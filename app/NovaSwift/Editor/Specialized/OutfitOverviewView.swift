@@ -19,7 +19,13 @@ struct OutfitOverviewView: View {
     @State private var after: ShipStatSheet?
     @State private var iconID: Int?
 
+    /// First result has landed (until then: skeleton, not "couldn't decode").
+    @State private var loaded = false
+    /// A newer result is being computed; the old numbers stay on screen.
+    @State private var refreshing = false
+
     private struct TaskKey: Hashable { let key: ResourceKey; let revision: Int; let ship: Int; let count: Int }
+    private struct Computed { let outfit: OutfRes?; let sellers: [SpobRes]; let before: ShipStatSheet?; let after: ShipStatSheet? }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -28,18 +34,39 @@ struct OutfitOverviewView: View {
                 economy(o)
                 availability(o)
                 compare(o)
+            } else if !loaded {
+                SkeletonForm(groups: 3)
             } else {
                 EditorEmptyState(icon: "puzzlepiece", title: "Couldn't decode this outfit", subtitle: "Use Form or Raw.")
             }
         }
-        .task(id: TaskKey(key: key, revision: model.revision, ship: shipID, count: count)) {
-            let d = SpecCache.data(model)
-            outfit = d.game.outfit(key.id)
-            sellers = outfit.map { SpecAvailability.spobs(sellingOutfit: $0, game: d.game) } ?? []
-            ships = env.cache.entries(NovaType.ship, model)
-            if !ships.contains(where: { $0.key.id == shipID }), let f = ships.first { shipID = f.key.id }
-            before = ShipStatSheet.compute(d, shipID: shipID)
-            after = ShipStatSheet.compute(d, shipID: shipID, extraOutfits: [key.id: count])
+        .overlay(alignment: .top) { EditorRefreshStrip(active: refreshing) }
+        .task(id: TaskKey(key: key, revision: model.dataRevision, ship: shipID, count: count)) {
+            // Stats + sellers + before/after run off-main; after edits wait ~200 ms so typing
+            // coalesces into one recompute, keeping the old numbers on screen meanwhile.
+            if loaded {
+                refreshing = true
+                try? await Task.sleep(for: .milliseconds(200))
+                if Task.isCancelled { return }
+            }
+            let list = await env.cache.list(NovaType.ship, model).entries
+            if Task.isCancelled { return }
+            ships = list
+            if !list.contains(where: { $0.key.id == shipID }), let f = list.first {
+                shipID = f.key.id         // re-keys this task; the restarted run does the work
+                return
+            }
+            let id = key.id, ship = shipID, n = count
+            let r = await SpecCache.compute(model) { d -> Computed in
+                let o = d.game.outfit(id)
+                return Computed(outfit: o,
+                                sellers: o.map { SpecAvailability.spobs(sellingOutfit: $0, game: d.game) } ?? [],
+                                before: ShipStatSheet.compute(d, shipID: ship),
+                                after: ShipStatSheet.compute(d, shipID: ship, extraOutfits: [id: n]))
+            }
+            if Task.isCancelled { return }
+            outfit = r.outfit; sellers = r.sellers; before = r.before; after = r.after
+            loaded = true; refreshing = false
         }
     }
 

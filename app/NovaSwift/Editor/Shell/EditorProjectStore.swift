@@ -65,7 +65,7 @@ final class EditorProjectStore: ObservableObject {
         guard !configured else { return }
         configured = true
         self.data = data
-        model.replaceDocument(PluginDocument(base: baseForNew()), url: nil)
+        replace(PluginDocument(base: baseForNew()), url: nil)
         recoveryAvailable = FileManager.default.fileExists(atPath: recoveryURL.path)
         autosaveTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.autosaveTick() }
@@ -96,8 +96,15 @@ final class EditorProjectStore: ObservableObject {
 
     // MARK: New / open
 
+    /// Swap the open document. Derived caches are dropped first so the UI shows skeletons
+    /// (not the previous document's lists) while the new merged view is assembled off-main.
+    private func replace(_ doc: PluginDocument, url: URL?) {
+        cache.reset()
+        model.replaceDocument(doc, url: url)
+    }
+
     func newPlugin() {
-        model.replaceDocument(PluginDocument(base: baseForNew()), url: nil)
+        replace(PluginDocument(base: baseForNew()), url: nil)
         installedID = nil
         model.format = .rez
         clearRecovery()
@@ -118,6 +125,7 @@ final class EditorProjectStore: ObservableObject {
         let bundle = installedBundle(containing: url)
         runBusy("Opening \(url.lastPathComponent)…") {
             let base = try await self.base(excluding: bundle?.id)
+            self.busyText = "Reading \(url.lastPathComponent)…"
             let box = try await Task.detached(priority: .userInitiated) {
                 DocBox(doc: try PluginDocument.open(url: url, base: base))
             }.value
@@ -129,6 +137,7 @@ final class EditorProjectStore: ObservableObject {
     func openInstalled(_ bundle: PluginBundle) {
         runBusy("Opening \(bundle.name)…") {
             let base = try await self.base(excluding: bundle.id)
+            self.busyText = "Reading \(bundle.name)…"
             let files = bundle.allFileURLs
             let box = try await Task.detached(priority: .userInitiated) { () -> DocBox in
                 if files.count == 1 { return DocBox(doc: try PluginDocument.open(url: files[0], base: base)) }
@@ -144,7 +153,8 @@ final class EditorProjectStore: ObservableObject {
     private struct DocBox: @unchecked Sendable { let doc: PluginDocument }
 
     private func adopt(_ doc: PluginDocument, url: URL?, installed: String?) {
-        model.replaceDocument(doc, url: url)
+        busyText = "Preparing data…"
+        replace(doc, url: url)
         installedID = installed
         if let url { model.format = url.pathExtension.lowercased() == "rez" ? .rez : .classic }
         clearRecovery()
@@ -160,6 +170,7 @@ final class EditorProjectStore: ObservableObject {
         guard let data else { return ResourceCollection() }
         guard let id, let inputs = data.editorMergeInputs() else { return baseForNew() }
         let plugs = data.plugins.filter { $0.id != id }
+        busyText = "Merging the base game and other plug-ins…"
         return try await Task.detached(priority: .userInitiated) {
             try GameLibrary.merge(baseFiles: inputs.baseFiles, plugins: plugs, flatPluginOrder: inputs.flatPluginOrder)
         }.value
@@ -317,17 +328,37 @@ final class EditorProjectStore: ObservableObject {
     private struct RecoveryInfo: Codable { var path: String?; var installedID: String?; var classic: Bool }
 
     private func autosaveTick() {
-        guard model.document.isDirty else { return }
-        do {
-            try FileManager.default.createDirectory(at: recoveryDir, withIntermediateDirectories: true)
-            // Always rez on disk; the real format is kept in the info file.
-            try model.document.exportData(format: .rez).write(to: recoveryURL, options: .atomic)
-            let info = RecoveryInfo(path: model.fileURL?.path, installedID: installedID, classic: model.format == .classic)
-            try JSONEncoder().encode(info).write(to: recoveryInfoURL, options: .atomic)
-        } catch { /* best effort */ }
+        let d = model.document
+        guard d.isDirty else { return }
+        // Serialising a big layer takes a while; snapshot the (value-type) layer and metadata
+        // here and encode + write on a background thread so typing never hitches.
+        let layer = d.layer
+        let (name, author, version, notes) = (d.name, d.author, d.version, d.notes)
+        let info = RecoveryInfo(path: model.fileURL?.path, installedID: installedID, classic: model.format == .classic)
+        let dir = recoveryDir, file = recoveryURL, infoFile = recoveryInfoURL
+        let gen = recoveryGeneration
+        Task.detached(priority: .utility) { [weak self] in
+            do {
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                // Always rez on disk; the real format is kept in the info file.
+                let snapshot = PluginDocument(name: name, author: author, version: version, notes: notes, layer: layer)
+                try snapshot.exportData(format: .rez).write(to: file, options: .atomic)
+                try JSONEncoder().encode(info).write(to: infoFile, options: .atomic)
+            } catch { /* best effort */ }
+            // A save/new/close may have cleared recovery while we were writing: drop the stale copy.
+            await MainActor.run {
+                if let self, self.recoveryGeneration != gen {
+                    try? FileManager.default.removeItem(at: file)
+                    try? FileManager.default.removeItem(at: infoFile)
+                }
+            }
+        }
     }
 
+    private var recoveryGeneration = 0
+
     func clearRecovery() {
+        recoveryGeneration += 1
         try? FileManager.default.removeItem(at: recoveryURL)
         try? FileManager.default.removeItem(at: recoveryInfoURL)
         recoveryAvailable = false
@@ -342,7 +373,8 @@ final class EditorProjectStore: ObservableObject {
             let doc = box.doc
             // Opened files are clean; a recovered document is not.
             let n = doc.name; doc.name = n + "~"; doc.name = n
-            self.model.replaceDocument(doc, url: info?.path.map { URL(fileURLWithPath: $0) })
+            self.busyText = "Preparing data…"
+            self.replace(doc, url: info?.path.map { URL(fileURLWithPath: $0) })
             self.model.format = (info?.classic ?? false) ? .classic : .rez
             self.installedID = info?.installedID
             self.recoveryAvailable = false

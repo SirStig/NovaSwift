@@ -77,18 +77,26 @@ struct SoundEditor: View {
                 Text(String(format: "%.2f s · %d Hz · %d samples · %d bytes", sound.duration, Int(sound.sampleRate),
                             sound.frameCount, data.count))
                     .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
-            } else {
-                EditorEmptyState(icon: "waveform", title: failure ?? "Decoding…", subtitle: "Use Raw to inspect the bytes.")
+            } else if let failure {
+                EditorEmptyState(icon: "waveform", title: failure, subtitle: "Use Raw to inspect the bytes.")
                     .frame(minHeight: 140)
+            } else {
+                // Still decoding: waveform-shaped placeholder.
+                VStack(alignment: .leading, spacing: 8) {
+                    RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.05)).frame(height: 110)
+                        .overlay { ProgressView().controlSize(.small).tint(novaAmber) }
+                    SkeletonBar(width: 260, height: 9)
+                }
             }
             if let message { Text(message).font(.system(size: 11)).foregroundStyle(.orange) }
         }
-        .task(id: DecodeID(key: key, hash: data.hashValue)) { await decode() }
+        .task(id: DecodeID(key: key, rev: model.dataRevision)) { await decode() }
         .onDisappear { player.stop() }
         .onChange(of: key) { _, _ in player.stop() }
     }
 
-    private struct DecodeID: Hashable { let key: ResourceKey; let hash: Int }
+    /// Keyed by data revision (not by hashing the whole blob on every body pass).
+    private struct DecodeID: Hashable { let key: ResourceKey; let rev: Int }
 
     private func decode() async {
         let d = data

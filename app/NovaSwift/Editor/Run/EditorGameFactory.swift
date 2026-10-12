@@ -49,6 +49,30 @@ struct EditorBuild: @unchecked Sendable {
     let warmMillis: Double
     /// How many rlëD resources differ from the base game (re-decoded this build).
     let changedSprites: Int
+    /// The scenario's default start, resolved off-main during the build.
+    var defaultStart: (systemID: Int, shipID: Int)? = nil
+    /// Searchable debug-panel lists, built off-main when the caller asked for them.
+    var catalogs: EditorCatalogs? = nil
+}
+
+/// Pre-built, immutable pick-lists for the debug panel (ships, outfits, …).
+struct EditorCatalogs: Sendable {
+    var ships: [EditorPick] = []
+    var outfits: [EditorPick] = []
+    var fleets: [EditorPick] = []
+    var systems: [EditorPick] = []
+    var missions: [EditorPick] = []
+    var govts: [EditorPick] = []
+
+    static func make(game: NovaGame) -> EditorCatalogs {
+        EditorCatalogs(
+            ships: game.ships().map { EditorPick(id: $0.id, title: $0.displayName, subtitle: "shïp") },
+            outfits: game.outfits().map { EditorPick(id: $0.id, title: $0.outfitterDisplayName, subtitle: "oütf") },
+            fleets: game.fleets().map { EditorPick(id: $0.id, title: $0.name.novaDisplayName, subtitle: "flët") },
+            systems: game.systems().map { EditorPick(id: $0.id, title: $0.displayName, subtitle: "sÿst") },
+            missions: game.missions().map { EditorPick(id: $0.id, title: $0.displayName, subtitle: "mïsn") },
+            govts: game.govts().map { EditorPick(id: $0.id, title: $0.displayName, subtitle: "gövt") })
+    }
 }
 
 enum EditorGameFactory {
@@ -71,11 +95,14 @@ enum EditorGameFactory {
     ///     author changed. Pass `nil` to run without a disk cache (every sprite
     ///     decodes on demand — correct, slower).
     ///   - systemID / shipID: sprites for these are decoded eagerly so the first
-    ///     frame doesn't hitch on the main thread.
+    ///     frame doesn't hitch on the main thread. `nil` = the scenario default,
+    ///     which is resolved here (off-main) and returned as `defaultStart`.
+    ///   - catalogs: also build the debug panel's searchable lists off-main.
     static func build(collection: ResourceCollection,
                       base: ResourceCollection?,
                       flightTuning: FlightTuning,
-                      systemID: Int?, shipID: Int?) async -> Result<EditorBuild, Error> {
+                      systemID: Int?, shipID: Int?,
+                      catalogs wantsCatalogs: Bool = false) async -> Result<EditorBuild, Error> {
         await Task.detached(priority: .userInitiated) {
             let t0 = DispatchTime.now().uptimeNanoseconds
             func ms(since t: UInt64) -> Double { Double(DispatchTime.now().uptimeNanoseconds - t) / 1_000_000 }
@@ -98,14 +125,17 @@ enum EditorGameFactory {
             let galaxy = Galaxy(game: game, flightTuning: flightTuning)
 
             let tw = DispatchTime.now().uptimeNanoseconds
-            warm(game: game, systemID: systemID, shipID: shipID)
+            let dflt = defaultStart(game: game)
+            warm(game: game, systemID: systemID ?? dflt?.systemID, shipID: shipID ?? dflt?.shipID)
+            let cats: EditorCatalogs? = wantsCatalogs ? EditorCatalogs.make(game: game) : nil
             let warmMs = ms(since: tw)
 
             let total = ms(since: t0)
             Log.data.info("EditorGameFactory.build: \(total, format: .fixed(precision: 1), privacy: .public) ms (sync \(syncMs, format: .fixed(precision: 1), privacy: .public), warm \(warmMs, format: .fixed(precision: 1), privacy: .public), \(changed, privacy: .public) changed sprite(s))")
             return .success(EditorBuild(game: game, galaxy: galaxy, collection: collection,
                                         totalMillis: total, spriteSyncMillis: syncMs,
-                                        warmMillis: warmMs, changedSprites: changed))
+                                        warmMillis: warmMs, changedSprites: changed,
+                                        defaultStart: dflt, catalogs: cats))
         }.value
     }
 

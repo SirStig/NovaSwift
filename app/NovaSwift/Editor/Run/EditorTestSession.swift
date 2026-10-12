@@ -6,11 +6,20 @@ import NovaSwiftEngine
 import NovaSwiftStory
 
 /// A lightweight list entry for the debug panel's searchable pickers.
-struct EditorPick: Identifiable, Hashable {
+struct EditorPick: Identifiable, Hashable, Sendable {
     let id: Int
     let title: String
     var subtitle: String = ""
-    var searchText: String { "\(id) \(title) \(subtitle)".lowercased() }
+    /// Pre-lowercased haystack, computed once at build time so per-keystroke
+    /// filtering is a plain `contains`.
+    let searchText: String
+
+    init(id: Int, title: String, subtitle: String = "") {
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+        self.searchText = "\(id) \(title) \(subtitle)".lowercased()
+    }
 }
 
 /// The sandbox behind `EditorTestRunView`: owns the throwaway pilot (control
@@ -73,10 +82,12 @@ final class EditorTestSession: ObservableObject {
     var playViewSize: CGSize = .zero
 
     private weak var app: AppModel?
-    private let collection: ResourceCollection
+    let collection: ResourceCollection
     private let base: ResourceCollection?
     private let startSystem: Int?
     private let startShip: Int?
+    var startSystemID: Int? { startSystem }
+    var startShipID: Int? { startShip }
     private var departedSpobID: Int?
     private var frozenBrains: [Int: AIBrain] = [:]
     private var frozenSpawner: Spawner?
@@ -103,19 +114,29 @@ final class EditorTestSession: ObservableObject {
         let result = await EditorGameFactory.build(
             collection: collection, base: base,
             flightTuning: FlightTuning(enhancements: app.settings.enhancements),
-            systemID: startSystem, shipID: startShip)
+            systemID: startSystem, shipID: startShip, catalogs: true)
         switch result {
         case .failure(let e):
             phase = .failed(e.localizedDescription)
         case .success(let b):
             build = b
-            guard let dflt = EditorGameFactory.defaultStart(game: b.game) else {
+            guard let dflt = b.defaultStart else {
                 phase = .failed("The collection has no usable start system / ship."); return
             }
             let sys = startSystem.flatMap { b.game.system($0)?.id } ?? dflt.systemID
             let ship = startShip.flatMap { b.game.ship($0)?.id } ?? dflt.shipID
-            buildCatalogs(b.game)
-            resetSandboxPilot(game: b.game, systemID: sys, shipID: ship)
+            // Catalogs came out of the off-main build; the initial pilot state and
+            // its hidden-system set are computed off-main too (decodes every sÿst).
+            let cats = b.catalogs ?? EditorCatalogs.make(game: b.game)
+            shipPicks = cats.ships; outfitPicks = cats.outfits; fleetPicks = cats.fleets
+            systemPicks = cats.systems; missionPicks = cats.missions; govtPicks = cats.govts
+            let game = b.game
+            let allSystems = cats.systems.map(\.id)
+            let prep = await Task.detached(priority: .userInitiated) {
+                Self.initialState(game: game, systemID: sys, shipID: ship, systemIDs: allSystems)
+            }.value
+            pilot.state = prep.state
+            nav.hiddenSystems = prep.hidden
             registerCommands()
             nav.configure(game: b.game, startSystemID: sys)
             systemID = sys
@@ -144,6 +165,26 @@ final class EditorTestSession: ObservableObject {
     }
 
     // MARK: Sandbox pilot
+
+    private struct InitialState: @unchecked Sendable {
+        let state: PlayerState
+        let hidden: Set<Int>
+    }
+
+    /// Pure: the throwaway pilot's starting state + which systems it can't see yet.
+    nonisolated private static func initialState(game: NovaGame, systemID: Int, shipID: Int, systemIDs: [Int]) -> InitialState {
+        var s = PlayerState()
+        s.pilotName = "Test Pilot"
+        s.shipType = shipID
+        s.shipName = game.ship(shipID)?.displayName ?? ""
+        s.currentSystem = systemID
+        s.credits = 1_000_000
+        s.outfits = [:]
+        for (oid, c) in EditorGameFactoryOutfits.stock(game: game, shipID: shipID) { s.grantOutfit(oid, count: c) }
+        s.hullFittingsGranted = true
+        s.exploredSystems = Set(systemIDs)
+        return InitialState(state: s, hidden: game.hiddenSystemIDs(for: s))
+    }
 
     private func resetSandboxPilot(game: NovaGame, systemID: Int, shipID: Int) {
         var s = PlayerState()

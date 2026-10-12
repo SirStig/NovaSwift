@@ -149,7 +149,8 @@ struct GraphicEditor: View {
 
     @State private var sprite: EditorDecodedSprite?
     @State private var failure: String?
-    @State private var loading = false
+    /// Starts true so the very first frame is the placeholder, not a flash of "No preview".
+    @State private var loading = true
     @State private var frame = 0
     @State private var playing = false
     @State private var fps = 12.0
@@ -158,7 +159,8 @@ struct GraphicEditor: View {
     @State private var grid = false
     @State private var importing = false
 
-    private struct DecodeID: Hashable { let key: ResourceKey; let hash: Int }
+    /// Keyed by data revision (not by hashing the whole blob on every body pass).
+    private struct DecodeID: Hashable { let key: ResourceKey; let rev: Int }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -170,14 +172,20 @@ struct GraphicEditor: View {
                         .frame(minHeight: 260, maxHeight: 520)
                     info(sprite)
                 } else if loading {
-                    ProgressView().frame(maxWidth: .infinity, minHeight: 200)
+                    // Decoding off-main: a box the size of the stage with a spinner.
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.05))
+                        ProgressView().controlSize(.regular).tint(novaAmber)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 260)
+                    SkeletonBar(width: 320, height: 9)
                 } else {
                     EditorEmptyState(icon: "photo", title: failure ?? "No preview", subtitle: "Use Raw to inspect the bytes.")
                         .frame(minHeight: 200)
                 }
             }
         }
-        .task(id: DecodeID(key: key, hash: data.hashValue)) { await decode() }
+        .task(id: DecodeID(key: key, rev: model.dataRevision)) { await decode() }
         .sheet(isPresented: $importing) {
             GraphicImportSheet(key: key, model: model) { importing = false }
         }

@@ -9,7 +9,7 @@ import NovaSwiftKit
 /// once per document revision, debounced; see `StoryAnalysisModel`.
 struct StoryEditorView: View {
     @ObservedObject var model: EditorModel
-    @StateObject private var analysis = StoryAnalysisModel()
+    @StateObject private var analysis = StoryAnalysisModel.shared
     @StateObject private var ui = StoryUIState()
 
     var body: some View {

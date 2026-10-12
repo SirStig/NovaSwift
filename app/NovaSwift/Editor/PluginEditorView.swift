@@ -38,8 +38,9 @@ struct PluginEditorView: View {
                               ship: r.ship, request: r)
         }
         .onAppear {
+            // Cheap: swaps in a document over the already-loaded base. The merged view and
+            // the reference graph are assembled off-main (see `EditorModel.prepare`).
             store.configure(data: app.data)
-            store.lint.schedule(store.model)
         }
     }
 
@@ -50,9 +51,9 @@ struct PluginEditorView: View {
                          onTestRun: startTestRun, onClose: requestClose)
             Divider()
             HSplitView {
-                EditorSidebar(model: model, store: store, lint: store.lint)
+                EditorSidebar(model: model, store: store, lint: store.lint, cache: store.cache)
                     .frame(minWidth: 200, idealWidth: 230, maxWidth: 320)
-                toolArea
+                EditorToolArea(model: model, store: store, ui: ui, plugins: app.data.plugins)
                     .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
             }
             if let m = store.message { statusBar(m) }
@@ -60,7 +61,7 @@ struct PluginEditorView: View {
         .background(Color(white: 0.1))
         .overlay { if store.isBusy { busyOverlay } }
         .background(shortcuts)
-        .onChange(of: model.revision) { _, _ in store.lint.schedule(model) }
+        .background(EditorLintTrigger(model: model, lint: store.lint))
         .sheet(item: Binding(get: { ui.renumberTarget.map(EditorKeyItem.init) }, set: { ui.renumberTarget = $0?.key })) { item in
             RenumberSheet(model: model, key: item.key) { ui.renumberTarget = nil }
         }
@@ -77,29 +78,6 @@ struct PluginEditorView: View {
             Button("Restore") { store.restoreRecovery() }
             Button("Discard", role: .destructive) { store.clearRecovery() }
         } message: { Text("The editor found an autosaved plug-in from a previous session that wasn't saved.") }
-    }
-
-    @ViewBuilder private var toolArea: some View {
-        let model = store.model
-        switch model.tool {
-        case .resources:
-            HSplitView {
-                ResourceListView(model: model, store: store, ui: ui)
-                    .frame(minWidth: 260, idealWidth: 320, maxWidth: 460)
-                InspectorView(model: model, store: store, ui: ui, lint: store.lint)
-                    .frame(minWidth: 380, maxWidth: .infinity)
-            }
-        case .galaxy:
-            GalaxyEditorView(model: model)
-        case .system:
-            SystemEditorView(model: model)
-        case .story:
-            StoryEditorView(model: model)
-        case .lint:
-            LintPanelView(model: model, lint: store.lint, ui: ui)
-        case .project:
-            ProjectPanelView(model: model, store: store, plugins: app.data.plugins)
-        }
     }
 
     private func statusBar(_ m: String) -> some View {
@@ -158,6 +136,70 @@ struct PluginEditorView: View {
     }
 }
 
+/// The main area under the toolbar. Observes the model so it can hold every tool back
+/// (skeleton + "Preparing data…") until the merged view exists, instead of letting a tool
+/// build it on the main thread inside its first `body`.
+struct EditorToolArea: View {
+    @ObservedObject var model: EditorModel
+    @ObservedObject var store: EditorProjectStore
+    @ObservedObject var ui: EditorUIState
+    let plugins: [PluginBundle]
+
+    var body: some View {
+        if !model.dataReady {
+            ZStack {
+                switch model.tool {
+                case .resources:
+                    HSplitView {
+                        SkeletonList(rows: 16).frame(minWidth: 260, idealWidth: 320, maxWidth: 460, maxHeight: .infinity, alignment: .top)
+                        SkeletonForm(groups: 4).frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    }
+                default:
+                    Color(white: 0.11)
+                }
+                EditorLoadingOverlay(label: "Preparing data…")
+            }
+        } else {
+            switch model.tool {
+            case .resources:
+                HSplitView {
+                    ResourceListView(model: model, store: store, ui: ui)
+                        .frame(minWidth: 260, idealWidth: 320, maxWidth: 460)
+                    InspectorView(model: model, store: store, ui: ui, lint: store.lint)
+                        .frame(minWidth: 380, maxWidth: .infinity)
+                }
+            case .galaxy:
+                GalaxyEditorView(model: model)
+            case .system:
+                SystemEditorView(model: model)
+            case .story:
+                StoryEditorView(model: model)
+            case .lint:
+                LintPanelView(model: model, lint: store.lint, ui: ui)
+            case .project:
+                ProjectPanelView(model: model, store: store, plugins: plugins)
+            }
+        }
+    }
+}
+
+/// Re-lints (debounced, off-main) when resource data changes or the merged view becomes
+/// ready. Lives in its own observing view because `PluginEditorView` doesn't observe the model.
+private struct EditorLintTrigger: View {
+    @ObservedObject var model: EditorModel
+    @ObservedObject var lint: EditorLintModel
+
+    private struct Key: Hashable { let rev: Int; let ready: Bool }
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onChange(of: Key(rev: model.dataRevision, ready: model.dataReady), initial: true) { _, _ in
+                lint.noteChange(model)
+            }
+    }
+}
+
 struct EditorKeyItem: Identifiable { let key: ResourceKey; var id: String { "\(key.type.rawValue)/\(key.id)" } }
 
 /// Top bar: close, file menu, save, undo/redo, validate, test run.
@@ -189,6 +231,7 @@ struct EditorTopBar: View {
                 HStack(spacing: 5) {
                     Image(systemName: lint.errorCount > 0 ? "xmark.shield" : "checkmark.shield")
                     Text("Validate")
+                    if lint.isRunning { ProgressView().controlSize(.mini).scaleEffect(0.8) }
                     let n = lint.errorCount + lint.warningCount
                     if n > 0 {
                         Text("\(n)").font(.system(size: 10, weight: .bold)).foregroundStyle(.white)

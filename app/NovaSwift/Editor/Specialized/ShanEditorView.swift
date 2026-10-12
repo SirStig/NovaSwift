@@ -60,6 +60,10 @@ struct ShanEditorView: View {
         VStack(alignment: .leading, spacing: 12) {
             if let s = shan {
                 canvas(s).frame(height: 380)
+                    .overlay {
+                        // Layer sheets decode off-main; the hardpoints are usable once they land.
+                        if loader.layers == nil && loader.isLoading { EditorLoadingOverlay(label: "Decoding layers…") }
+                    }
                 controls(s)
                 pointTable(s)
                 compression
@@ -67,7 +71,7 @@ struct ShanEditorView: View {
                 EditorEmptyState(icon: "scope", title: "No shän data", subtitle: "Use Form or Raw.")
             }
         }
-        .task(id: TaskKey(key: key, revision: model.revision)) { await loader.load(model: model, id: key.id) }
+        .task(id: TaskKey(key: key, revision: model.dataRevision)) { await loader.load(model: model, id: key.id) }
     }
 
     // MARK: Canvas

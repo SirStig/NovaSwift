@@ -40,7 +40,7 @@ public struct ResourceReference: Hashable, Sendable {
 /// (govt classes, `mïsn` AvailStel bands, …), contextual values (`oütf` ModVal),
 /// implicit id-arithmetic relations (`dësc`/`PICT`/`shän` companions), NCB
 /// script operands, and the `NSgx` → `NSbl` blob link.
-public struct ResourceReferences {
+public struct ResourceReferences: Sendable {
     public private(set) var outgoing: [ResourceKey: [ResourceReference]] = [:]
     public private(set) var incoming: [ResourceKey: [ResourceReference]] = [:]
 

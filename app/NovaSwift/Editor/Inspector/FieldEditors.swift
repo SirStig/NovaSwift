@@ -290,6 +290,9 @@ struct ValuePicker: View {
 
     @State private var open = false
     @State private var query = ""
+    /// Candidate resources for `refType`, built off-main by the shared browse cache
+    /// (one build per type per revision, shared by every picker).
+    @State private var candidates: BrowseList?
 
     private var matchedOption: ValueOption? { options.first { $0.contains(value) } }
     private var target: (type: NovaSwiftKit.FourCharCode, id: Int)? {
@@ -357,28 +360,38 @@ struct ValuePicker: View {
                         }
                     }
                     if let t = refType {
-                        ForEach(filtered(t), id: \.key) { e in
-                            row(e.name.isEmpty ? "#\(e.key.id)" : "#\(e.key.id)  \(e.name)", sub: nil,
-                                current: matchedOption == nil && value + base == e.key.id) {
-                                set(e.key.id - base)
+                        if let all = candidates ?? env.cache.cachedList(t) {
+                            ForEach(filtered(all), id: \.key) { e in
+                                row(e.name.isEmpty ? "#\(e.key.id)" : "#\(e.key.id)  \(e.name)", sub: nil,
+                                    current: matchedOption == nil && value + base == e.key.id) {
+                                    set(e.key.id - base)
+                                }
                             }
+                        } else {
+                            HStack(spacing: 6) {
+                                ProgressView().controlSize(.small)
+                                Text("Loading…").font(.system(size: 11)).foregroundStyle(.secondary)
+                            }.padding(10)
                         }
                     }
                 }
             }
             .frame(width: 320, height: 300)
         }
+        .task {
+            if let t = refType { candidates = await env.cache.list(t, env.model) }
+        }
     }
 
     private func set(_ v: Int) { onSet(v); open = false }
     private func matches(_ s: String) -> Bool { query.isEmpty || s.lowercased().contains(query.lowercased()) }
 
-    private func filtered(_ t: NovaSwiftKit.FourCharCode) -> [PluginDocument.BrowserEntry] {
-        let all = env.cache.entries(t, env.model)
+    /// First 300 matches over the prebuilt rows (lowercase names are precomputed).
+    private func filtered(_ all: BrowseList) -> [PluginDocument.BrowserEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         var out: [PluginDocument.BrowserEntry] = []
-        for e in all {
-            if q.isEmpty || e.name.lowercased().contains(q) || String(e.key.id).contains(q) { out.append(e) }
+        for r in all.rows {
+            if q.isEmpty || r.matches(q) { out.append(r.entry) }
             if out.count >= 300 { break }
         }
         return out

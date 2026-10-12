@@ -38,8 +38,11 @@ extension EditorModel {
         return "\(type.stringValue) #\(id)"
     }
 
+    /// Sorted (id, name) list of a type. Memoised per document + revision (and kept
+    /// across edits that didn't touch the type), so pickers in a body don't re-sort
+    /// hundreds of resources on every evaluation.
     func entries(_ type: NovaSwiftKit.FourCharCode) -> [(id: Int, name: String)] {
-        document.effective.resources(of: type).map { ($0.id, $0.name.isEmpty ? "#\($0.id)" : $0.name) }
+        MapEntriesMemo.shared.entries(type, self)
     }
 
     /// Show a resource in the shell's resource browser.
@@ -52,6 +55,50 @@ extension EditorModel {
     func openSystemEditor(_ id: Int) {
         focusedSystemID = id
         tool = .system
+    }
+}
+
+@MainActor
+final class MapEntriesMemo {
+    static let shared = MapEntriesMemo()
+    private var doc: ObjectIdentifier?
+    private var store: [NovaSwiftKit.FourCharCode: (rev: Int, list: [(id: Int, name: String)])] = [:]
+
+    func entries(_ type: NovaSwiftKit.FourCharCode, _ model: EditorModel) -> [(id: Int, name: String)] {
+        let d = ObjectIdentifier(model.document)
+        if d != doc { doc = d; store.removeAll() }
+        let rev = model.revision
+        if let c = store[type] {
+            if c.rev == rev { return c.list }
+            if rev == c.rev + 1, !model.lastChanged.contains(where: { $0.type == type }) {
+                store[type] = (rev, c.list)
+                return c.list
+            }
+        }
+        let list = model.document.effective.resources(of: type).map { (id: $0.id, name: $0.name.isEmpty ? "#\($0.id)" : $0.name) }
+        store[type] = (rev, list)
+        return list
+    }
+}
+
+/// Shows `placeholder` for the first frame, then swaps in `content` on the next
+/// run-loop turn — so a heavy inspector (dozens of pickers) never delays the
+/// click that opened it.
+struct DeferredContent<Content: View, Placeholder: View>: View {
+    @ViewBuilder var content: () -> Content
+    @ViewBuilder var placeholder: () -> Placeholder
+    @State private var ready = false
+
+    var body: some View {
+        Group {
+            if ready { content() } else { placeholder() }
+        }
+        .task {
+            guard !ready else { return }
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(16))
+            ready = true
+        }
     }
 }
 

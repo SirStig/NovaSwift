@@ -15,9 +15,14 @@ struct StoryLeftPane: View {
             }
             .pickerStyle(.segmented).labelsHidden().padding(10)
             Divider()
-            switch ui.left {
-            case .bits: StoryBitList(model: model, analysis: analysis, ui: ui)
-            case .missions: StoryNodeList(model: model, analysis: analysis, ui: ui)
+            if analysis.hasResult {
+                switch ui.left {
+                case .bits: StoryBitList(model: model, analysis: analysis, ui: ui)
+                case .missions: StoryNodeList(model: model, analysis: analysis, ui: ui)
+                }
+            } else {
+                // First analysis still running off-main: placeholder rows, not a blank pane.
+                SkeletonList(rows: 18)
             }
         }
         .background(Color(white: 0.115))

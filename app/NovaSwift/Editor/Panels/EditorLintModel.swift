@@ -15,10 +15,22 @@ final class EditorLintModel: ObservableObject {
     var errorCount: Int { issues.lazy.filter { $0.severity == .error }.count }
     var warningCount: Int { issues.lazy.filter { $0.severity == .warning }.count }
 
+    private var lastDataRevision = -1
+
+    /// Re-lint only if resource data changed since the last scheduled run (saving or a
+    /// metadata edit bumps `EditorModel.revision` but not the data).
+    func noteChange(_ model: EditorModel) {
+        guard model.dataReady, model.dataRevision != lastDataRevision else { return }
+        schedule(model)
+    }
+
     func schedule(_ model: EditorModel, delay: Duration = .milliseconds(700)) {
         task?.cancel()
         generation += 1
         let gen = generation
+        // The merged view is still being assembled off-main; `noteChange` fires again when it lands.
+        guard model.dataReady else { isRunning = true; return }
+        lastDataRevision = model.dataRevision
         let doc = model.document
         let layer = doc.layer, eff = doc.effective, base = doc.base
         isRunning = true

@@ -17,15 +17,20 @@ struct ResourceListView: View {
     @State private var scope: Scope = .all
     @State private var search = ""
     @FocusState private var searchFocused: Bool
-    @State private var rows: [PluginDocument.BrowserEntry] = []
-    @State private var totalForType = 0
+    /// The last list delivered for the selected type (kept while a newer one builds).
+    @State private var shown: Shown?
+
+    private struct Shown { let type: NovaSwiftKit.FourCharCode; let list: BrowseList }
 
     var body: some View {
         VStack(spacing: 0) {
             if let type = model.selectedType {
-                header(type)
-                Divider()
-                list(type)
+                let current = currentList(type)
+                header(type, current)
+                Divider().overlay(alignment: .top) {
+                    EditorRefreshStrip(active: current.map { $0.revision != model.dataRevision } ?? false)
+                }
+                list(type, current)
             } else {
                 EditorEmptyState(icon: "sidebar.left", title: "Choose a resource type",
                                  subtitle: "Pick a type in the sidebar to browse and edit its resources.")
@@ -33,35 +38,54 @@ struct ResourceListView: View {
         }
         .background(Color(white: 0.11))
         .onChange(of: ui.searchTick) { _, _ in searchFocused = true }
-        .task(id: RefreshKey(type: model.selectedType, rev: model.revision, scope: scope, search: search)) {
-            refresh()
+        .task(id: RefreshKey(type: model.selectedType, rev: model.dataRevision, ready: model.dataReady)) {
+            await refresh()
         }
     }
 
-    private struct RefreshKey: Hashable { let type: NovaSwiftKit.FourCharCode?; let rev: Int; let scope: Scope; let search: String }
+    private struct RefreshKey: Hashable { let type: NovaSwiftKit.FourCharCode?; let rev: Int; let ready: Bool }
 
-    private func refresh() {
-        guard let type = model.selectedType else { rows = []; return }
-        let all = store.cache.entries(type, model)
-        totalForType = all.count
+    /// What to draw for `type` right now: the delivered list if it is for this type, else
+    /// whatever the cache already has (instant on a revisited type), else nil → skeleton.
+    private func currentList(_ type: NovaSwiftKit.FourCharCode) -> BrowseList? {
+        guard model.dataReady else { return nil }
+        if let s = shown, s.type == type { return s.list }
+        return store.cache.cachedList(type)
+    }
+
+    /// Build (off-main) the list for the selected type at the current revision. Edits arrive
+    /// in bursts while typing in the inspector, so a refresh over an already-shown list waits
+    /// briefly and is cancelled by the next edit instead of rebuilding per keystroke.
+    private func refresh() async {
+        guard let type = model.selectedType, model.dataReady else { return }
+        if currentList(type)?.revision != model.dataRevision, currentList(type) != nil {
+            try? await Task.sleep(for: .milliseconds(120))
+            if Task.isCancelled { return }
+        }
+        let fresh = await store.cache.list(type, model)
+        if Task.isCancelled { return }
+        shown = Shown(type: type, list: fresh)
+    }
+
+    private func visibleRows(_ all: BrowseList) -> [BrowseRow] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        rows = all.filter { e in
+        if scope == .all && q.isEmpty { return all.rows }
+        return all.rows.filter { r in
             switch scope {
             case .all: break
-            case .mine: if !e.provenance.isOwn { return false }
-            case .base: if e.provenance.isOwn { return false }
+            case .mine: if !r.entry.provenance.isOwn { return false }
+            case .base: if r.entry.provenance.isOwn { return false }
             }
-            guard !q.isEmpty else { return true }
-            return String(e.key.id).contains(q) || e.name.lowercased().contains(q)
+            return q.isEmpty || r.matches(q)
         }
     }
 
-    private func header(_ type: NovaSwiftKit.FourCharCode) -> some View {
+    private func header(_ type: NovaSwiftKit.FourCharCode, _ current: BrowseList?) -> some View {
         VStack(spacing: 8) {
             HStack {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(ResourceSchemas.displayName(for: type)).font(.system(size: 14, weight: .semibold))
-                    Text("\(rows.count) of \(totalForType) · \(type.stringValue)")
+                    Text(current.map { "\(visibleRows($0).count) of \($0.rows.count) · \(type.stringValue)" } ?? type.stringValue)
                         .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -86,20 +110,27 @@ struct ResourceListView: View {
         .padding(10)
     }
 
-    private func list(_ type: NovaSwiftKit.FourCharCode) -> some View {
+    private func list(_ type: NovaSwiftKit.FourCharCode, _ current: BrowseList?) -> some View {
         Group {
-            if rows.isEmpty {
-                EditorEmptyState(icon: "magnifyingglass", title: totalForType == 0 ? "No resources" : "No matches",
-                                 subtitle: totalForType == 0 ? "Press + to create the first one." : "Try another filter or search.")
-            } else {
-                List(selection: $model.selection) {
-                    ForEach(rows, id: \.key) { e in
-                        row(e).tag(Optional(e.key)).contextMenu { menu(e) }
+            if let current {
+                let rows = visibleRows(current)
+                if rows.isEmpty {
+                    EditorEmptyState(icon: "magnifyingglass", title: current.rows.isEmpty ? "No resources" : "No matches",
+                                     subtitle: current.rows.isEmpty ? "Press + to create the first one." : "Try another filter or search.")
+                } else {
+                    List(selection: $model.selection) {
+                        ForEach(rows) { r in
+                            row(r.entry).tag(Optional(r.entry.key)).contextMenu { menu(r.entry) }
+                        }
                     }
+                    .listStyle(.inset)
+                    .scrollContentBackground(.hidden)
+                    .onDeleteCommand { if let k = model.selection { delete(k) } }
                 }
-                .listStyle(.inset)
-                .scrollContentBackground(.hidden)
-                .onDeleteCommand { if let k = model.selection { delete(k) } }
+            } else {
+                // First load of this type (or the merged view is still being assembled).
+                SkeletonList(rows: 16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
     }
@@ -203,6 +234,12 @@ struct RenumberSheet: View {
                 Text("New ID"); TextField("", text: $newID).frame(width: 90).textFieldStyle(.roundedBorder)
             }
             Toggle("Update references in this plug-in", isOn: $rewrite)
+            if !model.referencesReady && report == nil {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Indexing references…").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
             if let report { Text(report).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             HStack {
                 Spacer()
@@ -211,6 +248,7 @@ struct RenumberSheet: View {
                     if report != nil { done(); return }
                     apply()
                 }.keyboardShortcut(.defaultAction)
+                    .disabled(report == nil && !model.referencesReady)
             }
         }
         .padding(20).frame(width: 380)

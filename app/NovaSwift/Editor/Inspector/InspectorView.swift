@@ -10,10 +10,18 @@ struct InspectorView: View {
     @ObservedObject var ui: EditorUIState
     @ObservedObject var lint: EditorLintModel
     @StateObject private var hover = EditorHoverState()
+    /// The resource whose heavy body (big schema forms) has been allowed to build. A click
+    /// first paints the header + skeleton, then the form lands on the next frame.
+    @State private var settled: ResourceKey?
+
+    /// Forms past this many fields take noticeable time to build; smaller ones render at once.
+    private static let deferThreshold = 45
 
     var body: some View {
         Group {
-            if let key = model.selection, let res = model.document.resource(key.type, key.id) {
+            if !model.dataReady {
+                SkeletonForm(groups: 4)
+            } else if let key = model.selection, let res = model.document.resource(key.type, key.id) {
                 content(key, res)
             } else {
                 EditorEmptyState(icon: "square.and.pencil", title: "Select a resource",
@@ -21,6 +29,10 @@ struct InspectorView: View {
             }
         }
         .background(Color(white: 0.13))
+    }
+
+    private func isHeavy(_ schema: ResourceSchema?) -> Bool {
+        (schema?.fields.count ?? 0) >= Self.deferThreshold
     }
 
     private func content(_ key: ResourceKey, _ res: Resource) -> some View {
@@ -38,9 +50,18 @@ struct InspectorView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 12) {
-                            if !issues.isEmpty { IssueBox(issues: issues, onSelect: { _ in }) }
-                            SpecializedInspectorRouter(model: model, env: env, key: key) {
-                                editor(kind, key, res, schema, env, issues)
+                            if isHeavy(schema) && settled != key {
+                                SkeletonForm(groups: 4)
+                                    .task(id: key) {
+                                        // One frame for the click to register, then build the big form.
+                                        await Task.yield()
+                                        if !Task.isCancelled { settled = key }
+                                    }
+                            } else {
+                                if !issues.isEmpty { IssueBox(issues: issues, onSelect: { _ in }) }
+                                SpecializedInspectorRouter(model: model, env: env, key: key) {
+                                    editor(kind, key, res, schema, env, issues)
+                                }
                             }
                         }
                         .padding(16)
@@ -134,16 +155,26 @@ struct InspectorHeader: View {
         .onChange(of: res.name) { _, v in if !nameFocused { name = v } }
     }
 
-    private var refsButton: some View {
-        let refs = model.document.references
-        let uses = refs.uses(key), usedBy = refs.usedBy(key)
-        return Button { showRefs = true } label: {
-            Label("\(uses.count) · \(usedBy.count)", systemImage: "link")
+    @ViewBuilder private var refsButton: some View {
+        if model.referencesReady {
+            // The graph is built off-main once per document and patched per edit, so this is a lookup.
+            let refs = model.document.references
+            let uses = refs.uses(key), usedBy = refs.usedBy(key)
+            Button { showRefs = true } label: {
+                Label("\(uses.count) · \(usedBy.count)", systemImage: "link")
+            }
+            .controlSize(.small)
+            .help("References: \(uses.count) used by this resource · used by \(usedBy.count)")
+            .popover(isPresented: $showRefs, arrowEdge: .bottom) { RefsPopover(env: env, uses: uses, usedBy: usedBy) { showRefs = false } }
+            .onChange(of: ui.refsTick) { _, _ in showRefs = true }
+        } else {
+            // Still indexing references in the background.
+            HStack(spacing: 5) {
+                ProgressView().controlSize(.mini)
+                Text("links").font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            .help("Indexing references…")
         }
-        .controlSize(.small)
-        .help("References: \(uses.count) used by this resource · used by \(usedBy.count)")
-        .popover(isPresented: $showRefs, arrowEdge: .bottom) { RefsPopover(env: env, uses: uses, usedBy: usedBy) { showRefs = false } }
-        .onChange(of: ui.refsTick) { _, _ in showRefs = true }
     }
 }
 

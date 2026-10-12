@@ -41,8 +41,8 @@ struct SystemEditorView: View {
     @State private var exits: [SystemExit] = []
     @State private var drag: Drag = .none
     @State private var liveDelta = CGSize.zero
-    @State private var hover: Int?
-    @State private var hoverScreen: CGPoint?
+    /// Held by @State (not observed) so hover only redraws the hover layer + readout.
+    @State private var hover = MapHoverState()
     @State private var snap = false
     @State private var showRings = true
     @State private var showGrid = true
@@ -50,11 +50,18 @@ struct SystemEditorView: View {
     @State private var toast: String?
     @State private var toastTask: Task<Void, Never>?
     @State private var lastFit: Int?
+    @State private var derivedRevision = -1
+    @State private var derivedSystem: Int?
 
     private enum Drag {
         case none
         case pan(last: CGPoint)
         case move(id: Int, startWorld: CGPoint, orig: CGPoint)
+    }
+
+    private var isDraggingStellar: Bool {
+        if case .move = drag { return true }
+        return false
     }
 
     private var systemID: Int? { model.focusedSystemID }
@@ -81,12 +88,20 @@ struct SystemEditorView: View {
         .background(Color(white: 0.09))
         .preferredColorScheme(.dark)
         .tint(novaAmber)
-        .onAppear { refreshDerived(); schedulePreview(); fitIfNeeded() }
+        .onAppear {
+            // First frame: layout from the document (≤16 stellars, cheap). The live
+            // preview is requested one tick later so the tool switch paints first.
+            refreshDerived(); fitIfNeeded()
+            Task { @MainActor in
+                await Task.yield()
+                schedulePreview()
+            }
+        }
         .onChange(of: model.revision) { _, _ in
             if model.lastChanged.contains(where: { StellarSpriteCache.relevant.contains($0.type) }) { sprites.invalidate() }
             refreshDerived(); schedulePreview()
         }
-        .onChange(of: model.focusedSystemID) { _, _ in refreshDerived(); schedulePreview(); fitIfNeeded(force: true) }
+        .onChange(of: model.focusedSystemID) { _, _ in refreshDerived(force: true); schedulePreview(); fitIfNeeded(force: true) }
         .onChange(of: mode) { _, m in if m != .layout { schedulePreview() } else { preview.teardown() } }
         .onChange(of: model.selection) { _, k in
             if k?.type == NovaType.spob, stellars.contains(where: { $0.id == k?.id }) { tab = .stellar; centrePreview() }
@@ -97,8 +112,17 @@ struct SystemEditorView: View {
 
     // MARK: Derived data
 
-    private func refreshDerived() {
+    private func refreshDerived(force: Bool = false) {
         guard let sid = systemID else { stellars = []; exits = []; return }
+        // Skip when the last single edit touched neither systems nor stellars
+        // (typing in an unrelated field shouldn't re-read the layout).
+        let rev = model.revision
+        if !force, derivedSystem == sid, rev == derivedRevision + 1,
+           model.lastChanged.allSatisfy({ $0.type != NovaType.syst && $0.type != NovaType.spob }) {
+            derivedRevision = rev
+            return
+        }
+        derivedRevision = rev; derivedSystem = sid
         let doc = model.document
         let ids = SystemLinkEditing.stellars(of: doc, sid)
         stellars = ids.enumerated().compactMap { i, id in
@@ -109,10 +133,12 @@ struct SystemEditorView: View {
                               type: model.intField("type", key, default: -1), govt: model.intField("govt", key, default: -1),
                               slot: i + 1, provenance: doc.provenance(NovaType.spob, id) ?? .base)
         }
-        let game = NovaGame(model.effective)
-        guard let me = game.system(sid) else { exits = []; return }
+        // Direct sÿst decodes for this system and its ≤16 neighbours; no NovaGame needed.
+        guard let meRes = doc.resource(NovaType.syst, sid) else { exits = []; return }
+        let me = SystRes(meRes)
         exits = me.links.compactMap { l in
-            guard let o = game.system(l) else { return nil }
+            guard let r = doc.resource(NovaType.syst, l) else { return nil }
+            let o = SystRes(r)
             return SystemExit(id: l, name: o.name, dx: CGFloat(o.x - me.x), dy: CGFloat(o.y - me.y))
         }
     }
@@ -219,6 +245,8 @@ struct SystemEditorView: View {
                 .background(GeometryReader { g in
                     Color.clear.onAppear { size = g.size; fitIfNeeded() }.onChange(of: g.size) { _, s in size = s }
                 })
+            StellarHoverLayer(hover: hover, stellars: stellars, vp: vp, suppressed: isDraggingStellar,
+                              extent: { halfExtent($0) })
             MapInputSurface(
                 onDown: { down($0) }, onDrag: { dragged($0) }, onUp: { up($0) },
                 onMove: { moved($0) },
@@ -268,10 +296,7 @@ struct SystemEditorView: View {
 
     private var statusLine: some View {
         HStack(spacing: 14) {
-            if let h = hoverScreen {
-                let w = vp.toWorld(h, size)
-                Text(String(format: "x %.0f  y %.0f  r %.0f", w.x, w.y, hypot(w.x, w.y))).font(.system(size: 10, design: .monospaced))
-            }
+            MapCursorReadout(hover: hover, vp: vp, size: size, showRadius: true)
             Text(String(format: "zoom %.0f%%", vp.zoom * 100)).font(.system(size: 10, design: .monospaced))
             Text("\(stellars.count)/\(SystemLinkEditing.maxStellars) stellars").font(.system(size: 10))
             if let s = selectedStellar { Text("selected: \(s.name)").font(.system(size: 10)).foregroundStyle(novaAmber) }
@@ -296,16 +321,24 @@ struct SystemEditorView: View {
                     if let sid = systemID {
                         if tab == .stellar {
                             if let s = selectedStellar {
-                                StellarInspector(model: model, sprites: sprites, systemID: sid, stellar: s,
-                                                 onRemove: { removeFromSystem($0) }, onDelete: { deleteStellar($0) },
-                                                 onDuplicate: { duplicateStellar($0) })
+                                DeferredContent {
+                                    StellarInspector(model: model, sprites: sprites, systemID: sid, stellar: s,
+                                                     onRemove: { removeFromSystem($0) }, onDelete: { deleteStellar($0) },
+                                                     onDuplicate: { duplicateStellar($0) })
+                                } placeholder: { SkeletonForm(groups: 4) }
+                                .id(s.id)
                             } else {
                                 stellarList(sid)
                             }
                         } else {
-                            SystemPanel(model: model, systemID: sid, onSelectStellar: { id in
-                                model.selection = ResourceKey(NovaType.spob, id); tab = .stellar
-                            })
+                            // The panel builds dozens of pickers; show a skeleton for the
+                            // first frame so opening the tool / tab is instant.
+                            DeferredContent {
+                                SystemPanel(model: model, systemID: sid, onSelectStellar: { id in
+                                    model.selection = ResourceKey(NovaType.spob, id); tab = .stellar
+                                })
+                            } placeholder: { SkeletonForm(groups: 4) }
+                            .id(sid)
                         }
                     }
                 }
@@ -461,7 +494,7 @@ struct SystemEditorView: View {
 
     private func dragged(_ e: MapPointer) {
         let p = e.location
-        hoverScreen = p
+        hover.screen = p
         switch drag {
         case .none: break
         case let .pan(last):
@@ -486,9 +519,9 @@ struct SystemEditorView: View {
     }
 
     private func moved(_ p: CGPoint) {
-        hoverScreen = p
+        hover.screen = p
         let h = stellarAt(p)
-        if h != hover { hover = h }
+        if h != hover.system { hover.system = h }
     }
 
     // MARK: Drawing
@@ -568,14 +601,17 @@ struct SystemEditorView: View {
                 half = max(r.width, r.height) / 2
                 if vp.zoom < 0.12 { ctx.fill(Path(ellipseIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6)), with: .color(.white)) }
             } else {
+                // Sprite still decoding (or none for this type): government-coloured disc.
+                let tint = GalaxyMapData.shared.color(s.govt)
+                ctx.fill(Path(ellipseIn: CGRect(x: p.x - 12, y: p.y - 12, width: 24, height: 24)), with: .color(tint.opacity(0.35)))
                 ctx.stroke(Path(ellipseIn: CGRect(x: p.x - 12, y: p.y - 12, width: 24, height: 24)),
-                           with: .color(.gray), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                ctx.fill(Path(ellipseIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6)), with: .color(.gray))
+                           with: .color(tint), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                ctx.fill(Path(ellipseIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6)), with: .color(tint))
             }
-            if selected || dragging || hover == s.id {
+            if selected || dragging {
                 let rr = max(half, 10) + 4
                 ctx.stroke(Path(ellipseIn: CGRect(x: p.x - rr, y: p.y - rr, width: rr * 2, height: rr * 2)),
-                           with: .color(selected || dragging ? novaAmber : .white.opacity(0.6)), lineWidth: selected ? 2 : 1)
+                           with: .color(novaAmber), lineWidth: selected ? 2 : 1)
             }
             switch s.provenance {
             case .new: ctx.fill(Path(ellipseIn: CGRect(x: p.x + max(half, 8) * 0.7, y: p.y - max(half, 8) - 2, width: 6, height: 6)), with: .color(.green))
@@ -598,6 +634,28 @@ struct SystemEditorView: View {
         ctx.stroke(bar, with: .color(.white.opacity(0.7)), lineWidth: 1.2)
         ctx.draw(Text("\(Int(step)) units").font(.system(size: 10, design: .monospaced)).foregroundColor(.white.opacity(0.7)),
                  at: CGPoint(x: barX + len / 2, y: barY - 10), anchor: .center)
+    }
+}
+
+/// Hover ring for the stellar under the pointer, drawn in its own layer so mouse
+/// moves don't redraw the layout canvas.
+struct StellarHoverLayer: View {
+    @ObservedObject var hover: MapHoverState
+    let stellars: [StellarRec]
+    let vp: MapViewport
+    let suppressed: Bool
+    let extent: (StellarRec) -> CGFloat
+
+    var body: some View {
+        Canvas(rendersAsynchronously: false) { ctx, sz in
+            guard !suppressed, let id = hover.system, let s = stellars.first(where: { $0.id == id }) else { return }
+            let p = vp.toScreen(s.point, sz)
+            let half = max(extent(s) * vp.zoom, 14)
+            let rr = max(half, 10) + 4
+            ctx.stroke(Path(ellipseIn: CGRect(x: p.x - rr, y: p.y - rr, width: rr * 2, height: rr * 2)),
+                       with: .color(.white.opacity(0.6)), lineWidth: 1)
+        }
+        .allowsHitTesting(false)
     }
 }
 #endif

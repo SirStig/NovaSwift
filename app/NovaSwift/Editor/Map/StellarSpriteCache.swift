@@ -51,20 +51,33 @@ final class StellarSpriteCache: ObservableObject {
 }
 
 /// A searchable pick-list in a popover (for the 1.5k systems / hundreds of stellars).
+/// The item list is gathered once when the popover opens and pre-lowercased, so typing
+/// only filters a cached array.
 struct MapSearchPicker<Label: View>: View {
     let items: () -> [(id: Int, name: String)]
     let onPick: (Int) -> Void
     @ViewBuilder var label: Label
     @State private var shown = false
     @State private var query = ""
+    @State private var cache: [Row] = []
+
+    private struct Row { let id: Int; let name: String; let lower: String }
+
+    private var rows: [Row] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        if q.isEmpty { return Array(cache.prefix(80)) }
+        return Array(cache.lazy.filter { $0.lower.contains(q) || String($0.id) == q }.prefix(80))
+    }
 
     var body: some View {
-        Button { query = ""; shown = true } label: { label }
+        Button {
+            query = ""
+            cache = items().map { Row(id: $0.id, name: $0.name, lower: $0.name.lowercased()) }
+            shown = true
+        } label: { label }
             .buttonStyle(.plain)
             .popover(isPresented: $shown, arrowEdge: .bottom) {
-                let all = items()
-                let q = query.lowercased()
-                let rows = q.isEmpty ? Array(all.prefix(80)) : Array(all.filter { $0.name.lowercased().contains(q) || String($0.id) == q }.prefix(80))
+                let rows = self.rows
                 VStack(spacing: 6) {
                     TextField("Search\u{2026}", text: $query).textFieldStyle(.roundedBorder)
                     ScrollView {

@@ -16,6 +16,9 @@ final class SpecData: @unchecked Sendable {
     let galaxy: Galaxy
     let collection: ResourceCollection
     let revision: Int
+    /// `Galaxy` keeps unsynchronised memo dictionaries, so catalog work on one `SpecData`
+    /// is serialised (`SpecCache.compute`). `NovaGame` itself is lock-guarded.
+    let lock = NSLock()
 
     init(_ collection: ResourceCollection, revision: Int) {
         self.collection = collection
@@ -26,18 +29,36 @@ final class SpecData: @unchecked Sendable {
     }
 }
 
-/// One `SpecData` per (model, revision): inspectors on the same revision share it, so
-/// stats are only recomputed when the document actually changed.
+/// Carries a value computed off the main actor back to it (decoded catalogs and sprite
+/// sheets aren't `Sendable`, but each result is only read after it has been handed over).
+struct SpecBox<T>: @unchecked Sendable { let value: T }
+
+/// One `SpecData` per (model, data revision): inspectors on the same revision share it, so
+/// stats are only recomputed when resource data actually changed (not on Save/metadata).
 @MainActor
 enum SpecCache {
     private static var cached: (model: ObjectIdentifier, revision: Int, data: SpecData)?
 
+    /// Cheap on the main actor (building `NovaGame`/`Galaxy` is lazy); all decoding happens
+    /// when the result is *used* — do that through `compute`, never directly in a `body`.
     static func data(_ model: EditorModel) -> SpecData {
         let id = ObjectIdentifier(model)
-        if let c = cached, c.model == id, c.revision == model.revision { return c.data }
-        let d = SpecData(model.effective, revision: model.revision)
-        cached = (id, model.revision, d)
+        if let c = cached, c.model == id, c.revision == model.dataRevision { return c.data }
+        let d = SpecData(model.effective, revision: model.dataRevision)
+        cached = (id, model.dataRevision, d)
         return d
+    }
+
+    /// Run `work` against this revision's catalog on a background thread and return the
+    /// result on the main actor. `NovaGame`'s decode caches are lock-guarded and shared, so
+    /// concurrent inspectors reuse each other's decodes.
+    static func compute<T>(_ model: EditorModel, _ work: @escaping @Sendable (SpecData) -> T) async -> T {
+        let d = data(model)
+        let box = await Task.detached(priority: .userInitiated) { () -> SpecBox<T> in
+            d.lock.lock(); defer { d.lock.unlock() }
+            return SpecBox(value: work(d))
+        }.value
+        return box.value
     }
 }
 

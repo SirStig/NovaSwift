@@ -78,6 +78,9 @@ public final class PluginDocument {
 
     private var cachedEffective: ResourceCollection?
     private var cachedReferences: ResourceReferences?
+    /// Keys changed inside the open `beginGroup`/`endGroup`; flushed as ONE change
+    /// (one `onChange`, one reference-graph update) when the outermost group closes.
+    private var pendingGroupKeys: Set<ResourceKey> = []
 
     /// `base` overlaid by `layer`. Maintained incrementally as the layer changes.
     public var effective: ResourceCollection {
@@ -95,6 +98,30 @@ public final class PluginDocument {
         cachedReferences = r
         return r
     }
+
+    /// Adopt an effective collection that was built off the main actor from this
+    /// document's `base` and `layer` (`base` overlaid by `layer`). Ignored when the
+    /// layer changed since the snapshot (`changeCount` moved) or `effective` was
+    /// already built, so a late result can never clobber newer state.
+    public func adoptEffective(_ built: ResourceCollection, atChangeCount count: Int) {
+        guard cachedEffective == nil, changeCount == count else { return }
+        cachedEffective = built
+    }
+
+    /// Adopt a reference graph built off the main actor from `effective`. `staleKeys`
+    /// are the resources that changed after the snapshot was taken; they are
+    /// re-indexed here (cheap) so the graph is current. Ignored if a graph already
+    /// exists or `effective` hasn't been built.
+    public func adoptReferences(_ built: ResourceReferences, updating staleKeys: Set<ResourceKey>) {
+        guard cachedReferences == nil, cachedEffective != nil else { return }
+        var r = built
+        if !staleKeys.isEmpty { r.update(staleKeys, in: effective) }
+        cachedReferences = r
+    }
+
+    /// Whether `effective` / the reference graph are already built (no work to read them).
+    public var hasEffectiveCached: Bool { cachedEffective != nil }
+    public var hasReferencesCached: Bool { cachedReferences != nil }
 
     // MARK: Change tracking
 
@@ -159,9 +186,20 @@ public final class PluginDocument {
 
     /// Every resource of a type in the merged view, sorted by id, with provenance.
     public func browse(_ type: FourCharCode) -> [BrowserEntry] {
+        Self.browse(type, effective: effective, layer: layer, base: base)
+    }
+
+    /// `browse` over explicit snapshots, so it can run off the main actor
+    /// (`ResourceCollection` is a value type; copy them on the owning actor first).
+    public static func browse(_ type: FourCharCode, effective: ResourceCollection,
+                              layer: ResourceCollection, base: ResourceCollection) -> [BrowserEntry] {
         effective.resources(of: type).map { r in
-            BrowserEntry(key: ResourceKey(type, r.id), name: r.name,
-                         provenance: provenance(type, r.id) ?? .base)
+            let inBase = base.resource(type, r.id)
+            let prov: Provenance
+            if layer.resource(type, r.id) != nil { prov = inBase == nil ? .new : .override }
+            else if let inBase { prov = inBase.pluginID.isEmpty ? .base : .otherPlugin(inBase.pluginID) }
+            else { prov = .base }
+            return BrowserEntry(key: ResourceKey(type, r.id), name: r.name, provenance: prov)
         }
     }
 
@@ -310,9 +348,21 @@ public final class PluginDocument {
     public func endGroup() {
         guard groupDepth > 0 else { return }
         groupDepth -= 1
-        guard groupDepth == 0, let entry = groupEntry else { return }
-        groupEntry = nil
-        if !entry.before.isEmpty { pushUndo(entry) }
+        guard groupDepth == 0 else { return }
+        if let entry = groupEntry {
+            groupEntry = nil
+            if !entry.before.isEmpty { pushUndo(entry) }
+        }
+        flushPendingGroupChange()
+    }
+
+    /// Announce everything a finished group touched as a single change.
+    private func flushPendingGroupChange() {
+        guard !pendingGroupKeys.isEmpty else { return }
+        let keys = pendingGroupKeys
+        pendingGroupKeys = []
+        updateReferences(keys)
+        onChange?(keys)
     }
 
     public func withGroup<T>(_ label: String, _ body: () throws -> T) rethrows -> T {
@@ -395,9 +445,16 @@ public final class PluginDocument {
                 else { cachedEffective!.remove(k.type, k.id) }
             }
         }
+        // Inside a group the reference update and `onChange` wait for the group to close,
+        // so a many-key edit (renumber, bulk rewrite) costs one update and one revision bump.
+        if groupDepth > 0 { pendingGroupKeys.formUnion(keys); return }
+        updateReferences(keys)
+        onChange?(keys)
+    }
+
+    private func updateReferences(_ keys: Set<ResourceKey>) {
         if cachedReferences != nil, let e = cachedEffective { cachedReferences!.update(keys, in: e) }
         else if cachedReferences != nil { cachedReferences = nil }
-        onChange?(keys)
     }
 
     // MARK: Save / open

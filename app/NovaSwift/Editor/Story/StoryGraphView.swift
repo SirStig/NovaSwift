@@ -113,12 +113,16 @@ struct StoryGraphView: View {
                     onPan: { ui.viewport.pan(byScreen: $0) },
                     onKey: { key in if key == "escape" { ui.inspect = .none; return true }; return false })
                 controls
-                if analysis.graph.nodes.isEmpty {
+                if !analysis.hasResult {
+                    EditorLoadingOverlay(label: "Analysing story\u{2026}")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if analysis.graph.nodes.isEmpty {
                     EditorEmptyState(icon: "point.3.connected.trianglepath.dotted",
-                                     title: analysis.isComputing ? "Analysing story…" : "No missions or crons",
+                                     title: analysis.isComputing ? "Analysing story\u{2026}" : "No missions or crons",
                                      subtitle: "Edges appear where one mission sets a control bit another mission tests.")
                         .allowsHitTesting(false)
                 }
+                EditorRefreshStrip(active: analysis.isComputing && analysis.hasResult)
             }
             .onAppear { size = geo.size; fitIfNeeded(force: false) }
             .onChange(of: geo.size) { _, s in size = s }
@@ -160,14 +164,23 @@ struct StoryGraphView: View {
                      bitRefs: { b in Set(idx.references(bit: b).map(\.key)) })
     }
 
+    /// Government colours are computed off-main (NovaGame + palette) and applied
+    /// when ready; nodes show neutral grey until then.
     private func loadGovtColors() {
         guard ui.colorMode == .government, govtRevision != model.revision else { return }
-        govtRevision = model.revision
-        let game = NovaGame(model.effective)
-        let pal = GovernmentPalette(game: game)
-        var out: [Int: Color] = [:]
-        for g in game.govts() { out[g.id] = pal.color(for: g.id) }
-        govtColors = out
+        let rev = model.revision
+        govtRevision = rev
+        let eff = model.effective
+        Task {
+            let out = await Task.detached(priority: .userInitiated) { () -> [Int: Color] in
+                let game = NovaGame(eff)
+                let pal = GovernmentPalette(game: game)
+                var out: [Int: Color] = [:]
+                for g in game.govts() { out[g.id] = pal.color(for: g.id) }
+                return out
+            }.value
+            if govtRevision == rev { govtColors = out }
+        }
     }
 
     // MARK: Drawing

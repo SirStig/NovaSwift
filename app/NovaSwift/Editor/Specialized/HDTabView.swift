@@ -44,6 +44,12 @@ struct HDTabView: View {
     }
 
     @State private var target: Target?
+    /// The classic sheet as a ready-to-crop image, built once per load (not per body pass).
+    @State private var classicSprite: EditorDecodedSprite?
+    /// Attachments in this plug-in's own layer (for the Export button).
+    @State private var layerAttachmentCount = 0
+    /// First load has landed (until then: skeleton, not "no sprite to upgrade").
+    @State private var loaded = false
     @State private var attachments: [HDPackAuthoring.Attachment] = []
     @State private var heading = 0
     @State private var autoSpin = false
@@ -75,6 +81,14 @@ struct HDTabView: View {
     @State private var spin = ""
 
     private struct TaskKey: Hashable { let key: ResourceKey; let revision: Int }
+    private struct Loaded {
+        var target: Target?
+        var classic: EditorDecodedSprite?
+        var attachments: [HDPackAuthoring.Attachment]
+        var layerCount: Int
+        var atlas: HDAtlas?
+        var atlasError: String?
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -85,18 +99,20 @@ struct HDTabView: View {
                 modelForm(t)
                 exportSection
                 if let status { Label(status, systemImage: "info.circle").font(.system(size: 11)).foregroundStyle(.secondary) }
+            } else if !loaded {
+                SkeletonForm(groups: 3)
             } else {
                 EditorEmptyState(icon: "cube.transparent", title: "No sprite to upgrade",
                                  subtitle: "This resource doesn't resolve to a sprite id (no shän / spïn / rlëD reached).")
             }
         }
-        .task(id: TaskKey(key: key, revision: model.revision)) { await refresh() }
-        .task(id: "\(heading)-\(model.revision)") { renderModelFrame() }
+        .task(id: TaskKey(key: key, revision: model.dataRevision)) { await refresh() }
+        .task(id: "\(heading)-\(model.dataRevision)") { renderModelFrame() }
     }
 
     // MARK: Resolve + load
 
-    private func resolve(_ d: SpecData) -> Target? {
+    nonisolated private static func resolve(_ d: SpecData, key: ResourceKey) -> Target? {
         let c = d.collection
         func sid(_ t: NovaSwiftKit.FourCharCode, _ id: Int) -> Int? { HDPackAuthoring.spriteID(forType: t, id: id, in: c) }
         switch key.type {
@@ -130,24 +146,30 @@ struct HDTabView: View {
         }
     }
 
+    /// Resolve the sprite, scan attachments (JSON-decodes every descriptor) and decode the
+    /// classic sheet + HD atlas — all off the main actor.
     private func refresh() async {
-        let d = SpecCache.data(model)
-        let t = resolve(d)
-        target = t
-        guard let t else { attachments = []; atlas = nil; return }
-        attachments = HDPackAuthoring.attachments(in: model.effective).filter { $0.spriteID == t.spriteID }
-        // Decode the HD atlas off-main.
-        if let a = attachments.first, a.kind == .sprite, let classic = t.classic,
-           let blobID = a.blobID, let blob = model.effective.resource(GraphicsEnhancementType.blob, blobID)?.data {
-            let desc = a.descriptor
-            let result: Result<HDAtlas, Error> = await Task.detached {
-                Result { try HDAtlas.load(blob, descriptor: desc, classic: classic, maxScale: 4) }
-            }.value
-            switch result {
-            case .success(let at): atlas = at; atlasError = nil
-            case .failure(let e): atlas = nil; atlasError = "\(e)"
+        let k = key
+        let layer = model.document.layer
+        let r = await SpecCache.compute(model) { d -> Loaded in
+            let t = Self.resolve(d, key: k)
+            let layerCount = HDPackAuthoring.attachments(in: layer).count
+            guard let t else { return Loaded(target: nil, classic: nil, attachments: [], layerCount: layerCount, atlas: nil, atlasError: nil) }
+            let classic = t.classic.flatMap { EditorDecodedSprite($0) }
+            let atts = HDPackAuthoring.attachments(in: d.collection).filter { $0.spriteID == t.spriteID }
+            var atlas: HDAtlas?
+            var atlasError: String?
+            if let a = atts.first, a.kind == .sprite, let sheet = t.classic,
+               let blobID = a.blobID, let blob = d.collection.resource(GraphicsEnhancementType.blob, blobID)?.data {
+                do { atlas = try HDAtlas.load(blob, descriptor: a.descriptor, classic: sheet, maxScale: 4) }
+                catch { atlasError = "\(error)" }
             }
-        } else { atlas = nil; atlasError = nil }
+            return Loaded(target: t, classic: classic, attachments: atts, layerCount: layerCount, atlas: atlas, atlasError: atlasError)
+        }
+        if Task.isCancelled { return }
+        target = r.target; classicSprite = r.classic; attachments = r.attachments
+        layerAttachmentCount = r.layerCount; atlas = r.atlas; atlasError = r.atlasError
+        loaded = true
         renderModelFrame()
     }
 
@@ -190,8 +212,7 @@ struct HDTabView: View {
     }
 
     private func classicImage(_ t: Target) -> CGImage? {
-        guard let s = t.classic, let d = EditorDecodedSprite(s) else { return nil }
-        return d.frame(heading % max(1, t.framesPerSet))
+        classicSprite?.frame(heading % max(1, t.framesPerSet))
     }
 
     private func hdImage(_ t: Target) -> CGImage? {
@@ -324,7 +345,7 @@ struct HDTabView: View {
     }
 
     private var exportSection: some View {
-        let count = HDPackAuthoring.attachments(in: model.document.layer).count
+        let count = layerAttachmentCount
         return SpecSection(title: "Export", trailing: "\(count) attachment\(count == 1 ? "" : "s") in this plug-in") {
             HStack {
                 Button { exportPack() } label: { Label("Export HD layer as .nsx pack…", systemImage: "square.and.arrow.up") }

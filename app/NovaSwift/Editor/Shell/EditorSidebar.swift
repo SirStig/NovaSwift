@@ -12,7 +12,11 @@ struct EditorSidebar: View {
     @ObservedObject var model: EditorModel
     @ObservedObject var store: EditorProjectStore
     @ObservedObject var lint: EditorLintModel
+    /// Sidebar counts come from here (computed off-main; nil until the first result).
+    @ObservedObject var cache: EditorBrowseCache
     @State private var search = ""
+
+    private struct StatsKey: Hashable { let rev: Int; let ready: Bool }
 
     private var selection: Binding<SidebarItem?> {
         Binding(
@@ -34,7 +38,7 @@ struct EditorSidebar: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
+            Divider().overlay(alignment: .top) { EditorRefreshStrip(active: cache.statsBusy && cache.stats != nil) }
             List(selection: selection) {
                 Section("Tools") {
                     toolRow(.resources, "Resources", "tray.full")
@@ -46,7 +50,20 @@ struct EditorSidebar: View {
                     toolRow(.project, "Project & Export", "shippingbox")
                 }
                 Section {
-                    ForEach(filteredStats) { s in typeRow(s) }
+                    if let stats = filteredStats {
+                        ForEach(stats) { s in typeRow(s) }
+                    } else {
+                        // First computation still running: placeholder rows, never a blank list.
+                        ForEach(0..<12, id: \.self) { i in
+                            HStack(spacing: 8) {
+                                SkeletonBar(width: CGFloat(80 + (i * 29) % 70), height: 11)
+                                Spacer(minLength: 4)
+                                SkeletonBar(width: 24, height: 9)
+                            }
+                            .padding(.vertical, 4)
+                            .accessibilityLabel("Loading resource types")
+                        }
+                    }
                 } header: {
                     HStack {
                         Text("Resource Types")
@@ -59,13 +76,15 @@ struct EditorSidebar: View {
             searchField
         }
         .background(Color(white: 0.09))
+        // Recount once per data revision (debounced, off-main); not on metadata/Save refreshes.
+        .task(id: StatsKey(rev: model.dataRevision, ready: model.dataReady)) { cache.refreshStats(model) }
     }
 
-    private var filteredStats: [EditorTypeStat] {
-        let all = store.cache.stats(model)
+    private var filteredStats: [EditorTypeStat]? {
+        guard let all = cache.stats else { return nil }
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return all }
-        return all.filter { $0.name.lowercased().contains(q) || $0.type.stringValue.lowercased().contains(q) }
+        return all.filter { $0.searchText.contains(q) }
     }
 
     private var header: some View {

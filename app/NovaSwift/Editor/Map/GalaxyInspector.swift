@@ -19,7 +19,8 @@ struct GalaxyInspector: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                if let n = nebula, selection.isEmpty { nebulaPanel(n) }
+                if !data.hasLoaded { SkeletonForm(groups: 2) }
+                else if let n = nebula, selection.isEmpty { nebulaPanel(n) }
                 else if selection.count == 1, let id = selection.first, data.system(id) != nil { systemPanel(id) }
                 else if selection.count > 1 { multiPanel }
                 else { emptyPanel }
@@ -34,11 +35,11 @@ struct GalaxyInspector: View {
     private var emptyPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("GALAXY").font(.system(size: 10, weight: .semibold)).foregroundStyle(novaAmber)
-            let touched = data.systems.filter(\.touched).count
+            let touched = data.touchedCount
             Text("\(data.systems.count) systems  \u{2022}  \(data.pairs.count) hyperlinks  \u{2022}  \(data.nebulae.count) nebulae")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
             Text("\(touched) added or overridden by this plug-in").font(.system(size: 11)).foregroundStyle(.secondary)
-            let oneWay = data.pairs.filter(\.oneWay).count
+            let oneWay = data.oneWayCount
             if oneWay > 0 {
                 Label("\(oneWay) one-way hyperlink\(oneWay == 1 ? "" : "s") (dashed red)", systemImage: "exclamationmark.triangle")
                     .font(.system(size: 11)).foregroundStyle(.orange)
@@ -213,7 +214,7 @@ struct GalaxyInspector: View {
             MapPointRow(model: model, key: key, field: "position", label: "Position (x, y)")
             MapPointRow(model: model, key: key, field: "size", label: "Size (w, h)")
             MapTextRow(model: model, key: key, field: "activeOn", label: "Active on (NCB test)")
-            Text("Artwork: PICT \(NovaGame(model.effective).nebulaImageID(index: id - 128)) (+ the six smaller zoom levels below it).")
+            Text("Artwork: PICT \((9502 + 7 * (id - 128))) (+ the six smaller zoom levels below it).")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
             HStack {
                 Button { model.showInResources(key) } label: { Label("Show in Resources", systemImage: "list.bullet.rectangle") }

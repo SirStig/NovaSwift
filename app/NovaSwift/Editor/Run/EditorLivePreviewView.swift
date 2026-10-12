@@ -135,18 +135,22 @@ final class EditorPreviewModel: ObservableObject {
         let sameSystem = host != nil && systemID == p.systemID
         if let ship = host?.scene.playerShip { cameraPose = ship.position }
 
-        let shipHint = EditorGameFactory.defaultStart(game: NovaGame(p.collection))?.shipID
+        // Nothing heavy on main: the default ship is resolved inside the off-main build
+        // (`shipID: nil` = scenario default, returned as `build.defaultStart`).
         let result = await EditorGameFactory.build(
             collection: p.collection, base: p.base,
             flightTuning: FlightTuning(enhancements: app.settings.enhancements),
-            systemID: p.systemID, shipID: shipHint)
+            systemID: p.systemID, shipID: nil)
         guard gen == generation, !Task.isCancelled else { return }   // superseded
+        // Let the loading state / refresh strip paint before the main-actor scene construction.
+        await Task.yield()
+        guard gen == generation, !Task.isCancelled else { return }
 
         switch result {
         case .failure(let err):
             status = .failed(err.localizedDescription)   // keep showing the last good scene
         case .success(let build):
-            guard let shipID = EditorGameFactory.defaultStart(game: build.game)?.shipID else {
+            guard let shipID = build.defaultStart?.shipID else {
                 status = .failed("No ship available to host the preview."); return
             }
             var opts = EditorHostOptions(systemID: p.systemID, shipID: shipID)
@@ -229,6 +233,10 @@ struct EditorLivePreviewView: View {
                     onZoom: { model.zoomBy($0) })
             }
             statusOverlay
+            VStack(spacing: 0) {
+                EditorRefreshStrip(active: model.status == .building && model.host != nil)
+                Spacer(minLength: 0)
+            }
             if showsToolbar { toolbar }
         }
         .clipped()
@@ -239,8 +247,7 @@ struct EditorLivePreviewView: View {
     @ViewBuilder private var statusOverlay: some View {
         switch model.status {
         case .building where model.host == nil:
-            VStack(spacing: 8) { ProgressView().controlSize(.small); Text("Building preview…").font(.caption) }
-                .foregroundStyle(novaAmber)
+            EditorLoadingOverlay(label: "Starting preview\u{2026}")
         case .failed(let msg):
             VStack {
                 Label(msg, systemImage: "exclamationmark.triangle.fill")
@@ -249,7 +256,9 @@ struct EditorLivePreviewView: View {
                 Spacer()
             }.padding(8).frame(maxHeight: .infinity, alignment: .top)
         case .idle where model.host == nil:
-            Text("No preview").font(.caption).foregroundStyle(.secondary)
+            // Idle only happens before the first `update` lands (the request is
+            // deferred one tick after the tool opens) — still "starting".
+            EditorLoadingOverlay(label: "Starting preview\u{2026}")
         default:
             EmptyView()
         }

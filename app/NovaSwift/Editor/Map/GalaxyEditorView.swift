@@ -10,7 +10,10 @@ import NovaSwiftKit
 /// y DOWN, nebulae placed by top-left + extent.
 struct GalaxyEditorView: View {
     @ObservedObject var model: EditorModel
-    @StateObject private var data = GalaxyMapData()
+    @StateObject private var data = GalaxyMapData.shared
+    /// Hover lives in its own object (held by @State, which does NOT observe it) so a
+    /// mouse move redraws only the hover layer + coordinate readout, never this whole view.
+    @State private var hover = MapHoverState()
 
     enum GTool: Hashable { case select, link, unlink, newSystem, delete, nebula }
     private enum Drag {
@@ -36,9 +39,6 @@ struct GalaxyEditorView: View {
     @State private var linkTo: CGPoint?
     @State private var nebLive: (id: Int, rect: CGRect)?
     @State private var nebNew: CGRect?
-    @State private var hoverScreen: CGPoint?
-    @State private var hoverSystem: Int?
-    @State private var hoverLink: MapLinkPair?
     @State private var spaceHeld = false
     @State private var snap = false
     @State private var showLegend = true
@@ -61,8 +61,17 @@ struct GalaxyEditorView: View {
                     .background(GeometryReader { g in
                         Color.clear.onAppear { size = g.size }.onChange(of: g.size) { _, s in size = s }
                     })
+                GalaxyHoverLayer(hover: hover, data: data, vp: vp, dotRadius: dotRadius,
+                                 selection: selection, suppressed: isDraggingSystems)
                 surface
                 overlays
+                VStack(spacing: 0) {
+                    EditorRefreshStrip(active: data.isBuilding && data.hasLoaded)
+                    Spacer()
+                }
+                if !data.hasLoaded {
+                    EditorLoadingOverlay(label: "Loading galaxy\u{2026}")
+                }
             }
             .clipped()
             Divider()
@@ -76,18 +85,27 @@ struct GalaxyEditorView: View {
         .preferredColorScheme(.dark)
         .tint(novaAmber)
         .onAppear {
-            data.refresh(model, force: true)
-            if !didFit {
-                didFit = true
-                if let f = model.focusedSystemID, data.system(f) != nil { focus(f, zoomIn: true) } else { fit() }
-            }
-        }
-        .onChange(of: model.revision) { _, _ in
+            // The first frame renders immediately (canvas + loading overlay); the
+            // snapshot is built off-main and `onChange(of: data.hasLoaded)` fits the view.
             data.refresh(model)
-            selection = selection.filter { data.system($0) != nil }
+            fitInitialIfReady()
+        }
+        .onChange(of: data.hasLoaded) { _, loaded in if loaded { fitInitialIfReady() } }
+        .onChange(of: model.revision) { _, _ in data.refresh(model) }
+        .onChange(of: data.version) { _, _ in
+            // Drop selections that no longer exist once fresh geometry has landed.
+            guard data.hasLoaded, !data.isBuilding else { return }
+            if !selection.isEmpty {
+                let kept = selection.filter { data.system($0) != nil }
+                if kept != selection { selection = kept }
+            }
             if let n = selectedNebula, !data.nebulae.contains(where: { $0.id == n }) { selectedNebula = nil }
         }
-        .onChange(of: ObjectIdentifier(model.document)) { _, _ in data.refresh(model, force: true); selection = []; fit() }
+        .onChange(of: ObjectIdentifier(model.document)) { _, _ in
+            selection = []; selectedNebula = nil; didFit = false
+            data.refresh(model)
+            fitInitialIfReady()
+        }
         .alert("New Star System", isPresented: Binding(get: { newSystemAt != nil }, set: { if !$0 { newSystemAt = nil } })) {
             TextField("Name", text: $newSystemName)
             Button("Create") { if let p = newSystemAt { createSystem(at: p, name: newSystemName) }; newSystemAt = nil }
@@ -124,6 +142,17 @@ struct GalaxyEditorView: View {
             },
             menu: { contextItems(at: $0) },
             cursor: spaceHeld ? .openHand : (tool == .select ? nil : .crosshair))
+    }
+
+    private func fitInitialIfReady() {
+        guard data.hasLoaded, !didFit else { return }
+        didFit = true
+        if let f = model.focusedSystemID, data.system(f) != nil { focus(f, zoomIn: true) } else { fit() }
+    }
+
+    private var isDraggingSystems: Bool {
+        if case .move = drag { return true }
+        return false
     }
 
     private func world(_ p: CGPoint) -> CGPoint { vp.toWorld(p, size) }
@@ -178,7 +207,7 @@ struct GalaxyEditorView: View {
 
     private func dragged(_ e: MapPointer) {
         let p = e.location
-        hoverScreen = p
+        hover.screen = p
         switch drag {
         case .none: break
         case let .pan(last):
@@ -258,11 +287,11 @@ struct GalaxyEditorView: View {
     }
 
     private func moved(_ p: CGPoint) {
-        hoverScreen = p
+        hover.screen = p
         let h = data.systemAt(screen: p, vp: vp, size: size, radius: hitRadius)
-        if h != hoverSystem { hoverSystem = h }
+        if h != hover.system { hover.system = h }
         let l = (h == nil && (tool == .unlink)) ? data.linkAt(screen: p, vp: vp, size: size, tolerance: 6) : nil
-        if l != hoverLink { hoverLink = l }
+        if l != hover.link { hover.link = l }
     }
 
     // MARK: Actions
@@ -283,10 +312,15 @@ struct GalaxyEditorView: View {
                 model.setValue(.point(clampI16(s.x) + dx, clampI16(s.y) + dy), field: "position", of: ResourceKey(NovaType.syst, id))
             }
         }
+        // Optimistic: patch the moved systems into the snapshot right now so the
+        // canvas never shows the old position between the drop and the next refresh.
+        data.refresh(model)
     }
 
     private func link(_ a: Int, _ b: Int) {
-        switch SystemLinkEditing.link(model.document, a, b) {
+        let result = SystemLinkEditing.link(model.document, a, b)
+        data.refresh(model)
+        switch result {
         case .linked: flash("Linked \(data.system(a)?.name ?? "\(a)") \u{2194} \(data.system(b)?.name ?? "\(b)")")
         case .alreadyLinked: flash("Already linked")
         case let .full(sid): flash("\(data.system(sid)?.name ?? "System \(sid)") has no free hyperlink slot (max 16)")
@@ -296,6 +330,7 @@ struct GalaxyEditorView: View {
 
     private func unlink(_ a: Int, _ b: Int) {
         if SystemLinkEditing.unlink(model.document, a, b) {
+            data.refresh(model)
             flash("Unlinked \(data.system(a)?.name ?? "\(a)") from \(data.system(b)?.name ?? "\(b)")")
         }
     }
@@ -310,7 +345,8 @@ struct GalaxyEditorView: View {
             model.setValue(.int(1), field: "avgShips", of: key)
             newID = id
         }
-        if let id = newID { data.refresh(model, force: true); selection = [id]; flash("Created system #\(id)") }
+        data.refresh(model)
+        if let id = newID { selection = [id]; flash("Created system #\(id)") }
         else { flash("No free sÿst id") }
     }
 
@@ -329,6 +365,7 @@ struct GalaxyEditorView: View {
                 }
             }
         }
+        data.refresh(model)
         selection.subtract(ids)
         if blocked > 0 {
             flash("Base-game systems can't be removed by a plug-in (diff layers only). Unlink them or gate them with a visibility test instead.")
@@ -346,8 +383,8 @@ struct GalaxyEditorView: View {
             made = id
         }
         if let id = made {
-            data.refresh(model, force: true); selectedNebula = id
-            flash("Created nëbu #\(id). Its art is PICT \(NovaGame(model.effective).nebulaImageID(index: id - 128)) (add one to show an image).")
+            data.refresh(model); selectedNebula = id
+            flash("Created nëbu #\(id). Its art is PICT \(9502 + 7 * (id - 128)) (add one to show an image).")
         }
     }
 
@@ -357,13 +394,14 @@ struct GalaxyEditorView: View {
             model.setValue(.point(clampI16(r.minX), clampI16(r.minY)), field: "position", of: key)
             model.setValue(.point(clampI16(r.width), clampI16(r.height)), field: "size", of: key)
         }
+        data.refresh(model)
     }
 
     private func deleteNebula(_ id: Int) {
         let doc = model.document
         switch doc.provenance(NovaType.nebula, id) {
-        case .new: doc.remove(NovaType.nebula, id); selectedNebula = nil
-        case .override: doc.revertToBase(NovaType.nebula, id); selectedNebula = nil
+        case .new: doc.remove(NovaType.nebula, id); selectedNebula = nil; data.refresh(model)
+        case .override: doc.revertToBase(NovaType.nebula, id); selectedNebula = nil; data.refresh(model)
         default: flash("Base-game nebulae can't be removed by a plug-in; move or resize it instead.")
         }
     }
@@ -458,6 +496,7 @@ struct GalaxyEditorView: View {
 
     private func draw(_ ctx: inout GraphicsContext, _ sz: CGSize) {
         _ = data.version
+        guard data.hasLoaded || !data.systems.isEmpty else { return }
         let moving: Set<Int>
         if case let .move(_, _, ids) = drag { moving = ids } else { moving = [] }
         let view = CGRect(origin: .zero, size: sz).insetBy(dx: -40, dy: -40)
@@ -537,11 +576,6 @@ struct GalaxyEditorView: View {
         ctx.stroke(normal, with: .color(.white.opacity(onlyTouched ? 0.12 : 0.28)), lineWidth: 1)
         ctx.stroke(hot, with: .color(novaAmber.opacity(0.75)), lineWidth: 1.4)
         ctx.stroke(oneWay, with: .color(.red.opacity(0.8)), style: StrokeStyle(lineWidth: 1.2, dash: [4, 3]))
-        if let hl = hoverLink, let ai = data.index[hl.a], let bi = data.index[hl.b] {
-            var p = Path()
-            p.move(to: vp.toScreen(data.systems[ai].point, sz)); p.addLine(to: vp.toScreen(data.systems[bi].point, sz))
-            ctx.stroke(p, with: .color(.red), lineWidth: 3)
-        }
         // Rubber band.
         if case let .link(from) = drag, let s = data.system(from), let t = linkTo {
             var end = t
@@ -553,38 +587,52 @@ struct GalaxyEditorView: View {
             ctx.stroke(p, with: .color(novaAmber), style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
         }
 
-        // Systems.
+        // Systems: one combined Path per (government, dimmed) fill and per ring
+        // colour, so a frame costs a handful of draw calls instead of one per dot.
+        // Selected / hovered systems and their names are drawn separately.
+        struct FillKey: Hashable { let govt: Int; let dim: Bool }
         let r = dotRadius
         let labelZoom: CGFloat = 1.0
+        let wantLabels = showNames && vp.zoom >= labelZoom
+        var fills: [FillKey: Path] = [:]
+        var newRing = Path(), overrideRing = Path()
+        var labels: [(String, CGPoint, Bool)] = []   // (name, anchor, dim)
         for s in data.systems {
-            let isMoving = moving.contains(s.id)
             let p = vp.toScreen(pos(s, moving: moving), sz)
             guard view.contains(p) else { continue }
             let visible = visibleWhenFiltered(s)
-            let isSel = selection.contains(s.id)
-            let col = data.color(s.govt)
-            let alpha: Double = (onlyTouched && !s.touched) ? (visible ? 0.3 : 0.0) : 1.0
-            if alpha == 0 { continue }
-            if isSel {
-                ctx.fill(Path(ellipseIn: CGRect(x: p.x - r - 5, y: p.y - r - 5, width: (r + 5) * 2, height: (r + 5) * 2)), with: .color(novaAmber.opacity(0.25)))
-                ctx.stroke(Path(ellipseIn: CGRect(x: p.x - r - 4, y: p.y - r - 4, width: (r + 4) * 2, height: (r + 4) * 2)), with: .color(novaAmber), lineWidth: 1.5)
-            }
+            let dim = onlyTouched && !s.touched
+            if dim && !visible { continue }
+            fills[FillKey(govt: s.govt, dim: dim), default: Path()]
+                .addEllipse(in: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
             switch s.provenance {
-            case .new:
-                ctx.stroke(Path(ellipseIn: CGRect(x: p.x - r - 2, y: p.y - r - 2, width: (r + 2) * 2, height: (r + 2) * 2)), with: .color(.green), lineWidth: 1.5)
-            case .override:
-                ctx.stroke(Path(ellipseIn: CGRect(x: p.x - r - 2, y: p.y - r - 2, width: (r + 2) * 2, height: (r + 2) * 2)), with: .color(.orange), lineWidth: 1.5)
+            case .new: newRing.addEllipse(in: CGRect(x: p.x - r - 2, y: p.y - r - 2, width: (r + 2) * 2, height: (r + 2) * 2))
+            case .override: overrideRing.addEllipse(in: CGRect(x: p.x - r - 2, y: p.y - r - 2, width: (r + 2) * 2, height: (r + 2) * 2))
             default: break
             }
-            ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)), with: .color(col.opacity(alpha)))
-            if hoverSystem == s.id && !isMoving {
-                ctx.stroke(Path(ellipseIn: CGRect(x: p.x - r - 2, y: p.y - r - 2, width: (r + 2) * 2, height: (r + 2) * 2)), with: .color(.white), lineWidth: 1)
+            if wantLabels, visible, labels.count < 600, !selection.contains(s.id) {
+                labels.append((s.name, CGPoint(x: p.x, y: p.y + r + 7), dim))
             }
-            if (showNames && vp.zoom >= labelZoom && visible) || isSel || hoverSystem == s.id {
-                ctx.draw(Text(s.name).font(.system(size: 10, weight: isSel ? .semibold : .regular))
-                            .foregroundColor(isSel ? novaAmber : .white.opacity(0.85 * alpha)),
-                         at: CGPoint(x: p.x, y: p.y + r + 7), anchor: .center)
-            }
+        }
+        for (k, path) in fills {
+            ctx.fill(path, with: .color(data.color(k.govt).opacity(k.dim ? 0.3 : 1.0)))
+        }
+        ctx.stroke(newRing, with: .color(.green), lineWidth: 1.5)
+        ctx.stroke(overrideRing, with: .color(.orange), lineWidth: 1.5)
+        for (name, at, dim) in labels {
+            ctx.draw(Text(name).font(.system(size: 10)).foregroundColor(.white.opacity(dim ? 0.26 : 0.85)),
+                     at: at, anchor: .center)
+        }
+        // Selection (iterates the selection set, not every system).
+        for id in selection {
+            guard let s = data.system(id) else { continue }
+            let p = vp.toScreen(pos(s, moving: moving), sz)
+            guard view.contains(p) else { continue }
+            ctx.fill(Path(ellipseIn: CGRect(x: p.x - r - 5, y: p.y - r - 5, width: (r + 5) * 2, height: (r + 5) * 2)), with: .color(novaAmber.opacity(0.25)))
+            ctx.stroke(Path(ellipseIn: CGRect(x: p.x - r - 4, y: p.y - r - 4, width: (r + 4) * 2, height: (r + 4) * 2)), with: .color(novaAmber), lineWidth: 1.5)
+            ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)), with: .color(data.color(s.govt)))
+            ctx.draw(Text(s.name).font(.system(size: 10, weight: .semibold)).foregroundColor(novaAmber),
+                     at: CGPoint(x: p.x, y: p.y + r + 7), anchor: .center)
         }
 
         if let m = marquee {
@@ -717,10 +765,7 @@ struct GalaxyEditorView: View {
 
     private var statusLine: some View {
         HStack(spacing: 14) {
-            if let h = hoverScreen {
-                let w = world(h)
-                Text(String(format: "x %.0f  y %.0f", w.x, w.y)).font(.system(size: 10, design: .monospaced))
-            }
+            MapCursorReadout(hover: hover, vp: vp, size: size, showRadius: false)
             Text(String(format: "zoom %.0f%%", vp.zoom * 100)).font(.system(size: 10, design: .monospaced))
             Text("\(selection.count) selected").font(.system(size: 10))
             Text("\(data.systems.count) systems").font(.system(size: 10)).foregroundStyle(.secondary)
@@ -742,6 +787,66 @@ struct GalaxyEditorView: View {
         case .delete: return "Click a system or nebula to delete it"
         case .nebula: return "Drag on empty space to create \u{2022} drag to move \u{2022} corner handles resize"
         }
+    }
+}
+
+// MARK: - Hover (isolated from the main view's invalidation)
+
+/// Pointer-hover state for the map editors. Held in `@State` by the owning view
+/// (which does not subscribe to it); only `GalaxyHoverLayer` / `MapCursorReadout`
+/// observe it, so mouse moves never re-evaluate the heavy parent body.
+final class MapHoverState: ObservableObject {
+    @Published var screen: CGPoint?
+    @Published var system: Int?
+    @Published var link: MapLinkPair?
+}
+
+/// "x … y …" cursor readout for the status bar.
+struct MapCursorReadout: View {
+    @ObservedObject var hover: MapHoverState
+    let vp: MapViewport
+    let size: CGSize
+    var showRadius: Bool
+
+    var body: some View {
+        if let h = hover.screen {
+            let w = vp.toWorld(h, size)
+            Text(showRadius ? String(format: "x %.0f  y %.0f  r %.0f", w.x, w.y, hypot(w.x, w.y))
+                            : String(format: "x %.0f  y %.0f", w.x, w.y))
+                .font(.system(size: 10, design: .monospaced))
+        }
+    }
+}
+
+/// Draws just the hover ring / name / hovered hyperlink over the main canvas.
+struct GalaxyHoverLayer: View {
+    @ObservedObject var hover: MapHoverState
+    let data: GalaxyMapData
+    let vp: MapViewport
+    let dotRadius: CGFloat
+    let selection: Set<Int>
+    let suppressed: Bool
+
+    var body: some View {
+        Canvas(rendersAsynchronously: false) { ctx, sz in
+            guard !suppressed else { return }
+            if let hl = hover.link, let ai = data.index[hl.a], let bi = data.index[hl.b] {
+                var p = Path()
+                p.move(to: vp.toScreen(data.systems[ai].point, sz)); p.addLine(to: vp.toScreen(data.systems[bi].point, sz))
+                ctx.stroke(p, with: .color(.red), lineWidth: 3)
+            }
+            if let id = hover.system, let s = data.system(id) {
+                let p = vp.toScreen(s.point, sz)
+                let r = dotRadius
+                ctx.stroke(Path(ellipseIn: CGRect(x: p.x - r - 2, y: p.y - r - 2, width: (r + 2) * 2, height: (r + 2) * 2)),
+                           with: .color(.white), lineWidth: 1)
+                if !selection.contains(id) {
+                    ctx.draw(Text(s.name).font(.system(size: 10)).foregroundColor(.white.opacity(0.95)),
+                             at: CGPoint(x: p.x, y: p.y + r + 7), anchor: .center)
+                }
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
 #endif

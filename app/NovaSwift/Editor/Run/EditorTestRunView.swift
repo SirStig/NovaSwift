@@ -40,23 +40,41 @@ struct EditorTestRunView: View {
             if let session = holder.session {
                 content(session)
             } else {
-                Color.black.overlay(GameLoadingView())
+                loadingView
             }
         }
         .preferredColorScheme(.dark)
-        .onAppear {
-            if holder.session == nil {
-                let s = EditorTestSession(collection: collection, base: base,
-                                          startSystem: startSystem, startShip: startShip)
-                holder.session = s
-                holder.objectWillChange.send()
-                Task {
-                    await s.start(app: model)
-                    if s.phase == .running { onReady?(s) }
-                }
-            }
+        // `.task` (not `.onAppear`): the loading state paints first, then the
+        // session (PilotStore init etc.) is created and started.
+        .task {
+            guard holder.session == nil else { return }
+            await Task.yield()
+            let s = EditorTestSession(collection: collection, base: base,
+                                      startSystem: startSystem, startShip: startShip)
+            holder.session = s
+            holder.objectWillChange.send()
+            await s.start(app: model)
+            if s.phase == .running { onReady?(s) }
         }
         .onDisappear { holder.session?.shutdown() }
+    }
+
+    /// Shown the instant the test run is requested, before any session exists.
+    private var loadingView: some View {
+        TestRunLoadingView(label: Self.loadingLabel(collection: collection, system: startSystem, ship: startShip))
+    }
+
+    fileprivate static func loadingLabel(collection: ResourceCollection, system: Int?, ship: Int?) -> String {
+        var parts: [String] = []
+        if let system {
+            let n = collection.resource(NovaType.syst, system)?.name ?? ""
+            parts.append(n.isEmpty ? "System #\(system)" : n)
+        }
+        if let ship {
+            let n = collection.resource(NovaType.ship, ship)?.name ?? ""
+            parts.append(n.isEmpty ? "Ship #\(ship)" : n)
+        }
+        return parts.isEmpty ? "Building test game\u{2026}" : "Building test game\u{2026}\n" + parts.joined(separator: " \u{2022} ")
     }
 
     // MARK: Layout
@@ -93,6 +111,18 @@ struct EditorTestRunView: View {
     }
 }
 
+/// Dark canvas + the shared editor loading overlay (spinner, label, system / ship name).
+private struct TestRunLoadingView: View {
+    let label: String
+    var body: some View {
+        ZStack {
+            Color(white: 0.04)
+            EditorLoadingOverlay(label: label).multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
 // MARK: - The game viewport + HUD + overlays
 
 private struct GameArea: View {
@@ -114,7 +144,8 @@ private struct GameArea: View {
             Color.black
             switch session.phase {
             case .loading:
-                GameLoadingView()
+                TestRunLoadingView(label: EditorTestRunView.loadingLabel(collection: session.collection, system: session.startSystemID,
+                                                                          ship: session.startShipID))
             case .failed(let message):
                 VStack(spacing: 10) {
                     Image(systemName: "exclamationmark.triangle.fill").font(.largeTitle).foregroundStyle(.orange)

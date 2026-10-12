@@ -71,6 +71,24 @@ rlëD encoder (exact inverse of `RLED.decode`), PICT v2 encoder (readable by
 - Real game data (for round-trip tests, never committed) is under `data/EV Nova/`
   (git-ignored); tests that need it must skip cleanly when absent.
 
+## Responsiveness rules (UI contributors)
+
+- The first frame after any click must render without waiting on data. Anything derived
+  (merged view, reference graph, browse lists, sidebar counts, spec stats, sprite/atlas
+  decodes, lint) is computed off the main actor from `Sendable` snapshots and published back;
+  until then the surface shows `SkeletonBar/List/Form` or `EditorLoadingOverlay`
+  (`Shell/EditorLoadingViews.swift`), and after edits it keeps the stale result with an
+  `EditorRefreshStrip`.
+- `EditorModel.dataReady` / `referencesReady` gate the merged view and `document.references`
+  (built in the background on open; patched incrementally afterwards). Never touch
+  `document.references` or `NovaGame(...)` inside a `body`.
+- Derived caches key off `EditorModel.dataRevision` (resource data only), not `revision`
+  (which also bumps on Save/metadata edits). `EditorBrowseCache` holds per-type browse rows
+  with precomputed lowercase names; `SpecCache.compute` runs engine/catalog work serialised
+  per revision (`Galaxy` isn't thread-safe).
+- `PluginDocument.beginGroup/endGroup/withGroup` coalesce a burst into one `onChange` (one
+  revision bump, one reference-graph update).
+
 ## Status (2026-10-12)
 
 Built: everything above. Entry point (both menus, macOS only) → full-window

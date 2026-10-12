@@ -6,7 +6,13 @@ import NovaSwiftKit
 struct ProjectPanelView: View {
     @ObservedObject var model: EditorModel
     @ObservedObject var store: EditorProjectStore
+    @ObservedObject private var cache: EditorBrowseCache
     let plugins: [PluginBundle]
+
+    init(model: EditorModel, store: EditorProjectStore, plugins: [PluginBundle]) {
+        self.model = model; self.store = store; self.plugins = plugins
+        _cache = ObservedObject(wrappedValue: store.cache)
+    }
 
     var body: some View {
         ScrollView {
@@ -21,6 +27,7 @@ struct ProjectPanelView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Color(white: 0.11))
+        .task(id: model.dataRevision) { cache.refreshStats(model) }
     }
 
     private func section<C: View>(_ title: String, @ViewBuilder _ c: () -> C) -> some View {
@@ -54,11 +61,21 @@ struct ProjectPanelView: View {
     }
 
     private var stats: some View {
-        let list = store.cache.stats(model).filter { $0.new + $0.overridden > 0 }
+        let list = (cache.stats ?? []).filter { $0.new + $0.overridden > 0 }
         let n = list.reduce(0) { $0 + $1.new }, o = list.reduce(0) { $0 + $1.overridden }
         return section("Contents") {
-            Text("\(n + o) resources · \(n) new · \(o) overriding the base game").font(.system(size: 12))
-            if list.isEmpty {
+            if cache.stats == nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    SkeletonBar(width: 260, height: 11)
+                    SkeletonBar(width: 200, height: 9)
+                    SkeletonBar(width: 230, height: 9)
+                }
+            } else {
+                Text("\(n + o) resources · \(n) new · \(o) overriding the base game").font(.system(size: 12))
+            }
+            if cache.stats == nil {
+                EmptyView()
+            } else if list.isEmpty {
                 Text("Nothing yet — create or edit a resource and it appears here.").font(.system(size: 12)).foregroundStyle(.tertiary)
             } else {
                 Grid(alignment: .trailing, horizontalSpacing: 18, verticalSpacing: 3) {

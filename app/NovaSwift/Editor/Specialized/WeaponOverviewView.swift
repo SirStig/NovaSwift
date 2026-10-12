@@ -16,9 +16,18 @@ struct WeaponOverviewView: View {
     @State private var carrierOutfit: Int?
     @State private var rangeShip = 128
     @State private var shipChoices: [PluginDocument.BrowserEntry] = []
+    @State private var geometry: RangeGeometry?
+    /// First result has landed (until then: skeleton, not "couldn't compute").
+    @State private var loaded = false
+    /// A newer result is being computed; the old numbers stay on screen.
+    @State private var refreshing = false
     @StateObject private var loader = ShipLayersLoader()
 
-    private struct TaskKey: Hashable { let key: ResourceKey; let revision: Int }
+    private struct TaskKey: Hashable { let key: ResourceKey; let revision: Int; let ship: Int }
+    private struct Computed {
+        let raw: WeapRes?; let line: ShipStatSheet.WeaponLine?; let carrier: Int?
+        let shot: EditorDecodedSprite?; let geometry: RangeGeometry
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -31,23 +40,51 @@ struct WeaponOverviewView: View {
                 ammoAndSub(w)
                 carriers
                 rangeSection(w, l)
+            } else if !loaded {
+                SkeletonForm(groups: 3)
             } else {
                 EditorEmptyState(icon: "scope", title: "Couldn't compute this weapon", subtitle: "Use Form or Raw.")
             }
         }
-        .task(id: TaskKey(key: key, revision: model.revision)) {
-            let d = SpecCache.data(model)
-            raw = d.game.weapon(key.id)
-            line = ShipStatSheet.weaponLine(galaxy: d.galaxy, game: d.game, id: key.id, count: 1)
-            carrierOutfit = d.game.outfitInstalling(weapon: key.id)
-            shipChoices = env.cache.entries(NovaType.ship, model)
-            if let spin = raw?.graphicSpinID, let sheet = d.game.weaponSprite(spinID: spin) {
-                shot = EditorDecodedSprite(sheet)
-            } else { shot = nil }
-            if !shipChoices.contains(where: { $0.key.id == rangeShip }), let f = shipChoices.first { rangeShip = f.key.id }
-            await loader.load(model: model, id: rangeShip)
+        .overlay(alignment: .top) { EditorRefreshStrip(active: refreshing) }
+        .task(id: TaskKey(key: key, revision: model.dataRevision, ship: rangeShip)) {
+            // Everything heavy (stats, shot sprite decode, exit points) runs off-main; after
+            // inline edits wait ~200 ms so typing coalesces, keeping the old numbers meanwhile.
+            if loaded {
+                refreshing = true
+                try? await Task.sleep(for: .milliseconds(200))
+                if Task.isCancelled { return }
+            }
+            let ships = await env.cache.list(NovaType.ship, model).entries
+            if Task.isCancelled { return }
+            shipChoices = ships
+            if !ships.contains(where: { $0.key.id == rangeShip }), let f = ships.first {
+                rangeShip = f.key.id      // re-keys this task; the restarted run does the work
+                return
+            }
+            let id = key.id, fromShip = rangeShip
+            let r = await SpecCache.compute(model) { d -> Computed in
+                let raw = d.game.weapon(id)
+                let spec = d.galaxy.weaponSpec(id)
+                var shot: EditorDecodedSprite?
+                if let spin = raw?.graphicSpinID, let sheet = d.game.weaponSprite(spinID: spin) {
+                    shot = EditorDecodedSprite(sheet)
+                }
+                func color(_ c: (r: Double, g: Double, b: Double)?, _ fallback: Color) -> Color {
+                    c.map { Color(red: $0.r, green: $0.g, blue: $0.b) } ?? fallback
+                }
+                let muzzle = d.galaxy.exitPoints(forShip: fromShip)?
+                    .muzzleOffset(type: spec?.exitType ?? .gun, index: 0, angle: 0, nose: 20) ?? Vec2(0, 20)
+                let geo = RangeGeometry(muzzle: muzzle, speed: spec?.projectileSpeed ?? 300,
+                                        beamCore: color(spec?.beamColor, .white), beamGlow: color(spec?.coronaColor, .cyan))
+                return Computed(raw: raw, line: ShipStatSheet.weaponLine(galaxy: d.galaxy, game: d.game, id: id, count: 1),
+                                carrier: d.game.outfitInstalling(weapon: id), shot: shot, geometry: geo)
+            }
+            if Task.isCancelled { return }
+            raw = r.raw; line = r.line; carrierOutfit = r.carrier; shot = r.shot; geometry = r.geometry
+            loaded = true; refreshing = false
+            await loader.load(model: model, id: fromShip)
         }
-        .onChange(of: rangeShip) { _, id in Task { await loader.load(model: model, id: id) } }
     }
 
     // MARK: Shot art
@@ -57,7 +94,7 @@ struct WeaponOverviewView: View {
         ZStack {
             CheckerboardBackground()
             if l.isBeam {
-                let colors = beamColors()
+                let colors = (core: geometry?.beamCore ?? Color.white, glow: geometry?.beamGlow ?? Color.cyan)
                 TimelineView(.animation(minimumInterval: 1.0 / 20)) { tl in
                     Canvas { ctx, size in
                         let pulse = 0.75 + 0.25 * sin(tl.date.timeIntervalSinceReferenceDate * 12)
@@ -78,15 +115,6 @@ struct WeaponOverviewView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.1)))
-    }
-
-    private func color(_ c: (r: Double, g: Double, b: Double)?, _ fallback: Color) -> Color {
-        c.map { Color(red: $0.r, green: $0.g, blue: $0.b) } ?? fallback
-    }
-
-    private func beamColors() -> (core: Color, glow: Color) {
-        let spec = SpecCache.data(model).galaxy.weaponSpec(key.id)
-        return (color(spec?.beamColor, .white), color(spec?.coronaColor, .cyan))
     }
 
     private func drawBeam(_ ctx: GraphicsContext, from: CGPoint, to: CGPoint, weapon w: WeapRes, scale: CGFloat,
@@ -176,11 +204,14 @@ struct WeaponOverviewView: View {
     }
 
     private var carriers: some View {
-        let refs = model.document.references.usedBy(key)
+        // Reference graph is built in the background once per document; a lookup afterwards.
+        let refs = model.referencesReady ? model.document.references.usedBy(key) : []
         var seen = Set<ResourceKey>()
         let uniq = refs.map(\.source).filter { [NovaType.outfit, NovaType.ship, NovaType.weapon, NovaType.pers].contains($0.type) && seen.insert($0).inserted }
         return SpecSection(title: "Carried by", trailing: "outfits · ships · other weapons") {
-            if uniq.isEmpty {
+            if !model.referencesReady {
+                SkeletonBar(width: 200, height: 10)
+            } else if uniq.isEmpty {
                 Text("Nothing mounts this weapon.").font(.system(size: 12)).foregroundStyle(.tertiary)
             } else {
                 ChipFlow {
@@ -210,7 +241,7 @@ struct WeaponOverviewView: View {
                         .help(carrierOutfit == nil ? "No oütf installs this weapon, so it can't be mounted in a test run." :
                                 "Fly this ship with the weapon mounted, god mode on, and a disabled dummy ahead")
                 }
-                RangeCanvas(model: model, weapon: w, line: l, shot: shot, shipID: rangeShip, layers: loader.layers)
+                RangeCanvas(weapon: w, line: l, shot: shot, geometry: geometry, layers: loader.layers)
                     .frame(height: 300)
             }
         }
@@ -218,22 +249,26 @@ struct WeaponOverviewView: View {
 }
 
 /// A schematic of the weapon being fired from a ship's real exit point at a dummy.
+/// Per-(weapon, firing ship) numbers the schematic needs, computed off-main with the stats.
+private struct RangeGeometry {
+    var muzzle: Vec2
+    var speed: Double
+    var beamCore: Color
+    var beamGlow: Color
+}
+
 private struct RangeCanvas: View {
-    let model: EditorModel
     let weapon: WeapRes
     let line: ShipStatSheet.WeaponLine
     let shot: EditorDecodedSprite?
-    let shipID: Int
+    let geometry: RangeGeometry?
     let layers: ShipLayerSet?
 
     var body: some View {
-        let d = SpecCache.data(model)
-        let spec = d.galaxy.weaponSpec(weapon.id)
-        let muzzle = d.galaxy.exitPoints(forShip: shipID)?
-            .muzzleOffset(type: spec?.exitType ?? .gun, index: 0, angle: 0, nose: 20) ?? Vec2(0, 20)
-        let speed = max(30, line.isBeam ? 0 : (spec?.projectileSpeed ?? 300))
-        let beamCore = spec?.beamColor.map { Color(red: $0.r, green: $0.g, blue: $0.b) } ?? .white
-        let beamGlow = spec?.coronaColor.map { Color(red: $0.r, green: $0.g, blue: $0.b) } ?? .cyan
+        let muzzle = geometry?.muzzle ?? Vec2(0, 20)
+        let speed = max(30, line.isBeam ? 0 : (geometry?.speed ?? 300))
+        let beamCore = geometry?.beamCore ?? Color.white
+        let beamGlow = geometry?.beamGlow ?? Color.cyan
         let range = max(60, line.range)
         TimelineView(.animation(minimumInterval: 1.0 / 30)) { tl in
             Canvas { ctx, size in

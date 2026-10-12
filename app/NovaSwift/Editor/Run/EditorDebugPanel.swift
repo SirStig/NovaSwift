@@ -59,7 +59,8 @@ private struct PickList: View {
     }
 
     var body: some View {
-        VStack(spacing: 4) {
+        let filtered = self.filtered   // once per body, not once per use
+        return VStack(spacing: 4) {
             HStack(spacing: 5) {
                 Image(systemName: "magnifyingglass").font(.caption).foregroundStyle(.secondary)
                 TextField(placeholder, text: $query).textFieldStyle(.plain).font(.system(size: 11))

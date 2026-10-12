@@ -11,6 +11,8 @@ struct ShipStageView: View {
     var autoSpin: Bool
     var toggles: ShipLayerToggles
     var zoom: CGFloat = 2
+    /// Layer decode still running: show a spinner instead of "No hull sprite".
+    var loading = false
 
     var body: some View {
         let animated = autoSpin || (layers?.shan.hasAltLayer ?? false)
@@ -27,7 +29,9 @@ struct ShipStageView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.1)))
         .overlay {
-            if layers?.base == nil {
+            if layers == nil && loading {
+                ProgressView().controlSize(.regular).tint(novaAmber)
+            } else if layers?.base == nil {
                 Text("No hull sprite").font(.system(size: 11)).foregroundStyle(.tertiary)
             }
         }
@@ -76,14 +80,17 @@ struct ShipStageControls: View {
 @MainActor
 final class ShipLayersLoader: ObservableObject {
     @Published private(set) var layers: ShipLayerSet?
+    /// True while a decode is in flight (the previous `layers`, if any, stay visible).
+    @Published private(set) var isLoading = false
     private var token = 0
 
     func load(model: EditorModel, id: Int) async {
         token += 1
         let mine = token
+        isLoading = true
         let data = SpecCache.data(model)
         let result = await ShipLayerCache.shared.load(data, id: id)
-        if mine == token { layers = result }
+        if mine == token { layers = result; isLoading = false }
     }
 }
 
@@ -101,8 +108,13 @@ struct ShipOverviewView: View {
     @State private var stats: ShipStatSheet?
     @State private var hull: ShipRes?
     @State private var sellers: [SpobRes] = []
+    /// First result has landed (until then: skeleton, not "couldn't compute").
+    @State private var loaded = false
+    /// A newer result is being computed; the old numbers stay on screen.
+    @State private var refreshing = false
 
     private struct TaskKey: Hashable { let key: ResourceKey; let revision: Int }
+    private struct Computed { let stats: ShipStatSheet?; let hull: ShipRes?; let sellers: [SpobRes] }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -116,16 +128,31 @@ struct ShipOverviewView: View {
                 description
                 availability
                 usedBy
+            } else if !loaded {
+                SkeletonForm(groups: 3)
             } else {
                 EditorEmptyState(icon: "airplane", title: "Couldn't compute this ship",
                                  subtitle: "The record is too short or malformed. Use Form or Raw.")
             }
         }
-        .task(id: TaskKey(key: key, revision: model.revision)) {
-            let d = SpecCache.data(model)
-            stats = ShipStatSheet.compute(d, shipID: key.id)
-            hull = d.game.ship(key.id)
-            sellers = hull.map { SpecAvailability.spobs(sellingShip: $0, game: d.game) } ?? []
+        .overlay(alignment: .top) { EditorRefreshStrip(active: refreshing) }
+        .task(id: TaskKey(key: key, revision: model.dataRevision)) {
+            // Stat recompute runs off-main; after inline edits wait ~200 ms so typing
+            // bursts coalesce into one recompute and the old numbers stay put meanwhile.
+            if loaded {
+                refreshing = true
+                try? await Task.sleep(for: .milliseconds(200))
+                if Task.isCancelled { return }
+            }
+            let id = key.id
+            let r = await SpecCache.compute(model) { d -> Computed in
+                let hull = d.game.ship(id)
+                return Computed(stats: ShipStatSheet.compute(d, shipID: id), hull: hull,
+                                sellers: hull.map { SpecAvailability.spobs(sellingShip: $0, game: d.game) } ?? [])
+            }
+            if Task.isCancelled { return }
+            stats = r.stats; hull = r.hull; sellers = r.sellers
+            loaded = true; refreshing = false
             await loader.load(model: model, id: key.id)
         }
     }
@@ -134,7 +161,8 @@ struct ShipOverviewView: View {
 
     private var topRow: some View {
         HStack(alignment: .top, spacing: 12) {
-            ShipStageView(layers: loader.layers, heading: $heading, autoSpin: autoSpin, toggles: toggles, zoom: 2.5)
+            ShipStageView(layers: loader.layers, heading: $heading, autoSpin: autoSpin, toggles: toggles, zoom: 2.5,
+                          loading: loader.isLoading)
                 .frame(width: 280, height: 280)
             VStack(alignment: .leading, spacing: 10) {
                 ShipStageControls(layers: loader.layers, toggles: $toggles, heading: $heading, autoSpin: $autoSpin)
@@ -297,11 +325,14 @@ struct ShipOverviewView: View {
 
     private var usedBy: some View {
         let kinds: [NovaSwiftKit.FourCharCode] = [NovaType.fleet, NovaType.dude, NovaType.char, NovaType.pers]
-        let refs = model.document.references.usedBy(key).filter { kinds.contains($0.source.type) }
+        // Reference graph is built in the background once per document; a lookup afterwards.
+        let refs = model.referencesReady ? model.document.references.usedBy(key).filter { kinds.contains($0.source.type) } : []
         var seen = Set<ResourceKey>()
         let uniq = refs.filter { seen.insert($0.source).inserted }
         return SpecSection(title: "Used by", trailing: "flët · düde · chär · përs") {
-            if uniq.isEmpty {
+            if !model.referencesReady {
+                SkeletonBar(width: 200, height: 10)
+            } else if uniq.isEmpty {
                 Text("Nothing references this hull.").font(.system(size: 12)).foregroundStyle(.tertiary)
             } else {
                 ChipFlow {

@@ -158,10 +158,13 @@ struct DescEditor: View {
         model.writeData(r.encode(), for: key, label: label, coalesce: coalesce)
     }
 
+    /// Compiled once (not per keystroke / body pass).
+    private static let codeRegex = try? NSRegularExpression(pattern: #"\^[A-Za-z0-9]{1,3}|\{[^}]*\}|<[^>\n]{1,40}>"#)
+
     private func preview(_ text: String) -> AttributedString {
         var out = AttributedString(text)
         let ns = text as NSString
-        guard let re = try? NSRegularExpression(pattern: #"\^[A-Za-z0-9]{1,3}|\{[^}]*\}|<[^>\n]{1,40}>"#) else { return out }
+        guard let re = Self.codeRegex else { return out }
         for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
             guard let r = Range(m.range, in: text),
                   let lo = AttributedString.Index(r.lowerBound, within: out),

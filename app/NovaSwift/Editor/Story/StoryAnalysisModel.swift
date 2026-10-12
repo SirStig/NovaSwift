@@ -23,16 +23,32 @@ final class StoryAnalysisModel: ObservableObject {
     @Published private(set) var rows: [StoryBitRow] = []
     @Published private(set) var notes = BitNotes()
     @Published private(set) var isComputing = false
+    /// False until the first off-main analysis has landed (drives skeleton / loading overlay).
+    @Published private(set) var hasResult = false
     /// Increments each time a fresh result lands (graph view re-fits on the first one).
     @Published private(set) var generation = 0
     /// Storyline names present, sorted.
     @Published private(set) var storylines: [String] = []
 
+    /// Shared across tool switches so re-opening Story shows the last result
+    /// instantly (it is revalidated against the document + revision).
+    static let shared = StoryAnalysisModel()
+
     private var task: Task<Void, Never>?
     private var computedRevision = -1
+    private var docID: ObjectIdentifier?
     private(set) var lastComputeMillis = 0.0
 
     func refresh(_ model: EditorModel, immediate: Bool = false) {
+        let id = ObjectIdentifier(model.document)
+        if id != docID {
+            // Different document: discard the old result and show the loading state.
+            task?.cancel()
+            docID = id
+            computedRevision = -1
+            hasResult = false
+            index = ControlBitIndex(ResourceCollection()); graph = StoryGraph(); rows = []; storylines = []
+        }
         guard model.revision != computedRevision else { return }
         let rev = model.revision
         task?.cancel()
@@ -61,6 +77,7 @@ final class StoryAnalysisModel: ObservableObject {
             self.computedRevision = rev
             self.lastComputeMillis = Date().timeIntervalSince(t0) * 1000
             self.generation += 1
+            self.hasResult = true
             self.isComputing = false
         }
     }
