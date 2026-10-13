@@ -124,14 +124,11 @@ func _top_bar() -> Control:
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", 8)
 	h.alignment = BoxContainer.ALIGNMENT_CENTER
-	bar.add_child(h)
 	var margin := MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 10)
 	margin.add_theme_constant_override("margin_right", 10)
 	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	margin.add_child(h)
-	# PanelContainer only shows one child; put the margin in the panel.
-	bar.remove_child(h)
 	bar.add_child(margin)
 
 	h.add_child(EdTheme.button("Close", _request_close))
@@ -159,7 +156,6 @@ func _sidebar() -> Control:
 	side.add_theme_stylebox_override("panel", EdTheme.fill(EdTheme.SIDE))
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 2)
-	side.add_child(v)
 	var pad := MarginContainer.new()
 	pad.add_theme_constant_override("margin_left", 8)
 	pad.add_theme_constant_override("margin_right", 8)
@@ -884,13 +880,12 @@ func _tool_project() -> void:
 	var box := VBoxContainer.new()
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var sc := _scroll(_tool_host)
-	sc.add_child(box)
 	var pad := MarginContainer.new()
 	pad.add_theme_constant_override("margin_left", 16)
 	pad.add_theme_constant_override("margin_top", 12)
 	pad.add_theme_constant_override("margin_right", 16)
-	sc.add_child(pad)
 	pad.add_child(box)
+	sc.add_child(pad)
 	var name := EdTheme.field("Name")
 	name.text = str(_st.get("name", ""))
 	var author := EdTheme.field("Author")

@@ -371,7 +371,7 @@ public enum GameDataImport {
             update { $0.running = true; $0.phase = "Reading your files"; $0.fraction = 0.02 }
             Thread.detachNewThread { [self] in
                 run()
-                discardExtractions()
+                GameDataImport.discardExtractions()
             }
         }
 

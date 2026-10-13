@@ -680,7 +680,7 @@ func _build_updates() -> void:
 	_check("Check for updates", "updates", "check", true)
 	_check("Experimental updates", "updates", "beta", false)
 	_caption("Also offer test builds that may be unstable or break saves. Back up your pilots. Turning this off while on an experimental build offers a return to the newest stable version.")
-	NC.value_row(_group, "Version", str(ProjectSettings.get_setting("application/config/version", "1.0.0")))
+	NC.value_row(_group, "Version", str(ProjectSettings.get_setting("application/config/version", "0.7.0")))
 	NC.value_row(_group, "Last checked", UpdateController.last_check_text())
 	var why: String = UpdateController.disabled_reason()
 	if why != "":
@@ -690,7 +690,7 @@ func _build_updates() -> void:
 
 ## Apple AboutView: the data's own About text over the NovaSwift header in the generic dësc dialog.
 func _show_about() -> void:
-	var version := str(ProjectSettings.get_setting("application/config/version", "1.0.0"))
+	var version := str(ProjectSettings.get_setting("application/config/version", "0.7.0"))
 	if ClassicTheme.has_data() and _nova != null and _nova.has_method("about_nova_text"):
 		var pict: int = int(_nova.classic_desc_graphic(32767)) if _nova.has_method("classic_desc_graphic") else -1
 		var d = ClassicDialog.desc_dialog(_nova, _nova.about_nova_text(version), pict)

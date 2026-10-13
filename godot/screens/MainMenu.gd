@@ -185,7 +185,7 @@ func _show_about() -> void:
 	# AboutNovaText: the NovaSwift header over dësc 32767, in the generic dësc dialog.
 	# The picture variant when dësc 32767 has a Graphic (Apple DescTextDialog graphicID:).
 	var pict: int = int(nova.classic_desc_graphic(32767)) if nova.has_method("classic_desc_graphic") else -1
-	var d = ClassicDialog.desc_dialog(nova, nova.about_nova_text(str(ProjectSettings.get_setting("application/config/version", "1.0.0"))), pict)
+	var d = ClassicDialog.desc_dialog(nova, nova.about_nova_text(str(ProjectSettings.get_setting("application/config/version", "0.7.0"))), pict)
 	d.activated.connect(func(_i): _close_about())   # OK press and Esc / B: one close path
 	_about = ClassicDialog.modal(_root, d, 0.6)
 
