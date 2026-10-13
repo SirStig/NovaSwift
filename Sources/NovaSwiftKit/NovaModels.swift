@@ -917,6 +917,12 @@ public struct SpobRes {
     /// hypergates/wormholes this gate connects to (−1/0 = unused; a wormhole
     /// with all −1 connects randomly). Empty for a non-gate stellar.
     public let hyperLinks: [Int]
+    /// The eight raw `HyperLink` slots in slot order (−1 where empty), duplicates and
+    /// out-of-range values kept (OS-06: `FUN_0046ebb0` counts slots whose stellar id is in
+    /// 0…2047, and a wormhole draws over the raw slots).
+    public let hyperLinkSlots: [Int]
+    /// The slots whose stellar id is in 0…2047 (resource ids 128…2175), duplicates kept.
+    public var validHyperLinkSlots: [Int] { hyperLinkSlots.filter { (128...2175).contains($0) } }
 
     // MARK: Domination / Demand Tribute (Nova Bible; offsets verified against
     // TMPL #520 + real data — see docs/reverse-engineering/DOMINATION.md).
@@ -1080,8 +1086,9 @@ public struct SpobRes {
     /// before we shun you", `0…32766` = "we have to like you this much", `32767`
     /// = never land. Ignored by the base game when the stellar is uninhabited —
     /// but the stock hypergates (govt #183 "Hypergate") all carry `32767`, so
-    /// gate access is deliberately a *clearance* mechanic, not a standing one
-    /// (see `playerMayUseGate`).
+    /// gate access is a *clearance* mechanic: gates run the same ladder as a
+    /// planet (`LandedServices.landingClearance`, EC-04) and stay shut unless
+    /// a waiver in it applies.
     public let minStatus: Int
 
     /// For a gate, the fixed angle (degrees, `0..<360`) at which ships emerge
@@ -1109,24 +1116,6 @@ public struct SpobRes {
     /// the normal landable test.
     public var isLandableStellar: Bool { isGate || isLandable }
 
-    /// Whether the player may pass through this gate given their relationship to
-    /// its owning `government`. Wormholes are open to everyone (no requirements).
-    /// Hypergates require landing *clearance* from the owner: independent gates
-    /// are open; a hostile owner always refuses; a "restricted network" gate
-    /// (`minStatus == 32767`, the stock case) needs the player allied-with or in
-    /// positive standing with the owner; otherwise the ordinary `MinStatus`
-    /// threshold applies. Pure — the caller supplies the relationship, so this
-    /// stays in NovaSwiftKit with no dependency on the engine's `Diplomacy`.
-    public func playerMayUseGate(standing: Int, hostile: Bool, allied: Bool) -> Bool {
-        if isWormhole { return true }
-        guard isHypergate else { return false }
-        if government < 128 { return true }        // independent gate: open to all
-        if hostile { return false }                // enemies never get clearance
-        if minStatus >= 32767 { return allied || standing > 0 }
-        if minStatus <= -32767 { return true }
-        return standing >= minStatus
-    }
-
     public init(_ r: Resource) {
         id = r.id
         name = r.name.isEmpty ? "Planet \(r.id)" : r.name
@@ -1150,7 +1139,9 @@ public struct SpobRes {
         let isGateStellar = flags2v & 0x3000 != 0
         ambientSoundID = (isGateStellar || rawCust == -1) ? nil : rawCust
         gateEmergeAngle = (isGateStellar && (0...359).contains(rawCust)) ? Double(rawCust) : nil
-        hyperLinks = (0..<8).map { i16(d, 38 + $0 * 2) }.filter { $0 >= 128 }
+        let rawSlots = (0..<8).map { i16(d, 38 + $0 * 2) }
+        hyperLinkSlots = rawSlots
+        hyperLinks = rawSlots.filter { $0 >= 128 }
         tribute = i16(d, 10)
         defenseDude = i16(d, 28)
         defenseCountRaw = i16(d, 30)
@@ -1506,25 +1497,61 @@ public struct NovaGame {
         return out
     }
 
-    /// Where a wormhole can spit the player out (`Stellar_EnterWormhole`
-    /// 0x00456ca0; OS-06). With `HyperLink`s, a uniform pick among the links
-    /// whose system is visible — if it has links but none is visible, the
-    /// wormhole can't be used ("Unable to use this wormhole"). Without links,
-    /// a pick among the *other link-less* wormholes outside the current system
-    /// whose system is visible; there is no fallback to linked wormholes.
-    /// Each candidate carries its own system.
-    public func wormholeExitCandidates(from wormhole: SpobRes, currentSystem: Int? = nil,
-                                       isVisible: (Int) -> Bool = { _ in true }) -> [(gateSpobID: Int, systemID: Int)] {
+    /// What entering a wormhole does (`Stellar_EnterWormhole` 0x00456ca0; OS-06).
+    public enum WormholeOutcome: Equatable, Sendable {
+        /// "Unable to use this wormhole" (STR# 2002 #84 + #86): no usable exit.
+        case unusable
+        /// The draw landed on a hole the rules refuse; the ship stays put.
+        case stayPut
+        case exit(gateSpobID: Int, systemID: Int)
+    }
+
+    /// The wormhole exit draw. `rand(n)` draws `0..<n` (`NovaRandom_Range`).
+    ///
+    /// - Linked (some `HyperLink` slot holds a stellar id in 0…2047, `FUN_0046ebb0`): at least one
+    ///   such slot's destination must resolve to a visible system, else it fails. Then
+    ///   `rand(8)` walks the raw slots until the chosen slot names a stellar that has a system.
+    ///   A hidden system can be chosen, a duplicated slot is twice as likely, and the far stellar
+    ///   need not be a gate.
+    /// - Link-less: some other available wormhole in a different system must itself be link-less
+    ///   and sit in a visible system, else it fails. Then one `rand(0x800)` stellar draw, redrawn
+    ///   until it lands on an available wormhole in another system (linked or not); that hole is
+    ///   used only when it is link-less and its system is visible, otherwise the ship stays put.
+    public func wormholeExit(from wormhole: SpobRes, currentSystem: Int? = nil,
+                             isVisible: (Int) -> Bool = { _ in true },
+                             isAvailable: (SpobRes) -> Bool = { _ in true },
+                             rand: (Int) -> Int) -> WormholeOutcome {
         let hidden = Set(visibilityGatedSystems().map(\.id).filter { !isVisible($0) })
-        if !wormhole.hyperLinks.isEmpty {
-            return gateDestinations(from: wormhole, hidden: hidden).filter { isVisible($0.systemID) }
+        let slots = wormhole.hyperLinkSlots
+        let valid = wormhole.validHyperLinkSlots
+        if !valid.isEmpty {
+            let visibleCount = valid.filter { id in
+                systemContaining(spob: id, hidden: hidden).map(isVisible) ?? false
+            }.count
+            guard visibleCount > 0 else { return .unusable }
+            for _ in 0..<100_000 {
+                let id = slots[min(slots.count - 1, max(0, rand(8)))]
+                guard (128...2175).contains(id), let sys = systemContaining(spob: id, hidden: hidden) else { continue }
+                return .exit(gateSpobID: id, systemID: sys)
+            }
+            return .unusable
         }
-        var out: [(Int, Int)] = []
-        for s in spobs() where s.id != wormhole.id && s.isWormhole && s.hyperLinks.isEmpty {
-            guard let sys = systemContaining(spob: s.id, hidden: hidden), sys != currentSystem, isVisible(sys) else { continue }
-            out.append((s.id, sys))
+        let here = currentSystem ?? systemContaining(spob: wormhole.id, hidden: hidden)
+        var others: [Int: (spob: SpobRes, system: Int)] = [:]
+        for s in spobs() where s.isWormhole && isAvailable(s) {
+            guard let sys = systemContaining(spob: s.id, hidden: hidden), sys != here else { continue }
+            others[s.id] = (s, sys)
         }
-        return out
+        guard others.values.contains(where: { $0.spob.validHyperLinkSlots.isEmpty && isVisible($0.system) }) else {
+            return .unusable
+        }
+        var picked: (spob: SpobRes, system: Int)?
+        for _ in 0..<100_000 {
+            if let hit = others[128 + rand(0x800)] { picked = hit; break }
+        }
+        if picked == nil, let first = others.keys.sorted().first { picked = others[first] }
+        guard let hole = picked, hole.spob.validHyperLinkSlots.isEmpty, isVisible(hole.system) else { return .stayPut }
+        return .exit(gateSpobID: hole.spob.id, systemID: hole.system)
     }
 
     // AI-driving resources.

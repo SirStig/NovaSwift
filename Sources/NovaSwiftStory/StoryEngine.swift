@@ -387,7 +387,7 @@ public final class StoryEngine {
     /// next to a mission-offer or cron-activation check.
     public func activeContributeBits() -> UInt64 {
         var bits: UInt64 = game.ship(player.shipType)?.contribute ?? 0
-        for (outfitID, qty) in player.outfits where qty > 0 {
+        for (outfitID, qty) in player.ownedOutfits where qty > 0 {
             bits |= game.outfit(outfitID)?.contribute ?? 0
         }
         for rankID in player.activeRanks {

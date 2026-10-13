@@ -5,7 +5,7 @@
 //
 // No game logic here: clearance, refusal text, the two-press landing, gate
 // permission and the gate exits are the shared `LandedServices` / `OriginalText` /
-// `PlayerLanding` / `SpobRes.playerMayUseGate` / `NovaGame.gateDestinations`
+// `PlayerLanding` / `NovaGame.gateDestinations` / `NovaGame.wormholeExit`
 // types the Apple app's `GameScene` + `GameContainerView` use.
 
 struct TravelState {
@@ -19,6 +19,9 @@ struct TravelState {
     var cleared: Set<Int> = []
     /// Hypergates switched on this visit (landing on one lights it).
     var openGates: Set<Int> = []
+    /// The stellar whose Land-press ladder (`landingRefusalReason`) passed, so docking or entering a
+    /// gate does not run it again (0x00457580 runs it once, on the press).
+    var ladderPassed: Int?
     /// While a hypergate's destination picker is up: the gate being used.
     var gatePicker: Int?
     /// The frontend plays the gate-entry movie itself (`GateTravelMovie`): a wormhole then picks its exit
@@ -32,6 +35,7 @@ struct TravelState {
     mutating func resetForNewWorld() {
         selectedSpob = nil
         landingRequest = nil
+        ladderPassed = nil
         cleared = []
         openGates = []
         gatePicker = nil

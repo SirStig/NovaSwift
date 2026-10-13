@@ -71,6 +71,43 @@ final class GameControllerInput {
     private var blocked: Set<PadButton> = []
     private var wasActive = true
 
+    // MARK: Action wheels
+
+    /// Live wheel set (a button that is a wheel's trigger is tap/hold dual-use).
+    /// Set by `GameHost` / the container like `bindings`.
+    var wheels = ActionWheels.load()
+    /// Hold longer than this (or push the right stick) and the wheel opens;
+    /// release sooner and it was a tap.
+    static let wheelHoldDelay: TimeInterval = 0.22
+
+    private struct WheelHold {
+        let wheel: ActionWheel
+        let button: PadButton
+        let start: TimeInterval
+        /// The right stick was already pushed (aiming) when the trigger went
+        /// down; only a push that starts after the press can open the wheel
+        /// early, so tapping LB/RB mid-aim stays a tap.
+        var stickWasAiming: Bool
+        var open = false
+        /// Ⓑ was pressed while open: release does nothing.
+        var cancelled = false
+        var selected: Int?
+    }
+    private var wheelHold: WheelHold?
+    /// Self-destruct picked from a wheel. The original holds the key for five
+    /// seconds and releasing aborts; a wheel can't be held that long, so the
+    /// command latches (`c.selfDestruct` every poll) until ANY pad button is
+    /// pressed, which aborts it.
+    private var selfDestructLatched = false
+    /// Last state pushed to `ActionWheelState`, so main is only hit on change.
+    private var publishedWheel: (id: String?, highlighted: Int?) = (nil, nil)
+    /// When the scene last polled. "Pause while an action wheel is open"
+    /// freezes the SKScene, which stops `update` and with it `poll()` — so
+    /// while a wheel is open this timer keeps polling whenever the scene
+    /// hasn't, or the wheel could never see its trigger released.
+    private var lastPoll: TimeInterval = 0
+    private var wheelPump: Timer?
+
     init(input: InputController) {
         self.input = input
         for name in GCController.activeChangeNotifications {
@@ -91,6 +128,7 @@ final class GameControllerInput {
         if !isConnected {
             input?.controller = ControlIntent()
             held.removeAll()
+            closeWheel()
         }
     }
 
@@ -101,6 +139,7 @@ final class GameControllerInput {
     var headingOffset: Double = 0
 
     func poll() {
+        lastPoll = ProcessInfo.processInfo.systemUptime
         guard let pad = GCController.active?.extendedGamepad else { return }
         var c = ControlIntent()
 
@@ -110,6 +149,7 @@ final class GameControllerInput {
             if wasActive { setAdaptiveTriggers(flying: false) }
             wasActive = false
             held.removeAll()
+            closeWheel()
             input?.controller = c
             return
         }
@@ -140,11 +180,61 @@ final class GameControllerInput {
             setAdaptiveTriggers(flying: true)
         }
         wasActive = active
+
+        // Ⓑ while a wheel is open cancels it. Handled before the button loop
+        // and blocked, so that press never also fires the secondary weapon.
+        if var h = wheelHold, h.open, !h.cancelled,
+           PadButton.buttonB.isPressed(on: pad), !held.contains(.buttonB) {
+            h.cancelled = true
+            wheelHold = h
+            blocked.insert(.buttonB)
+        }
+        let now = ProcessInfo.processInfo.systemUptime
+        let stickMag = hypot(rx, ry)
+
         for button in PadButton.allCases {
             let pressed = button.isPressed(on: pad)
             let wasHeld = held.contains(button)
             if pressed { held.insert(button) } else { held.remove(button) }
             if !pressed { blocked.remove(button) }
+            // Any fresh press aborts a latched wheel self-destruct.
+            if pressed, !wasHeld, selfDestructLatched { selfDestructLatched = false }
+
+            // Wheel triggers: tap fires the normal binding, hold opens the wheel.
+            if active, !blocked.contains(button),
+               let wheel = wheels.wheel(for: button),
+               ActionWheels.canTrigger(button, bindings: bindings) {
+                if pressed, !wasHeld, wheelHold == nil {
+                    wheelHold = WheelHold(wheel: wheel, button: button, start: now,
+                                          stickWasAiming: stickMag > 0.5)
+                } else if var h = wheelHold, h.button == button {
+                    if pressed {
+                        if stickMag <= 0.5 { h.stickWasAiming = false }
+                        if !h.open, now - h.start >= Self.wheelHoldDelay || (stickMag > 0.5 && !h.stickWasAiming) {
+                            h.open = true
+                        }
+                        if h.open, !h.cancelled, stickMag > 0.5,
+                           let i = ActionWheels.slotIndex(x: rx, y: ry, count: h.wheel.slots.count) {
+                            h.selected = i      // sticky: recentring keeps the pick
+                        }
+                        wheelHold = h
+                    } else {
+                        wheelHold = nil
+                        let onDiscrete = onDiscrete
+                        if !h.open {
+                            // A tap: the button's own action, on release.
+                            if let action = bindings.action(for: button), !action.continuous {
+                                DispatchQueue.main.async { onDiscrete(action) }
+                            }
+                        } else if !h.cancelled, let i = h.selected, h.wheel.slots.indices.contains(i) {
+                            let action = h.wheel.slots[i]
+                            if action == .selfDestruct { selfDestructLatched = true }
+                            else if !action.continuous { DispatchQueue.main.async { onDiscrete(action) } }
+                        }
+                    }
+                }
+                continue
+            }
             // While a menu/dialog owns the pad (the UI cursor is driving it),
             // no button flies the ship; held ones release cleanly.
             guard active, !blocked.contains(button),
@@ -167,7 +257,47 @@ final class GameControllerInput {
             }
         }
 
+        // An open wheel owns the right stick (it picks a slot, it doesn't aim).
+        if wheelHold?.open == true { c.desiredHeading = nil }
+        if selfDestructLatched { c.selfDestruct = true }
+        publishWheel()
+
         input?.controller = c
+    }
+
+    /// Close any wheel without executing it (menu took the pad, pad lost).
+    /// Also drops a latched self-destruct.
+    private func closeWheel() {
+        wheelHold = nil
+        selfDestructLatched = false
+        publishWheel()
+    }
+
+    private func publishWheel() {
+        let open = wheelHold.flatMap { $0.open && !$0.cancelled ? $0 : nil }
+        updateWheelPump(running: wheelHold?.open == true)
+        let id = open?.wheel.id
+        let hi = open?.selected
+        guard id != publishedWheel.id || hi != publishedWheel.highlighted else { return }
+        publishedWheel = (id, hi)
+        let wheel = open?.wheel
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { ActionWheelState.shared.apply(wheel: wheel, highlighted: hi) }
+        }
+    }
+
+    private func updateWheelPump(running: Bool) {
+        if running, wheelPump == nil {
+            let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                if ProcessInfo.processInfo.systemUptime - self.lastPoll > 0.05 { self.poll() }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            wheelPump = timer
+        } else if !running, let timer = wheelPump {
+            timer.invalidate()
+            wheelPump = nil
+        }
     }
 
     /// DualSense adaptive triggers: a light, even resistance on both triggers

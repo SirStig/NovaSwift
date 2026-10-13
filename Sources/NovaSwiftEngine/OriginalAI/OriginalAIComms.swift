@@ -279,7 +279,9 @@ extension OriginalAI {
     /// The hail command on a targeted ship (0x00454910).
     public func hailCheck(_ ship: Ship, world: World) -> OriginalComms.HailCheck {
         let player = world.player
-        if player.cloakLevel > 0 || !player.isAlive || world.playerJump != nil { return .beep }
+        // AI-44: the cloak test is the visibility threshold 0x0046c7a0 (fading in: past 24/32;
+        // fading out: until under 8/32; at rest: past 16/32), not any non-zero cloak level.
+        if player.isCloaked || !player.isAlive || world.playerJump != nil { return .beep }
         let host = WorldAIHost(world: world, ai: self)
         if let rec = records[ship.entityID], rec.jumpTimer > 0 {
             return .message(index: ship.disabled ? 53 : 54)

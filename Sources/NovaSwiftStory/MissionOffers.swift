@@ -142,13 +142,13 @@ extension StoryEngine {
     }
 
     /// 0x0043d4c0: N >= 0 stays N; -1 is 0; n <= -2 is floor(n/2) +
-    /// NovaRandom_Range(n), with n = abs(encoded). This still uses (n + 1) / 2,
-    /// which disagrees on odd n (MS-19).
+    /// NovaRandom_Range(n), with n = abs(encoded). CargoQty -5 is 2...6 and -10
+    /// is 5...14 (MS-19).
     func specialCount(_ encoded: Int) -> Int {
         if encoded >= 0 { return encoded }
         if encoded == -1 { return 0 }
         let n = -encoded
-        return (n + 1) / 2 + random(n)
+        return n / 2 + random(n)
     }
 
     /// 0x0043d510: a concrete stellar for a TravelStel/ReturnStel locator.

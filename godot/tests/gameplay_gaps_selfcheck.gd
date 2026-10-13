@@ -364,6 +364,27 @@ func _gambling() -> void:
 	_check("a bet beyond the credits is refused, nothing charged", not refused.ok and nova.player_credits() == c)
 	_check("a zero wager is refused", not _j(nova.gamble_bet(0, 0)).ok and nova.player_credits() == c)
 	_check("standard wager follows poverty", int(_j(nova.gamble_info()).standard) == 500)
+	# EC-26: the previous winner resets whenever the bar window opens.
+	if nova.has_method("bar_opened"):
+		nova.debug_set_credits(1000000)
+		var prev: int = -1
+		var repeat_in_visit := false
+		for n in 30:
+			var w: int = int(_j(nova.gamble_bet(0, 10)).winner)
+			if prev >= 0 and w == prev:
+				repeat_in_visit = true
+			prev = w
+		_check("inside one bar visit a winner never repeats", not repeat_in_visit)
+		var repeated_after_reopen := false
+		for n in 80:
+			nova.bar_opened()
+			var w1: int = int(_j(nova.gamble_bet(0, 10)).winner)
+			nova.bar_opened()
+			var w2: int = int(_j(nova.gamble_bet(0, 10)).winner)
+			if w1 == w2:
+				repeated_after_reopen = true
+				break
+		_check("after the bar reopens the last winner can win again", repeated_after_reopen)
 
 
 # --- përs LinkMission offers --------------------------------------------------------------

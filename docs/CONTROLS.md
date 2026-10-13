@@ -15,6 +15,7 @@ sheet and alert — on macOS, iPadOS and iOS, and *required* on tvOS.
 | Ⓑ | Bindable (default: fire secondary) | Back / cancel — what Esc does, plus Close/Back/Skip/Done-type buttons |
 | Menu | Bindable (default: game menu) | The dialog's default button — what Return does |
 | Triggers | Bindable (default: throttle) | Zoom on the star map |
+| LB / RB / Options | Tap = bound action; **hold = action wheel** (default) | Cursor keys as bound |
 | Everything else | Bindable | — |
 
 ## Flight
@@ -33,6 +34,58 @@ pad back, any button still held (the Ⓐ that just pressed OK, the Ⓑ that just
 backed out) is ignored until released, so closing a dialog never fires a
 weapon. On a DualSense the triggers get light adaptive resistance while
 flying and a free pull in menus.
+
+## Action wheels
+
+Far more actions exist than buttons, so a pad can open **action wheels**:
+Steam-style radial menus. **Hold** a wheel's trigger button, **flick the right
+stick** toward a slot, **release** to use it. Slot 0 is at the top, then
+clockwise. The wheel opens low on the side of the hand holding its trigger
+(LB / Options wheels bottom-left, RB wheel bottom-right), clear of the ship at
+screen centre (`UI/ActionWheelOverlay.swift`). By default **the game pauses**
+while a wheel is open; Settings ▸ Controls ▸ *Pause while an action wheel is
+open* turns that off so time keeps running (the wheels are a NovaSwift input
+layer, so there is no original behaviour to match). While paused the pad is
+polled by a small timer (`GameControllerInput.wheelPump`), because a frozen
+SKScene stops calling `update`.
+
+| Wheel | Trigger | Slots (clockwise from top) |
+|---|---|---|
+| Combat & Fleet | LB | Cloak, Escorts: Aggressive / Defensive / Evasive / Hold / Formation / Return to Hangar, Recall Fighters, Open Escorts, Clear Secondary, Eject, Self-Destruct |
+| Targeting & Nav | RB | Target Nearest, Cycle Target Backward, Cycle Escorts, Clear Ship Target, Nav 1-4, Hail Planet, Hyperspace Destination, Cycle Hyperspace Destination, Autopilot |
+| Info & View | Options (galaxy-map button) | Player Info, Mission Info, Ship Info, Dismiss Message, Change Camera View, Camera Zoom In / Out, Route Map Zoom In / Out, Pause |
+
+**Tap vs hold.** A wheel trigger is dual-use. Released within 0.22 s without
+the right stick pushed (a stick already aiming when the button went down
+doesn't count), it is a tap and does the button's normal bound action
+(LB/RB still cycle secondary weapons, Options still opens the map), fired on
+release. Held longer, or with the right stick pushed past half, the wheel
+opens. While it is open the right stick selects a slot instead of aiming (the
+pick is sticky: recentring the stick keeps it); the left stick and triggers
+keep flying (when the pause setting is off). Releasing the trigger uses the highlighted slot; releasing without
+ever picking one does nothing. **Ⓑ cancels** (and that press does not fire the
+secondary weapon). Only one wheel is open at a time, and a wheel closes without
+firing if a menu or dialog takes the pad. A button bound to a held control
+(fire, afterburner, thrust) can't be a trigger.
+
+**Self-destruct latches.** The original needs the key held for five seconds.
+Picking it from a wheel can't be held, so it latches: the self-destruct command
+stays on until **any pad button is pressed**, which aborts it.
+
+**Customizing.** Controls ▸ Controller ▸ *Action Wheels* edits each wheel's
+trigger button and slots (4-12 per wheel; pick any fire-once action, add,
+remove, reorder), with *Reset wheels to defaults*. Saved under
+`com.novaswift.actionwheels.v1`.
+
+**Coverage guarantee.** With the default buttons plus the default wheels, every
+`GameAction` is reachable from the controller (turning and throttle ride the
+sticks and triggers). If a custom setup leaves any action unreachable, the
+editor lists them in a warning. `ActionWheels.uncovered(bindings:wheels:)`
+computes it, and the tests assert the defaults leave nothing out.
+
+### Godot (Linux / Windows / Steam Deck)
+
+Same wheels and defaults; see GODOT_LAYER.md.
 
 ## The UI cursor
 
@@ -105,6 +158,10 @@ names and SF Symbols ("Cross" on a DualSense, Ⓐ on Xbox).
 |---|---|
 | Flight polling, twin-stick mapping, held-button guard, adaptive triggers | `app/NovaSwift/Input/GameControllerInput.swift` |
 | Bindable-button enum, persistence, display labels | `app/NovaSwift/Input/PadBindings.swift` |
+| Action wheel model, defaults, coverage check, slot icons, overlay state | `app/NovaSwift/Input/ActionWheels.swift` |
+| Wheel radial overlay (mounted over flight) | `app/NovaSwift/UI/ActionWheelOverlay.swift` |
+| Wheel editor (Controller tab) | `app/NovaSwift/Launcher/ControlsEditor/ActionWheelsEditor.swift` |
+| Wheel tests | `app/NovaSwiftTests/ActionWheelTests.swift` |
 | Cursor registry, hosts/layers, Ⓑ/Menu keys, the cursor overlay | `app/NovaSwift/Input/ControllerCursor.swift` |
 | Scroll / pan registry | `app/NovaSwift/Input/CursorScroll.swift` |
 | Pad keyboard + `.padTextEntry` | `app/NovaSwift/Input/PadKeyboard.swift` |

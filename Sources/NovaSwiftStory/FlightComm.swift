@@ -72,8 +72,15 @@ public final class FlightComm {
     public private(set) var persOffer: (personID: Int, missionID: Int)?
     /// The per-jump `Rand(100)` bribe latch (−1 until rolled); reset on each jump.
     public var bribeLatch = -1
-    /// Stellars whose landing a bribe bought, until the player leaves the system.
-    public private(set) var bribedStellars: Set<Int> = []
+    /// EC-25: the stellar a paid bribe was settled at - the original's approach timer set to
+    /// 0x2ef with `DAT_00597a10` at that stellar. It is one approach, not a permit: the next
+    /// Land press (on **any** selected body) waives `MinStatus`, and the first press then
+    /// consumes it (`consumeBribeWaiver`). `Require`, a fee and the rest of the ladder still apply.
+    public private(set) var bribeWaiverStellar: Int?
+    /// Whether the approach timer holds a bribe (above 0x2ed).
+    public var hasBribeWaiver: Bool { bribeWaiverStellar != nil }
+    /// The waiver ends: a Land press ran the ladder, or the ship came within 250 px.
+    public func consumeBribeWaiver() { bribeWaiverStellar = nil }
 
     public init() {}
 
@@ -82,7 +89,7 @@ public final class FlightComm {
     /// A new system: bribes and the latch reset.
     public func systemChanged() {
         bribeLatch = -1
-        bribedStellars = []
+        bribeWaiverStellar = nil
         dismiss()
     }
 
@@ -381,9 +388,9 @@ public final class FlightComm {
             window.responseText = text
             hail = window
         case let .paid(_, hudLine):
-            // Paid: landing is granted until the player leaves the system, and
-            // the comm window closes.
-            bribedStellars.insert(spobID)
+            // Paid: the next Land press waives MinStatus (one approach), and the
+            // comm window closes.
+            bribeWaiverStellar = spobID
             pendingMessages.append(hudLine)
             dismiss()
         }

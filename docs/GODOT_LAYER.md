@@ -266,6 +266,33 @@ the status message. Pad: X cycles targets (the Apple `PadBindings`: X=targetNext
 Y=nearestHostile). Port-only Apple extras with no original key (camera view/zoom, ship-info
 card, Evasive) are not bound in Godot. `docs/GODOT_SETTINGS_KEYS.md` lists the rebind keys.
 
+### Controller cursor (`godot/ui/PadCursor.gd`, autoload)
+
+Mirrors the Apple app's stick cursor (`ControllerCursor.swift`, docs/CONTROLS.md "The UI cursor") so every menu, dialog
+and docked screen is reachable from a pad with no per-screen code. It draws a pointer on a high `CanvasLayer` (400, above
+PadKeyboard) and **synthesises mouse events** (`Input.parse_input_event`), so hover styles, sliders, `ItemList`s and custom
+`_gui_input` all respond.
+
+- **Left stick** moves the pointer (radial dead zone from `Controls.stick_deadzone`, squared response, ~1.1 viewport heights/s
+  at full tilt x the speed setting, slowed to 45% over anything clickable). While the cursor is *available* the left stick is
+  removed from `ui_up/down/left/right`, so it no longer also walks focus; the **d-pad** still does, and a d-pad focus change
+  glides the pointer (0.1 s) to the focused control.
+- **A** presses/releases a left mouse button at the pointer (holding drags sliders / scroll bars). It is consumed *only* when
+  the pointer is over a clickable control (button, field, list, slider, scroll bar, tab bar, scripted `STOP` control with a
+  `_gui_input`, or any control with meta `pad_clickable`); over empty space A falls through to `ui_accept`. **B** stays `ui_cancel`.
+- **Right stick** sends mouse-wheel events at the pointer (6-18 per second by deflection), scrolling `ScrollContainer`s and lists.
+- **Last input wins**: a real mouse move (> 2 px) or a key hides the pointer; the next stick motion shows it at the last mouse
+  position, else the focused control's centre. Its own events are recognised (`is_synthetic`) so PadKeyboard / the Classic
+  nav tracker do not mistake them for a mouse.
+- **Coordinates**: the pointer is in viewport coordinates; events are sent in window coordinates via
+  `get_viewport().get_final_transform()` (canvas_items stretch + aspect expand).
+- **Suppression** (`PadCursor.suppress(reason)` / `release(reason)`; any reason hides it): `"flight"` (Main.gd, plain flight with
+  the HUD, A fires weapons), `"map"` (galaxy map has its own stick cursor), `"intro"` (new-pilot intro), `"keyboard"` (PadKeyboard
+  open). All set from `Main._cursor_state`, except `"keyboard"` (PadCursor listens to PadKeyboard's signals).
+- **Settings** -> Controls: *Controller cursor* (`input/pad_cursor`, default on) and *Controller cursor speed*
+  (`input/cursor_speed`, 0.4-2.0, default 1.0).
+- Test: `tests/pad_cursor_selfcheck.gd` (hooks `debug_move_to`, `debug_press_a`, `debug_scroll`).
+
 ### Flight travel (selected stellar · landing clearance · gates · escorts across jumps)
 
 NovaWorld's `// MARK: Flight travel` (state in `Flight.swift`) mirrors what the Apple
@@ -279,9 +306,9 @@ NovaWorld's `// MARK: Flight travel` (state in `Flight.swift`) mirrors what the 
 - **Selected stellar**: 1–4 (`select_nav_stellar`), N clears, a new selection disarms the
   armed jump and H re-arms it (`StarMapRoute.selectHyperspace`), the Nav panel readout
   (`nav_readout`: STR# 2002 #342–346), a bracket on the selected body. Hail-stellar and Land
-  use it. When nothing is selected, Land falls back to the nearest body the Swift helper treats as approachable. That pick is UI-06 and is wider than the original.
-- **Landing** (`press_land`, UI-08): the Godot path calls the same helpers as the Apple app. First press requests through `LandedServices.landingClearance` / `refusalMessage`, then the clearance line on reaching ±250 px; second press lands inside the square envelope (`PlayerLanding`). The fee is charged on touchdown. Those helpers still diverge from the executable: the clearance ladder and the fee also cover hypergates and wormholes (EC-04, EC-05), and a paid bribe is one approach, not a lasting permit (EC-25). `FlightComm.bribedStellars` is the Swift set the helper reads.
-- **Gates** (`press_land` on a gate): a wormhole calls `wormholeExitCandidates` and leaves when that list is non-empty; a hypergate calls `SpobRes.playerMayUseGate` and then opens the map in gate mode. Both helpers diverge (OS-06 for the exit draw, EC-04 and EC-05 for permission and the fee). Arrival routing after a hypergate the pilot is allowed to use still follows the shared gate path: no fuel, no days, the far gate emits the ship on its emergence angle (`World.placePlayerEmergingFromGate`) with the wing coming out of it.
+  use it. When nothing is selected, Land falls back to the nearest body the Swift helper treats as approachable. That pick is `PlayerLanding.nearestTravelStellar` (UI-06): WRITTEN, NOT BUILT (2026-10-13), 16 nav slots and a 500 px gate radius as in the original.
+- **Landing** (`press_land`, UI-08): the Godot path calls the same helpers as the Apple app. First press requests through `LandedServices.landingClearance` / `refusalMessage`, then the clearance line on reaching ±250 px; second press lands inside the square envelope (`PlayerLanding`). The fee is charged on touchdown. The fixes that bring those helpers in line with the executable are WRITTEN, NOT BUILT (2026-10-13): the clearance ladder and the fee also cover hypergates and wormholes (EC-04, EC-05), and a paid bribe is one approach, not a lasting permit (EC-25; the waiver applies to a selected hypergate). `FlightComm.bribeWaiverStellar` is the Swift value the helper reads (it replaces `bribedStellars`).
+- **Gates** (`press_land` on a gate): a wormhole draws its exit with `NovaGame.wormholeExit` (OS-06); a hypergate goes through `LandedServices.landingClearance`, the fee is charged by `chargeGateFee` before the map opens (EC-04, EC-05, EC-25), then the map opens in gate mode. These replace `wormholeExitCandidates` and `SpobRes.playerMayUseGate`; WRITTEN, NOT BUILT (2026-10-13). Arrival routing after a hypergate the pilot is allowed to use still follows the shared gate path: no fuel, no days, the far gate emits the ship on its emergence angle (`World.placePlayerEmergingFromGate`) with the wing coming out of it.
 - **Map**: nebula art (`nav_nebulae` + `pict_rgba`, active explored ones, additive), Find
   (`nav_find` = `StarMapFind`), gate spokes (opt-in), `nav_map_closed` re-syncs the route.
 - **Escorts across jumps**: `FlightEscorts.carryThroughJump` / `respawn` — disabled escorts
@@ -438,7 +465,7 @@ and not yet tested end to end.
    the Apple app now calls; `HyperjumpCommit.apply` takes optional services.
    Headless checks: `tests/story_selfcheck.gd` (accept a BBS delivery, jump, land,
    pay + text, calendar advance) and `tests/story_menu_check.gd` (offer modal
-   owns input, BBS/bar/info focus). Gambling, hire escort, jettison and in-flight `pêrs` offers are wired through the same helpers as the Apple app. The gambling reset still diverges (EC-26). Mission-offer `dësc` movies are wired (see "Total-conversion add-ons").
+   owns input, BBS/bar/info focus). Gambling, hire escort, jettison and in-flight `pêrs` offers are wired through the same helpers as the Apple app. The gambling reset fix (the previous winner resets when the bar opens, `barOpened`) is WRITTEN, NOT BUILT (EC-26, 2026-10-13). The outfitter bank promotion and visit-scoped items (`outfitterOpen` / `outfitterClose`, EC-09, EC-28) are likewise WRITTEN, NOT BUILT. Mission-offer `dësc` movies are wired (see "Total-conversion add-ons").
 6. **Packaging** — Godot export presets and local package scripts: macOS arm64 and Linux x86_64 built and verified headless; Windows script written, not run; auto-updater built, not tested end to end.
 
 ## Non-goals

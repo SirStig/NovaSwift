@@ -737,8 +737,8 @@ class NovaDebug: RefCounted {
             for s in w.npcs where s.isAlive && isHostileToPlayer(s, w) { s.shield = 0; s.armor = 0; n += 1 }
             return "Destroyed \(n) ship\(n == 1 ? "" : "s")."
         }
-        reg("hd", "HD / 3D graphics: unavailable in the Godot build.", "hd [status|on|off|detail|3d|overlay|reload|clearcache|view]") { _ in
-            "HD / 3D graphics (NovaSwiftHD packs, the bake cache and the viewer) are Apple-only and not part of the Godot build."
+        reg("hd", "HD / 3D graphics: packs are not in this build. The viewer shows classic sprites.", "hd [status|on|off|detail|3d|overlay|reload|clearcache|view]") { _ in
+            "NovaSwiftHD flight packs are not linked in the Godot build. The HD viewer lists classic sprites (rlëD) with the same sidebar; there is no 3D hull."
         }
         reg("spawn", "Spawn a ship by id, hostile/escort/neutral.", "spawn <hostile|escort|neutral> <shipID> [count]") { [unowned self] a in
             guard a.count >= 2, let hull = Int(a[1]) else { throw fail("Usage: spawn <hostile|escort|neutral> <shipID> [count]") }
@@ -1057,5 +1057,53 @@ class NovaDebug: RefCounted {
               let data = try? JSONSerialization.data(withJSONObject: object),
               let text = String(data: data, encoding: .utf8) else { return "[]" }
         return text
+    }
+
+    // MARK: Classic sprite viewer (HD viewer stand-in)
+    //
+    // NovaSwiftHD is not linked here. The catalog is SpriteOwnerIndex (names, no decode).
+    // A preview is one classic rlëD frame as RGBA8.
+
+    private var ownerIndex: SpriteOwnerIndex?
+    private var ownerGen: NovaGame?
+
+    private func owners() -> SpriteOwnerIndex? {
+        guard let game = host?.dbgGame else { return nil }
+        if ownerIndex == nil || ownerGen?.resources.totalCount != game.resources.totalCount {
+            ownerIndex = SpriteOwnerIndex(game: game)
+            ownerGen = game
+        }
+        return ownerIndex
+    }
+
+    /// `{hd:false, note, entries:[{id,title,category,ships,spin}]}`. `hd` stays false: no HD pack.
+    @Callable(autoSnakeCase: true) func hdCatalog() -> String {
+        guard let index = owners() else {
+            return Self.json(["hd": false, "note": "No game data is loaded.", "entries": []] as [String: Any])
+        }
+        let rows: [[String: Any]] = index.sorted.map { e in
+            ["id": e.spriteID, "title": e.title.isEmpty ? "Sprite \(e.spriteID)" : e.title,
+             "category": e.category.rawValue, "ships": e.shipIDs, "spin": e.spinID ?? -1] as [String: Any]
+        }
+        return Self.json(["hd": false,
+                          "note": "NovaSwiftHD packs are not in this build. These are classic sprites.",
+                          "entries": rows] as [String: Any])
+    }
+
+    /// `[frameWidth, frameHeight, frameCount]` for rlëD `spriteID`, or empty.
+    @Callable(autoSnakeCase: true) func hdPreviewInfo(spriteID: Int) -> PackedInt32Array {
+        guard let sheet = classicSheet(spriteID) else { return PackedInt32Array() }
+        return PackedInt32Array([Int32(sheet.frameWidth), Int32(sheet.frameHeight), Int32(sheet.frameCount)])
+    }
+
+    /// One frame of rlëD `spriteID` as RGBA8 (`width * height * 4`). Empty when it will not decode.
+    @Callable(autoSnakeCase: true) func hdPreview(spriteID: Int, frame: Int) -> PackedByteArray {
+        guard let sheet = classicSheet(spriteID), let one = sheet.singleFrame(max(0, frame)) else { return PackedByteArray() }
+        return PackedByteArray(one.rgba)
+    }
+
+    private func classicSheet(_ id: Int) -> SpriteSheet? {
+        guard let data = host?.dbgGame?.resources.resource(NovaType.rleD, id)?.data else { return nil }
+        return try? RLED.decode(data)
     }
 }

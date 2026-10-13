@@ -533,9 +533,10 @@ func _build_enhancements() -> void:
 func _build_controls() -> void:
 	_section("Controls", "The dead zone is how far a stick or drag must move before it registers. Sticks and triggers are fixed; the keys and pad buttons below can be rebound.", "dpad")
 	_slider("Stick dead zone", "input", "deadzone", 0.0, 0.5, 0.01, _pct)
-	# Controller cursor speed and Haptic feedback are touch / virtual-cursor features with no Godot key
-	# (docs/GODOT_SETTINGS_KEYS.md: n/a); the rows stay as Apple draws them.
-	_apple_slider("Controller cursor speed", "cursor_sensitivity", 0.4, 2.0, 0.05, _pct, 1.0)
+	# The gamepad UI cursor (ui/PadCursor.gd): left stick pointer, A click, right stick scroll.
+	_check("Controller cursor", "input", "pad_cursor", true)
+	_slider("Controller cursor speed", "input", "cursor_speed", 0.4, 2.0, 0.05, _pct)
+	# Haptic feedback has no Godot key (docs/GODOT_SETTINGS_KEYS.md: n/a); the row stays as Apple draws it.
 	_check("Invert turn direction", "input", "invert_turn")
 	_apple_check("Haptic feedback", "haptics_enabled", true)
 	_check("Aim toward mouse cursor", "input", "mouse_aiming")

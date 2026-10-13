@@ -227,16 +227,19 @@ public enum LandedServices {
         case cannotPayFee(Int)
     }
 
-    /// Whether the player may land on `spob` (0x00457580):
-    /// - a fee > 0 at a stellar that is not dominated, with fewer credits than
-    ///   the fee, refuses outright;
-    /// - otherwise landing is cleared when the system reputation meets
-    ///   `MinStatus` (or `MinStatus` is −32767, and never when it is 32767), the
-    ///   stellar is dominated or uninhabited, or a bribe was accepted;
-    /// - a failed government `Require` mask then denies;
-    /// - being an active mission's travel or return stellar, or holding an
-    ///   AlwaysLand rank (`ränk` 0x0200) with the stellar's government or an
-    ///   ally, clears it again.
+    /// Whether the player may land on `spob`, or use it when it is a hypergate or wormhole
+    /// (0x00457580 runs this one ladder before `Stellar_EnterHypergate` 0x00456480 and
+    /// `Stellar_EnterWormhole` 0x00456ca0 as well, EC-04/EC-05; there is no Flags2 0x2000
+    /// exemption and no free pass for a government id under 128):
+    /// - a fee > 0 at a stellar that is not dominated, with fewer credits than the fee,
+    ///   refuses outright;
+    /// - otherwise it is cleared when the system reputation meets `MinStatus` (or `MinStatus`
+    ///   is −32767, and never when it is 32767), the stellar is dominated, or the approach
+    ///   timer holds a bribe (`bribed`, EC-25: timer above 0x2ed), or it is an uninhabited
+    ///   non-gate stellar (the original sets that timer itself);
+    /// - a failed government `Require` mask then denies, even over those waivers;
+    /// - being an active mission's travel or return stellar, or an AlwaysLand rank
+    ///   (`ränk` 0x0200, `RankPrivilege`) reaching the stellar's government, clears it again.
     public static func landingClearance(spob: SpobRes, system: Int, state: PlayerState, game: NovaGame,
                                         diplomacy: Diplomacy?, contributedBits: UInt64,
                                         bribed: Bool = false) -> LandingClearance {
@@ -246,8 +249,7 @@ public enum LandedServices {
         let minStatus = spob.minStatus
         let rep = systemReputation(state, system: system, game: game)
         var cleared = (rep >= minStatus || minStatus == -32767) && minStatus != 32767
-        // An uninhabited stellar clears itself as the player approaches.
-        if isDominated(spob, state) || bribed || spob.isUninhabited { cleared = true }
+        if isDominated(spob, state) || bribed || (spob.isUninhabited && !spob.isGate) { cleared = true }
         if spob.government >= 128, let govt = game.govt(spob.government),
            govt.require != 0, contributedBits & govt.require != govt.require {
             cleared = false
@@ -257,13 +259,19 @@ public enum LandedServices {
                 $0.travelSpobID == spob.id || $0.returnSpobID == spob.id
             }
         }
-        if !cleared, spob.government >= 128 {
-            cleared = state.activeRanks.contains { rid in
-                guard let r = game.rank(rid), r.canAlwaysLand, r.govt >= 128 else { return false }
-                return r.govt == spob.government || (diplomacy?.areAllied(r.govt, spob.government) ?? false)
-            }
-        }
+        if !cleared { cleared = RankPrivilege.alwaysLands(at: spob.government, state: state, game: game) }
         return cleared ? .granted : .denied
+    }
+
+    /// Pay a gate's fee at entry (EC-05): the same block that charges a planet fee runs before
+    /// `Stellar_EnterHypergate` / `Stellar_EnterWormhole`, so the fee is taken even when the
+    /// hypergate then refuses (no links) or the wormhole fails. The balance clamps at 0.
+    @discardableResult
+    public static func chargeGateFee(spob: SpobRes, state: inout PlayerState) -> Int {
+        let fee = landingFee(spob: spob, state: state)
+        guard fee > 0 else { return 0 }
+        state.credits = max(0, state.credits - fee)
+        return fee
     }
 
     /// The landing fee actually charged on touchdown: the full `spöb` fee, or
@@ -352,7 +360,7 @@ public enum LandedServices {
     public static func rawTradeInValue(_ state: PlayerState, game: NovaGame) -> Int {
         guard let hull = game.ship(state.shipType) else { return 0 }
         var total = Int(Double(hull.cost) * 0.25)
-        for (id, count) in state.outfits.sorted(by: { $0.key < $1.key }) where count > 0 {
+        for (id, count) in state.ownedOutfits.sorted(by: { $0.key < $1.key }) where count > 0 {
             guard let o = game.outfit(id), o.flags & 0x0004 == 0 else { continue }
             total = Int(Double(total) + Double(count * o.effectiveCost(shipMass: hull.mass)) * 0.5)
         }

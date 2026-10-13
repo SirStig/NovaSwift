@@ -185,6 +185,22 @@ final class PluginRuntime: @unchecked Sendable {
         return merged
     }
 
+    /// The editor's read-only base: the loaded game's files plus every enabled plug-in except
+    /// `id` (the one being edited, so its own records are not both the base and the layer).
+    /// An empty collection when no base folder has been scanned yet.
+    func editorBase(excluding id: String?) -> ResourceCollection {
+        guard let base = baseDir else { return ResourceCollection() }
+        let r = rescan(base: base)
+        let use = id == nil || id?.isEmpty == true ? r.plugins : r.plugins.filter { $0.id != id }
+        let pluginPaths = r.dirs.map { $0.standardizedFileURL.resolvingSymlinksInPath().path + "/" }
+        let files = GameLibrary.discoverResourceFiles(in: base).filter { f in
+            let p = f.standardizedFileURL.resolvingSymlinksInPath().path
+            return !pluginPaths.contains { p.hasPrefix($0) }
+        }
+        guard !files.isEmpty else { return ResourceCollection() }
+        return (try? GameLibrary.merge(baseFiles: files, plugins: use, flatPluginOrder: !r.manual)) ?? ResourceCollection()
+    }
+
     func recordLoad(failures f: [PluginLoadFailure]) {
         lock.lock(); failures = f; needsReload = false; lock.unlock()
     }

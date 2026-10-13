@@ -23,6 +23,8 @@
 #             menu and framed galaxy map from the user's data (ui/classic/); Enhanced is Classic
 #             with the full-screen map; Nova Swift (all true) keeps the port's own screens. See
 #             ui_mode()/apply_ui_mode().
+#   [wheels]  pause (pause the game while an action wheel is open) · one key per customised wheel
+#             (combat | nav | info -> {trigger, slots, anchor}); see ActionWheels.gd
 #   [developer] debug_mode · ui_debug_overlay · collapsed_sections -- the debug suite (debug/)
 #   [data]    dir — the EV Nova data folder chosen in the data-setup screen
 #   [pilots]  dir (the Pilots folder; "" = the default, see screens/PilotFiles.gd) · recent (paths of
@@ -40,6 +42,7 @@
 extends RefCounted
 
 const Controls = preload("res://Controls.gd")
+const ActionWheels = preload("res://ActionWheels.gd")   # radial hold-a-button menus (persisted in [wheels])
 
 const PATH := "user://settings.cfg"
 const BASE_SIZE := Vector2i(1280, 720)
@@ -52,6 +55,8 @@ const DEFAULTS := {
 	# invert_turn / mouse_aiming: Apple invertTurn / mouseAiming (both off = the original's feel).
 	"input": {"deadzone": Controls.STICK_DEADZONE, "modern_keys": false, "invert_turn": false,
 		"mouse_aiming": false,
+		# Gamepad UI cursor (ui/PadCursor.gd): on/off and speed multiplier.
+		"pad_cursor": true, "cursor_speed": 1.0,
 		# Controls Editor pickers (screens/controls_editor): keyboard size preset (full / tkl / compact), pad art style.
 		"ctl_preset": "full", "ctl_pad_style": "auto"},
 	"data": {"dir": ""},
@@ -115,6 +120,7 @@ const DEFAULTS := {
 	# (Apple fullscreenGalaxyMap; off in Classic, on in Enhanced and Nova Swift).
 	# Developer (Apple GameSettings.debugModeEnabled / uiDebugOverlay): gates the debug suite
 	# (debug/DevTools.gd). Settings > Support > Debug mode.
+	"wheels": {"pause": true},   # action wheels: pause the game while one is open (wheel layouts: one key per customised wheel id)
 	"developer": {"debug_mode": false, "ui_debug_overlay": false, "collapsed_sections": ""},
 	"presentation": {"modern_menu": false, "modern_dialogs": false, "modern_hud": false,
 		"fullscreen_galaxy_map": false},
@@ -143,6 +149,15 @@ static func load_all() -> void:
 		for action in _cfg.get_section_keys("keys"):
 			if Controls.BINDINGS.has(action) and _cfg.get_value("keys", action) is Dictionary:
 				Controls.overrides[action] = _cfg.get_value("keys", action)
+	# Action wheels: the defaults with any saved wheel laid over them (ActionWheels.from_store), then the trigger set
+	# reaches Controls so register() strips those buttons off the Flight actions.
+	var stored_wheels: Dictionary = {}
+	if _cfg.has_section("wheels"):
+		for wid in _cfg.get_section_keys("wheels"):
+			if wid != "pause" and _cfg.get_value("wheels", wid) is Dictionary:
+				stored_wheels[wid] = _cfg.get_value("wheels", wid)
+	ActionWheels.from_store(stored_wheels)
+	ActionWheels.pause_while_open = bool(get_value("wheels", "pause"))
 
 
 static func save() -> void:
@@ -152,6 +167,14 @@ static func save() -> void:
 		_cfg.erase_section("keys")
 	for action in Controls.overrides:
 		_cfg.set_value("keys", action, Controls.overrides[action])
+	if _cfg.has_section("wheels"):
+		for wid in _cfg.get_section_keys("wheels"):
+			if wid != "pause":
+				_cfg.erase_section_key("wheels", wid)
+	var wstore: Dictionary = ActionWheels.to_store()
+	for wid in wstore:
+		_cfg.set_value("wheels", wid, wstore[wid])
+	_cfg.set_value("wheels", "pause", ActionWheels.pause_while_open)
 	_cfg.save(path)
 
 
@@ -167,6 +190,8 @@ static func set_value(section: String, key: String, value: Variant) -> void:
 	_cfg.set_value(section, key, value)
 	if section == "input" and key == "deadzone":
 		Controls.stick_deadzone = float(value)
+	elif section == "wheels" and key == "pause":
+		ActionWheels.pause_while_open = bool(value)
 	elif section == "input" and key == "modern_keys":
 		Controls.layout = Controls.LAYOUT_MODERN if bool(value) else Controls.LAYOUT_ORIGINAL
 	hub.changed.emit(section, key)

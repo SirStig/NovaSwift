@@ -583,6 +583,29 @@ final class OriginalAITests: XCTestCase {
         XCTAssertEqual(w.originalAI.hailCheck(mute, world: w), .beep)
     }
 
+    func testHailBeepFollowsTheCloakVisibilityThreshold() {
+        // AI-44: 0x00454910 beeps on `Ship_IsShipCloakVisibilityThresholdActive` 0x0046c7a0,
+        // not on any non-zero cloak level.
+        let w = world(govts: [govt(128, classes: [1])])
+        let trader = npc("T", govt: 128, at: Vec2(300, 0), ai: .wimpyTrader)
+        w.addNPC(trader)
+        run(w, 1)
+        let p = w.player
+        p.cloakEngaged = true
+        p.cloakLevel = 20.0 / 32
+        XCTAssertEqual(w.originalAI.hailCheck(trader, world: w), .open, "fading in, not yet past 24/32")
+        p.cloakLevel = 25.0 / 32
+        XCTAssertEqual(w.originalAI.hailCheck(trader, world: w), .beep, "fading in, past 24/32")
+        p.cloakEngaged = false
+        p.cloakLevel = 9.0 / 32
+        XCTAssertEqual(w.originalAI.hailCheck(trader, world: w), .beep, "fading out, still over 8/32")
+        p.cloakLevel = 7.0 / 32
+        XCTAssertEqual(w.originalAI.hailCheck(trader, world: w), .open, "fading out, under 8/32")
+        p.cloakEngaged = true
+        p.cloakLevel = 1
+        XCTAssertEqual(w.originalAI.hailCheck(trader, world: w), .beep, "fully cloaked at rest")
+    }
+
     func testGreedyGovernmentRollsTheBribeTwice() {
         var plain = NovaRandom(seed: 99 as UInt32)
         var greedy = NovaRandom(seed: 99 as UInt32)

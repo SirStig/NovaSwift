@@ -87,9 +87,11 @@ public enum SpaceportShops {
     /// Buy `ship` here (0x00492f30) — `PilotEconomy.buyShip` at this port's rank
     /// scale and tech level.
     @discardableResult
-    public static func buyShip(_ state: inout PlayerState, _ ship: ShipRes, at spob: SpobRes, galaxy: Galaxy) -> Bool {
+    public static func buyShip(_ state: inout PlayerState, _ ship: ShipRes, at spob: SpobRes, galaxy: Galaxy,
+                                rolled: Bool = false) -> Bool {
         PilotEconomy.buyShip(&state, ship, game: galaxy.game,
-                             scale: rankPriceScale(state, at: spob, galaxy: galaxy), stellarTech: spob.techLevel)
+                             scale: rankPriceScale(state, at: spob, galaxy: galaxy), stellarTech: spob.techLevel,
+                             rolled: rolled)
     }
 
     /// Buy Ship's enabled state: not the hull already flown, affordable at the

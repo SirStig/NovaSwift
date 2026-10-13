@@ -283,6 +283,7 @@ extension StoryEngine {
     /// there. Deadlines don't fail anything while docked.
     public func playerLanded(onSpob spobID: Int) {
         player.landedSpob = spobID
+        PilotEconomy.beginVisit(&player)      // the chart / clean-record latches clear (EC-28)
         if let sys = owningSystem(ofSpob: spobID) {
             player.landedSystems = (player.landedSystems ?? []).union([sys])
             player.exploredSystems.insert(sys)

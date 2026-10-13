@@ -144,7 +144,15 @@ func _roll_landing_offer() -> void:
 		_nova.offer_roll("spaceport")
 
 
+## Leaving the outfitter zeroes Flags 0x0010 items and charts (EC-28).
+func _outfitter_closed() -> void:
+	if _nova != null and _nova.has_method("outfitter_close"):
+		_nova.outfitter_close()
+
+
 func close() -> void:
+	if _screen == "outfitter":
+		_outfitter_closed()
 	_close_overlay()
 	_c.clear_all()
 	visible = false
@@ -320,6 +328,8 @@ func _spob_sprite_tex(spob_id: int) -> Texture2D:
 func _show_hub() -> void:
 	# Closing a shop resets the lane-offer context (0x00448660); leaving the
 	# Mission BBS drops its shown listing.
+	if _screen == "outfitter":
+		_outfitter_closed()
 	if _screen in ["trade", "outfitter", "shipyard"]:
 		_nova.offer_clear_context()
 	elif _screen == "bbs":
@@ -969,6 +979,8 @@ func _show_bar() -> void:
 		_bar_active = true
 		_bar_wait = 15.0 / 60.0
 		_bar_offer_up = false
+		if _nova.has_method("bar_opened"):
+			_nova.bar_opened()   # EC-26: the previous race winner resets with the window
 	_screen = "bar"
 	var b = JSON.parse_string(_nova.bar_info())
 	if not (b is Dictionary):

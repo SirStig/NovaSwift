@@ -123,6 +123,11 @@ struct RootView: View {
                 HDGraphicsPromptView(packNames: packs,
                                      onEnable: { model.enableHDGraphics() },
                                      onDecline: { model.declineHDGraphics() })
+                    // Above any modal the screen already has up (it often pops
+                    // while the Plugins dialog is open): on a shared layer the
+                    // controller cursor could only reach the deeper dialog, so
+                    // neither button here was pressable.
+                    .environment(\.cursorLayer, 900)
                     .transition(.opacity)
                     .zIndex(13)
             }

@@ -127,6 +127,11 @@ func _shop_checks() -> void:
 				nova.player_credits() == c2 - int(buy.price), "%s net %d" % [buy.name, int(buy.price)])
 			var now = _find(JSON.parse_string(nova.shipyard_list()), int(buy.id))
 			_check("new hull is current", now != null and now.current)
+			if nova.has_method("stock_bank_size") and info.outfitter:
+				# EC-09: the new hull's stock armament sits in the bank until the outfitter opens.
+				var bank0: int = nova.stock_bank_size()
+				nova.outfitter_open()
+				_check("opening the outfitter promotes the stock bank", nova.stock_bank_size() == 0, "%d -> 0" % bank0)
 		else:
 			print("  (no affordable hull on a 25000 cr scenario — buy path not exercised here)")
 			var c3: int = nova.player_credits()

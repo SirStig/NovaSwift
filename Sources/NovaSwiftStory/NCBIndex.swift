@@ -1,6 +1,5 @@
 import Foundation
 import NovaSwiftKit
-import NovaSwiftStory
 
 /// One place a single control bit is referenced in the loaded game data.
 ///

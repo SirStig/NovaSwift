@@ -176,7 +176,11 @@ func _on_focus_changed(node: Control) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if event is InputEventJoypadButton and event.pressed:
+	var cursor: Node = get_node_or_null("/root/PadCursor")
+	var synth: bool = cursor != null and cursor.is_synthetic(event)   # the pad cursor's own mouse events are not a mouse
+	if synth:
+		pass
+	elif event is InputEventJoypadButton and event.pressed:
 		last_was_pad = true
 	elif event is InputEventJoypadMotion and absf(event.axis_value) > 0.5:
 		last_was_pad = true

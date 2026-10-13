@@ -375,6 +375,7 @@ struct SettingsView: View {
             sliderRow("Controller cursor speed", binding(\.cursorSensitivity), 0.4...2.0)
             Toggle("Invert turn direction", isOn: binding(\.invertTurn))
             Toggle("Haptic feedback", isOn: binding(\.hapticsEnabled))
+            Toggle("Pause while an action wheel is open", isOn: binding(\.pauseOnActionWheel))
             #if os(macOS)
             Toggle("Aim toward mouse cursor", isOn: binding(\.mouseAiming))
             #endif

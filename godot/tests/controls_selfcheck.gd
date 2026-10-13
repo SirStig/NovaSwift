@@ -68,6 +68,7 @@ func _run() -> void:
 	await process_frame
 	Controls.layout = Controls.LAYOUT_ORIGINAL
 	Controls.overrides.clear()
+	Controls.wheel_triggers = []   # the raw table: action wheels (action_wheel_selfcheck.gd) strip LB / RB / Back off the Flight actions
 	Controls.register()
 
 	print("== key + pad tables ==")

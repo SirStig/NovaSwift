@@ -95,6 +95,67 @@ public enum PilotEconomy {
         for (oid, count) in hullFittings(ship, game: game, seedBayFighters: seedBayFighters) {
             state.grantOutfit(oid, count: count)
         }
+        // EC-09: DefaultItems are owned at once (0x00492f30), but the stock
+        // WeapType armament and AmmoLoad go to the weapon banks (0x004b3350):
+        // flown, yet not owned until the outfitter promotes them.
+        var bank = state.stockBank ?? [:]
+        for (oid, count) in hullFittings(ship, game: game, includeDefaultItems: false,
+                                         seedBayFighters: seedBayFighters) {
+            bank[oid, default: 0] += count
+        }
+        state.stockBank = bank.isEmpty ? nil : bank
+    }
+
+    /// The outfitter opening (0x00462ec0, EC-09): leftover weapon-bank counts
+    /// become owned outfits, so the stock armament is sellable and counts toward
+    /// the next trade-in from here on. Call before the outfitter lists anything
+    /// and before capturing the visit's `ownedAtOpen`.
+    public static func openOutfitter(_ state: inout PlayerState) {
+        state.promoteStockBank()
+    }
+
+    /// The outfitter closing (0x0048ea70, EC-28): every Flags 0x0010 item — and a
+    /// pure chart, which NovaSwift treats the same way — leaves the inventory.
+    /// During the visit it was real inventory; the charted systems, cleared
+    /// record and set bits it paid for are already permanent.
+    public static func closeOutfitter(_ state: inout PlayerState, game: NovaGame) {
+        for id in state.outfits.keys.sorted() {
+            guard let o = game.outfit(id), o.flags & 0x0010 != 0 || o.isConsumableChart else { continue }
+            state.outfits[id] = nil
+        }
+    }
+
+    /// A new landing starts a new visit: the chart and clean-record purchase
+    /// latches (`DAT_007d4c08` / `DAT_007d4c09`) clear (EC-28).
+    public static func beginVisit(_ state: inout PlayerState) {
+        state.visitChartBought = nil
+        state.visitAmnestyBought = nil
+    }
+
+    /// Fleet cargo overflow (`Outfit_RecomputeOutfitDerivedState` 0x0046d4b0,
+    /// EC-27): when the fleet's capacity is below the cargo-plus-junk total, the
+    /// six ordinary commodity bins scale by `capacity / total` (single precision,
+    /// truncated toward zero — the executable's round-and-correct idiom), one
+    /// pass. Mission cargo and junk stay in the denominator and are not reduced.
+    /// Returns whether anything changed.
+    @discardableResult
+    public static func shrinkCargoToCapacity(_ state: inout PlayerState, galaxy: Galaxy) -> Bool {
+        let capacity = cargoCapacity(state, galaxy: galaxy)
+        let total = state.usedCargoSpace
+        guard capacity < total, total > 0 else { return false }
+        let ratio = Float(capacity) / Float(total)
+        let mission = missionCargo(state, game: galaxy.game)
+        var changed = false
+        for bin in 0..<6 {
+            guard let held = state.cargo[bin], held > 0 else { continue }
+            let kept = min(held, mission[bin] ?? 0)
+            let ordinary = held - kept
+            guard ordinary > 0 else { continue }
+            let scaled = Int(Float(ordinary) * ratio)
+            let left = kept + scaled
+            if left != held { state.cargo[bin] = left > 0 ? left : nil; changed = true }
+        }
+        return changed
     }
 
     /// One-time save migration for pilots written before `state.outfits` recorded
@@ -195,7 +256,7 @@ public enum PilotEconomy {
             ?? galaxy.game.ship(state.shipType)?.freeMass ?? 0
     }
 
-    public static func owned(_ state: PlayerState, outfit id: Int) -> Int { state.outfits[id] ?? 0 }
+    public static func owned(_ state: PlayerState, outfit id: Int) -> Int { state.ownedCount(id) }
     /// Tons of cargo `id` in the trade bins (`player+0x7a`) or junk counts —
     /// what the trade center shows and can sell (0x00465ea0). Mission cargo
     /// lives in its mission slot and is never part of it.
@@ -350,6 +411,10 @@ public enum PilotEconomy {
     /// mount if it's a fixed-gun/turret item (Bible `Flags 0x0001/0x0002`)?
     public static func canBuyOutfit(_ state: PlayerState, _ o: OutfRes, galaxy: Galaxy) -> Bool {
         guard state.credits >= effectiveCost(state, o, galaxy: galaxy) else { return false }
+        // 0x00491950: one chart (ModType 16) and one clean-record outfit (ModType
+        // 21) per visit (EC-28).
+        if o.has(.map), state.visitChartBought == true { return false }
+        if o.has(.cleanRecord), state.visitAmnestyBought == true { return false }
         // Free-mass check uses the outfit's *effective* mass (Flags 0x0400
         // scales mass with the hull), matching how `freeMass` accounts for
         // already-installed outfits.
@@ -425,17 +490,12 @@ public enum PilotEconomy {
         // grant, which does not "buy" and so does not fire this.
         runOutfitScript(&state, o.onPurchase, outfit: o, field: "OnPurchase", game: galaxy.game)
         // Bible `Flags 0x0010`: "Remove any items of this type after purchase —
-        // useful for permits and other intangible purchases." The effects above
-        // (charted systems, cleared record, set bits) have already landed; this
-        // just keeps the intangible item from sitting in inventory.
-        //
-        // A pure star chart is consumed the same way even though the stock
-        // records don't set that bit — see `OutfRes.isConsumableChart`. It's what
-        // makes a chart re-buyable in the next region instead of a once-per-game
-        // purchase that's greyed out at every port thereafter.
-        if o.flags & 0x0010 != 0 || o.isConsumableChart {
-            state.removeOutfit(o.id)
-        }
+        // useful for permits and other intangible purchases." The original keeps
+        // the item as real inventory for the visit and the outfitter's exit loop
+        // zeroes it (0x0048ea70; `closeOutfitter`). A chart and a clean-record
+        // outfit also latch for the rest of the visit (EC-28).
+        if o.has(.map) { state.visitChartBought = true }
+        if o.has(.cleanRecord) { state.visitAmnestyBought = true }
         return true
     }
 
@@ -451,12 +511,8 @@ public enum PilotEconomy {
     /// how many were actually bought.
     @discardableResult
     public static func buyOutfit(_ state: inout PlayerState, _ o: OutfRes, count: Int, galaxy: Galaxy) -> Int {
-        // A consumed item leaves inventory the instant it's bought, so its `Max`
-        // never stops the loop — "buy 1000" of a chart would charge for a
-        // thousand copies of the same one-shot reveal. One per transaction.
-        let limit = (o.flags & 0x0010 != 0 || o.isConsumableChart) ? min(count, 1) : count
         var bought = 0
-        while bought < limit, buyOutfitUnit(&state, o, galaxy: galaxy) {
+        while bought < count, buyOutfitUnit(&state, o, galaxy: galaxy) {
             bought += 1
         }
         return bought
@@ -485,15 +541,38 @@ public enum PilotEconomy {
     private static func sellOutfitUnit(_ state: inout PlayerState, _ o: OutfRes, galaxy: Galaxy, ownedAtOpen: Int?) -> Bool {
         guard canSellOutfit(state, o) else { return false }
         let price = outfitSalePrice(state, o, galaxy: galaxy, ownedAtOpen: ownedAtOpen)
-        let before = rawFreeMass(state, galaxy: galaxy)
-        var after = state
-        after.removeOutfit(o.id)
-        if let before, let left = rawFreeMass(after, galaxy: galaxy), left < 0, before >= 0 { return false }
+        if sellRefused(state, o, galaxy: galaxy) { return false }
         state.credits += price
         state.removeOutfit(o.id)
         // Bible `OnSell`: the sibling NCB set expression, run when the item is sold.
         runOutfitScript(&state, o.onSell, outfit: o, field: "OnSell", game: galaxy.game)
+        shrinkCargoToCapacity(&state, galaxy: galaxy)      // EC-27: a hold expansion sold
         return true
+    }
+
+    /// The three sales 0x0048ea70 refuses outright (EC-07): a negative-mass
+    /// outfit when the clamped free mass plus that (negative) mass would drop
+    /// below zero — an over-mass ship has free mass 0 and cannot sell one at all;
+    /// a ModType 27 expander whose target would exceed `expanders left × target
+    /// Max`; and a ModType 1 weapon whose loaded ammo would exceed `MaxAmmo ×
+    /// launchers left` (bay fighters are carried as ammunition outfits here;
+    /// docked, none are live ship records).
+    private static func sellRefused(_ state: PlayerState, _ o: OutfRes, galaxy: Galaxy) -> Bool {
+        let game = galaxy.game
+        let mass = galaxy.effectiveMass(of: o, forShip: state.shipType)
+        if mass < 0, let raw = rawFreeMass(state, galaxy: galaxy), max(0, raw) + mass < 0 { return true }
+        let ownedNow = state.ownedCount(o.id)
+        for t in o.increasesMaxOf where (128..<640).contains(t) {
+            guard let target = game.outfit(t) else { continue }
+            if state.ownedCount(t) - (ownedNow - 1) * target.maxInstallable > 0 { return true }
+        }
+        if let first = o.modifiers.first, first.type == .weapon, let w = game.weapon(first.value), w.maxAmmo > 0 {
+            let pool = (w.ammoType >= 0 && w.ammoType <= 255 && !w.isFighterBay) ? 128 + w.ammoType : w.id
+            let ammo = game.outfits().filter { $0.ammoFor.contains(pool) }
+                .reduce(0) { $0 + (state.outfits[$1.id] ?? 0) }
+            if ammo > 0, ammo - (ownedNow - 1) * w.maxAmmo > 0 { return true }
+        }
+        return false
     }
 
     /// Free mass without the display clamp at zero.
@@ -554,12 +633,20 @@ public enum PilotEconomy {
                - tradeInValue(state, game: game, scale: scale, stellarTech: stellarTech))
     }
 
+    /// Starting a ship purchase (0x00492f30) redraws that class's shipyard roll
+    /// whether or not the confirm dialog is accepted (EC-11). The shipyard calls
+    /// this when the confirm opens, then `buyShip(..., rolled: true)`.
+    public static func beginShipPurchase(_ state: inout PlayerState, _ ship: ShipRes) {
+        state.rerollStock(shipType: ship.id, hire: false, day: state.date.julianDay)
+    }
+
     /// Buy `ship` (0x00492f30): credit the trade-in, run the old hull's
     /// OnRetire, charge the full scaled price, keep only the outfits that stay
     /// with the player (`oütf` Flags 0x0004), hand over the new hull's fittings,
     /// run its OnPurchase and redraw the class's shipyard roll for the day.
     @discardableResult
-    public static func buyShip(_ state: inout PlayerState, _ ship: ShipRes, game: NovaGame, scale: Float = 1, stellarTech: Int = 0) -> Bool {
+    public static func buyShip(_ state: inout PlayerState, _ ship: ShipRes, game: NovaGame, scale: Float = 1,
+                               stellarTech: Int = 0, rolled: Bool = false) -> Bool {
         let price = LandedServices.shipPrice(ship, scale: scale, stellarTech: stellarTech)
         let tradeIn = tradeInValue(state, game: game, scale: scale, stellarTech: stellarTech)
         guard state.credits + tradeIn >= price, ship.id != state.shipType else { return false }
@@ -578,8 +665,12 @@ public enum PilotEconomy {
         // ships" (licenses/permits, star charts, and whatever else scenario
         // data flags this way) — everything else is gone with the old ship.
         state.outfits = state.outfits.filter { id, _ in
-            (game.outfit(id)?.flags ?? 0) & 0x0004 != 0
+            guard let o = game.outfit(id) else { return false }
+            // Paint (ModType 43) is a global colour, not an owned outfit, and a
+            // ship purchase clears it (EC-28).
+            return o.flags & 0x0004 != 0 && !o.has(.paint)
         }
+        state.stockBank = nil
         // Everything the new hull comes with — its preinstalled `DefaultItems`
         // (turrets, launchers, jammers) *and* its stock `WeapType` armament —
         // becomes owned, so the Outfitter and Ship Info show it and it can be
@@ -600,7 +691,9 @@ public enum PilotEconomy {
         state.armor = nil
         state.shield = nil
         state.fuel = nil
-        state.rerollStock(shipType: ship.id, hire: false, day: state.date.julianDay)
+        if !rolled { beginShipPurchase(&state, ship) }
+        // 0x0046d4b0: the new hull's smaller hold shrinks the ordinary bins (EC-27).
+        shrinkCargoToCapacity(&state, galaxy: Galaxy(game: game))
         return true
     }
 
@@ -619,6 +712,7 @@ public enum PilotEconomy {
             runControlBitSet(&state, old.onRetire, game: game, source: "shïp \(old.id) \"\(old.name)\" OnRetire")
         }
         state.shipType = hull
+        state.stockBank = nil
         if let prize = game.ship(hull) {
             state.shipName = prize.displayName
             grantHullFittings(&state, ship: prize, game: game)
@@ -627,6 +721,7 @@ public enum PilotEconomy {
         if kept {
             state.registerEscort(shipType: oldType, name: game.ship(oldType)?.name ?? "Escort", origin: .captured)
         }
+        shrinkCargoToCapacity(&state, galaxy: Galaxy(game: game))
         return kept
     }
 

@@ -36,11 +36,11 @@ with function addresses in [docs/reverse-engineering/](docs/reverse-engineering/
 
 One block is roughly 5% of that part of the original code: compared and
 matching or fixed to match (green), handled differently on purpose, such as the
-save format and controls (teal), or found to differ with the fix in progress
+save format and controls (teal), or found to differ, with the fix written and awaiting test
 (amber). The number at the end of a row is matching functions out of the
 functions to port, not a progress percentage. This tracks how much has been
-checked, not how finished the game is. 16 of the 179 plan items are open; they
-are listed in [docs/STATUS.md](docs/STATUS.md). NovaSwift is in beta and has bugs. If something plays
+checked, not how finished the game is. 16 of the 179 plan items were reopened; they are
+implemented and awaiting build and test, and are listed in [docs/STATUS.md](docs/STATUS.md). NovaSwift is in beta and has bugs. If something plays
 differently from the original, please
 [open a fidelity issue](https://github.com/SirStig/NovaSwift/issues/new/choose).
 The function-by-function view is in [docs/STATUS.md](docs/STATUS.md) and on the

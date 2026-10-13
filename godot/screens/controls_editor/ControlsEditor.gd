@@ -5,6 +5,7 @@
 #                   Base · Shift · Alt layer selector; bound keys are tinted by action category.
 #   Controller tab  a procedurally drawn pad (Xbox / PlayStation / Switch Pro / Steam Deck) with
 #                   callout labels; pressing a physical button lights it on the art.
+#   Action Wheels   tab 3 (WheelsPage.gd): each wheel's trigger, slots, side; reset; unreachable-action warning.
 #   Group selector  Flight · Docked · Galaxy map — a key may be reused across groups (Controls.GROUPS).
 #
 # Two ways to bind, always available: DEVICE FIRST (click / A a key or pad button -> the bar under the
@@ -26,6 +27,7 @@ const Layouts = preload("res://screens/controls_editor/KeyboardLayouts.gd")
 const KeyboardView = preload("res://screens/controls_editor/KeyboardView.gd")
 const ControllerView = preload("res://screens/controls_editor/ControllerView.gd")
 const Art = preload("res://screens/controls_editor/ControllerArt.gd")
+const WheelsPage = preload("res://screens/controls_editor/WheelsPage.gd")   # tab 2: action wheels
 
 signal closed
 signal changed
@@ -33,7 +35,7 @@ signal changed
 const CAPTURE_TIMEOUT := 6.0
 const AMBER := T.AMBER
 
-var tab := 0                        # 0 keyboard, 1 controller
+var tab := 0                        # 0 keyboard, 1 controller, 2 action wheels
 var group := "Flight"
 var kb_layer := 0                      # index into Model.LAYERS
 var rows: Dictionary = {}           # action -> Button
@@ -45,6 +47,8 @@ var sel_input: Variant = null       # device-first selection: key code or JoyBut
 
 var _root: Control
 var _tab_seg: HBoxContainer
+var _opts_row: Control
+var _wheels_page: Control
 var _group_seg: HBoxContainer
 var _layer_seg: HBoxContainer
 var _opts_kb: Control
@@ -102,9 +106,9 @@ func _build() -> void:
 	head.add_theme_constant_override("separation", 14)
 	main.add_child(head)
 	NC.label(head, "Controls Editor", "heading", "bold", AMBER)
-	_tab_seg = NC.segmented(head, ["Keyboard", "Controller"], 0, _on_tab)
+	_tab_seg = NC.segmented(head, ["Keyboard", "Controller", "Action Wheels"], 0, _on_tab)
 	_tab_seg.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	_tab_seg.custom_minimum_size = Vector2(280, 0)
+	_tab_seg.custom_minimum_size = Vector2(430, 0)
 	NC.hspacer(head)
 	var reset := NC.button("Reset to Defaults", "bordered", _reset_confirm, "arrow.counterclockwise")
 	head.add_child(reset)
@@ -115,6 +119,7 @@ func _build() -> void:
 	var opts := HBoxContainer.new()
 	opts.add_theme_constant_override("separation", 12)
 	main.add_child(opts)
+	_opts_row = opts
 	var ctx := HBoxContainer.new()
 	ctx.add_theme_constant_override("separation", 10)
 	opts.add_child(ctx)
@@ -234,6 +239,13 @@ func _build() -> void:
 	_list.add_theme_constant_override("v_separation", 10)
 	scroll.add_child(_list)
 
+	_wheels_page = WheelsPage.new()
+	_wheels_page.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_wheels_page.visible = false
+	main.add_child(_wheels_page)
+	_wheels_page.setup()
+	_wheels_page.changed.connect(func() -> void: changed.emit())
+
 	pad.set_style(Model.pad_style())
 	kb.set_layout(Model.preset())
 	_apply_tab()
@@ -329,6 +341,12 @@ func _on_tab(i: int) -> void:
 func _apply_tab() -> void:
 	kb.visible = tab == 0
 	pad.visible = tab == 1
+	_body.visible = tab != 2
+	_opts_row.visible = tab != 2
+	_wheels_page.visible = tab == 2
+	if tab == 2:
+		_wheels_page.rebuild()
+		_wheels_page.focus_first.call_deferred()
 	_opts_kb.visible = tab == 0
 	_opts_pad.visible = tab == 1
 	_strip.visible = false
@@ -584,7 +602,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.button_index == JOY_BUTTON_LEFT_SHOULDER and tab == 1:
 			set_tab(0)
 			get_viewport().set_input_as_handled()
-		elif event.button_index == JOY_BUTTON_RIGHT_SHOULDER and tab == 0:
+		elif event.button_index == JOY_BUTTON_RIGHT_SHOULDER and tab < 2:
+			set_tab(tab + 1)
+			get_viewport().set_input_as_handled()
+		elif event.button_index == JOY_BUTTON_LEFT_SHOULDER and tab == 2:
 			set_tab(1)
 			get_viewport().set_input_as_handled()
 

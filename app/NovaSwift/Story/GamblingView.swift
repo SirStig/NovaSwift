@@ -47,6 +47,10 @@ import NovaSwiftStory
 struct GamblingView: View {
     let graphics: SpaceportGraphics
     @ObservedObject var pilot: PilotStore
+    /// The previous race's winner. The original resets it every time the
+    /// services window opens (0x0047c8e0, EC-26), so `BarView` owns it and it
+    /// lives exactly as long as that window. It is not saved.
+    @Binding var raceBet: LandedServices.RaceBet
     var onDone: () -> Void
 
     @EnvironmentObject private var model: AppModel
@@ -74,10 +78,6 @@ struct GamblingView: View {
     /// each new bet rather than reusing the previous run.
     @State private var raceID = 0
     @State private var showAmountPrompt = false
-    /// The previous race's winner. The original resets it every time the
-    /// services window opens (0x0047c8e0). This value stays for the app's
-    /// lifetime (EC-26). It is not saved.
-    @MainActor private static var raceBet = LandedServices.RaceBet()
     @State private var payout = 0
 
     var body: some View {
@@ -213,7 +213,7 @@ struct GamblingView: View {
         guard let pick = selectedColor, amount > 0, pilot.state.credits >= amount else { return }
         stake = amount
         pilot.state.credits -= amount
-        let race = Self.raceBet.race(pick: pick.rawValue - 1, wager: amount) { Int.random(in: 0..<$0) }
+        let race = raceBet.race(pick: pick.rawValue - 1, wager: amount) { Int.random(in: 0..<$0) }
         payout = race.payout
         let winIndex = race.winner + 1
         winner = RaceColor(rawValue: winIndex)

@@ -52,7 +52,9 @@ the engine is running with. The tables and rules are the shared `Sources/NovaSwi
 | `invertTurn` | `input/invert_turn` | bool | false | Invert turn direction | yes |
 | `mouseAiming` | `input/mouse_aiming` | bool | false | Aim toward mouse cursor | yes (desktop; ship turns toward the pointer while flying, the right stick and turn keys win) |
 | `stickDeadzone` | `input/deadzone` | float 0..0.5 | `Controls.STICK_DEADZONE` | Stick dead zone | yes (existing) |
-| `controlScheme`, `tiltSensitivity`, `cursorSensitivity`, `hapticsEnabled` | none | | | Touch flying, tilt, cursor speed, haptics | n/a (touch/tilt/virtual cursor/haptics) |
+| `controlScheme`, `tiltSensitivity`, `hapticsEnabled` | none | | | Touch flying, tilt, haptics | n/a (touch/tilt/haptics) |
+| `cursorSensitivity` | `input/cursor_speed` | float 0.4..2.0 | 1.0 | Controller cursor speed | yes (`godot/ui/PadCursor.gd`) |
+| (port) Controller cursor | `input/pad_cursor` | bool | true | Controller cursor | yes (`godot/ui/PadCursor.gd`) |
 | (port) Controller on-screen keyboard | `ui/pad_keyboard` | enum `auto` `off` | `auto` | (Apple opens its pad keyboard on Cursor-click) | yes (`godot/ui/PadKeyboard.gd`) |
 
 ## Graphics (Apple: Settings > Graphics)

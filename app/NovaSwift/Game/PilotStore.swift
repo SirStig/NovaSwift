@@ -318,8 +318,11 @@ final class PilotStore: ObservableObject {
 
     @discardableResult
     func buyShip(_ ship: ShipRes, at spob: SpobRes, galaxy: Galaxy) -> Bool {
+        // Starting the purchase redraws that class's roll whether or not it
+        // completes (0x00492f30, EC-11).
+        PilotEconomy.beginShipPurchase(&state, ship)
         let ok = PilotEconomy.buyShip(&state, ship, game: galaxy.game, scale: rankPriceScale(at: spob, galaxy: galaxy),
-                                      stellarTech: spob.techLevel)
+                                      stellarTech: spob.techLevel, rolled: true)
         if ok { visitDays.shipPurchase = true; save() }
         return ok
     }

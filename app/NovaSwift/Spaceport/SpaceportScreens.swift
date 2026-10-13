@@ -399,7 +399,18 @@ struct OutfitterView: View {
 
     var body: some View {
         outfitterBody
-            .onAppear { if ownedAtOpen == nil { ownedAtOpen = pilot.state.outfits } }
+            .onAppear {
+                if ownedAtOpen == nil {
+                    PilotEconomy.openOutfitter(&pilot.state)      // EC-09: stock bank -> owned
+                    ownedAtOpen = pilot.state.outfits
+                }
+            }
+            .onDisappear {
+                // EC-28: Flags 0x0010 items (and charts) are zeroed on the way out.
+                let before = pilot.state.outfits
+                PilotEconomy.closeOutfitter(&pilot.state, game: game)
+                if pilot.state.outfits != before { pilot.save() }
+            }
             .cursorCancel(onDone)
             .focusable().focusEffectDisabled().focused($gridFocused)
             .onAppear { gridFocused = true }
@@ -909,6 +920,8 @@ struct BarView: View {
     @EnvironmentObject private var appModel: AppModel
 
     @State private var showGambling = false
+    /// The previous race winner: reset whenever the bar window opens (EC-26).
+    @State private var raceBet = LandedServices.RaceBet()
     /// Gamble with no credits: the original (0x0047c8e0) raises STR# 2002 #361 instead.
     @State private var showBrokeAlert = false
     @State private var showHire = false
@@ -1007,7 +1020,7 @@ struct BarView: View {
                     Color.black.opacity(0.5).ignoresSafeArea()
                         .onTapGesture { showGambling = false }
                         .transition(.opacity)
-                    GamblingView(graphics: graphics, pilot: pilot, onDone: { showGambling = false })
+                    GamblingView(graphics: graphics, pilot: pilot, raceBet: $raceBet, onDone: { showGambling = false })
                 }
                 .cursorCancel { showGambling = false }
                 .cursorModal()

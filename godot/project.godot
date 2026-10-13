@@ -28,6 +28,8 @@ WindowScale="*res://WindowScale.gd"
 SettingsPlumbing="*res://SettingsPlumbing.gd"
 ; Gamepad on-screen keyboard that opens for any LineEdit focused with a pad: ui/PadKeyboard.gd.
 PadKeyboard="*res://ui/PadKeyboard.gd"
+; Gamepad UI cursor (left stick pointer, A click, right stick scroll; synthesises mouse events): ui/PadCursor.gd.
+PadCursor="*res://ui/PadCursor.gd"
 
 [display]
 

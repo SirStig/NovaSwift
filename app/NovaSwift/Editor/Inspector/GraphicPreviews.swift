@@ -164,7 +164,7 @@ struct HDBlobPreview: View {
         }
     }
 
-    private static func load(_ d: Data) -> Loaded {
+    nonisolated private static func load(_ d: Data) -> Loaded {
         // A zip is a USDZ; ImageIO would refuse it anyway.
         if d.prefix(2).elementsEqual([0x50, 0x4B]) {
             // SceneKit/ModelIO only read USDZ from a file URL.

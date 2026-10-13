@@ -29,9 +29,7 @@ public enum RadarIFF {
     public static func stellarColor(_ spob: SpobRes, state: PlayerState, game: NovaGame, system: Int) -> RGB16 {
         let destroyed = state.isStellarDestroyed(spob.id)
         guard spob.canLand, destroyed == spob.landsOnlyWhenDestroyed, !spob.isUninhabited else { return inactive }
-        let alwaysLand = spob.government >= 0 && state.activeRanks.contains { rid in
-            game.rank(rid).map { $0.canAlwaysLand && $0.govt == spob.government } ?? false
-        }
+        let alwaysLand = RankPrivilege.alwaysLands(at: spob.government, state: state, game: game)
         func standing() -> RGB16 {
             let rep = state.reputation(atSystem: system)
             let refused = spob.minStatus == 32767 || (rep < spob.minStatus && spob.minStatus > -32767)

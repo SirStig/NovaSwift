@@ -34,6 +34,12 @@
 #   D-pad ↓      land         D-pad ↑  hyperjump (J)         Back/Select  galaxy map (M)
 #   D-pad ←      hail target  D-pad →  board (B)
 #
+# Action wheels (ActionWheels.gd, ui/ActionWheel.gd): HOLD a trigger, flick the right stick, release.
+#   LB    Combat & Fleet wheel   (tap: previous secondary)
+#   RB    Targeting & Nav wheel  (tap: next secondary)
+#   Back  Info & View wheel      (tap: galaxy map)
+# Those three buttons are stripped from the Flight actions in register() and the wheel fires the tap on release.
+#
 # 1-5 pick an escort group while the Escort Commands panel is up (otherwise 1-4 select
 # nav stellars). Inside the comm window: G greetings, R request assistance, E / Enter /
 # Esc close (the original's own shortcuts).
@@ -175,7 +181,7 @@ const BINDINGS := {
 	"map_auto_route": {"keys": [KEY_T], "buttons": [JOY_BUTTON_X]},
 	"map_center": {"keys": [KEY_C], "buttons": [JOY_BUTTON_RIGHT_STICK]},
 	"map_find": {"keys": [KEY_F], "buttons": [JOY_BUTTON_LEFT_STICK]},
-	"map_close": {"keys": [KEY_ESCAPE], "buttons": [JOY_BUTTON_B]},
+	"map_close": {"keys": [KEY_ESCAPE], "buttons": [JOY_BUTTON_B, JOY_BUTTON_BACK]},   # Back also closes (it opens the map; an action wheel owns it in flight)
 }
 
 
@@ -222,6 +228,13 @@ const MODERN_KEYS := {
 # analog axes, which are never rebindable — as with the Apple app's sticks) comes
 # from BINDINGS. Prefs.gd fills this from user://settings.cfg before register().
 static var overrides := {}
+
+# Action wheels (ActionWheels.gd / ui/ActionWheel.gd): the pad buttons that open a wheel. register() leaves these
+# buttons OFF the Flight-group actions they would otherwise drive, so the wheel node can tell a tap from a hold;
+# `wheel_taps` records button -> [actions] it stripped, which the wheel fires itself when a tap is released.
+# ActionWheels.sync() fills `wheel_triggers`.
+static var wheel_triggers: Array = []
+static var wheel_taps: Dictionary = {}
 
 # Rebinding screen layout: group -> actions it lists, in order. A key/button may
 # only be held by one action *per group* (the same contexts never overlap in
@@ -377,6 +390,7 @@ static func describe_buttons(action: String) -> String:
 
 
 static func register() -> void:
+	wheel_taps = {}
 	for action in BINDINGS:
 		if InputMap.has_action(action):
 			InputMap.erase_action(action)
@@ -403,6 +417,11 @@ static func register() -> void:
 			sk.shift_pressed = true
 			InputMap.action_add_event(action, sk)
 		for button in spec.get("buttons", []):
+			if int(button) in wheel_triggers and action in GROUPS["Flight"]:
+				var taps: Array = wheel_taps.get(int(button), [])
+				taps.append(action)
+				wheel_taps[int(button)] = taps
+				continue
 			var b := InputEventJoypadButton.new()
 			b.device = -1   # any connected pad
 			b.button_index = button
@@ -413,6 +432,26 @@ static func register() -> void:
 			m.axis = axis_pair[0]
 			m.axis_value = axis_pair[1]
 			InputMap.action_add_event(action, m)
+	_register_ui_pad_buttons()
+
+
+## Godot's built-in ui_accept / ui_cancel carry no gamepad button (only Enter / Space / Esc),
+## while ui_up..ui_right do include the d-pad and left stick -- so a pad could move focus but
+## never press anything. A presses (ui_accept), B backs out (ui_cancel), as on the Apple app's
+## cursor (Ⓐ click, Ⓑ .cursorCancel). Flight never reads ui_*, so A/B still fire there.
+static func _register_ui_pad_buttons() -> void:
+	for pair in [["ui_accept", JOY_BUTTON_A], ["ui_cancel", JOY_BUTTON_B]]:
+		var action: String = pair[0]
+		var button: int = pair[1]
+		var present := false
+		for e in InputMap.action_get_events(action):
+			if e is InputEventJoypadButton and (e as InputEventJoypadButton).button_index == button:
+				present = true
+		if not present:
+			var b := InputEventJoypadButton.new()
+			b.device = -1
+			b.button_index = button
+			InputMap.action_add_event(action, b)
 
 
 ## Right-stick aim as an engine compass heading (radians, 0 = up, clockwise), or

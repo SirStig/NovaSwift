@@ -23,9 +23,7 @@ public enum OriginalMapMarker {
         var dominated = 0, landable = 0, friendly = 0, hostile = 0
         for spob in usable {
             if state.hasDominated(spob.id) { dominated += 1; continue }
-            let alwaysLand = spob.government >= 0 && state.activeRanks.contains {
-                game.rank($0).map { $0.govt == spob.government && $0.canAlwaysLand } ?? false
-            }
+            let alwaysLand = RankPrivilege.alwaysLands(at: spob.government, state: state, game: game)
             let forbidden = spob.minStatus == 32767 || (rep < spob.minStatus && spob.minStatus > -32767)
             if !alwaysLand && forbidden {
                 if rep < 0 { hostile += 1 } else { friendly += 1 }

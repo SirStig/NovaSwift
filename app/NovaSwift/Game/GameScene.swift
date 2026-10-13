@@ -2049,6 +2049,12 @@ final class GameScene: SKScene {
         var bestBody: StellarBody?
         for body in world.systemContext.bodies where isPlayerLandTarget(body) {
             let rel = body.position - p.position
+            if bribeWaiverStellar == body.id, abs(rel.x) < 250, abs(rel.y) < 250 {
+                // The timer is rewritten to 0x2ed: the waiver ends and the ordinary arm takes over.
+                bribeWaiverStellar = nil
+                ladderPassedStellar = body.id
+                landingRequestID = body.id
+            }
             if abs(rel.x) < 250 && abs(rel.y) < 250, !landingClearance.contains(body.id),
                forgivingLanding || body.id == landingRequestID {
                 landingClearance.insert(body.id)
@@ -2307,9 +2313,25 @@ final class GameScene: SKScene {
     @discardableResult
     func selectNearestLandableIfNoneSelected() -> Int? {
         guard selectedPlanetID == nil else { return selectedPlanetID }
-        guard let id = nearestLandableID else { return nil }
+        guard let id = nearestTravelStellarID() else { return nil }
         selectPlanet(id)
         return id
+    }
+
+    /// The Land key's nearest search with nothing selected
+    /// (`Stellar_FindNearestAvailableTravelStellar` 0x00462db0; UI-06): the system's first
+    /// 16 nav slots, available (not destroyed) with Flags 0x0001, a gate only inside 500 px.
+    /// `forgivingLanding` keeps the port's any-body nearest.
+    private func nearestTravelStellarID() -> Int? {
+        if forgivingLanding { return nearestLandableID }
+        guard let world, let game = galaxy?.game, let sys = game.system(systemID) else { return nearestLandableID }
+        let slots: [PlayerLanding.TravelSlot] = sys.spobs.prefix(16).compactMap { id in
+            guard let spob = game.spob(id),
+                  let body = world.systemContext.bodies.first(where: { $0.id == id }) else { return nil }
+            return PlayerLanding.TravelSlot(id: id, position: body.position, canLand: spob.canLand, isGate: spob.isGate,
+                                            available: destroyedStellarIDs.contains(id) == spob.landsOnlyWhenDestroyed)
+        }
+        return PlayerLanding.nearestTravelStellar(from: world.player.position, slots: slots)
     }
 
     /// The `nearestFirstTargeting` enhancement: the port's range-capped,
@@ -3282,17 +3304,23 @@ final class GameScene: SKScene {
 
     private enum GateGlowKind { case hypergate, wormhole }
 
-    /// Whether the player is cleared to use hypergate `spobID` right now — a
-    /// clearance check against the gate's owning government (see
-    /// `SpobRes.playerMayUseGate`). Wormholes always pass.
+    /// EC-25: the stellar a paid bribe was settled at (approach timer 0x2ef). The next Land
+    /// press waives `MinStatus` for whichever body is selected and consumes it; coming within
+    /// 250 px of this stellar rewrites the timer to 0x2ed, which ends the waiver (`updateLanding`).
+    var bribeWaiverStellar: Int?
+    /// The stellar whose Land-press ladder passed (set by the container, or here when a paid
+    /// bribe's approach arms the stellar), so docking does not run the ladder again.
+    var ladderPassedStellar: Int?
+
+    /// Supplied by the container: whether the Land-press ladder
+    /// (`LandedServices.landingClearance`, EC-04/EC-05) would let the ship use this gate now.
+    var gateClearance: ((SpobRes) -> Bool)?
+
+    /// Whether the player is cleared to use gate `spobID` right now. Gates and wormholes share
+    /// the planet ladder; there is no gate-specific rule (EC-04).
     func playerMayUseGate(_ spobID: Int) -> Bool {
         guard let spob = galaxy?.game.spob(spobID) else { return false }
-        let dip = world?.diplomacy
-        let govt = spob.government
-        let standing = dip?.reputationHere ?? 0
-        let hostile = dip?.isHostileToPlayer(govt) ?? false
-        let allied = dip?.areAllied(govt, world?.player.government ?? independentGovt) ?? false
-        return spob.playerMayUseGate(standing: standing, hostile: hostile, allied: allied)
+        return gateClearance?(spob) ?? false
     }
 
     /// Handle a click on a gate. A wormhole just notes it's usable; a hypergate

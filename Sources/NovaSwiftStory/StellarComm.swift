@@ -35,11 +35,7 @@ public struct StellarComm: Sendable {
         let rep = LandedServices.systemReputation(state, system: system, game: game)
         var denied = spob.minStatus == 32767 || (rep < spob.minStatus && spob.minStatus != -32767)
         if denied, spob.government >= 128 {
-            let alwaysLand = state.activeRanks.contains { rid in
-                guard let r = game.rank(rid), r.canAlwaysLand, r.govt >= 128 else { return false }
-                return r.govt == spob.government || (diplomacy?.areAllied(r.govt, spob.government) ?? false)
-            }
-            if alwaysLand { denied = false }
+            if RankPrivilege.alwaysLands(at: spob.government, state: state, game: game) { denied = false }
         }
         if bribeLatch < 0 { bribeLatch = rand(100) }
         return StellarComm(spobID: spob.id, denied: denied,

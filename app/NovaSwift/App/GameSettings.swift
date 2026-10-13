@@ -361,6 +361,9 @@ struct GameSettings: Codable, Equatable {
     var cursorSensitivity: Double = 1.0
     /// Haptic feedback on touch devices / controllers.
     var hapticsEnabled: Bool = true
+    /// Freeze the sim while a controller action wheel is open (the wheels are
+    /// a NovaSwift input layer; the original has none to stay faithful to).
+    var pauseOnActionWheel: Bool = true
     /// Aim toward the mouse cursor (macOS) — off keeps the original no-auto-follow feel.
     var mouseAiming: Bool = false
 
@@ -635,6 +638,7 @@ struct GameSettings: Codable, Equatable {
         stickDeadzone         = v(.stickDeadzone, d.stickDeadzone)
         cursorSensitivity     = v(.cursorSensitivity, d.cursorSensitivity)
         hapticsEnabled        = v(.hapticsEnabled, d.hapticsEnabled)
+        pauseOnActionWheel    = v(.pauseOnActionWheel, d.pauseOnActionWheel)
         mouseAiming           = v(.mouseAiming, d.mouseAiming)
         starfieldDensity      = v(.starfieldDensity, d.starfieldDensity)
         showFPS               = v(.showFPS, d.showFPS)

@@ -67,48 +67,6 @@ final class SpaceObjectGateTests: XCTestCase {
         XCTAssertNil(s.gateEmergeAngle)
     }
 
-    // MARK: playerMayUseGate — the clearance mechanic
-
-    private func hypergate(govt: Int, minStatus: Int) -> SpobRes {
-        var b = [UInt8](repeating: 0, count: 1118)
-        put16(&b, 20, govt)
-        put16(&b, 22, minStatus)
-        put32(&b, 30, 0x0000_1000)
-        return SpobRes(Resource(type: NovaType.spob, id: 1400, name: "HG", data: Data(b)))
-    }
-
-    func testWormholeUsableByAnyone() {
-        var b = [UInt8](repeating: 0, count: 1118)
-        put16(&b, 20, 183)
-        put32(&b, 30, 0x0000_2000)
-        let wh = SpobRes(Resource(type: NovaType.spob, id: 465, name: "Wormhole", data: Data(b)))
-        // Even hostile, deeply-criminal, unallied: a wormhole never checks.
-        XCTAssertTrue(wh.playerMayUseGate(standing: -5000, hostile: true, allied: false))
-    }
-
-    func testIndependentHypergateOpenToAll() {
-        let hg = hypergate(govt: 50, minStatus: 32767)   // govt < 128 = independent
-        XCTAssertTrue(hg.playerMayUseGate(standing: 0, hostile: false, allied: false))
-    }
-
-    func testHostileOwnerRefusesHypergate() {
-        let hg = hypergate(govt: 183, minStatus: -32767)  // would otherwise always allow
-        XCTAssertFalse(hg.playerMayUseGate(standing: 500, hostile: true, allied: true))
-    }
-
-    func testRestrictedHypergateNeedsStandingOrAlliance() {
-        let hg = hypergate(govt: 183, minStatus: 32767)   // the stock "restricted network" case
-        XCTAssertFalse(hg.playerMayUseGate(standing: 0, hostile: false, allied: false))
-        XCTAssertTrue(hg.playerMayUseGate(standing: 1, hostile: false, allied: false))   // liked
-        XCTAssertTrue(hg.playerMayUseGate(standing: 0, hostile: false, allied: true))    // allied
-    }
-
-    func testOrdinaryMinStatusThreshold() {
-        let hg = hypergate(govt: 183, minStatus: 100)
-        XCTAssertFalse(hg.playerMayUseGate(standing: 99, hostile: false, allied: false))
-        XCTAssertTrue(hg.playerMayUseGate(standing: 100, hostile: false, allied: false))
-    }
-
     // MARK: gate → system mapping over a small hand-built galaxy
 
     private func system(id: Int, spobIDs: [Int]) -> Resource {
@@ -139,36 +97,60 @@ final class SpaceObjectGateTests: XCTestCase {
         XCTAssertEqual(dests.first?.systemID, 201)
     }
 
-    func testLinklessWormholeExitsAreOtherLinklessWormholes() {
-        var col = ResourceCollection()
-        col.add(gateSpob(id: 460, govt: 183, flags2: 0x2000, links: []))  // our wormhole (link-less)
-        col.add(gateSpob(id: 461, govt: 183, flags2: 0x2000, links: []))  // another link-less wormhole
-        col.add(system(id: 300, spobIDs: [460]))
-        col.add(system(id: 301, spobIDs: [461]))
-        let game = NovaGame(col)
-        let exits = game.wormholeExitCandidates(from: game.spob(460)!)
-        XCTAssertEqual(exits.map(\.gateSpobID), [461])
-        XCTAssertEqual(exits.first?.systemID, 301)
+    /// A deterministic `NovaRandom_Range` stand-in: replays `draws`, wrapping into `0..<n`.
+    private func scripted(_ draws: [Int]) -> (Int) -> Int {
+        var k = 0
+        return { n in defer { k += 1 }; return draws[k % draws.count] % max(1, n) }
     }
-    func testWormholeExitsFollowTheOriginalFilters() {
-        // OS-06 (`Stellar_EnterWormhole` 0x00456ca0).
+
+    func testLinkedWormholeCanEmergeInAHiddenSystemAndDuplicatesWeighMore() {
+        // OS-06 (`Stellar_EnterWormhole` 0x00456ca0 / `FUN_0046ebb0`).
         var col = ResourceCollection()
-        col.add(gateSpob(id: 460, govt: 183, flags2: 0x2000, links: []))   // ours, link-less
-        col.add(gateSpob(id: 461, govt: 183, flags2: 0x2000, links: []))   // link-less, same system
-        col.add(gateSpob(id: 462, govt: 183, flags2: 0x2000, links: []))   // link-less, hidden system
-        col.add(gateSpob(id: 463, govt: 183, flags2: 0x2000, links: [464]))
-        col.add(gateSpob(id: 464, govt: 183, flags2: 0x2000, links: [463]))
-        col.add(system(id: 300, spobIDs: [460, 461]))
-        col.add(system(id: 301, spobIDs: [462]))
-        col.add(system(id: 302, spobIDs: [463]))
-        col.add(system(id: 303, spobIDs: [464]))
+        // Slots: 464, 464, 465, then five empty. 464 sits in a hidden system, 465 in a visible one.
+        col.add(gateSpob(id: 460, govt: 183, flags2: 0x2000, links: [464, 464, 465]))
+        col.add(gateSpob(id: 464, govt: 183, flags2: 0x2000, links: []))
+        col.add(gateSpob(id: 465, govt: 183, flags2: 0x2000, links: []))
+        col.add(system(id: 300, spobIDs: [460]))
+        col.add(system(id: 301, spobIDs: [464]))
+        col.add(system(id: 302, spobIDs: [465]))
         let game = NovaGame(col)
-        let hidden: Set<Int> = [301, 303]
-        let visible = { (id: Int) in !hidden.contains(id) }
-        XCTAssertTrue(game.wormholeExitCandidates(from: game.spob(460)!, currentSystem: 300, isVisible: visible).isEmpty,
-                      "no fallback to linked wormholes; the current and hidden systems are excluded")
-        XCTAssertTrue(game.wormholeExitCandidates(from: game.spob(463)!, currentSystem: 302, isVisible: visible).isEmpty,
-                      "a wormhole whose only link is hidden can't be used")
-        XCTAssertEqual(game.wormholeExitCandidates(from: game.spob(463)!, currentSystem: 302).map(\.gateSpobID), [464])
+        let visible = { (id: Int) in id != 301 }
+        let wh = game.spob(460)!
+        XCTAssertEqual(wh.validHyperLinkSlots, [464, 464, 465], "raw slots keep duplicates")
+        // rand(8) = 0 or 1 -> the duplicated hidden hole; 2 -> the visible one; 3...7 redraw over an empty slot.
+        XCTAssertEqual(game.wormholeExit(from: wh, currentSystem: 300, isVisible: visible, rand: scripted([0])),
+                       .exit(gateSpobID: 464, systemID: 301), "a hidden system can be chosen")
+        XCTAssertEqual(game.wormholeExit(from: wh, currentSystem: 300, isVisible: visible, rand: scripted([1])),
+                       .exit(gateSpobID: 464, systemID: 301), "the duplicated slot is a second ticket")
+        XCTAssertEqual(game.wormholeExit(from: wh, currentSystem: 300, isVisible: visible, rand: scripted([2])),
+                       .exit(gateSpobID: 465, systemID: 302))
+        XCTAssertEqual(game.wormholeExit(from: wh, currentSystem: 300, isVisible: visible, rand: scripted([5, 2])),
+                       .exit(gateSpobID: 465, systemID: 302), "an empty slot redraws")
+        // Every link hidden: unusable.
+        XCTAssertEqual(game.wormholeExit(from: wh, currentSystem: 300, isVisible: { $0 == 300 }, rand: scripted([0])),
+                       .unusable)
+    }
+
+    func testLinklessWormholeDrawThatLandsOnALinkedHoleStaysPut() {
+        var col = ResourceCollection()
+        col.add(gateSpob(id: 460, govt: 183, flags2: 0x2000, links: []))      // ours, link-less
+        col.add(gateSpob(id: 461, govt: 183, flags2: 0x2000, links: []))      // link-less, visible, other system
+        col.add(gateSpob(id: 462, govt: 183, flags2: 0x2000, links: [461]))   // LINKED, other system
+        col.add(gateSpob(id: 463, govt: 183, flags2: 0x2000, links: []))      // link-less, same system as ours
+        col.add(system(id: 300, spobIDs: [460, 463]))
+        col.add(system(id: 301, spobIDs: [461]))
+        col.add(system(id: 302, spobIDs: [462]))
+        let game = NovaGame(col)
+        let wh = game.spob(460)!
+        // The stellar draw is `128 + rand(0x800)`: 461 -> exit; 462 (linked) -> stay put; 463 (same system) redraws.
+        XCTAssertEqual(game.wormholeExit(from: wh, currentSystem: 300, rand: scripted([461 - 128])),
+                       .exit(gateSpobID: 461, systemID: 301))
+        XCTAssertEqual(game.wormholeExit(from: wh, currentSystem: 300, rand: scripted([462 - 128])),
+                       .stayPut, "a draw that lands on a linked hole stays put")
+        XCTAssertEqual(game.wormholeExit(from: wh, currentSystem: 300, rand: scripted([463 - 128, 461 - 128])),
+                       .exit(gateSpobID: 461, systemID: 301), "a hole in the current system redraws")
+        // No link-less wormhole in a visible other system: fails outright.
+        XCTAssertEqual(game.wormholeExit(from: wh, currentSystem: 300, isVisible: { $0 != 301 },
+                                         rand: scripted([462 - 128])), .unusable)
     }
 }

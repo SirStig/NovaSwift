@@ -49,6 +49,8 @@ final class AppModel: ObservableObject {
     @Published var settings: GameSettings = .load()
     @Published var bindings: KeyBindings = .load()
     @Published var padBindings: PadBindings = .load()
+    /// Hold-a-button radial menus on the pad (Controls → Controller → Action Wheels).
+    @Published var actionWheels: ActionWheels = .load()
     /// The on-screen flight controls' arrangement (iOS; edited in Controls → Touch).
     @Published var touchLayout: TouchLayout = .load()
     @Published var data = GameDataController()
@@ -285,6 +287,7 @@ final class AppModel: ObservableObject {
     func commitBindings() { bindings.save() }
 
     func commitPadBindings() { padBindings.save() }
+    func commitActionWheels() { actionWheels.save() }
     func commitTouchLayout() { touchLayout.save() }
 
     // MARK: Online sessions

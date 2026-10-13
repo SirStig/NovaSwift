@@ -101,6 +101,16 @@ class NovaWorld: Node2D {
         var saveID: UUID?
         var landed = false
     }
+    /// Plugin Editor test run (Apple `EditorTestRunView`): the live game and the real pilot
+    /// wait here while a sandbox pilot flies `base ⊕ document`. Nothing is written to the roster.
+    private var editorBackup: EditorBackup?
+    private struct EditorBackup {
+        var game: NovaGame?
+        var galaxy: Galaxy?
+        var pilot: PlayerState
+        var started: Bool
+        var saveID: UUID?
+    }
 
     // MARK: Fixed-step simulation
     //
@@ -167,6 +177,8 @@ class NovaWorld: Node2D {
         interactionsWorldRebuilt()   // close hail/plunder windows, bring the escort wing back
         storyWorldRebuilt()          // attach the mission-ship host, drop active missions' ships in
         gaps.resetForNewWorld()      // përs offer, self-destruct, pod respawn latches
+        // OS-08: a rebuilt world is a launch or jump; the original recomputes there and reseeds the bomb fuse.
+        if let game { HazardOutfits.recompute(fuse: &gaps.bombFuse, pilot: pilot, game: game) }
         flightVisuals.reset()        // overlay clocks / stellar animators
     }
 
@@ -1466,7 +1478,22 @@ class NovaWorld: Node2D {
     // Outfitter.
 
     /// Snapshot what's owned now (call when the outfitter opens).
-    @Callable(autoSnakeCase: true) func outfitterOpen() { outfitterOwnedAtOpen = pilot.outfits }
+    @Callable(autoSnakeCase: true) func outfitterOpen() {
+        PilotEconomy.openOutfitter(&pilot)          // EC-09: the stock weapon bank becomes owned
+        outfitterOwnedAtOpen = pilot.outfits
+    }
+
+    /// Units of stock armament still in the weapon banks, not yet owned (EC-09; self-check aid).
+    @Callable(autoSnakeCase: true) func stockBankSize() -> Int {
+        guard let bank = pilot.stockBank else { return 0 }
+        return bank.keys.reduce(0) { $0 + pilot.bankedCount($1) }
+    }
+
+    /// The outfitter closed: Flags 0x0010 items and charts leave the inventory (EC-28).
+    @Callable(autoSnakeCase: true) func outfitterClose() {
+        guard let game else { return }
+        PilotEconomy.closeOutfitter(&pilot, game: game)
+    }
 
     private func outfitterOwned(_ id: Int) -> Int? { outfitterOwnedAtOpen.map { $0[id] ?? 0 } }
 
@@ -1587,10 +1614,14 @@ class NovaWorld: Node2D {
     /// ship). The next launch flies the new hull.
     @Callable(autoSnakeCase: true) func shipyardBuy(id: Int) -> Bool {
         guard let c = shopContext(), let s = c.game.ship(id),
-              SpaceportShops.shipyardList(game: c.game, spob: c.spob, state: pilot).contains(where: { $0.id == id }),
-              SpaceportShops.canBuyShip(s, game: c.game, galaxy: c.galaxy, spob: c.spob, state: pilot)
+              SpaceportShops.shipyardList(game: c.game, spob: c.spob, state: pilot).contains(where: { $0.id == id })
         else { return false }
-        let ok = SpaceportShops.buyShip(&pilot, s, at: c.spob, galaxy: c.galaxy)
+        // Starting the purchase redraws that class's roll whether or not it
+        // completes (0x00492f30, EC-11).
+        PilotEconomy.beginShipPurchase(&pilot, s)
+        guard SpaceportShops.canBuyShip(s, game: c.game, galaxy: c.galaxy, spob: c.spob, state: pilot)
+        else { return false }
+        let ok = SpaceportShops.buyShip(&pilot, s, at: c.spob, galaxy: c.galaxy, rolled: true)
         if ok { visitDays.shipPurchase = true }
         return ok
     }
@@ -2777,8 +2808,7 @@ class NovaWorld: Node2D {
     // no fuel and no days). Every rule is shared code: `World.cyclePlayerTarget` /
     // `selectNearestEngaged` / `selectNearestHostileThreat`, `PlayerLanding`,
     // `LandedServices.landingClearance` + `refusalMessage`, `OriginalText`,
-    // `SpobRes.playerMayUseGate`, `NovaGame.gateDestinations` /
-    // `wormholeExitCandidates`, `World.placePlayerEmergingFromGate`. This section
+    // `NovaGame.gateDestinations` / `wormholeExit`, `World.placePlayerEmergingFromGate`. This section
     // marshals and keeps the per-visit selection / clearance state (Flight.swift).
 
     private var travel = TravelState()
@@ -2803,6 +2833,21 @@ class NovaWorld: Node2D {
 
     private func stellarBody(_ id: Int) -> StellarBody? {
         world?.systemContext.bodies.first { $0.id == id }
+    }
+
+    /// The Land key's nearest stellar with nothing selected (`Stellar_FindNearestAvailableTravelStellar`
+    /// 0x00462db0; UI-06): the system's first 16 nav slots, available (not destroyed) with Flags 0x0001,
+    /// a gate only inside 500 px. `forgivingLanding` keeps the port's any-body nearest.
+    private func nearestTravelStellar() -> StellarBody? {
+        if plumbing.enhancements.forgivingLanding { return nearestLandTarget() }
+        guard let world, let game, let sys = game.system(currentSystemID ?? -1) else { return nearestLandTarget() }
+        let slots: [PlayerLanding.TravelSlot] = sys.spobs.prefix(16).compactMap { id in
+            guard let spob = game.spob(id), let body = stellarBody(id) else { return nil }
+            return PlayerLanding.TravelSlot(id: id, position: body.position, canLand: spob.canLand, isGate: spob.isGate,
+                                            available: pilot.isStellarDestroyed(id) == spob.landsOnlyWhenDestroyed)
+        }
+        guard let id = PlayerLanding.nearestTravelStellar(from: world.player.position, slots: slots) else { return nil }
+        return stellarBody(id)
     }
 
     private func nearestLandTarget() -> StellarBody? {
@@ -3005,17 +3050,15 @@ class NovaWorld: Node2D {
         let clearance = LandedServices.landingClearance(
             spob: spob, system: currentSystemID ?? -1, state: pilot, game: game,
             diplomacy: galaxy.makeDiplomacy(), contributedBits: game.contributedBits(pilot: pilot),
-            bribed: interact.comm.bribedStellars.contains(spob.id))
+            bribed: interact.comm.hasBribeWaiver)
         return LandedServices.refusalMessage(clearance, spob: spob, game: game)
     }
 
-    /// Whether the player is cleared to use hypergate `id` (wormholes always pass).
+    /// Whether the Land-press ladder would let the ship use gate `id` now (EC-04/EC-05: gates and
+    /// wormholes share the planet ladder).
     private func playerMayUseGate(_ id: Int) -> Bool {
-        guard let spob = game?.spob(id), let world else { return false }
-        let dip = world.diplomacy
-        return spob.playerMayUseGate(standing: dip?.reputationHere ?? 0,
-                                     hostile: dip?.isHostileToPlayer(spob.government) ?? false,
-                                     allied: dip?.areAllied(spob.government, world.player.government) ?? false)
+        guard let spob = game?.spob(id) else { return false }
+        return landingRefusalReason(spob) == nil
     }
 
     /// Per `step`: reaching ±250 px of the stellar a landing was requested from
@@ -3028,6 +3071,14 @@ class NovaWorld: Node2D {
                 travel.cleared.insert(body.id)
             }
             return
+        }
+        // EC-25: coming within 250 px of the stellar a bribe was paid at rewrites the approach timer
+        // to 0x2ed - the waiver ends and the ordinary arm takes over (0x00459950).
+        if let paid = interact.comm.bribeWaiverStellar, let body = stellarBody(paid),
+           PlayerLanding.inClearanceRange(offset: body.position - world.player.position) {
+            interact.comm.consumeBribeWaiver()
+            travel.ladderPassed = paid
+            travel.landingRequest = paid
         }
         guard let request = travel.landingRequest, !travel.cleared.contains(request),
               let body = stellarBody(request) else { return }
@@ -3082,7 +3133,7 @@ class NovaWorld: Node2D {
     @Callable(autoSnakeCase: true) func pressLand() -> String {
         guard let world, let game, dockedSpobID == nil, world.playerJump == nil, nav.quick == nil, travel.gatePicker == nil,
               world.player.isAlive else { return landJSON("none") }
-        if travel.selectedSpob == nil, let near = nearestLandTarget() { selectStellar(near.id) }
+        if travel.selectedSpob == nil, let near = nearestTravelStellar() { selectStellar(near.id) }
         if plumbing.autoLanding || plumbing.enhancements.forgivingLanding {
             return settingsPressLand(world)   // Settings: auto-landing / forgiving landing replace the two presses
         }
@@ -3099,6 +3150,14 @@ class NovaWorld: Node2D {
             post(text.misc(73), rawCalls: OriginalText.Duration.landing)
             return landJSON("messages")
         }
+        // EC-25: a bribe paid at this very stellar (timer >= 0x2ee, still selected) docks without the
+        // +-250 arm when the ship is slow enough and in reach (0x00457580).
+        if interact.comm.bribeWaiverStellar == id, travel.landingRequest != id {
+            interact.comm.consumeBribeWaiver()
+            travel.ladderPassed = id
+            travel.landingRequest = id
+            travel.cleared.insert(id)
+        }
         guard travel.landingRequest == id else {
             // First press: the request.
             if spob.isUninhabited && !spob.isGate {
@@ -3111,14 +3170,17 @@ class NovaWorld: Node2D {
             }
             // Clearance reads the per-system reputation: fold in this session's crimes first (EC-02).
             syncLiveStanding()
-            let refusal = spob.isGate ? nil : landingRefusalReason(spob)
-            let denied = spob.isGate ? !(spob.isWormhole || playerMayUseGate(id)) : refusal != nil
-            if denied {
+            // EC-04/EC-05: gates and wormholes run the same ladder and fee check as a planet.
+            let refusal = landingRefusalReason(spob)
+            interact.comm.consumeBribeWaiver()   // EC-25: the press consumes the approach timer however it ends
+            if let refusal {
                 beep(2)
-                post(refusal ?? text.landingDenied(body: kind), rawCalls: OriginalText.Duration.landing)
+                post(refusal, rawCalls: OriginalText.Duration.landing)
                 travel.selectedSpob = nil
+                travel.ladderPassed = nil
                 return landJSON("messages")
             }
+            travel.ladderPassed = id
             travel.landingRequest = id
             if let body = stellarBody(id), PlayerLanding.inClearanceRange(offset: body.position - world.player.position) {
                 return landJSON("messages")   // the clearance line follows on the next tick
@@ -3153,8 +3215,19 @@ class NovaWorld: Node2D {
                  rawCalls: OriginalText.Duration.landing)
             return landJSON("messages")
         }
-        if spob.isGate { return handleGateLanding(spob) }
-        if let reason = landingRefusalReason(spob) {
+        // The ladder ran on the Land press (`travel.ladderPassed`); the autopilot's arrival has not run
+        // it yet, so it runs here (EC-04/EC-05 for gates as well).
+        let ladderDone = travel.ladderPassed == id
+        travel.ladderPassed = nil
+        if spob.isGate {
+            if !ladderDone, let reason = landingRefusalReason(spob) {
+                beep(2)
+                post(reason)
+                return landJSON("messages")
+            }
+            return handleGateLanding(spob)
+        }
+        if !ladderDone, let reason = landingRefusalReason(spob) {
             post(reason)
             return landJSON("messages")
         }
@@ -3169,22 +3242,20 @@ class NovaWorld: Node2D {
 
     // MARK: Hypergates and wormholes
 
-    /// Landing on a gate. A wormhole flings you through (no choice); a hypergate
-    /// you're cleared for opens its destination picker; one you aren't refuses.
+    /// Landing on a gate, after the Land-press ladder passed (EC-04/EC-05). The gate fee is taken
+    /// first, even when the hypergate then does nothing (0x00457580 charges it before
+    /// `Stellar_EnterHypergate` / `Stellar_EnterWormhole`). A wormhole flings you through (no choice);
+    /// a hypergate opens its destination picker.
     private func handleGateLanding(_ spob: SpobRes) -> String {
         guard let game else { return landJSON("none") }
+        LandedServices.chargeGateFee(spob: spob, state: &pilot)
         if spob.isWormhole { return beginWormholeTransport(from: spob) }
-        if playerMayUseGate(spob.id) {
-            // A gate with no links does nothing: `Stellar_EnterHypergate` 0x00456480
-            // returns -1 with no message or beep.
-            guard !game.gateDestinations(from: spob).isEmpty else { return landJSON("none") }
-            travel.openGates.insert(spob.id)
-            travel.gatePicker = spob.id
-            return landJSON("gate", spob: spob.id)
-        }
-        beep(2)   // 0x00457580: snd 151 + STR# 2002 #81
-        post(OriginalText(game: game).misc(81))
-        return landJSON("messages")
+        // A gate with no links does nothing: `Stellar_EnterHypergate` 0x00456480
+        // returns -1 with no message or beep.
+        guard !game.gateDestinations(from: spob).isEmpty else { return landJSON("none") }
+        travel.openGates.insert(spob.id)
+        travel.gatePicker = spob.id
+        return landJSON("gate", spob: spob.id)
     }
 
     /// A wormhole spits you out at a visible linked wormhole, or a random other
@@ -3192,13 +3263,20 @@ class NovaWorld: Node2D {
     private func beginWormholeTransport(from wormhole: SpobRes) -> String {
         guard let game else { return landJSON("none") }
         let story = StoryEngine(game: game, player: pilot)
-        let exits = game.wormholeExitCandidates(from: wormhole, currentSystem: currentSystemID,
-                                                isVisible: { story.isSystemVisible($0) })
-        guard let dest = exits.randomElement() else {
-            beep(4)   // Stellar_EnterWormhole 0x00456ca0
-            post(OriginalText(game: game).misc(84) + " " + OriginalText(game: game).misc(86))
+        // OS-06 (`NovaGame.wormholeExit`): a raw HyperLink slot (a hidden system can be chosen, a
+        // duplicated slot weighs more), or one random other link-less wormhole; a draw that lands on a
+        // refused hole leaves the ship where it is.
+        let outcome = game.wormholeExit(from: wormhole, currentSystem: currentSystemID,
+                                        isVisible: { story.isSystemVisible($0) },
+                                        rand: { Int.random(in: 0..<max(1, $0)) })
+        guard case let .exit(gateSpobID, systemID) = outcome else {
+            if outcome == .unusable {
+                beep(4)   // Stellar_EnterWormhole 0x00456ca0
+                post(OriginalText(game: game).misc(84) + " " + OriginalText(game: game).misc(86))
+            }
             return landJSON("messages")
         }
+        let dest = (gateSpobID: gateSpobID, systemID: systemID)
         travel.openGates.insert(wormhole.id)
         if travel.deferGateTransport {
             // The entry movie (dësc = the wormhole's own spöb id, travel mode 2, 0x00456ca0) plays first;
@@ -3426,8 +3504,14 @@ class NovaWorld: Node2D {
         var flat: [Int32] = []
         for spob in game.spobs() where spob.isGate && spob.isWormhole == wormhole {
             guard let sys = game.systemContaining(spob: spob.id) else { continue }
-            let dests = wormhole ? game.wormholeExitCandidates(from: spob, currentSystem: sys)
-                                 : game.gateDestinations(from: spob)
+            var wormholeDest: [(gateSpobID: Int, systemID: Int)] = []
+            if wormhole {
+                var draw = 0
+                if case let .exit(g, s) = game.wormholeExit(from: spob, currentSystem: sys, rand: { n in draw += 1; return (draw * 7919) % max(1, n) }) {
+                    wormholeDest = [(g, s)]
+                }
+            }
+            let dests = wormhole ? wormholeDest : game.gateDestinations(from: spob)
             if let d = dests.first { flat += [Int32(sys), Int32(spob.id), Int32(d.systemID), Int32(d.gateSpobID)] }
             if flat.count >= 40 { break }
         }
@@ -3824,6 +3908,11 @@ class NovaWorld: Node2D {
 
     // --- Bar and Holovid ---
 
+    /// The bar window opened: the previous race's winner resets every time the
+    /// services window opens (0x0047c8e0, EC-26), so the repeat-winner
+    /// exclusion lasts only for the visit's bar session.
+    @Callable(autoSnakeCase: true) func barOpened() { gaps.race = RaceSession() }
+
     /// `{text, pict, canHire}` for the Bar screen (`dësc` spöb + 9872).
     @Callable(autoSnakeCase: true) func barInfo() -> String {
         guard let game, let spob = dockedSpob else { return "{}" }
@@ -3965,6 +4054,20 @@ class NovaWorld: Node2D {
         world.player.velocity = Vec2()
         return true
     }
+
+    /// Test seam (EC-04): mark stellar `spobID` dominated, which waives `MinStatus` in the landing ladder.
+    @Callable(autoSnakeCase: true) func debugDominateStellar(spobID: Int) {
+        pilot.dominate(spobID)
+    }
+
+    /// Test seam (UI-06): the stellar the Land key would select with nothing selected
+    /// (`PlayerLanding.nearestTravelStellar`), or -1.
+    @Callable(autoSnakeCase: true) func debugNearestTravelStellar() -> Int {
+        nearestTravelStellar()?.id ?? -1
+    }
+
+    /// Test seam (OS-08): the bomb fuse's current value, or -1 with none aboard.
+    @Callable(autoSnakeCase: true) func debugBombFuse() -> Int { gaps.bombFuse ?? -1 }
 
     // MARK: Story Map (Story Guide)
     //
@@ -5844,6 +5947,82 @@ class NovaWorld: Node2D {
     /// `DescDialogLayout.shrink`: how far a text-only dialog shrinks (may be negative).
     @Callable(autoSnakeCase: true) func descDialogShrink(textHeight: Int, textItemHeight: Int) -> Int {
         DescDialogLayout.shrink(textHeight: textHeight, textItemHeight: textItemHeight)
+    }
+
+    // MARK: Plugin editor test run + debug pick
+    //
+    // Test run swaps the loaded game for the open plug-in's merged view and a throwaway pilot,
+    // the same way training does, then the frontend calls `make_world`. Ending puts the real
+    // game and the real pilot back and does not write a save. `dbg_pick` is the context menu's
+    // non-mutating twin of `click_select`.
+
+    /// True while an editor test run is holding the real pilot.
+    @Callable(autoSnakeCase: true) func editorTesting() -> Bool { editorBackup != nil }
+
+    /// Restore the game and pilot captured by `NovaEditor.beginTest`. False when no test is running.
+    @Callable(autoSnakeCase: true) func editorEndTest() -> Bool {
+        guard let b = editorBackup else { return false }
+        game = b.game
+        galaxy = b.galaxy
+        pilot = b.pilot
+        pilotStarted = b.started
+        pilotSaveID = b.saveID
+        editorBackup = nil
+        world = nil
+        dockedSpobID = nil
+        currentSystemID = nil
+        dataGen += 1
+        return true
+    }
+
+    /// What is under a world point, without changing the selection. JSON
+    /// `{kind: ship|stellar|player|none, id, name}`. Same geometry as `click_select`.
+    @Callable(autoSnakeCase: true) func dbgPick(x: Double, y: Double) -> String {
+        guard let world, dockedSpobID == nil, world.player.isAlive else {
+            return Self.json(["kind": "none", "id": -1, "name": ""] as [String: Any])
+        }
+        let p = Vec2(x, y)
+        if let npc = world.npcs.first(where: { npc in
+            guard npc.isAlive, world.canTarget(npc, by: world.player) else { return false }
+            let half = npc.radius * 2 < 48 ? npc.radius + 16 : npc.radius
+            let d = npc.position - p
+            return abs(d.x) <= half && abs(d.y) <= half
+        }) {
+            return Self.json(["kind": "ship", "id": npc.entityID, "name": npc.name, "ship": npc.shipTypeID] as [String: Any])
+        }
+        let hit = world.systemContext.bodies
+            .filter { (($0.position - p).length) <= $0.radius + 15 }
+            .min { ($0.position - p).length < ($1.position - p).length }
+        if let body = hit {
+            let name = game?.spob(body.id)?.name ?? ""
+            return Self.json(["kind": "stellar", "id": body.id, "name": name] as [String: Any])
+        }
+        if (world.player.position - p).length <= world.player.radius + 24 {
+            return Self.json(["kind": "player", "id": 0, "name": world.player.name] as [String: Any])
+        }
+        return Self.json(["kind": "none", "id": -1, "name": ""] as [String: Any])
+    }
+
+    /// Swap in `resources` (base ⊕ the open plug-in) and a sandbox pilot. The frontend then
+    /// builds the world with `make_world`. False when a test or a training flight is already up.
+    func editorBeginTest(resources: ResourceCollection, baseDir: String, systemID: Int, shipType: Int) -> Bool {
+        guard editorBackup == nil, training == nil else { return false }
+        editorBackup = EditorBackup(game: game, galaxy: galaxy, pilot: pilot, started: pilotStarted, saveID: pilotSaveID)
+        let g = PerfSupport.makeGame(resources, baseDir: URL(fileURLWithPath: baseDir))
+        game = g
+        galaxy = Galaxy(game: g, flightTuning: plumbing.flightTuning)
+        var p = PilotFactory.makeDefault(name: "Editor", isMale: true, game: g)
+        if shipType >= 128 { p.shipType = shipType }
+        if systemID >= 0 { p.currentSystem = systemID }
+        p.landedSpob = nil
+        pilot = p
+        pilotStarted = true
+        pilotSaveID = nil
+        dockedSpobID = nil
+        world = nil
+        currentSystemID = nil
+        dataGen += 1
+        return true
     }
 }
 

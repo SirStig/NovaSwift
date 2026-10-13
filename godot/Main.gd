@@ -48,6 +48,7 @@ const Spaceport = preload("res://screens/Spaceport.gd")     # landing, trade, ou
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")   # Classic UI kit (original ïntf HUD, DLOG/DITL dialogs)
 const AuthenticHUD = preload("res://ui/classic/AuthenticHUD.gd")
 const DevTools = preload("res://debug/DevTools.gd")           # Debug suite (console, tools, bug report)
+const ActionWheel = preload("res://ui/ActionWheel.gd")         # hold-a-button radial menus (ActionWheels.gd)
 const DescMovie = preload("res://ui/DescMovie.gd")             # dësc movies (gate / wormhole entry)
 const FlightRenderer = preload("res://flight/FlightRenderer.gd")   # the world drawn on screen (godot/flight/)
 const UpdaterMode = preload("res://updater/UpdaterMode.gd")        # `-- --updater ...`: this process is the installer
@@ -187,6 +188,16 @@ func _ready() -> void:
 	add_child(_dev)
 	_dev.setup(nova, Callable(self, "_dbg_to_screen"))
 
+	_wheel = ActionWheel.new()   # action wheels: LB / RB / Back hold -> radial menu (taps re-fired on release)
+	add_child(_wheel)
+	_wheel.escort_panel_open = func() -> bool: return nova.escort_panel_open()
+	_wheel.right_inset = func() -> float: return _hud_bar_width()
+	_wheel.avoid_rect = func(vp: Vector2) -> Rect2: return message_rect(vp)
+	_wheel.fired.connect(func(a: String) -> void:
+		if a == "pause_menu" and _can_pause():
+			_shell.open_pause())
+	_wheel.cancelled.connect(func() -> void: _suppressed["fire_secondary"] = true)   # B cancels; it must not fire the secondary
+
 	_start_world()
 	_nav.run_selftest_if_requested()
 
@@ -286,9 +297,14 @@ func _flight_frame(delta: float, sim_ran: bool) -> void:
 	_flight.frame(delta, _hud_bar_width(), sim_ran)
 
 
+var _wheel: Node = null   # ui/ActionWheel.gd
+
 func _process(delta: float) -> void:
 	if nova == null:
 		return
+	if _wheel != null:
+		_wheel.live = false   # re-asserted below only in plain flight
+	_cursor_state(false)   # menus / docked / pause / dialogs / map: the pad cursor may run (flight re-suppresses it below)
 	if _shell.in_menu():
 		$HUD.visible = false
 		_flight.set_active(false)
@@ -337,10 +353,20 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		return
 
+	_cursor_state(true)   # plain flight: A fires, so the gamepad UI cursor stands down
+	if _wheel != null:
+		_wheel.live = true   # the wheel is live in plain flight, paused or not (pausing must not close it)
+		if _wheel.pausing():   # an action wheel is open: the sim holds still (Prefs [wheels] pause)
+			_flight_frame(0.0, false)
+			_drain_events_to_log(0.0)
+			queue_redraw()
+			return
 	nova.set_intent(_held("turn_left"), _held("turn_right"), _held("thrust"), _held("reverse"),
 		_held("afterburner"), _held("fire_primary"), _held("fire_secondary"))
 	nova.set_self_destruct(_held("self_destruct"))   # Alt-−, held: the five-second countdown
 	var aim: float = Controls.aim_heading()
+	if _wheel != null and _wheel.is_open():
+		aim = NAN   # an open wheel owns the right stick (it picks a slot, it doesn't aim)
 	nova.set_aim_heading(not is_nan(aim), 0.0 if is_nan(aim) else aim)
 	nova.step(delta)
 	_check_game_over(delta)
@@ -353,6 +379,17 @@ func _process(delta: float) -> void:
 	_drain_events_to_log(delta)
 	_update_top_label()
 	queue_redraw()
+
+
+## Tells the gamepad UI cursor (ui/PadCursor.gd) who owns the pad: "flight" while flying with the HUD (A fires),
+## "map" while the galaxy map is up (it has its own stick cursor), "intro" while a new pilot's intro plays.
+func _cursor_state(flying: bool) -> void:
+	var pc: Node = get_node_or_null("/root/PadCursor")
+	if pc == null:
+		return
+	pc.set_suppressed("flight", flying)
+	pc.set_suppressed("map", _nav != null and _nav.blocks_flight())
+	pc.set_suppressed("intro", _shell != null and _shell.intro != null)
 
 
 func _on_launch() -> void:

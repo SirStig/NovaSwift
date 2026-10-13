@@ -84,6 +84,7 @@ final class GameHost {
     init(model: AppModel, systemID: Int? = nil, arrivedViaJump: Bool = false) {
         controller = GameControllerInput(input: input)
         controller.bindings = model.padBindings
+        controller.wheels = model.actionWheels
         hudStyle = GameHost.makeHUDStyle(model.data.game, shipType: model.pilot.state.shipType)
         hud.credits = model.pilot.state.credits
         scene.scaleMode = .resizeFill
@@ -505,6 +506,7 @@ final class GameHost {
          prepareScene: ((GameScene) -> Void)? = nil) {
         controller = GameControllerInput(input: input)
         controller.bindings = model.padBindings
+        controller.wheels = model.actionWheels
         self.game = game
         self.galaxy = galaxy
         self.graphics = game.map { SpaceportGraphics(game: $0) }
@@ -725,6 +727,9 @@ struct GameContainerView: View {
     /// Live debug/performance state for this play session, handed to each
     /// `GameScene` the container (re)builds. Persists across host rebuilds.
     @StateObject private var debug = DebugController()
+    /// The controller action wheel (open/closed) — freezes the sim while open
+    /// under Settings ▸ "Pause while an action wheel is open".
+    @ObservedObject private var actionWheel = ActionWheelState.shared
     /// The in-game command console: a typed CLI companion to the debug suite
     /// (log tail + commands), gated by the same debug-mode setting.
     @StateObject private var console = ConsoleController()
@@ -817,9 +822,20 @@ struct GameContainerView: View {
     private let missionSightingHeartbeat = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
     /// The bomb outfits' fuse in 30 Hz ticks (OS-08); nil when none is aboard.
     @State private var bombFuse: Int?
-    /// Stellars whose bribe was accepted since the last jump (EC-25): landing
-    /// is granted there until the player leaves the system.
-    @State private var bribedStellars: Set<Int> = []
+    /// The stellar a paid bribe was settled at (EC-25): the original's approach timer set to
+    /// 0x2ef. One approach, not a permit - the next Land press on any selected body waives
+    /// `MinStatus`, and the press consumes it.
+    /// Held by the scene so coming within 250 px of the stellar can end it (0x00459950).
+    private var bribeWaiverStellar: Int? {
+        get { host?.scene.bribeWaiverStellar }
+        nonmutating set { host?.scene.bribeWaiverStellar = newValue }
+    }
+    /// The stellar whose Land-press ladder (`landingRefusalReason`) already passed, so the
+    /// dock/enter that follows does not run it a second time (0x00457580 runs it once).
+    private var ladderPassedStellar: Int? {
+        get { host?.scene.ladderPassedStellar }
+        nonmutating set { host?.scene.ladderPassedStellar = newValue }
+    }
     /// The per-jump planetary-bribe latch: `Rand(100)` rolled at the first
     /// stellar hail after a jump, −1 until then; a refused or failed bribe
     /// spends it (EC-25).
@@ -956,6 +972,10 @@ struct GameContainerView: View {
                                        onOrder: touchEscortPanel ? { host.scene.escortOrder($0) } : nil)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.top, 60).padding(.leading, 12)
+
+                // Hold-a-button action wheel (pad). Display only; the game keeps
+                // running behind it, as in the original's real-time flight.
+                ActionWheelOverlay(isFlying: flightControlsVisible)
 
                 // Multiplayer session chat — only rendered while a session is
                 // live (started from the in-game menu). Passive cluster; empty
@@ -1449,7 +1469,8 @@ struct GameContainerView: View {
             // whether that's the real reason (redundant delivery) or not.
             guard navReady, newID != hostSystemID else { return }
             hostSystemID = newID
-            bribedStellars = []
+            bribeWaiverStellar = nil
+            ladderPassedStellar = nil
             bribeLatch = -1
             planetPayment = nil
             // The rebuild below touches three different ObservableObjects
@@ -1600,7 +1621,7 @@ struct GameContainerView: View {
         let clearance = LandedServices.landingClearance(
             spob: spob, system: nav.currentSystemID, state: model.pilot.state, game: game,
             diplomacy: host?.galaxy?.makeDiplomacy(), contributedBits: game.contributedBits(pilot: model.pilot.state),
-            bribed: bribedStellars.contains(spob.id))
+            bribed: bribeWaiverStellar != nil)
         return LandedServices.refusalMessage(clearance, spob: spob, game: game)
     }
 
@@ -1629,6 +1650,13 @@ struct GameContainerView: View {
             host?.hud.post(text.misc(73), rawCalls: OriginalText.Duration.landing)
             return
         }
+        // EC-25: a bribe paid at this very stellar (timer >= 0x2ee, still selected) docks without
+        // the +-250 arm when the ship is slow enough and in reach (0x00457580).
+        if bribeWaiverStellar == id, scene.landingRequestID != id {
+            bribeWaiverStellar = nil
+            ladderPassedStellar = id
+            scene.requestLandingClearance(id, clearedNow: true)
+        }
         guard scene.landingRequestID == id else {
             // First press: the request.
             if spob.isUninhabited && !spob.isGate {
@@ -1641,15 +1669,19 @@ struct GameContainerView: View {
             // Clearance reads the per-system reputation, so fold in this
             // session's crimes first (EC-02).
             syncCombatStanding()
-            let refusal = spob.isGate ? nil : landingRefusalReason(spob: spob)
-            let denied = spob.isGate ? !(spob.isWormhole || scene.playerMayUseGate(id)) : refusal != nil
-            if denied {
+            // EC-04/EC-05: gates and wormholes run the same ladder and fee check as a planet
+            // (0x00457580 runs it before the hypergate and wormhole calls too).
+            let refusal = landingRefusalReason(spob: spob)
+            bribeWaiverStellar = nil   // EC-25: the press consumes the approach timer however it ends
+            if let refusal {
                 model.audio.play(.beep2)
-                // An unpayable fee says so (#61–64); otherwise #81–83.
-                host?.hud.post(refusal ?? text.landingDenied(body: body), rawCalls: OriginalText.Duration.landing)
+                // An unpayable fee says so (#61-64); otherwise #81-83.
+                host?.hud.post(refusal, rawCalls: OriginalText.Duration.landing)
                 scene.clearTravelSelection()
+                ladderPassedStellar = nil
                 return
             }
+            ladderPassedStellar = id
             if scene.isWithinClearanceRange(id) {
                 scene.requestLandingClearance(id)        // the clearance line follows next frame
                 return
@@ -1712,12 +1744,21 @@ struct GameContainerView: View {
         }
         // A gate isn't a spaceport — landing on it *uses* it. Route gates to gate
         // travel instead of opening the port (and skip the land confirmation).
+        // The ladder ran on the Land press (`ladderPassedStellar`); the autopilot's arrival has
+        // not run it yet, so it runs here (EC-04/EC-05 for gates as well).
+        let ladderDone = ladderPassedStellar == id
+        ladderPassedStellar = nil
         if let game = host?.game, let spob = game.spob(id), spob.isGate {
+            if !ladderDone, let reason = landingRefusalReason(spob: spob) {
+                model.audio.play(.beep2)
+                host?.hud.post(reason)
+                return
+            }
             handleGateLanding(spob)
             return
         }
         // Travel-permit / legal-standing landing clearance (see landingRefusalReason).
-        if let spob = host?.game?.spob(id), let reason = landingRefusalReason(spob: spob) {
+        if !ladderDone, let spob = host?.game?.spob(id), let reason = landingRefusalReason(spob: spob) {
             host?.hud.post(reason)
             return
         }
@@ -1725,45 +1766,49 @@ struct GameContainerView: View {
         else { landedSpobID = id }
     }
 
-    /// Landing on a gate. A wormhole flings you straight through (no choice); a
-    /// hypergate you're cleared for opens its destination map so you can pick a
-    /// jump; one you aren't cleared for just refuses.
+    /// Landing on a gate, after the Land-press ladder passed (EC-04/EC-05). The gate fee is
+    /// taken first, even when the hypergate then does nothing (0x00457580 charges it before
+    /// `Stellar_EnterHypergate` / `Stellar_EnterWormhole`). A wormhole flings you straight
+    /// through (no choice); a hypergate opens its destination map.
     private func handleGateLanding(_ spob: SpobRes) {
         guard let scene = host?.scene else { return }
+        if LandedServices.chargeGateFee(spob: spob, state: &model.pilot.state) > 0 {
+            host?.hud.credits = model.pilot.state.credits
+        }
         if spob.isWormhole {
             beginWormholeTransport(from: spob)
-        } else if scene.playerMayUseGate(spob.id) {
+        } else {
             // A gate with no links does nothing: `Stellar_EnterHypergate`
             // 0x00456480 returns -1 with no message or beep.
             guard !(host?.game?.gateDestinations(from: spob) ?? []).isEmpty else { return }
             scene.activateGate(spob.id)     // light it even if the player never clicked it
             gateMapOrigin = spob.id
-        } else {
-            // Refused: snd 151 + STR# 2002 #81 (hypergate), 0x00457580.
-            model.audio.play(.beep2)
-            if let line = host?.game?.stringList(2002)?.string(at: 81) { host?.hud.post(line) }
         }
     }
 
-    /// A wormhole spits you out at a visible linked wormhole, or a random other
-    /// link-less one if it has no links (OS-06). No destination choice.
+    /// A wormhole's exit draw (`Stellar_EnterWormhole` 0x00456ca0; OS-06, `NovaGame.wormholeExit`):
+    /// a raw HyperLink slot (a hidden system can be chosen, a duplicated slot weighs more), or for
+    /// a link-less wormhole one random other link-less one - and if that draw lands on a refused
+    /// hole the ship stays put. No destination choice.
     private func beginWormholeTransport(from wormhole: SpobRes) {
         guard let game = host?.game else { return }
         let story = StoryEngine(game: game, player: model.pilot.state)
-        let exits = game.wormholeExitCandidates(from: wormhole, currentSystem: nav.currentSystemID,
-                                                isVisible: { story.isSystemVisible($0) })
-        guard let dest = exits.randomElement() else {
-            // Stellar_EnterWormhole 0x00456ca0: no exit — STR# 2002 #84 + " " +
-            // #86, and snd 153.
-            model.audio.play(.beep4)
-            let list = game.stringList(2002)
-            if let a = list?.string(at: 84), let b = list?.string(at: 86) {
-                host?.hud.post(a + " " + b)
+        let outcome = game.wormholeExit(from: wormhole, currentSystem: nav.currentSystemID,
+                                        isVisible: { story.isSystemVisible($0) },
+                                        rand: { Int.random(in: 0..<max(1, $0)) })
+        guard case let .exit(gateSpobID, systemID) = outcome else {
+            if outcome == .unusable {
+                // Stellar_EnterWormhole 0x00456ca0: no exit - STR# 2002 #84 + " " + #86, and snd 153.
+                model.audio.play(.beep4)
+                let list = game.stringList(2002)
+                if let a = list?.string(at: 84), let b = list?.string(at: 86) {
+                    host?.hud.post(a + " " + b)
+                }
             }
             return
         }
         // The movie is keyed to the wormhole's own spöb id (travel mode 2, 0x00456ca0).
-        performGateJump(toSystem: dest.systemID, arriveAtGate: dest.gateSpobID, movieSelection: wormhole.id)
+        performGateJump(toSystem: systemID, arriveAtGate: gateSpobID, movieSelection: wormhole.id)
     }
 
     /// Drive a gate transport through the live scene: it flashes and swaps to
@@ -1822,6 +1867,7 @@ struct GameContainerView: View {
             // days (FL-05); then the original's launch-tail save (UI-01), still
             // docked at this stellar: that's the restore point.
             if let departedSpob { runEscortFleetPass(spobID: departedSpob) }
+            recomputeBombFuse()   // OS-08: launching recomputes derived state, which reseeds the fuse
             payEscorts(periods: 1)
             advanceGameDays(model.pilot.visitDays.departureDays)
             model.pilot.visitDays = SpaceportVisitDays()
@@ -1973,6 +2019,8 @@ struct GameContainerView: View {
         // Selecting a stellar takes the travel channel from an armed jump (UI-06).
         host?.scene.onTravelStellarSelected = { nav.disarmJump() }
         host?.scene.onLandingCleared = { id in postLandingClearance(id) }
+        // A clicked hypergate lights up only when the Land-press ladder would let the ship in.
+        host?.scene.gateClearance = { spob in landingRefusalReason(spob: spob) == nil }
         host?.scene.persGrudgeProvider = { id in model.pilot.state.persHoldsGrudge(id) }
         host?.scene.persMissionAvailableProvider = { pers in
             guard let game = host?.game else { return true }
@@ -2293,6 +2341,7 @@ struct GameContainerView: View {
     /// too), and the mission-offer rolls are drawn afresh (UI-04, OS-14).
     private func storyArrival(in systemID: Int, via hops: [Int] = []) {
         creditSurvivingAuxShips()
+        recomputeBombFuse()   // OS-08: a jump recomputes derived state and reseeds the fuse
         guard let game = model.data.game else {
             model.pilot.state.currentSystem = systemID
             model.pilot.state.exploredSystems.insert(systemID)
@@ -2772,6 +2821,7 @@ struct GameContainerView: View {
         .onAppear { wirePadController(host) }
         .onChange(of: ObjectIdentifier(host.scene)) { wirePadController(host) }
         .onChange(of: model.padBindings) { wirePadController(host) }
+        .onChange(of: model.actionWheels) { wirePadController(host) }
         #if os(macOS)
         // On macOS the flight scene owns the keyboard through one AppKit event
         // monitor rather than SwiftUI focus. It drives every binding — including
@@ -2808,6 +2858,7 @@ struct GameContainerView: View {
     /// safe to call from onAppear and every re-wire trigger.
     private func wirePadController(_ host: GameHost) {
         host.controller.bindings = model.padBindings
+        host.controller.wheels = model.actionWheels
         host.controller.onDiscrete = handleDiscrete
         host.controller.isActive = { flightControlsVisible }
         // While flight owns the sticks (and Ⓐ fires weapons), the UI cursor
@@ -2823,7 +2874,8 @@ struct GameContainerView: View {
     private var sceneFreezingOverlayOpen: Bool {
         landedSpobID == nil
             && (boardManifest != nil || showMissionsPanel || showPilotInfoPanel
-                || showStoryGuide || flightMissionServices.storyText != nil)
+                || showStoryGuide || flightMissionServices.storyText != nil
+                || (actionWheel.openWheel != nil && model.settings.pauseOnActionWheel))
     }
 
     private var flightControlsVisible: Bool {
@@ -2981,6 +3033,12 @@ struct GameContainerView: View {
     /// a nonlethal one (ModType 50) throws all its units overboard, plays spöb
     /// impact effect `ModVal − 128` and deals armor-only damage
     /// `armor + rand(armor × 0.5 + 1)` of the hull's base armor.
+    /// `Outfit_RecomputeOutfitDerivedState` (0x0046d4b0) reseeds a bomb's fuse (OS-08).
+    private func recomputeBombFuse() {
+        guard let game = host?.game ?? model.data.game else { return }
+        HazardOutfits.recompute(fuse: &bombFuse, pilot: model.pilot.state, game: game)
+    }
+
     private func checkHazardOutfits(_ host: GameHost) {
         guard let game = host.game else { return }
         switch HazardOutfits.tick(fuse: &bombFuse, pilot: &model.pilot.state, ship: host.scene.playerShip, game: game) {
@@ -3005,6 +3063,7 @@ struct GameContainerView: View {
     /// safe to call after any purchase regardless of what changed.
     private func syncHUDFromPilotState() {
         guard let host, let galaxy = host.galaxy, let game = host.game else { return }
+        recomputeBombFuse()   // OS-08: a purchase/sale recomputes derived state
         let state = model.pilot.state
         host.hud.credits = state.credits
         let res = game.ship(state.shipType)
@@ -3876,9 +3935,8 @@ struct GameContainerView: View {
             state.responseText = text
             hailDialogState = state
         case let .paid(_, hudLine):
-            // Paid: landing is granted until the player leaves the system, and
-            // the comm window closes.
-            bribedStellars.insert(spobID)
+            // Paid: the comm window closes.
+            bribeWaiverStellar = spobID   // one approach: the next Land press waives MinStatus (EC-25)
             host?.hud.post(hudLine)
             hailDialogState = nil
         }

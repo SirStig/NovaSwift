@@ -12,4 +12,5 @@ import SwiftGodot
     NovaWorld.self,
     NovaDebug.self,
     NovaPlugins.self,
+    NovaEditor.self,
 ])

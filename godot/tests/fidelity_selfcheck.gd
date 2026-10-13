@@ -53,6 +53,7 @@ func _run() -> void:
 	_test_planet_select_and_land()
 	_test_refusal_and_bribe()
 	_test_gate()
+	_test_nearest_stellar()
 	_test_find()
 	_test_death_bursts()
 	_test_escorts()
@@ -220,6 +221,12 @@ func _test_refusal_and_bribe() -> void:
 		nova.debug_select_stellar(spob)
 		r = _json(nova.press_land())
 		var after := _drain()
+		if r["result"] == "landed" and nova.is_landed():
+			# EC-25: the paid bribe is one approach - the next press docks without the +-250 arm.
+			_check("a paid bribe lets the next press dock", nova.landed_spob_id() == spob)
+			done = true
+			nova.launch()
+			break
 		if nova.selected_stellar_id() == -1:
 			continue   # the bribe did not take for this one; try the next candidate
 		_check("after the bribe the request is granted", nova.selected_stellar_id() == spob)
@@ -260,7 +267,14 @@ func _test_gate() -> void:
 	var deny_msgs := _drain()
 	print("  fresh pilot at the gate: ", deny_msgs)
 	_check("a gate refuses a pilot without standing", denied["result"] == "messages" and nova.selected_stellar_id() == -1)
+	# EC-04: MinStatus 32767 is never met by standing alone - the gate runs the planet ladder, so a liked pilot is
+	# refused too, and only a waiver in the ladder (here: domination) opens it.
 	nova.debug_set_reputation(100)
+	nova.debug_select_stellar(gate)
+	denied = _json(nova.press_land())
+	_drain()
+	_check("a liked pilot is still refused at a MinStatus 32767 gate", denied["result"] == "messages" and nova.selected_stellar_id() == -1)
+	nova.debug_dominate_stellar(gate)
 	nova.debug_select_stellar(gate)
 	var fuel_before: float = nova.player_fuel_fraction()
 	var r = _json(nova.press_land())
@@ -285,14 +299,33 @@ func _test_gate() -> void:
 		nova.make_world(worms[0])
 		nova.step(1.0 / 30.0)
 		nova.debug_place_player_at_spob(worms[1])
+		nova.debug_dominate_stellar(worms[1])   # a wormhole shares the ladder (EC-04); waive MinStatus
 		nova.debug_select_stellar(worms[1])
 		nova.press_land()
 		nova.step(1.0 / 30.0)
 		r = _json(nova.press_land())
 		print("  wormhole: ", r)
-		_check("a wormhole transports", r["result"] == "transported" and nova.nav_current_system() != worms[0])
+		# OS-06: the draw may stay put (a refused hole) or be unusable; a transport must leave the system.
+		_check("a wormhole transports or refuses cleanly", (r["result"] == "transported" and nova.nav_current_system() != worms[0])
+			or r["result"] == "messages" or r["result"] == "none")
 	else:
 		print("  (no independent wormhole in this data)")
+
+
+# --- UI-06: the Land key's nearest search ----------------------------------------------
+
+func _test_nearest_stellar() -> void:
+	print("-- nearest travel stellar")
+	var gates: PackedInt32Array = nova.debug_gates(false)
+	if gates.size() < 4:
+		print("  (no hypergate in this data)")
+		return
+	nova.make_world(gates[0])
+	nova.step(1.0 / 30.0)
+	nova.debug_place_player_at_spob(gates[1])
+	var near: int = nova.debug_nearest_travel_stellar()
+	print("  nearest travel stellar at the gate: ", near)
+	_check("the Land search returns a nav stellar or none", near == -1 or near > 0)
 
 
 # --- 5. the map's Find ------------------------------------------------------------

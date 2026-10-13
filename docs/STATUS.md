@@ -13,7 +13,7 @@ die with the original's consequences. Plug-ins and total conversions load in the
 original's order.
 
 Gameplay has been checked against the original executable, system by system.
-After a later re-read, 16 of the plan's 179 items are open again (see below).
+After a later re-read, 16 of the plan's 179 items were reopened; all 16 are now implemented in code and awaiting build and test (see below).
 Original behaviour is the default. The Linux/Windows frontend plays through on
 macOS and is partway done; its status table is under
 [Linux and Windows](#linux-and-windows). The auto-updater and the packaging
@@ -45,7 +45,7 @@ generator, thrust and top speed, the control-bit test and set interpreters), the
 original routine was run on its own in an emulator and NovaSwift was tested
 against its output.
 
-The plan has 179 items in eight areas. 163 are done. 16 are open: a later read of the executable reopened items whose heading said done, and added EC-27 and EC-28.
+The plan has 179 items in eight areas. 163 are done. 16 are still marked **OPEN**: a later read of the executable reopened items whose heading said done, and added EC-27 and EC-28. As of 2026-10-13 all 16 are implemented in both apps but not yet built or tested, so their headings stay **OPEN** until the maintainer tests them.
 
 | Area | Items | Open |
 |---|---:|---:|
@@ -58,7 +58,28 @@ The plan has 179 items in eight areas. 163 are done. 16 are open: a later read o
 | Player-facing rules: map, targeting, HUD, keys, saving (UI) | 18 | 1 |
 | Data loading (LD) | 2 | 0 |
 
-Open: OS-06, EC-04, EC-05, EC-07, EC-09, EC-10, EC-11, EC-12, EC-25, EC-26, OS-08, AI-44, UI-06, MS-19, EC-27, EC-28. The first paragraph under an open heading is the current gap. An older Done paragraph under the same heading is historical.
+Open: OS-06, EC-04, EC-05, EC-07, EC-09, EC-10, EC-11, EC-12, EC-25, EC-26, OS-08, AI-44, UI-06, MS-19, EC-27, EC-28. Each has a "Status 2026-10-13" line saying what was implemented and that it awaits build and test; the "Still open" paragraph under it describes the gap that code was written to close. An older Done paragraph under the same heading is historical.
+
+Implemented 2026-10-13, awaiting build and test (written in code, not compiled or run):
+
+- OS-06: wormhole exit draw (`NovaGame.wormholeExit`, `SpobRes.hyperLinkSlots`). Stock wormhole HyperLink use is still unmeasured.
+- EC-04: landing clearance now serves hypergates and wormholes; the invented gate permission helper is gone.
+- EC-05: the landing fee is charged at gate entry, even when the hypergate then does nothing (`LandedServices.chargeGateFee`).
+- EC-07: sell refusals follow the original (half price for units owned when the outfitter opened, full refund for units bought this visit).
+- EC-09: stock fittings from the hull are tracked as a separate bank. This adds a `stockBank` field to the pilot save; old saves decode without it and treat everything as owned.
+- EC-10: rank privilege bits (Flags 0x0100/0x0200) spread over allied governments, derelicts excluded.
+- EC-11: a cancelled ship purchase no longer redraws the daily BuyRandom roll.
+- EC-12: RequireGovt waiver scopes skip the bit test and allow the buy; owning one no longer short-circuits the lock state.
+- AI-44: the hail beep follows the original cloak visibility threshold.
+- EC-25: a bribe is one approach, not a permit (`bribeWaiverStellar`). Two recorded deviations: the waiver applies to a selected hypergate, and the hypergate fee is charged before the map opens.
+- EC-26: the bar's previous gambling winner resets when the bar opens.
+- EC-27: commodity overflow shrinks the six ordinary bins (`shrinkCargoToCapacity`).
+- EC-28: chart, paint, amnesty and Flags 0x0010 limits last for the visit.
+- OS-08: bomb fuse is reseeded on every recompute; a lethal bomb outranks a nonlethal one.
+- MS-19: random cargo quantity uses the original's `floor` for negative values.
+- UI-06: Land with no selection picks the nearest travel stellar the way the original does (16 nav slots, gate radius 500 px).
+
+After the maintainer's build and test, each heading flips to DONE and the grid is regenerated; if every item holds, the expected result is 671 of 671 gameplay functions green or teal, with no amber.
 
 A few done items left a small piece for later. These are the same on the Apple
 app and the Godot frontend, because both call the shared engine. The closing passes
@@ -126,7 +147,7 @@ One square per function in the EV Nova CE executable, grouped by subsystem.
 | Outline | Gameplay code whose role is still unknown. |
 | Dark grey | Nothing to port: C runtime, QuickTime, image and audio libraries, networking, blitters, Windows glue, the shareware nag, plus drawing and debug plumbing found during checking. |
 
-The grid was redrawn after the 16 items were reopened. Rule, reproducible with
+The grid was redrawn after the 16 items were reopened, and has not changed since: the amber squares stay amber until the items are tested and their headings flip to DONE. Rule, reproducible with
 `python3 scripts/reopen-progress.py`: a function that was green, is cited by at
 least one plan item, and is cited by no item marked **DONE** is amber. The 16 open
 items are the ones whose heading is not **DONE** in the plan. Functions confirmed
@@ -136,7 +157,7 @@ by the line-by-line comparison (no citing item) stay green.
 0 blue, 2,515 dark grey. Of the 697 gameplay functions, 504 are green, 24 teal
 (NovaSwift's own save format, input layer, frame loop, and SwiftUI lists and
 dialogs), 15 amber, and 154 drawing or debug plumbing. The 15 amber functions are
-the ones only EC-07, EC-09, EC-10, EC-11, EC-12, EC-26, EC-28, MS-19, OS-06 and UI-06 cite. The other
+the ones only EC-07, EC-09, EC-10, EC-11, EC-12, EC-26, EC-28, MS-19, OS-06 and UI-06 cite. All of those fixes are now written in code and awaiting build and test, so amber here means "fix written, not yet verified". The other
 open items cite functions that other, finished items also cite, so those squares
 stay green: green means "matched when compared", and an open item can concern only
 one slice of a function. The tooltips list each square's citing items, taken from
@@ -237,7 +258,7 @@ None of these change the game's rules:
 
 ## Linux and Windows
 
-The Godot frontend ([GODOT_LAYER.md](GODOT_LAYER.md)) runs the same engine and calls the same Swift helpers as the Apple app, so wherever a helper still differs from the executable, the open plan items apply on both frontends (EC-04, EC-05, EC-25, OS-06, EC-26, OS-08, UI-06). This section is only about frontend wiring. The row-by-row list is [GODOT_FIDELITY_GAPS.md](GODOT_FIDELITY_GAPS.md).
+The Godot frontend ([GODOT_LAYER.md](GODOT_LAYER.md)) runs the same engine and calls the same Swift helpers as the Apple app, so wherever a helper still differs from the executable, the open plan items apply on both frontends. The fixes for EC-04, EC-05, EC-25, OS-06, EC-26, OS-08 and UI-06 are written in both apps and in the Godot bridge, awaiting build and test. This section is only about frontend wiring. The row-by-row list is [GODOT_FIDELITY_GAPS.md](GODOT_FIDELITY_GAPS.md).
 
 Packaging (local, no CI; see [PACKAGING.md](PACKAGING.md)): the macOS arm64 app is exported, ad-hoc signed and loads the extension headless. The Linux x86_64 / Steam Deck tarball is built in a `swift:6.3-jammy` container (`scripts/package-linux-docker.sh`), needs glibc 2.35 at most, resolves every library, and in a clean Ubuntu 22.04 container the exported binary loads the extension and parses the game data headless. It has not been run on a real Steam Deck or with a GPU. The Windows package script (`scripts/package-windows.ps1`) is written but has not been run: it needs a Windows PC with the Swift toolchain. No flight visual has been checked on a real GPU on any of these. The local container runtime is Colima (vz with Rosetta); there is no GitHub CI.
 
@@ -247,6 +268,7 @@ Auto-updater ([UPDATER.md](UPDATER.md), `godot/updater/`): built. A signing key 
 |---|---|
 | Flight, HUD, radar, targeting, landing, spaceport, story runtime, pilots, gamepad | Done, run on macOS |
 | Live-world wiring (combat rating, scooping, përs spawn gating, pirates boarding the player, defence persistence, bombs, Strict Play) | Done and self-checked (package A) |
+| Gate and wormhole clearance, fee and exit draw, bribe waiver, bar gambling reset, outfitter bank and visit-scoped items, nearest-stellar Land, bomb fuse, rank privileges (OS-06, EC-04, EC-05, EC-09, EC-10, EC-25, EC-26, EC-28, OS-08, UI-06) | Written 2026-10-13, not yet built or run (`godot/tests/fidelity_selfcheck.gd`, `gameplay_gaps_selfcheck.gd`) |
 | Status line, messages, HUD icons | Done and self-checked (package B) |
 | Controls and targeting checklist, performance (release bridge, sprite cache and prewarm, asteroid layout) | Done |
 | Plug-ins: all 13 catalog plug-ins load with the same counts as the shared merge and pass `scripts/plugins-check.sh` | Done |
@@ -265,7 +287,7 @@ Auto-updater ([UPDATER.md](UPDATER.md), `godot/updater/`): built. A signing key 
 
 ## Known gaps
 
-- The 16 open plan items listed above.
+- The 16 open plan items listed above: implemented 2026-10-13, awaiting build and test. EC-09 adds a `stockBank` field to the pilot save (old saves still load).
 - The deferred pieces listed above (UI-15's map cycling inference, AI-12, FL-23) and the closing-pass work that is written but not yet built.
 - Open questions in §6 of the fidelity plan.
 - Apple app, found against the decompile and fixed 2026-10-13 (written, not yet built): the Classic status-message rectangle, title music scaled by the volume step twice, the ambient and quick-hyperjump loops scaled by the Effects slider twice, and the ambient check (`>= 128`). The newest total-conversion and gate-movie edits were built and tested on macOS.

@@ -90,7 +90,7 @@ final class OutfitAcquisitionTests: XCTestCase {
     /// chart per pilot per game: bought once at Earth, greyed out at every other
     /// world forever (exactly what a tester hit). Buying consumes it instead; the
     /// reveal it paid for is already permanent in `chartedSystems`.
-    func testChartIsConsumedOnPurchaseSoItCanBeBoughtAgainElsewhere() {
+    func testChartLastsTheVisitThenCanBeBoughtAgainElsewhere() {
         var col = ResourceCollection()
         col.add(system(128, links: [129]))
         col.add(system(129, links: [128, 130]))
@@ -109,18 +109,25 @@ final class OutfitAcquisitionTests: XCTestCase {
         var player = PlayerState(credits: 10_000, currentSystem: 128)
         XCTAssertTrue(PilotEconomy.buyOutfit(&player, chart, galaxy: galaxy))
         XCTAssertEqual(player.credits, 9_000)
-        XCTAssertNil(player.outfits[500], "a chart is a service, not an item in the hold")
+        XCTAssertEqual(player.outfits[500], 1, "EC-28: the chart is real inventory for the rest of the visit")
         XCTAssertEqual(player.chartedSystems, [128, 129])
+        XCTAssertFalse(PilotEconomy.canBuyOutfit(player, chart, galaxy: galaxy),
+                       "a second chart is refused for the rest of the visit (DAT_007d4c08)")
 
-        // …and the next port sells one again, revealing its own neighbourhood.
+        // Leaving the outfitter zeroes it; the next landing is a new visit, and
+        // the next port sells one again, revealing its own neighbourhood.
+        PilotEconomy.closeOutfitter(&player, game: game)
+        XCTAssertNil(player.outfits[500])
+        PilotEconomy.beginVisit(&player)
         player.currentSystem = 129
         XCTAssertTrue(PilotEconomy.canBuyOutfit(player, chart, galaxy: galaxy),
                       "Max 1 must not lock a pilot out of every later chart")
         XCTAssertTrue(PilotEconomy.buyOutfit(&player, chart, galaxy: galaxy))
         XCTAssertEqual(player.chartedSystems, [128, 129, 130])
 
-        // One per transaction: a consumed item never accumulates, so a bulk
-        // "buy 50" would otherwise charge fifty times for one reveal.
+        // One per visit: a bulk "buy 50" stops at the latch.
+        PilotEconomy.closeOutfitter(&player, game: game)
+        PilotEconomy.beginVisit(&player)
         player.currentSystem = 130
         XCTAssertEqual(PilotEconomy.buyOutfit(&player, chart, count: 50, galaxy: galaxy), 1)
         XCTAssertEqual(player.credits, 7_000)

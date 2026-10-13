@@ -27,7 +27,7 @@ extension NovaGame {
     /// the shipyard even after the player earned the rank).
     public func contributedBits(pilot: PlayerState) -> UInt64 {
         var bits: UInt64 = ship(pilot.shipType)?.contribute ?? 0
-        for (outfitID, qty) in pilot.outfits where qty > 0 {
+        for (outfitID, qty) in pilot.ownedOutfits where qty > 0 {
             bits |= outfit(outfitID)?.contribute ?? 0
         }
         for rankID in pilot.activeRanks {
@@ -39,24 +39,25 @@ extension NovaGame {
         return bits
     }
 
-    /// Whether `outfit` may be bought *at this spöb* per its `RequireGovt`
-    /// band (Bible: -1 everywhere; 128-383 this govt/allies only; 1128-1383 +
-    /// independent; 2128-2383 all-but; 3128-3383 all-but + independent).
-    /// In 0x00491950 a value inside one of the four bands skips the bit test
-    /// when the port is outside that band, and the buy is allowed. A value
-    /// outside every band, and any value while not docked, is always enforced.
-    /// A false result here is ANDed into a failed require, so a skip becomes
-    /// a lock (EC-12).
-    private func requireGovtApplies(_ requireGovt: Int, at spob: SpobRes, diplomacy: Diplomacy) -> Bool {
-        guard requireGovt >= 0 else { return true }
-        let scopeGovt = requireGovt % 1000
-        let independent = spob.government < 0
-        let hereOrAlly = spob.government == scopeGovt || diplomacy.areAllied(spob.government, scopeGovt)
+    /// Whether the Require bits are **enforced** for an outfit with `RequireGovt` at this spöb
+    /// (`NovaLanded_CanBuyOutfit` 0x00491950; EC-12). The value is a band of resource ids:
+    /// 128-383 enforce only at that government or an ally; 1128-1383 also at an independent
+    /// port; 2128-2383 waive at that government or an ally and enforce everywhere else,
+    /// independent included; 3128-3383 also waive at an independent port. Outside every band
+    /// (−1 and negatives included) the bits are always enforced. Alliance is
+    /// `Government_AreGovtsAllied` 0x0046bc90 (`GovtRelations.allied`: never a derelict
+    /// government). Inside a waived scope the bit test is skipped and the buy is allowed.
+    func requireBitsEnforced(_ requireGovt: Int, at spob: SpobRes) -> Bool {
+        let table = RankPrivilege.govtTable(self)
+        let independent = spob.government == -1
+        func hereOrAlly(_ g: Int) -> Bool {
+            spob.government == g || (!independent && GovtRelations.allied(spob.government, g, govts: table))
+        }
         switch requireGovt {
-        case 128...383:   return hereOrAlly
-        case 1128...1383: return independent || hereOrAlly
-        case 2128...2383: return !hereOrAlly
-        case 3128...3383: return !(independent || hereOrAlly)
+        case 128...383:   return hereOrAlly(requireGovt - 128)
+        case 1128...1383: return independent || hereOrAlly(requireGovt - 1128)
+        case 2128...2383: return !hereOrAlly(requireGovt - 2128)
+        case 3128...3383: return !(independent || hereOrAlly(requireGovt - 3128))
         default:          return true
         }
     }
@@ -67,7 +68,7 @@ extension NovaGame {
         // ("can be sold anywhere, regardless of tech level, requirements, or
         // mission bits") — it does not waive the buy-side Require/Availability
         // gate here. See OUTFITTERS.md §3.5.
-        if pilot.hasOutfit(item.id) { return .available }
+        // Owning one does not skip tech, Require or Availability (0x00491950; EC-12).
         let availOK = outfitAvailabilityPasses(item, pilot: pilot)
         let requireOK = outfitRequirePasses(item, pilot: pilot, at: spob, diplomacy: diplomacy)
         if availOK && requireOK { return .available }
@@ -79,10 +80,11 @@ extension NovaGame {
         NCBTest(item.availBits).evaluate(pilot)
     }
 
-    /// The outfit's Require test: its `RequireGovt` scope and Require bits.
+    /// The outfit's Require test: the bits must be held unless the `RequireGovt` scope waives
+    /// them at this port (a waived scope allows the buy; EC-12).
     public func outfitRequirePasses(_ item: OutfRes, pilot: PlayerState, at spob: SpobRes, diplomacy: Diplomacy) -> Bool {
-        requireGovtApplies(item.requireGovt, at: spob, diplomacy: diplomacy)
-            && (item.require & contributedBits(pilot: pilot)) == item.require
+        !requireBitsEnforced(item.requireGovt, at: spob)
+            || (item.require & contributedBits(pilot: pilot)) == item.require
     }
 
     /// Lock state for a ship class (no documented `RequireGovt` for ships —

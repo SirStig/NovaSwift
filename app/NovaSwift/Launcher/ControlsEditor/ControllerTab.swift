@@ -17,6 +17,9 @@ struct ControllerTab: View {
     let onActionTap: (GameAction) -> Void
     let onUnbind: (GameAction) -> Void
 
+    private enum SidePage: String, CaseIterable { case buttons = "Buttons", wheels = "Action Wheels" }
+    @State private var page: SidePage = .buttons
+
     private var detected: PadStyle? { pad == nil ? nil : PadStyle.detect(GCController.active) }
     private var style: PadStyle { prefs.padStyle ?? detected ?? .xbox }
 
@@ -42,7 +45,19 @@ struct ControllerTab: View {
                 CategoryLegend()
             }
         } side: {
-            ActionListPanel(bindingText: { a in
+            VStack(spacing: 8) {
+                NovaSegmentedPicker(selection: $page, options: SidePage.allCases) { $0.rawValue }
+                if page == .wheels {
+                    ActionWheelsEditor(pad: pad)
+                } else {
+                    actionList
+                }
+            }
+        }
+    }
+
+    private var actionList: some View {
+        ActionListPanel(bindingText: { a in
                 guard let b = bindings.button(for: a) else { return nil }
                 return detected == style ? b.displayName(on: pad) : style.name(b)
             }, symbol: { a in bindings.button(for: a)?.symbolName(on: pad) },
@@ -52,7 +67,6 @@ struct ControllerTab: View {
                onTap: onActionTap, onUnbind: onUnbind) {
                 inspector
             }
-        }
     }
 
     @ViewBuilder

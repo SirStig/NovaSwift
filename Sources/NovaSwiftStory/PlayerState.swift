@@ -571,6 +571,38 @@ public struct PlayerState: Codable, Sendable {
     /// one redraws that class's daily roll. Optional for save-compat.
     public var stockRerolls: StockRerolls? = nil
 
+    /// The stock weapon banks (EC-09): the hull's `WeapType` armament and
+    /// `AmmoLoad` rounds as `oütf` id → count. The loader (0x004b3350) puts them
+    /// in the weapon banks, not in the owned outfits; the outfitter promotes
+    /// leftover bank counts onto the first matching outfit when it opens
+    /// (0x00462ec0). `outfits` still lists them (it is the flown inventory), but
+    /// they are not *owned*: no trade-in, no Contribute, nothing to sell, until
+    /// `promoteStockBank`. Optional for save-compat: a pilot saved before this
+    /// has no bank, so everything in `outfits` is owned, as before.
+    public var stockBank: [Int: Int]? = nil
+    /// `DAT_007d4c08`: a chart (ModType 16) was bought this visit; another is
+    /// refused until the next landing (0x00491950, EC-28).
+    public var visitChartBought: Bool? = nil
+    /// `DAT_007d4c09`: a clean-record outfit (ModType 21) was bought this visit.
+    public var visitAmnestyBought: Bool? = nil
+
+    /// How many of `outfits[id]` are still unpromoted stock in the bank.
+    public func bankedCount(_ id: Int) -> Int { min(stockBank?[id] ?? 0, outfits[id] ?? 0) }
+    /// Units of `id` the player actually owns (inventory less the bank).
+    public func ownedCount(_ id: Int) -> Int { max(0, (outfits[id] ?? 0) - bankedCount(id)) }
+    /// `outfits` less the bank: what the trade-in, Contribute and the NCB see.
+    public var ownedOutfits: [Int: Int] {
+        guard let bank = stockBank, !bank.isEmpty else { return outfits }
+        var out: [Int: Int] = [:]
+        for (id, n) in outfits {
+            let owned = n - min(bank[id] ?? 0, n)
+            if owned > 0 { out[id] = owned }
+        }
+        return out
+    }
+    /// The outfitter opening promotes every leftover bank count to an owned outfit.
+    public mutating func promoteStockBank() { stockBank = nil }
+
     public init(pilotName: String = "Captain",
                 isMale: Bool = true,
                 shipType: Int = 128,
@@ -763,7 +795,7 @@ public struct PlayerState: Codable, Sendable {
 
 extension PlayerState: NCBTestContext {
     public func isBitSet(_ n: Int) -> Bool { setBits.contains(n) }
-    public func hasOutfit(_ id: Int) -> Bool { (outfits[id] ?? 0) > 0 }
+    public func hasOutfit(_ id: Int) -> Bool { ownedCount(id) > 0 }
     /// NCB `E`: the system's discovery level is above 0 — visited, revealed by
     /// a mission `X`, or charted by a map outfit (UI-04).
     public func isSystemExplored(_ id: Int) -> Bool {

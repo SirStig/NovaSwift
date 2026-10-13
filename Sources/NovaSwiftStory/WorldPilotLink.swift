@@ -30,10 +30,9 @@ public enum WorldPilotLink {
         dip.seed(reputation: pilot.systemReputation ?? [:])
         // Ranks with "govt won't attack" (Flags 0x0100) shield the player
         // from that government's ships for as long as the rank is held.
-        dip.rankProtectedGovts = Set(pilot.activeRanks
-            .compactMap { game.rank($0) }
-            .filter { $0.govtWontAttack && $0.govt >= 128 }
-            .map { $0.govt })
+        // EC-10: the flag is rebuilt for every government allied with the rank's (0x0046bc90).
+        dip.rankProtectedGovts = RankPrivilege.governments(with: RankPrivilege.wontAttack,
+                                                           activeRanks: pilot.activeRanks, game: game)
         // Every active rank's flags: the ship comm window reads 0x0400 / 0x0800
         // from ranks allied with the hailed ship (AI-42).
         dip.activeRankFlags = pilot.activeRanks.sorted()
@@ -201,19 +200,36 @@ public enum HazardOutfits {
         case nonlethal(outfitID: Int, boomID: Int?, line: String)
     }
 
+    /// The bomb that will go off (OS-08, 0x0046d4b0): ModType 47 sets class 1 (lethal); ModType 50 is
+    /// class 2 only while the class is still below 1, so a lethal bomb aboard wins whatever the
+    /// outfit ids. Within a class the lowest outfit id.
+    static func activeBomb(pilot: PlayerState, game: NovaGame) -> (OutfRes, Int, Bool)? {
+        var nonlethal: (OutfRes, Int, Bool)?
+        for oid in pilot.outfits.filter({ $0.value > 0 }).keys.sorted() {
+            guard let o = game.outfit(oid) else { continue }
+            for (type, value) in o.modifiers {
+                if type == .bomb { return (o, value, true) }
+                if type == .nonlethalBomb, nonlethal == nil { nonlethal = (o, value, false) }
+            }
+        }
+        return nonlethal
+    }
+
+    /// `Outfit_RecomputeOutfitDerivedState` 0x0046d4b0 (OS-08): every recompute with a bomb aboard
+    /// zeroes the timer and, because it is then at or below 0.0, reseeds `rand(100)`. The fuse is
+    /// therefore not kept across the events that recompute (a purchase or sale, launching, jumping,
+    /// boarding). Without a bomb the class is 0 and the timer clears. Hosts call this wherever the
+    /// original recomputes; `tick` still seeds a fuse when none was ever drawn.
+    public static func recompute(fuse: inout Int?, pilot: PlayerState, game: NovaGame,
+                                 rand: (Int) -> Int = { Int.random(in: 0..<$0) }) {
+        fuse = activeBomb(pilot: pilot, game: game) == nil ? nil : rand(100)
+    }
+
     /// Advance one 30 Hz tick of the fuse. `fuse` is the host's persisted counter (nil = no
     /// bomb aboard). Mutates `pilot.outfits` and the ship when a bomb goes off.
     public static func tick(fuse: inout Int?, pilot: inout PlayerState, ship: Ship?, game: NovaGame,
                             rand: (Int) -> Int = { Int.random(in: 0..<$0) }) -> Outcome {
-        let bombs = pilot.outfits.filter { $0.value > 0 }.keys.sorted().compactMap { oid -> (OutfRes, Int, Bool)? in
-            guard let o = game.outfit(oid) else { return nil }
-            for (type, value) in o.modifiers {
-                if type == .bomb { return (o, value, true) }
-                if type == .nonlethalBomb { return (o, value, false) }
-            }
-            return nil
-        }
-        guard let (outfit, value, lethal) = bombs.first else { fuse = nil; return .none }
+        guard let (outfit, value, lethal) = activeBomb(pilot: pilot, game: game) else { fuse = nil; return .none }
         guard let f = fuse else { fuse = rand(100); return .none }
         guard f >= 300 else { fuse = f + 1; return .none }
         fuse = nil
