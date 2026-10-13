@@ -90,6 +90,8 @@ func show_resource(editor: Object, ty: String, id: int) -> void:
 	if not diff.is_empty():
 		_diff_card(diff)
 	var kind := str(info.get("kind", "form"))
+	if kind == "form" or kind == "text":
+		_previews_card()
 	match kind:
 		"form":
 			_form()
@@ -989,6 +991,148 @@ func _sound() -> void:
 	player.finished.connect(func() -> void:
 		play.text = "Play"
 		EdTheme.set_icon(play, "play.fill", EdTheme.INK))
+
+
+# --- art previews -------------------------------------------------------------------------------
+
+const _ART := ["rlëD", "rlë8", "PICT", "cicn", "ppat"]
+const _FIELD_NAMES := {"type": "Graphic", "graphic": "Graphic", "Shan": "Sprite", "custPicID": "Landing Picture", "Target Pict": "Target Picture", "Shipyard Pict": "Shipyard Picture", "Outfitter Pict": "Outfitter Picture", "graphicIndex": "Graphic"}
+
+
+## Art this record draws with, found through the reference graph (companions + fields):
+## shïp -> shän -> base / glow / light sprites, target & shipyard PICTs; spöb / wëap -> spïn ->
+## sprite; oütf -> outfitter PICT; dësc -> picture; përs / düde -> their ships' sprites.
+func _collect_art(ty: String, id: int, label: String, depth: int, out: Array, seen: Dictionary) -> void:
+	if out.size() >= 8 or depth > 3 or id < 0:
+		return
+	var key := "%s#%d" % [ty, id]
+	if seen.has(key):
+		return
+	seen[key] = true
+	if ty in _ART:
+		out.append({"type": ty, "id": id, "label": label if label != "" else "Sprite"})
+		return
+	if ty == "spïn":
+		var sp: Variant = JSON.parse_string(ed.inspect("spïn", id))
+		if sp is Dictionary:
+			var vals: Dictionary = (sp as Dictionary).get("values", {})
+			var sid := int((vals.get("spriteID", {}) as Dictionary).get("v", -1))
+			var probe: Variant = JSON.parse_string(ed.inspect("rlëD", sid))
+			var sty := "rlëD" if probe is Dictionary and not (probe as Dictionary).is_empty() else "PICT"
+			_collect_art(sty, sid, label, depth + 1, out, seen)
+		return
+	if ty not in ["shïp", "shän", "spöb", "wëap", "oütf", "përs", "düde", "flët", "gövt", "bööm", "röid", "nëbu", "jünk", "chär"] and depth > 0:
+		return
+	var parsed: Variant = JSON.parse_string(ed.references(ty, id))
+	if not parsed is Dictionary:
+		return
+	for u in (parsed as Dictionary).get("uses", []):
+		var uty := str(u.get("type", ""))
+		var field := str(u.get("field", ""))
+		if field.to_lower().contains("mask"):
+			continue
+		# Name art by the field that points at it ("Base Sprite", "Shipyard Pict"); when we came
+		# through a person / fleet, prefix the ship's name. shän passes the prefix down unchanged.
+		var prefix := label if ty in ["shïp", "shän"] else ""
+		var nice := label if uty == "shän" else ((prefix + " · " if prefix != "" else "") + str(_FIELD_NAMES.get(field, field.capitalize())))
+		if uty == "shän" or uty == "spïn" or uty in _ART:
+			_collect_art(uty, int(u.get("id", -1)), nice, depth + 1, out, seen)
+		elif depth == 0 and uty == "shïp" and ty in ["përs", "düde", "flët"]:
+			_collect_art(uty, int(u.get("id", -1)), str(u.get("name", "Ship")), depth + 1, out, seen)
+	if ty == "dësc":
+		var pic := int((info.get("text", {}) as Dictionary).get("picture", 0))
+		if pic > 0:
+			_collect_art("PICT", pic, "Picture", depth + 1, out, seen)
+
+
+func _previews_card() -> void:
+	if ed == null:
+		return
+	var art: Array = []
+	_collect_art(type_code, res_id, "", 0, art, {})
+	if art.is_empty():
+		return
+	var card := EdTheme.card(14)
+	add_child(card)
+	var body := EdTheme.card_body(card)
+	var head := EdTheme.hbox(8)
+	head.add_child(EdTheme.icon_rect("photo", 14, EdTheme.SECONDARY))
+	head.add_child(EdTheme.label("Artwork", 12, EdTheme.SECONDARY, "semibold"))
+	head.add_child(EdTheme.spacer())
+	head.add_child(EdTheme.label("Click a tile to open it", 11, EdTheme.TERTIARY))
+	body.add_child(head)
+	var flow := HFlowContainer.new()
+	flow.add_theme_constant_override("h_separation", 10)
+	flow.add_theme_constant_override("v_separation", 10)
+	body.add_child(flow)
+	var animated := false
+	for a in art:
+		var aty := str(a.get("type", ""))
+		var aid := int(a.get("id", -1))
+		var gi: Variant = JSON.parse_string(ed.graphic_info(aty, aid))
+		var meta: Dictionary = gi if gi is Dictionary else {}
+		var frames := int(meta.get("frames", 0))
+		if frames == 0 and not bool(meta.get("png", false)):
+			continue
+		var tile := EdTheme.row_button(func() -> void: navigate.emit(aty, aid))
+		tile.add_theme_stylebox_override("normal", T.box(Color(0, 0, 0, 0.25), 10, EdTheme.CARD_LINE, 1))
+		tile.add_theme_stylebox_override("hover", T.box(EdTheme.SELECT, 10, Color(EdTheme.AMBER.r, EdTheme.AMBER.g, EdTheme.AMBER.b, 0.4), 1))
+		tile.tooltip_text = "%s #%d  ·  %s" % [aty, aid, "%d frames" % frames if frames > 1 else "%d × %d" % [int(meta.get("w", 0)), int(meta.get("h", 0))]]
+		var v := EdTheme.vbox(4)
+		var view := Previews.GraphicView.new()
+		view.custom_minimum_size = Vector2(150, 130)
+		view.size_flags_horizontal = Control.SIZE_FILL
+		view.fixed = true
+		v.add_child(view)
+		var cap := EdTheme.label(str(a.get("label", aty)), 11, EdTheme.TEXT, "medium")
+		cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		cap.custom_minimum_size.x = 150
+		cap.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		v.add_child(cap)
+		var sub := EdTheme.label("%s #%d" % [aty, aid], 10, EdTheme.TERTIARY)
+		sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		v.add_child(sub)
+		EdTheme.fill_row(tile, v, 6, 6)
+		flow.add_child(tile)
+		var tex := _frame_texture(aty, aid, meta, 0)
+		view.set_texture(tex)
+		# Spin the first multi-frame sprite (ship rotations, stellar turns) so it reads as alive.
+		if frames > 1 and not animated:
+			animated = true
+			var cache: Array = []
+			for f in mini(frames, 72):
+				cache.append(null)
+			cache[0] = tex
+			var st := {"f": 0}
+			var timer := Timer.new()
+			timer.wait_time = 1.0 / 12.0
+			timer.autostart = true
+			tile.add_child(timer)
+			var n := mini(frames, 72)
+			timer.timeout.connect(func() -> void:
+				st["f"] = (int(st["f"]) + 1) % n
+				var fi := int(st["f"])
+				if cache[fi] == null:
+					cache[fi] = _frame_texture(aty, aid, meta, fi)
+				view.set_texture(cache[fi]))
+
+
+func _frame_texture(ty: String, id: int, meta: Dictionary, frame: int) -> Texture2D:
+	var bytes: PackedByteArray = ed.graphic_frame(ty, id, frame)
+	if bytes.is_empty():
+		return null
+	var image: Image
+	if bool(meta.get("png", false)):
+		image = Image.new()
+		if image.load_png_from_buffer(bytes) != OK:
+			return null
+	else:
+		var w := int(meta.get("w", 1))
+		var h := int(meta.get("h", 1))
+		if bytes.size() != w * h * 4:
+			return null
+		image = Image.create_from_data(w, h, false, Image.FORMAT_RGBA8, bytes)
+	return ImageTexture.create_from_image(image)
 
 
 # --- raw bytes & references ---------------------------------------------------------------------

@@ -8,6 +8,7 @@ const EdTheme = preload("res://editor/EditorTheme.gd")
 class GraphicView extends Control:
 	var texture: Texture2D
 	var scale_mode := 0      # 0 = fit, else integer zoom
+	var fixed := false       # keep the given minimum size (thumbnail tiles)
 
 	func _init() -> void:
 		custom_minimum_size = Vector2(0, 260)
@@ -17,13 +18,13 @@ class GraphicView extends Control:
 
 	func set_texture(t: Texture2D) -> void:
 		texture = t
-		if t != null:
+		if t != null and not fixed:
 			var want := float(t.get_height()) * (1.0 if scale_mode == 0 else float(scale_mode)) + 32.0
 			custom_minimum_size.y = clampf(want, 160.0, 640.0)
 		queue_redraw()
 
 	func _draw() -> void:
-		var cell := 10.0
+		var cell := 8.0 if fixed else 10.0
 		var y := 0.0
 		var row := 0
 		while y < size.y:
@@ -39,7 +40,8 @@ class GraphicView extends Control:
 		var ts := Vector2(texture.get_size())
 		var k := 1.0
 		if scale_mode == 0:
-			k = minf((size.x - 24) / maxf(1.0, ts.x), (size.y - 24) / maxf(1.0, ts.y))
+			var pad := 8.0 if fixed else 24.0
+			k = minf((size.x - pad) / maxf(1.0, ts.x), (size.y - pad) / maxf(1.0, ts.y))
 			if k >= 1.0:
 				k = floorf(k)
 		else:

@@ -222,7 +222,6 @@ func _top_bar() -> Control:
 	names.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var title_row := EdTheme.hbox(8)
 	_title = EdTheme.label("Untitled Plug-in", 15, EdTheme.TEXT, "semibold")
-	_title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	title_row.add_child(_title)
 	_dirty_chip = EdTheme.chip("Edited", EdTheme.AMBER)
 	_dirty_chip.tooltip_text = "Unsaved changes"
@@ -296,8 +295,9 @@ func _sidebar() -> Control:
 	v.add_child(_type_search)
 	_type_box = EdTheme.vbox(1)
 	var sc := EdTheme.scroll(_type_box)
-	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(EdTheme.margin(sc, 0, 6, 0, 0))
+	var wrap := EdTheme.margin(sc, 0, 6, 0, 0)
+	wrap.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(wrap)
 	return side
 
 
