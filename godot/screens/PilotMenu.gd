@@ -393,8 +393,8 @@ func _c_new() -> void:
 	var names := []
 	for sc in _scenarios:
 		names.append(str(sc.name))
-	var keep_name := _name_edit.text if is_instance_valid(_name_edit) and _name_edit.is_inside_tree() else _nova.pilot_default_name(0)
-	var keep_nick := _nick_edit.text if is_instance_valid(_nick_edit) and _nick_edit.is_inside_tree() else _nova.pilot_default_name(1)
+	var keep_name: String = _name_edit.text if is_instance_valid(_name_edit) and _name_edit.is_inside_tree() else _nova.pilot_default_name(0)
+	var keep_nick: String = _nick_edit.text if is_instance_valid(_nick_edit) and _nick_edit.is_inside_tree() else _nova.pilot_default_name(1)
 	var me := self
 	var d := ClassicDialog.from_ditl(_nova, 3101 if multi else 3102, {
 		"texts": {NP_NAME: keep_name, NP_NICK: keep_nick},
@@ -441,7 +441,7 @@ func _c_name_ok() -> void:
 
 func _c_start(nm: String, ship_name: String) -> void:
 	var s: Dictionary = _scenarios[_scenario_index]
-	var nick := _nick_edit.text.strip_edges() if is_instance_valid(_nick_edit) else _nova.pilot_default_name(1)
+	var nick: String = _nick_edit.text.strip_edges() if is_instance_valid(_nick_edit) else _nova.pilot_default_name(1)
 	var id: String = _nova.pilot_create_strict(_dir, int(s.id), nm, _is_male, nick,
 		ClassicDialog.prompt_answer(ship_name.strip_edges()), _strict)
 	if id == "":

@@ -7,6 +7,8 @@ extends SceneTree
 const Spaceport = preload("res://screens/Spaceport.gd")
 const StoryScreens = preload("res://screens/StoryScreens.gd")
 const Controls = preload("res://Controls.gd")
+const Prefs = preload("res://Prefs.gd")
+var classic := OS.get_environment("NOVA_UI") != "modern"
 var ok := true
 var launches := 0
 var nova
@@ -50,6 +52,9 @@ func _clear_texts(ss) -> int:
 
 
 func _init() -> void:
+	Prefs.path = OS.get_user_data_dir() + "/menucheck_settings.cfg"
+	Prefs.load_all()
+	Prefs.apply_ui_mode(Prefs.UI_CLASSIC if classic else Prefs.UI_NOVA_SWIFT)
 	Controls.register()
 	nova = ClassDB.instantiate("NovaWorld")
 	root.add_child(nova)
@@ -76,7 +81,7 @@ func _init() -> void:
 
 	# --- landing offer: a modal that owns input
 	if ss._modal != null:
-		_check("offer dialog: a button has focus", root.gui_get_focus_owner() is Button, _focus_text())
+		_check("offer dialog: a button has focus", root.gui_get_focus_owner() is BaseButton, _focus_text())
 		var before := launches
 		_key("launch")   # L must not launch the spaceport underneath
 		await _frames()
@@ -93,7 +98,7 @@ func _init() -> void:
 	else:
 		print("  (no landing offer this time)")
 	await _clear_texts(ss)
-	_check("hub focuses a service button", sp._screen == "hub" and root.gui_get_focus_owner() is Button, _focus_text())
+	_check("hub focuses a service button", sp._screen == "hub" and root.gui_get_focus_owner() is BaseButton, _focus_text())
 	_check("no launch yet", launches == 0)
 
 	# --- Mission BBS
@@ -103,7 +108,7 @@ func _init() -> void:
 	var listings: Array = sp._bbs_list
 	_check("BBS has listings", listings.size() > 0)
 	if listings.size() > 0:
-		_check("BBS: a listing has focus and is shown", root.gui_get_focus_owner() is Button and sp._bbs_nodes.title.text != "",
+		_check("BBS: a listing has focus and is shown", root.gui_get_focus_owner() is BaseButton and sp._bbs_nodes.title.text != "",
 			sp._bbs_nodes.title.text)
 		_check("BBS: accept enabled", not sp._bbs_nodes.accept.disabled)
 		if listings.size() > 1:
@@ -128,7 +133,7 @@ func _init() -> void:
 	# --- Bar and Holovid
 	sp._show_bar()
 	await _frames()
-	_check("bar: a button has focus", root.gui_get_focus_owner() is Button, _focus_text())
+	_check("bar: a button has focus", root.gui_get_focus_owner() is BaseButton, _focus_text())
 	root.gui_get_focus_owner().pressed.emit()   # Holovid
 	await _frames()
 	_check("bar: Holovid overlay opens", sp._overlay != null)
@@ -149,7 +154,7 @@ func _init() -> void:
 	# --- Player Info / Mission Info
 	ss.open_info("missions")
 	await _frames()
-	_check("info window opens with a focused button", ss._info != null and root.gui_get_focus_owner() is Button, _focus_text())
+	_check("info window opens with a focused button", ss._info != null and root.gui_get_focus_owner() is BaseButton, _focus_text())
 	var ms = JSON.parse_string(nova.mission_list())
 	if ms.size() > 0:
 		_check("info: missions tab lists the accepted mission", ss._info_sel == int(ms[0].id))

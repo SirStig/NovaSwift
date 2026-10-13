@@ -9,9 +9,10 @@
 #             earlier key layout instead of the original's, default off)
 #   [map]     gate_links — draw hypergate / wormhole spokes on the plain galaxy map (an
 #             enhancement; the original draws them only in the gate picker), default off
-#   [presentation] modern_menu · modern_dialogs · modern_hud — Classic (all false, default)
-#             draws the original ïntf status bar and DLOG/DITL dialogs from the user's data
-#             (ui/classic/); Nova Swift (all true) keeps the port's own screens. See
+#   [presentation] modern_menu · modern_dialogs · modern_hud · fullscreen_galaxy_map — Classic
+#             (all false, default) draws the original ïntf status bar, DLOG/DITL dialogs, main
+#             menu and framed galaxy map from the user's data (ui/classic/); Enhanced is Classic
+#             with the full-screen map; Nova Swift (all true) keeps the port's own screens. See
 #             ui_mode()/apply_ui_mode().
 #   [data]    dir — the EV Nova data folder chosen in the data-setup screen
 #   [keys]    action -> { keys, buttons, alt_keys } — only what the player rebound
@@ -38,7 +39,10 @@ const DEFAULTS := {
 	# Presentation (mirrors the Apple GameSettings modernMainMenu / modernDialogs /
 	# modernHUD toggles). false = the authentic original UI (default); true = the
 	# port's own "Nova Swift" screens. Classic = all off, Nova Swift = all on.
-	"presentation": {"modern_menu": false, "modern_dialogs": false, "modern_hud": false},
+	# fullscreen_galaxy_map: the map edge to edge instead of inside its original dialog frame
+	# (Apple fullscreenGalaxyMap; off in Classic, on in Enhanced and Nova Swift).
+	"presentation": {"modern_menu": false, "modern_dialogs": false, "modern_hud": false,
+		"fullscreen_galaxy_map": false},
 }
 
 static var _cfg := ConfigFile.new()
@@ -129,26 +133,41 @@ static func apply_video() -> void:
 # --- presentation presets (Apple GameSettings.UIMode) ---------------------------
 
 const UI_CLASSIC := "classic"
+const UI_ENHANCED := "enhanced"
 const UI_NOVA_SWIFT := "nova_swift"
 const UI_CUSTOM := "custom"
 
+const _UI_FLAGS := ["modern_menu", "modern_dialogs", "modern_hud", "fullscreen_galaxy_map"]
 
-## "classic" (all authentic), "nova_swift" (all modern) or "custom" (mixed).
+
+## "classic" (all authentic), "enhanced" (authentic + the full-screen map), "nova_swift" (all
+## modern) or "custom" (mixed) -- Apple GameSettings.matchedPreset.
 static func ui_mode() -> String:
-	var on := 0
-	for k in ["modern_menu", "modern_dialogs", "modern_hud"]:
-		if bool(get_value("presentation", k)):
-			on += 1
-	return UI_CLASSIC if on == 0 else (UI_NOVA_SWIFT if on == 3 else UI_CUSTOM)
+	var on := {}
+	for k in _UI_FLAGS:
+		on[k] = bool(get_value("presentation", k))
+	var count := on.values().count(true)
+	if count == 0:
+		return UI_CLASSIC
+	if count == _UI_FLAGS.size():
+		return UI_NOVA_SWIFT
+	if count == 1 and on["fullscreen_galaxy_map"]:
+		return UI_ENHANCED
+	return UI_CUSTOM
 
 
-## Stamp the three toggles from a preset (UI_CUSTOM is a no-op).
+## Stamp the toggles from a preset (UI_CUSTOM is a no-op).
 static func apply_ui_mode(mode: String) -> void:
 	if mode == UI_CUSTOM:
 		return
-	var modern := mode == UI_NOVA_SWIFT
-	for k in ["modern_menu", "modern_dialogs", "modern_hud"]:
-		set_value("presentation", k, modern)
+	for k in _UI_FLAGS:
+		var on: bool = mode == UI_NOVA_SWIFT or (mode == UI_ENHANCED and k == "fullscreen_galaxy_map")
+		set_value("presentation", k, on)
+
+
+## Whether the galaxy map draws edge to edge (otherwise inside its original dialog frame).
+static func fullscreen_map() -> bool:
+	return bool(get_value("presentation", "fullscreen_galaxy_map"))
 
 
 # --- game data location -------------------------------------------------------

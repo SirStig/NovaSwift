@@ -32,6 +32,19 @@
 extends CanvasLayer
 
 const Prefs = preload("res://Prefs.gd")
+const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
+const ClassicDialog = preload("res://ui/classic/ClassicDialog.gd")
+
+# Classic presentation (the default unless Prefs presentation/fullscreen_galaxy_map): the map
+# sits inside its original dialog -- DLOG/DITL 2000 on PICT 8509, as the Apple GalaxyMapView's
+# authenticChrome -- with the original's side panel (item 5), status bar (item 1) and the
+# Done / Clear Route / Find / - / + buttons; zoom 0.5...2.0 stepped by 3/4 like the original.
+const FRAME_PICT := 8509
+const CLASSIC_ZOOM_MIN := 0.5
+const CLASSIC_ZOOM_MAX := 2.0
+const CLASSIC_ZOOM_DEFAULT := 1.0 / 0.5625
+const THEME_LIGHT := Color(0.75, 0.75, 0.75)    # 0xC000: labels
+const THEME_DIM := Color(0.25, 0.25, 0.25)      # 0x4000: the date
 
 signal closed
 signal jump_requested
@@ -69,6 +82,17 @@ var _neb: Control                # nebula art, added over the background
 var _find_box: PanelContainer
 var _find_edit: LineEdit
 
+var _framed := false             # inside the original dialog frame
+var _frame: Control              # the ClassicDialog
+var _clip: Control               # the starmap item's clipping rect inside the frame
+var _side: Control
+var _bar: Control
+var _sys_text := {}
+var _info_key := ""
+var _minus: Control
+var _plus: Control
+var _clear: Control
+var _hint: Label
 var _gate := {}                  # gate picker state (empty = the plain map)
 var _gate_dests := {}            # destination system id -> {gate, name, pos}
 var _gate_links := PackedInt32Array()   # [a, b, wormhole] triples
@@ -128,7 +152,11 @@ func open() -> void:
 	if nova == null or not nova.has_game():
 		return
 	nova.nav_refresh()
+	_apply_mode()
 	_reload()
+	if _framed:
+		_zoom = CLASSIC_ZOOM_DEFAULT
+	_update_classic()
 	_center = _info[_current]["pos"] if _info.has(_current) else Vector2.ZERO
 	_cursor = _canvas.size * 0.5
 	_hover = -1
@@ -147,13 +175,16 @@ func open_gate() -> void:
 	if not (st is Dictionary) or st.is_empty():
 		return
 	nova.nav_refresh()
+	_apply_mode()
 	_reload()
+	_zoom = clampf(_zoom, _zmin(), _zmax())
 	_gate = st
 	_gate_dests.clear()
 	for d in st["destinations"]:
 		_gate_dests[int(d["system"])] = {"gate": int(d["gate"]), "name": str(d["name"]),
 			"pos": Vector2(d["x"], d["y"])}
 	_center = Vector2(st["hereX"], st["hereY"])
+	_update_classic()
 	_cursor = _canvas.size * 0.5
 	_hover = -1
 	_pad_mode = _pad_connected()
@@ -275,6 +306,7 @@ func _process(delta: float) -> void:
 			moved = true
 		_hover = near
 
+	_update_classic()
 	if moved:
 		_canvas.queue_redraw()
 
@@ -304,21 +336,23 @@ func _input(event: InputEvent) -> void:
 
 	if event is InputEventMouseMotion:
 		_pad_mode = false
-		_cursor = event.position
+		_cursor = _local(event.position)
 		if _dragging:
-			_center -= event.relative / _zoom
+			_center -= event.relative / (_zoom * _canvas_scale())
 		_hover = _nearest(_cursor, MOUSE_RADIUS)
 		_canvas.queue_redraw()
 	elif event is InputEventMouseButton:
 		_pad_mode = false
+		var lp := _local(event.position)
+		var inside := Rect2(Vector2.ZERO, _canvas.size).has_point(lp)
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
-			_zoom_at(1.15, event.position)
+			_zoom_at(1.15, lp)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
-			_zoom_at(1.0 / 1.15, event.position)
+			_zoom_at(1.0 / 1.15, lp)
 		elif event.button_index == MOUSE_BUTTON_RIGHT or event.button_index == MOUSE_BUTTON_MIDDLE:
 			_dragging = event.pressed
-		elif event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-			var id := _nearest(event.position, MOUSE_RADIUS)
+		elif event.button_index == MOUSE_BUTTON_LEFT and event.pressed and inside:
+			var id := _nearest(lp, MOUSE_RADIUS)
 			if id != -1:
 				_plot(id, event.shift_pressed)
 	elif event is InputEventJoypadButton and event.pressed:
@@ -387,7 +421,7 @@ func _step_direction(dir: Vector2) -> void:
 
 func _zoom_at(factor: float, screen: Vector2) -> void:
 	var before := _to_map(screen)
-	_zoom = clampf(_zoom * factor, ZOOM_MIN, ZOOM_MAX)
+	_zoom = clampf(_zoom * factor, _zmin(), _zmax())
 	_center += before - _to_map(screen)   # keep the point under the cursor fixed
 	_canvas.queue_redraw()
 
@@ -605,7 +639,8 @@ func _on_draw() -> void:
 		c.draw_line(_cursor + Vector2(-16, 0), _cursor + Vector2(-6, 0), Color(0.4, 0.85, 1.0), 1.5)
 		c.draw_line(_cursor + Vector2(16, 0), _cursor + Vector2(6, 0), Color(0.4, 0.85, 1.0), 1.5)
 
-	_draw_panel(c, font, fs, size)
+	if not _framed:
+		_draw_panel(c, font, fs, size)
 
 
 func _draw_panel(c: Control, font: Font, fs: int, size: Vector2) -> void:
@@ -660,3 +695,227 @@ func _draw_gate_panel(c: Control, font: Font, fs: int, size: Vector2) -> void:
 			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, COLOR_TEXT if n != 1 else COLOR_ROUTE)
 	var hint := "Click / A pick a destination · wheel zoom · right-drag pan · Esc / B leave"
 	c.draw_string(font, Vector2(20, size.y - 16), hint, HORIZONTAL_ALIGNMENT_LEFT, -1, fs - 2, COLOR_DIM)
+
+
+# --- Classic frame -------------------------------------------------------------------------
+
+func _zmin() -> float:
+	return CLASSIC_ZOOM_MIN if _framed else ZOOM_MIN
+
+
+func _zmax() -> float:
+	return CLASSIC_ZOOM_MAX if _framed else ZOOM_MAX
+
+
+## Build (or drop) the dialog frame for this opening, from the presentation setting.
+func _apply_mode() -> void:
+	ClassicTheme.setup(nova)
+	var want: bool = ClassicTheme.has_data() and not Prefs.fullscreen_map() and ClassicTheme.pict(FRAME_PICT) != null
+	if _frame != null:
+		_neb.reparent(self, false)
+		_canvas.reparent(self, false)
+		_frame.queue_free()
+		_frame = null
+		_clip = null
+	_framed = want
+	if not want:
+		_neb.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_canvas.set_anchors_preset(Control.PRESET_FULL_RECT)
+		if _hint != null:
+			_hint.visible = false
+		return
+	var me := self
+	_frame = ClassicDialog.from_ditl(nova, 2000, {
+		"frame_pict": FRAME_PICT, "default_item": 0, "cancel_item": 0,
+		"actions": {0: me.close, 3: func(): me._step_zoom(0.75), 4: func(): me._step_zoom(1.0 / 0.75),
+			7: func(): me._clear_route(), 9: func(): me.open_find()},
+		"custom": {
+			0: func(p, r): p.add_button(ClassicTheme.string_at(150, 5, "Done"), r, 0),
+			3: func(p, r): me._minus = p.add_button("-", r, 3),
+			4: func(p, r): me._plus = p.add_button("+", r, 4),
+			7: func(p, r):
+				me._clear = p.add_button(ClassicTheme.string_at(150, 49, "Clear Route"), r, 7)
+				me._clear.refused.connect(func(): me.nova.sound_beep(4)),
+			9: func(p, r): p.add_button(ClassicTheme.string_at(150, 60, "Find"), r, 9),
+			2: func(p, r):
+				me._clip = Control.new()
+				me._clip.position = Vector2(r.position)
+				me._clip.size = Vector2(r.size)
+				me._clip.clip_contents = true
+				p.add_child(me._clip),
+			5: func(p, r): me._side = me._text_item(p, r, me._draw_side),
+			1: func(p, r): me._bar = me._text_item(p, r, me._draw_bar),
+		}})
+	add_child(_frame)
+	_neb.reparent(_clip, false)
+	_canvas.reparent(_clip, false)
+	_neb.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_canvas.set_anchors_preset(Control.PRESET_FULL_RECT)
+	# Pointer-only buttons: pad A plots on the map, so none of them may hold focus.
+	for b in _frame.items.values():
+		if b is BaseButton:
+			b.focus_mode = Control.FOCUS_NONE
+	_frame._focusables.clear()
+	_frame.default_item = -1
+	_info_key = ""
+	if _hint == null:
+		_hint = Label.new()
+		_hint.add_theme_font_size_override("font_size", 12)
+		_hint.add_theme_color_override("font_color", COLOR_DIM)
+		_hint.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+		_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_hint.position.y = -22
+		add_child(_hint)
+	_hint.visible = true
+
+
+func _text_item(parent: Control, r: Rect2i, drawer: Callable) -> Control:
+	var c := Control.new()
+	c.position = Vector2(r.position)
+	c.size = Vector2(r.size)
+	c.clip_contents = true
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	c.draw.connect(drawer.bind(c))
+	parent.add_child(c)
+	return c
+
+
+func _step_zoom(factor: float) -> void:
+	_zoom_at(factor, _canvas.size * 0.5)
+	_update_classic()
+
+
+func _clear_route() -> void:
+	if _route.size() == 0 or not _gate.is_empty():
+		return
+	nova.nav_clear_route()
+	_reload_route()
+	_canvas.queue_redraw()
+	_update_classic()
+
+
+## The system the info column describes: the selection, else the course's end, else here.
+func _info_id() -> int:
+	if _selected != -1:
+		return _selected
+	if _route.size() > 0:
+		return _route[_route.size() - 1]
+	return _current
+
+
+## Refresh what the frame's text items and zoom / clear buttons show.
+func _update_classic() -> void:
+	if not _framed or _frame == null:
+		return
+	var id := _info_id()
+	var key := "%d|%s|%s" % [id, _armed, _route.size()]
+	if key != _info_key:
+		_info_key = key
+		var parsed = JSON.parse_string(nova.classic_map_info(id))
+		_sys_text = parsed if parsed is Dictionary else {}
+		_side.queue_redraw()
+		_bar.queue_redraw()
+	if _minus != null:
+		_minus.disabled = _zoom <= CLASSIC_ZOOM_MIN + 0.0001
+		_plus.disabled = _zoom >= CLASSIC_ZOOM_MAX - 0.0001
+	if _clear != null:
+		_clear.disabled = _route.size() == 0 or not _gate.is_empty()
+	_hint.text = ("L-stick cursor - D-pad next system - A plot - Y add hop - LB/RB zoom - D-pad up jump - B close"
+		if _pad_mode else "Click plot - Shift+click add hop - J jump - F find - wheel zoom - right-drag pan - C center - M/Esc close")
+
+
+func _qd(c: Control, text: String, x: float, y: float, color := Color.WHITE) -> float:
+	var f := ClassicTheme.body_font()
+	c.draw_string(f, Vector2(x, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, color)
+	return f.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
+
+
+## Item 5 (0x004a51f0): header and name, then Government, Legal Status, Goods, Services.
+func _draw_side(c: Control) -> void:
+	if _sys_text.is_empty():
+		return
+	var L: Dictionary = _sys_text["labels"]
+	var level := int(_sys_text["level"])
+	var gate_dest := not _gate.is_empty() and _gate_dests.has(_info_id())
+	var header: String = L["destination"] if _armed else (L["current"] if _info_id() == _current
+		else (L["gate"] if gate_dest else L["selected"]))
+	_qd(c, header, 10, 12, THEME_LIGHT)
+	_qd(c, str(_sys_text["name"]) if level >= 1 else str(L["unknown"]), 15, 26)
+	if level < 1:
+		return
+	if not bool(_sys_text["usable"]):
+		_qd(c, str(L["noPorts"]), 10, 75)
+		return
+	_qd(c, str(L["government"]), 10, 75, THEME_LIGHT)
+	_qd(c, str(_sys_text["government"]), 15, 88)
+	_qd(c, str(L["legalLabel"]), 10, 119, THEME_LIGHT)
+	_qd(c, str(_sys_text["legal"]), 15, 132)
+	_qd(c, str(L["goodsLabel"]), 10, 155, THEME_LIGHT)
+	if level < 2:
+		_qd(c, str(L["unknown"]), 15, 168)
+	else:
+		for i in _sys_text["goods"].size():
+			_qd(c, str(_sys_text["goods"][i]), 15, 168 + 12 * i)
+	_qd(c, str(L["servicesLabel"]), 10, 250, THEME_LIGHT)
+	var tags: Array = _sys_text["services"]
+	if level < 2:
+		_qd(c, str(L["unknown"]), 15, 263)
+	elif tags.is_empty():
+		_qd(c, str(L["noServices"]), 15, 262)
+	else:
+		for i in tags.size():
+			_qd(c, str(tags[i]), 15, 263 + 12 * i)
+
+
+## Item 1: Ports (wrapping near the right edge), Navigation Hazards, the date; in the gate
+## picker the "select a destination" prompt.
+func _draw_bar(c: Control) -> void:
+	if _sys_text.is_empty():
+		return
+	var L: Dictionary = _sys_text["labels"]
+	var width := c.size.x
+	var f := ClassicTheme.body_font()
+	if not _gate.is_empty() and (_selected == -1 or _selected == _current):
+		var prompt := str(L["gatePrompt"])
+		_qd(c, prompt, (width - f.get_string_size(prompt, HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x) / 2.0, 24, THEME_LIGHT)
+		return
+	var known := int(_sys_text["level"]) >= 1
+	_qd(c, str(L["ports"]), 10, 12, THEME_LIGHT)
+	if known:
+		var names: Array = _sys_text["ports"]
+		if names.is_empty():
+			_qd(c, str(L["none"]), 45, 12)
+		else:
+			var pen := 45.0
+			var y := 12.0
+			var used := 0.0
+			var sep := f.get_string_size(", ", HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
+			for i in names.size():
+				var w := f.get_string_size(str(names[i]), HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
+				if width - 20.0 < w + 45.0 + used:
+					pen = 45.0
+					y = 24.0
+					used = 0.0
+				else:
+					used += w
+				_qd(c, str(names[i]), pen, y)
+				pen += w
+				if i < names.size() - 1:
+					_qd(c, ", ", pen, y)
+					pen += sep
+					used += sep
+	else:
+		_qd(c, str(L["unknown"]), 45, 12)
+	_qd(c, str(L["hazardsLabel"]), 10, 36, THEME_LIGHT)
+	_qd(c, str(_sys_text["hazards"]) if known else str(L["unknown"]), 110, 36)
+	var date := str(_sys_text["date"])
+	_qd(c, date, width - f.get_string_size(date, HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x - 5, 36, THEME_DIM)
+
+
+## Viewport position -> the starmap canvas's own space (identity when full-screen).
+func _local(p: Vector2) -> Vector2:
+	return _canvas.get_global_transform().affine_inverse() * p
+
+
+func _canvas_scale() -> float:
+	return _canvas.get_global_transform().get_scale().x

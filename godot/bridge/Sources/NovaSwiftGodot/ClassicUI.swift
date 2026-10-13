@@ -301,4 +301,51 @@ enum ClassicUIBackend {
         }
         return json(["lines": lines, "pict": targetingPict(game, shipType: save.player.shipType), "centred": ""])
     }
+
+    // MARK: Galaxy map frame (GalaxyMapView.classicSidePanel / originalStatusBar)
+
+    /// The original map's text for system `id`: `{level, name, usable, government, legal, goods[], services[],
+    /// ports[], hazards, date, known}`; the strings are the game's (STR# 2002), `known` = visited or charted.
+    static func mapInfo(_ game: NovaGame, pilot: PlayerState, system id: Int) -> String {
+        guard let sys = game.system(id) else { return "{}" }
+        let text = OriginalText(game: game)
+        let level = pilot.discoveryLevel(id)
+        let usable = sys.spobs.compactMap { game.spob($0) }.filter {
+            !$0.isUninhabited && $0.usableForTravel(destroyed: pilot.isStellarDestroyed($0.id))
+        }
+        let goodsSet = Set(usable.flatMap { game.commodityMarket(at: $0).map(\.commodity) })
+        var goods = Commodity.allCases.filter { goodsSet.contains($0) }.map { game.commodityName($0) }
+        if goods.isEmpty { goods = [text.misc(335)] }
+        var services: [String] = []
+        if usable.contains(where: { $0.hasCommodityExchange }) { services.append(text.misc(329)) }
+        if usable.contains(where: { $0.hasOutfitter }) { services.append(text.misc(330)) }
+        if usable.contains(where: { $0.hasShipyard }) { services.append(text.misc(331)) }
+        let ports = sys.spobs.compactMap { game.spob($0) }
+            .filter { !$0.isUninhabited && !pilot.isStellarDestroyed($0.id) }.map(\.displayName)
+        var parts: [String] = []
+        if sys.spobs.compactMap({ game.spob($0) }).contains(where: { $0.gravity != 0 }) { parts.append(text.misc(312)) }
+        if sys.asteroidCount > 0 {
+            parts.append("\(text.misc(sys.asteroidCount < 4 ? 313 : sys.asteroidCount < 7 ? 314 : 315)) \(text.misc(316))")
+        }
+        if sys.interference > 0 {
+            parts.append("\(text.misc(sys.interference < 34 ? 317 : sys.interference < 67 ? 318 : 319)) \(text.misc(320))")
+        }
+        if sys.murk > 0 {
+            parts.append("\(text.misc(sys.murk < 31 ? 321 : sys.murk < 61 ? 322 : 323)) \(text.misc(324))")
+        }
+        let joined = parts.isEmpty ? text.misc(335) : parts.joined(separator: ", ")
+        let hazards = joined.prefix(1).uppercased() + joined.dropFirst()
+        return json(["level": level, "name": sys.displayName, "usable": !usable.isEmpty,
+                     "government": game.govt(sys.government)?.displayName ?? text.misc(333),
+                     "legal": LegalStatus.label(inSystem: id, player: pilot, game: game),
+                     "goods": goods, "services": services, "ports": ports, "hazards": hazards,
+                     "date": text.date(for: pilot),
+                     "labels": ["unknown": text.misc(310), "none": text.misc(335), "noServices": text.misc(332),
+                                "ports": text.misc(309), "hazardsLabel": text.misc(311),
+                                "government": text.misc(325), "legalLabel": text.misc(326),
+                                "goodsLabel": text.misc(327), "servicesLabel": text.misc(328),
+                                "noPorts": text.misc(334), "gatePrompt": text.misc(308),
+                                "current": text.misc(337), "selected": text.misc(338),
+                                "destination": text.misc(339), "gate": text.misc(340)]])
+    }
 }

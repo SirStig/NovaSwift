@@ -25,6 +25,10 @@ signal close_spaceport_screen
 ## A `Q` fired while landed bounced the pilot into space.
 signal forced_launch
 
+const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
+const CD = preload("res://ui/classic/ClassicDialog.gd")
+const CS = preload("res://ui/classic/ClassicScreen.gd")
+
 const COL_AMBER := Color(1.0, 0.82, 0.4)
 const COL_DIM := Color(0.62, 0.66, 0.74)
 const COL_RED := Color(1.0, 0.35, 0.3)
@@ -47,6 +51,7 @@ var _labels := {}
 func setup(world) -> void:
 	nova = world
 	layer = 60
+	ClassicTheme.setup(world)
 
 
 func blocks_flight() -> bool:
@@ -236,6 +241,9 @@ func _open_text() -> void:
 	if not (t is Dictionary) or t.is_empty():
 		nova.story_text_dismiss()
 		return
+	if ClassicTheme.classic("dialogs"):
+		_open_text_classic(t)
+		return
 	var box := _dialog_root(560)
 	var title := str(t.get("title", ""))
 	_lbl(title if title != "" else "Mission", 22, COL_AMBER, box)
@@ -259,6 +267,9 @@ func _dismiss_text() -> void:
 func _open_offer() -> void:
 	var o = _json(nova.offer_state())
 	if not (o is Dictionary) or o.is_empty():
+		return
+	if ClassicTheme.classic("dialogs"):
+		_open_offer_classic(o)
 		return
 	var box := _dialog_root(620)
 	_lbl(str(o.get("title", "")), 22, COL_AMBER, box)
@@ -325,6 +336,9 @@ func close_info() -> void:
 
 
 func _build_info(focus_tab := true) -> void:
+	if ClassicTheme.classic("dialogs"):
+		_build_info_classic(focus_tab)
+		return
 	var was_open := _info != null
 	if _info != null:
 		var old := _info
@@ -476,3 +490,311 @@ func _abort_selected() -> void:
 	if nova.mission_abort(_info_sel):
 		_info_sel = -1
 	_build_info()
+
+
+# MARK: Classic (original DLOG/DITL) dialogs ---------------------------------------------
+# Story text: the generic dësc reader (DITL 3003 text-only on PICT 8524/8525/8526 sized to the
+# text, 3004 with the dësc picture on 8527). Mission offer: DITL 1016 "Single Mission" on
+# 8521/8522/8523. Player Info: DITL 1017 on 8518/8519/8520. Mission Info: DITL 1012 on 8517.
+
+func _info_rect(did: int, idx: int, stock: Rect2i) -> Rect2i:
+	return CS.rect(nova, did, idx, stock)
+
+
+func _modal_host(d: Control, kind: String, buttons: Array, cancel: Callable) -> void:
+	_prev_focus = get_viewport().gui_get_focus_owner()
+	_modal = CD.modal(self, d, 0.6)
+	_modal_kind = kind
+	_modal_buttons = buttons
+	_modal_cancel = cancel
+	nova.sound_beep(2)
+
+
+## Three stacked PICTs as one frame (top / stretched middle / bottom) at `size`.
+func _three_slice(d: Control, top: int, mid: int, bot: int, top_h: int, bot_h: int) -> void:
+	var h: int = d.window_size.y
+	var w: int = d.window_size.x
+	for part in [[top, 0, top_h], [mid, top_h, h - top_h - bot_h], [bot, h - bot_h, bot_h]]:
+		var tex := ClassicTheme.pict(part[0])
+		var tr := TextureRect.new()
+		tr.texture = tex
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_SCALE
+		tr.position = Vector2(0, part[1])
+		tr.size = Vector2(w, part[2])
+		tr.mouse_filter = Control.MOUSE_FILTER_STOP
+		d.add_child(tr)
+
+
+func _open_text_classic(t: Dictionary) -> void:
+	var text := str(t.get("text", ""))
+	var pid := int(t.get("pict", -1))
+	var with_pic := pid >= 128 and ClassicTheme.pict(pid) != null
+	var did := 3004 if with_pic else 3003
+	var win := Vector2i(441, 313)
+	var parsed = JSON.parse_string(nova.classic_dialog(did))
+	if parsed is Dictionary and parsed.has("w"):
+		win = Vector2i(int(parsed["w"]), int(parsed["h"]))
+	var ok_r := CS.rect(nova, did, 0, Rect2i(91, 276, 259, 25))
+	var pic_r := CS.rect(nova, did, 1, Rect2i(10, 10, 200, 200))
+	var txt_r := CS.rect(nova, did, 2, Rect2i(20, 20, 400, 240))
+	var shrink := 0
+	if not with_pic:
+		var th := int(ceil(ClassicTheme.body_font().get_multiline_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, txt_r.size.x, 12).y))
+		if th < txt_r.size.y:
+			shrink = (txt_r.size.y - maxi(th, 0x30)) - 16
+	win.y -= shrink
+	var d: Control = CD._make(nova, win, CD.Chrome.PICT if with_pic else CD.Chrome.PANEL)
+	d._add_background(ClassicTheme.pict(8527) if with_pic else null)
+	if with_pic:
+		CS.picture(d, ClassicTheme.pict(pid), Rect2i(pic_r.position, Vector2i(ClassicTheme.pict(pid).get_size())), TextureRect.STRETCH_KEEP)
+	var sc := CS.scroll_text(d, text, Rect2i(txt_r.position, Vector2i(txt_r.size.x, txt_r.size.y - shrink)), 12, Color.WHITE)
+	d.beep = false
+	var ok: TextureButton = d.add_button("OK", Rect2i(ok_r.position.x, ok_r.position.y - shrink, ok_r.size.x, ok_r.size.y), 0)
+	ok.name = "story_ok"
+	d.actions[0] = _dismiss_text
+	d.default_item = 0
+	_modal_host(d, "text", [ok], _dismiss_text)
+	_focus(ok)
+
+
+func _open_offer_classic(o: Dictionary) -> void:
+	var win := Vector2i(441, 317)
+	var parsed = JSON.parse_string(nova.classic_dialog(1016))
+	if parsed is Dictionary and parsed.has("w"):
+		win = Vector2i(int(parsed["w"]), int(parsed["h"]))
+	var d: Control = CD._make(nova, win, CD.Chrome.NONE)
+	d.beep = false
+	_three_slice(d, 8521, 8522, 8523, 9, 40)
+	var pane := CS.rect(nova, 1016, 2, Rect2i(12, 9, 415, 267))
+	var content := VBoxContainer.new()
+	content.custom_minimum_size = Vector2(pane.size.x - 8, 0)
+	content.add_theme_constant_override("separation", 5)
+	var title := Label.new()
+	title.text = str(o.get("title", ""))
+	title.add_theme_font_override("font", ClassicTheme.chrome_font())
+	title.add_theme_font_size_override("font_size", 12)
+	title.add_theme_color_override("font_color", Color.WHITE)
+	content.add_child(title)
+	var tex := ClassicTheme.pict(int(o.get("pict", -1))) if int(o.get("pict", -1)) >= 0 else null
+	if tex != null:
+		var tr := TextureRect.new()
+		tr.texture = tex
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		var sz := tex.get_size()
+		var k := minf(1.0, minf(140.0 / sz.y, (pane.size.x - 8.0) / sz.x))
+		tr.custom_minimum_size = Vector2(sz.x * k, sz.y * k)
+		content.add_child(tr)
+	var body := Label.new()
+	body.text = str(o.get("text", ""))
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.custom_minimum_size = Vector2(pane.size.x - 10, 0)
+	body.add_theme_font_override("font", ClassicTheme.body_font())
+	body.add_theme_font_size_override("font_size", 11)
+	body.add_theme_color_override("font_color", Color.WHITE)
+	body.add_theme_constant_override("line_spacing", 0)
+	content.add_child(body)
+	if str(o.get("destination", "")) != "":
+		var dest := Label.new()
+		dest.text = "Destination: %s" % o.destination
+		dest.add_theme_font_override("font", ClassicTheme.body_font())
+		dest.add_theme_font_size_override("font_size", 10)
+		dest.add_theme_color_override("font_color", Color(0.65, 0.65, 0.65))
+		content.add_child(dest)
+	var sc := CS.PaneScroll.new()
+	sc.position = Vector2(pane.position)
+	sc.size = Vector2(pane.size)
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	sc.get_v_scroll_bar().modulate = Color(1, 1, 1, 0)
+	sc.add_child(content)
+	d.add_child(sc)
+	var buttons := []
+	var cancel := Callable()
+	var yes: TextureButton
+	if o.get("canRefuse", true):
+		var no := CS.button(d, str(o.get("refuse", "No")), CS.rect(nova, 1016, 1, Rect2i(117, 285, 99, 25)), 1, _offer_decline, true, "offer_refuse")
+		yes = CS.button(d, str(o.get("accept", "Yes")), CS.rect(nova, 1016, 0, Rect2i(225, 285, 99, 25)), 0, _offer_accept, true, "offer_accept")
+		buttons = [no, yes]
+		cancel = _offer_decline
+	else:
+		yes = CS.button(d, str(o.get("accept", "Yes")), CS.rect(nova, 1016, 5, Rect2i(173, 285, 99, 25)), 5, _offer_accept, true, "offer_accept")
+		buttons = [yes]
+	d.default_item = 0
+	_modal_host(d, "offer", buttons, cancel)
+	_focus(yes)
+
+
+func _tab_pict_button(d: Control, label: String, r: Rect2i, idx: int, active: bool, cb: Callable, key: String) -> void:
+	var b := CS.button(d, label, r, idx, cb, true, key)
+	if active:
+		b.texture_normal = ClassicTheme.button_texture(r.size.x, 1)
+
+
+func _build_info_classic(focus_tab: bool) -> void:
+	var was_open := _info != null
+	if _info != null:
+		var old := _info
+		_info = null
+		old.get_parent().remove_child(old)
+		old.queue_free()
+	if not was_open:
+		nova.sound_beep(2)
+	var data = _json(nova.player_info())
+	if not (data is Dictionary):
+		data = {}
+	var d: Control
+	var focus_key := "done"
+	if _info_tab == "missions":
+		d = _mission_info_dialog(data)
+	else:
+		d = _player_info_dialog(data)
+	d.beep = false
+	_info = CD.modal(self, d, 0.55)
+	if focus_tab:
+		var target: Control = d.find_child("btn_" + (_info_focus if _info_focus != "" else focus_key), true, false)
+		if target == null:
+			target = d.find_child("btn_done", true, false)
+		_focus(target)
+
+
+var _info_focus := ""
+
+
+func _player_info_dialog(data: Dictionary) -> Control:
+	var win := Vector2i(413, 227)
+	var parsed = JSON.parse_string(nova.classic_dialog(1017))
+	if parsed is Dictionary and parsed.has("w"):
+		win = Vector2i(int(parsed["w"]), int(parsed["h"]))
+	var d: Control = CD._make(nova, win, CD.Chrome.NONE)
+	_three_slice(d, 8518, 8519, 8520, 40, 40)
+	var names := ["general", "cargo", "extras", "honors"]
+	var defaults := ["General", "Cargo", "Extras", "Honors"]
+	for i in 4:
+		var t: String = names[i]
+		var r := CS.rect(nova, 1017, 1 + i, Rect2i(7 + 100 * i, 8, 99, 25))
+		_tab_pict_button(d, str(_labels.get(t, defaults[i])), r, 1 + i, t == _info_tab, _switch_tab.bind(t), "tab_" + t)
+		d.items[1 + i].name = "btn_tab_" + t
+	var pane := CS.rect(nova, 1017, 5, Rect2i(4, 40, 405, 141))
+	match _info_tab:
+		"general":
+			var g: Dictionary = data.get("general", {})
+			var holder := Control.new()
+			holder.custom_minimum_size = Vector2(pane.size.x - 12, 0)
+			var rows_l: Array = g.get("left", [])
+			var rows_r: Array = g.get("right", [])
+			var n := maxi(rows_l.size(), rows_r.size())
+			for i in n:
+				if i < rows_l.size():
+					_row_cell(holder, str(rows_l[i][0]), 6, 75, Color(0.6, 0.6, 0.6), 4 + i * 15)
+					_row_cell(holder, str(rows_l[i][1]), 85, 120, Color.WHITE, 4 + i * 15)
+				if i < rows_r.size():
+					_row_cell(holder, str(rows_r[i][0]), 213, 70, Color(0.6, 0.6, 0.6), 4 + i * 15)
+					_row_cell(holder, str(rows_r[i][1]), 283, 120, Color.WHITE, 4 + i * 15)
+			var eco := Label.new()
+			eco.text = str(g.get("economy", ""))
+			eco.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			eco.position = Vector2(6, 8 + n * 15)
+			eco.size = Vector2(393, 40)
+			eco.add_theme_font_override("font", ClassicTheme.body_font())
+			eco.add_theme_font_size_override("font_size", 10)
+			eco.add_theme_color_override("font_color", Color.WHITE)
+			holder.add_child(eco)
+			holder.custom_minimum_size.y = 10 + n * 15 + 40
+			var sc := CS.PaneScroll.new()
+			sc.position = Vector2(pane.position)
+			sc.size = Vector2(pane.size)
+			sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+			sc.get_v_scroll_bar().modulate = Color(1, 1, 1, 0)
+			sc.add_child(holder)
+			d.add_child(sc)
+		"cargo":
+			CS.scroll_text(d, str(data.get("cargo", "")), Rect2i(pane.position.x + 6, pane.position.y + 4, 393, pane.size.y - 4), 10, Color.WHITE)
+		"extras":
+			CS.scroll_text(d, str(data.get("extras", "")), Rect2i(pane.position.x + 6, pane.position.y + 4, 393, pane.size.y - 4), 10, Color.WHITE)
+		_:
+			CS.scroll_text(d, str(data.get("honors", "")), Rect2i(pane.position.x + 6, pane.position.y + 4, 393, pane.size.y - 4), 10, Color.WHITE)
+	if _info_tab == "cargo" and data.get("canJettison", false):
+		CS.button(d, str(_labels.get("jettison", "Jettison Cargo")), CS.rect(nova, 1017, 6, Rect2i(60, 195, 150, 25)), 6,
+			_jettison_confirm, true, "btn_jettison")
+		d.items[6].name = "btn_jettison"
+	var done := CS.button(d, str(_labels.get("done", "Done")), CS.rect(nova, 1017, 0, Rect2i(293, 195, 99, 25)), 0, close_info, true, "btn_done")
+	done.name = "btn_done"
+	if _info_msg != "":
+		CS.text(d, _info_msg, Rect2i(8, 184, 390, 12), 10, CS.AMBER)
+	_info_focus = "tab_" + _info_tab
+	return d
+
+
+func _jettison_confirm() -> void:
+	var prompt := ClassicTheme.string_at(2002, 291, "Jettison all cargo?")
+	var c := CD.confirm(nova, prompt, {"ok": ClassicTheme.string_at(150, 50, "Yes"), "cancel": ClassicTheme.string_at(150, 51, "No")})
+	var host := CD.modal(self, c, 0.4)
+	c.activated.connect(func(i: int):
+		host.queue_free()
+		if i == 0:
+			_jettison())
+
+
+func _mission_info_dialog(data: Dictionary) -> Control:
+	var d: Control = CS.frame(nova, 1012, 8517)
+	CS.text(d, str(data.get("date", "")), CS.rect(nova, 1012, 6, Rect2i(343, 4, 122, 12)), 10, Color(0.75, 0.75, 0.75), HORIZONTAL_ALIGNMENT_RIGHT)
+	var missions = _json(nova.mission_list())
+	if not (missions is Array):
+		missions = []
+	var lr := CS.rect(nova, 1012, 1, Rect2i(9, 24, 195, 84))
+	var br := CS.rect(nova, 1012, 3, Rect2i(218, 26, 242, 91))
+	var brief := CS.scroll_text(d, "", br, 10, Color(0.82, 0.82, 0.82))
+	var abort_btn := CS.button(d, str(_labels.get("abort", "Abort")), CS.rect(nova, 1012, 4, Rect2i(57, 125, 99, 25)), 4,
+		_abort_selected, false, "abort")
+	abort_btn.name = "btn_abort"
+	abort_btn.refused.connect(func(): if _info_sel < 0: nova.sound_beep(4))
+	var done := CS.button(d, str(_labels.get("done", "Done")), CS.rect(nova, 1012, 0, Rect2i(290, 125, 99, 25)), 0, close_info, true, "done")
+	done.name = "btn_done"
+	if missions.is_empty():
+		var l := CS.text(d, "No active missions.", lr, 11, Color(0.6, 0.6, 0.6), HORIZONTAL_ALIGNMENT_CENTER)
+		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		_info_focus = "done"
+		return d
+	var sel := -1
+	for i in missions.size():
+		if int(missions[i].id) == _info_sel:
+			sel = i
+	if sel < 0:
+		sel = 0
+		_info_sel = int(missions[0].id)
+	var box := Control.new()
+	box.position = Vector2(lr.position)
+	box.size = Vector2(lr.size)
+	box.clip_contents = true
+	d.add_child(box)
+	var rows := []
+	var show := func(i: int):
+		var m: Dictionary = missions[i]
+		_info_sel = int(m.id)
+		brief.label.text = str(m.brief)
+		brief.scroll_vertical = 0
+		abort_btn.disabled = not m.canAbort
+		for k in rows.size():
+			rows[k].set_selected(k == i)
+	for i in missions.size():
+		var m: Dictionary = missions[i]
+		var rb := CS.Row.new()
+		rb.position = Vector2(0, i * 16)
+		rb.size = Vector2(lr.size.x, 16)
+		rb.name = "btn_m%d" % i
+		rb.hi.color = Color(1.0, 0.7, 0.28, 0.28)
+		CS.cell(rb, ("• " if m.failed else "") + str(m.name), 5, lr.size.x - 8, 16, Color.WHITE if i == sel else Color(0.78, 0.78, 0.78), HORIZONTAL_ALIGNMENT_LEFT, 11)
+		rb.focus_entered.connect(show.bind(i))
+		rb.pressed.connect(show.bind(i))
+		box.add_child(rb)
+		d._register(30 + i, rb, Rect2i(lr.position.x, lr.position.y + i * 16, lr.size.x, 16), true)
+		rows.append(rb)
+	show.call(sel)
+	_info_focus = "m%d" % sel
+	return d
+
+
+func _row_cell(parent: Control, text: String, x: int, w: int, color: Color, y: int) -> void:
+	var l := CS.cell(parent, text, x, w, 12, color, HORIZONTAL_ALIGNMENT_LEFT, 9)
+	l.position.y = y

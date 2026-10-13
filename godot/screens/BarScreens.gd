@@ -15,6 +15,10 @@
 # clip (Race n.mov) isn't played — the result screen shows the outcome art.
 extends RefCounted
 
+const CS = preload("res://ui/classic/ClassicScreen.gd")
+const T = preload("res://ui/classic/ClassicTheme.gd")
+const CD = preload("res://ui/classic/ClassicDialog.gd")
+
 const COL_DIM := Color(0.62, 0.66, 0.74)
 const COL_HI := Color(1.0, 0.95, 0.7)
 const COL_GOOD := Color(0.5, 0.9, 0.5)
@@ -59,6 +63,9 @@ func open_hire() -> void:
 
 
 func _show_hire(focus_id := -2) -> void:
+	if _sp._classic():
+		_hire_classic()
+		return
 	var d := _json(_nova.hire_list())
 	var ships: Array = d.get("ships", [])
 	var labels: Dictionary = d.get("labels", {})
@@ -200,6 +207,9 @@ func _color_button(c: Dictionary, index: int, chosen: bool) -> Button:
 
 
 func _show_choose() -> void:
+	if _sp._classic():
+		_choose_classic()
+		return
 	var d := _json(_nova.gamble_info())
 	var labels: Dictionary = d.get("labels", {})
 	var box := _begin(640)
@@ -245,6 +255,9 @@ func _show_choose() -> void:
 # The typed wager (STR# 2002 #372 "Amount to bet:"), capped at min(credits, 10000).
 func _show_amount(d: Dictionary) -> void:
 	var cap := maxi(1, int(d.get("max", 1)))
+	if _sp._classic():
+		_sp._c.prompt(str(d.get("prompt", "Amount to bet:")), cap, mini(1000, cap), func(q): _bet(q), _show_choose)
+		return
 	var box := _begin(480)
 	_sp._label(str(d.get("prompt", "Amount to bet:")), 18, COL_HI, box)
 	var spin := SpinBox.new()
@@ -281,6 +294,9 @@ func _bet(wager: int) -> void:
 
 
 func _show_result(r: Dictionary) -> void:
+	if _sp._classic():
+		_result_classic(r)
+		return
 	var d := _json(_nova.gamble_info())
 	var colors: Array = d.get("colors", [])
 	var labels: Dictionary = d.get("labels", {})
@@ -319,3 +335,181 @@ func _show_result(r: Dictionary) -> void:
 		c.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_sp._overlay_back = _close_overlay_beep
 	_sp._focus(again)
+
+
+# --- Classic (original UI) versions ------------------------------------------------------------
+
+var _hire_dlg: Control
+var _hire_top := 0
+var _gamble_dlg: Control
+
+
+func _overlay_swap(old: Control, d: Control, default_key: String) -> void:
+	var key := CS.focus_key(old)
+	_sp._c.show_overlay(d)
+	_sp._overlay_back = _close_overlay_beep
+	if key == "" or not CS.focus_by_key(d, key):
+		CS.focus_by_key(d, default_key)
+
+
+# Hire Escort: the Shipyard's frame (PICT 8501, DITL 1004) renting instead of buying.
+func _hire_classic() -> void:
+	var data := _json(_nova.hire_list())
+	var ships: Array = data.get("ships", [])
+	var labels: Dictionary = data.get("labels", {})
+	var by_id := {}
+	for s in ships:
+		by_id[int(s.id)] = s
+	if not by_id.has(_hire_sel) and not ships.is_empty():
+		_hire_sel = int(ships[0].id)
+	var d := CS.frame(_nova, 1004, 8501)
+	var grid := CS.ItemGrid.new()
+	grid.build(d, CS.rect(_nova, 1004, 4, Rect2i(9, 8, 333, 271)), 100)
+	var pane := CS.rect(_nova, 1004, 5, Rect2i(354, 10, 192, 267))
+	var pic := CS.picture(d, null, CS.rect(_nova, 1004, 7, Rect2i(557, 8, 200, 200)), TextureRect.STRETCH_KEEP_ASPECT_COVERED)
+	var nm := CS.text(d, "", Rect2i(pane.position, Vector2i(pane.size.x, 16)), 12, Color.WHITE, HORIZONTAL_ALIGNMENT_LEFT, true)
+	var desc := CS.scroll_text(d, "", Rect2i(pane.position.x, pane.position.y + 16, pane.size.x, pane.size.y - 16))
+	var info_r := CS.rect(_nova, 1004, 8, Rect2i(614, 214, 143, 100))
+	var rows := []
+	for i in 3:
+		var y := info_r.position.y + i * 22
+		rows.append([CS.text(d, "", Rect2i(info_r.position.x, y, 66, 16), 10, Color(0.6, 0.6, 0.6)),
+			CS.text(d, "", Rect2i(info_r.position.x + 66, y, info_r.size.x - 66, 16), 10, Color.WHITE)])
+	var msg := ""
+	if not bool(data.get("hasRoom", true)):
+		msg = "You can't command any more escorts."
+	if _hire_msg != "":
+		msg = _hire_msg
+	var status := CS.text(d, msg, Rect2i(205, 289, 155, 25), 9, CS.AMBER)
+	status.name = "hire_status"
+	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var hire := CS.button(d, str(labels.get("hire", "Hire Escort")), CS.rect(_nova, 1004, 0, Rect2i(365, 289, 109, 25)), 0,
+		_hire_pressed, true, "hire_button")
+	hire.refused.connect(func(): _nova.sound_beep(4))
+	CS.button(d, str(labels.get("done", "Done")), CS.rect(_nova, 1004, 6, Rect2i(480, 289, 109, 25)), 6, _close_overlay_beep, true, "hire_done")
+	var up := CS.button(d, "^", CS.rect(_nova, 1004, 11, Rect2i(141, 288, 25, 25)), 11, func(): grid.scroll(-1), true, "hire_up")
+	var down := CS.button(d, "&", CS.rect(_nova, 1004, 12, Rect2i(171, 288, 25, 25)), 12, func(): grid.scroll(1), true, "hire_down")
+	var show := func(id: int):
+		_hire_sel = id
+		var s: Dictionary = by_id.get(id, {})
+		if s.is_empty():
+			return
+		pic.texture = T.pict(int(s.pict)) if int(s.pict) >= 0 else null
+		nm.text = str(s.name)
+		desc.label.text = "%s\nShield / Armor: %d / %d\nGuns / Turrets: %d / %d\n\n%s" % [str(s.category),
+			int(s.shield), int(s.armor), int(s.guns), int(s.turrets), str(s.description)]
+		desc.scroll_vertical = 0
+		var vals := [["Hire:", "%d cr" % int(s.price)], ["Per day:", "%d cr" % int(s.perDay)],
+			["You Have:", "%d cr" % int(data.get("credits", 0))]]
+		for r in 3:
+			rows[r][0].text = vals[r][0]
+			rows[r][1].text = vals[r][1]
+		hire.disabled = not bool(s.get("canHire", false))
+	var items := []
+	for s in ships:
+		var pid := int(s.pict)
+		items.append({"id": int(s.id), "name": str(s.name), "tex": T.pict(pid) if pid >= 0 else null,
+			"qty": 0, "locked": bool(s.locked)})
+	grid.on_select = show
+	grid.on_activate = func(_id): if not hire.disabled: hire.grab_focus()
+	grid.on_scroll = func():
+		_hire_top = grid.top_row
+		up.disabled = grid.top_row <= 0
+		down.disabled = grid.top_row >= grid.max_top()
+	grid.set_items(items, _hire_sel, _hire_top)
+	for i in grid.tiles.size():
+		pass
+	show.call(_hire_sel)
+	var old := _hire_dlg
+	_hire_dlg = d
+	var si: int = grid.slot_of_selected()
+	_overlay_swap(old, d, "tile%d" % si if si >= 0 else "hire_done")
+	if ships.is_empty():
+		CS.text(d, "No ships are available for hire here today.", Rect2i(30, 120, 280, 30), 11, Color(0.7, 0.7, 0.7),
+			HORIZONTAL_ALIGNMENT_CENTER)
+
+
+func _gamble_bg(old: Control, d: Control, default_key: String) -> void:
+	_gamble_dlg = d
+	_overlay_swap(old, d, default_key)
+
+
+# Choose your colour: DITL 1023 on PICT 8529.
+func _choose_classic() -> void:
+	var data := _json(_nova.gamble_info())
+	var labels: Dictionary = data.get("labels", {})
+	var colors: Array = data.get("colors", [])
+	var d := CS.frame(_nova, 1023, 8529)
+	var lefts := [13, 128, 243, 357]
+	var first_key := ""
+	for i in colors.size():
+		var idx := i
+		var r := CS.rect(_nova, 1023, 2 + i, Rect2i(lefts[i], 88, 100, 100))
+		var b := CS.row(d, r, 2 + i)
+		b.name = "color_%d" % i
+		b.set_meta("fkey", "color_%d" % i)
+		var chosen := i == _pick
+		var tex := T.pict(int(colors[i].chosen if chosen else colors[i].idle))
+		if tex != null:
+			var tr := TextureRect.new()
+			tr.texture = tex
+			tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			tr.size = Vector2(r.size)
+			tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			b.add_child(tr)
+		if chosen:
+			var ring := ReferenceRect.new()
+			ring.editor_only = false
+			ring.border_color = Color(1, 0.9, 0.2, 0.85)
+			ring.border_width = 3.0
+			ring.size = Vector2(r.size)
+			ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			b.add_child(ring)
+		b.pressed.connect(func(): _pick = idx; _choose_classic())
+		if first_key == "" or chosen:
+			first_key = "color_%d" % i
+	var have_cash := int(data.get("credits", 0)) > 0
+	var bet1 := CS.button(d, str(labels.get("bet1000", "Bet 1000")), CS.rect(_nova, 1023, 1, Rect2i(129, 196, 99, 25)), 1,
+		func(): _bet(int(data.get("standard", 0))), _pick >= 0 and have_cash, "bet_standard")
+	var bet := CS.button(d, str(labels.get("bet", "Bet")), CS.rect(_nova, 1023, 0, Rect2i(243, 196, 99, 25)), 0,
+		func(): _show_amount(data), _pick >= 0 and have_cash, "bet_amount")
+	for b in [bet1, bet]:
+		b.refused.connect(func(): _nova.sound_beep(4))
+	var cr := CS.text(d, "%s cr" % CS.credits(int(data.get("credits", 0))), Rect2i(13, 203, 100, 14), 11, CS.GOLD,
+		HORIZONTAL_ALIGNMENT_CENTER)
+	cr.name = "gamble_credits"
+	var st := CS.text(d, _gamble_msg, Rect2i(13, 66, 444, 16), 11, CS.AMBER, HORIZONTAL_ALIGNMENT_CENTER)
+	st.name = "gamble_status"
+	CS.button(d, str(labels.get("leave", "Leave")), Rect2i(357, 196, 99, 25), 20, _close_overlay_beep, true, "gamble_leave")
+	_gamble_bg(_gamble_dlg, d, first_key)
+
+
+# Result: DITL 1015 (251x214, no frame art).
+func _result_classic(r: Dictionary) -> void:
+	var data := _json(_nova.gamble_info())
+	var colors: Array = data.get("colors", [])
+	var labels: Dictionary = data.get("labels", {})
+	var d := CS.frame(_nova, 1015, -1, {"chrome": CD.Chrome.PICT, "fallback_size": Vector2i(251, 214)})
+	var won := int(r.payout) > 0
+	var lefts := [6, 67, 128, 189]
+	for i in colors.size():
+		var top := CS.rect(_nova, 1015, 2 + i, Rect2i(lefts[i], 5, 56, 48))
+		var tex := T.pict(int(colors[i].win if i == int(r.winner) else colors[i].lose))
+		if tex != null:
+			CS.picture(d, tex, top, TextureRect.STRETCH_KEEP_ASPECT)
+		if i == int(r.pick):
+			var mine := CS.rect(_nova, 1015, 6 + i, Rect2i(lefts[i], 67, 56, 48))
+			var t2 := T.pict(int(colors[i].chosen))
+			if t2 != null:
+				CS.picture(d, t2, mine, TextureRect.STRETCH_KEEP_ASPECT)
+	var line := CS.text(d, str(r.text), CS.rect(_nova, 1015, 11, Rect2i(6, 125, 238, 48)), 12,
+		Color(0.5, 0.9, 0.5) if won else Color(1, 0.5, 0.5), HORIZONTAL_ALIGNMENT_CENTER)
+	line.name = "gamble_result"
+	var cr := CS.text(d, "%s cr" % CS.credits(int(r.credits)), CS.rect(_nova, 1015, 1, Rect2i(87, 186, 75, 20)), 10, CS.GOLD,
+		HORIZONTAL_ALIGNMENT_CENTER)
+	cr.name = "gamble_credits"
+	CS.button(d, str(labels.get("leave", "Leave")), CS.rect(_nova, 1015, 10, Rect2i(6, 182, 75, 25)), 10, _close_overlay_beep, true, "gamble_leave")
+	CS.button(d, "Bet Again", CS.rect(_nova, 1015, 0, Rect2i(169, 182, 75, 25)), 0,
+		func(): _pick = -1; _gamble_msg = ""; _choose_classic(), true, "bet_again")
+	_gamble_bg(_gamble_dlg, d, "bet_again")

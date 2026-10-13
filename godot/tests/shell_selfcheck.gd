@@ -39,6 +39,9 @@ func _init() -> void:
 	Prefs.path = OS.get_user_data_dir() + "/shell_check_settings.cfg"
 	DirAccess.remove_absolute(Prefs.path)
 	Prefs.load_all()
+	# This file checks the plain (Nova Swift) menus; classic_reskin_selfcheck covers the Classic ones.
+	Prefs.set_value("presentation", "modern_menu", true)
+	Prefs.set_value("presentation", "modern_dialogs", true)
 	Controls.register()
 
 	var nova = ClassDB.instantiate("NovaWorld")

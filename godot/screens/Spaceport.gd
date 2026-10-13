@@ -20,6 +20,8 @@ extends CanvasLayer
 signal launch_requested
 
 const BarScreens = preload("res://screens/BarScreens.gd")   # Hire Escort, Gamble
+const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
+const SpaceportClassic = preload("res://screens/SpaceportClassic.gd")   # the original-UI look
 
 const PANEL_SIZE := Vector2(1180, 660)
 const COL_DIM := Color(0.62, 0.66, 0.74)
@@ -58,10 +60,15 @@ var _reopen_bbs_pending := false  # the BBS reopens afresh once an accept's text
 var _bbs_list: Array = []
 var _bbs_nodes: Dictionary = {}
 var _bar_screens                  # BarScreens: the bar's Hire Escort + Gamble overlays
+var _c                            # SpaceportClassic: the Classic (original EV Nova) windows
+var _modern_center: Control       # the plain Nova Swift panel's container (hidden in Classic)
 
 
 func setup(nova: Object) -> void:
 	_nova = nova
+	ClassicTheme.setup(nova)
+	_c = SpaceportClassic.new()
+	_c.setup(self, nova)
 	_bar_screens = BarScreens.new()
 	_bar_screens.setup(self, nova)
 	layer = 40
@@ -76,6 +83,7 @@ func setup(nova: Object) -> void:
 	var center := CenterContainer.new()
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_root.add_child(center)
+	_modern_center = center
 	var box := PanelContainer.new()
 	box.custom_minimum_size = PANEL_SIZE
 	var style := StyleBoxFlat.new()
@@ -95,10 +103,25 @@ func is_open() -> bool:
 	return visible
 
 
+## True when the docked UI is drawn in the Classic (original EV Nova) presentation.
+func _classic() -> bool:
+	return ClassicTheme.classic("dialogs")
+
+
+## Common start of every screen build: drop the overlay, reset per-screen handles.
+func _begin(back: Callable) -> void:
+	_close_overlay()
+	_back = back
+	_detail = {}
+	_tiles = {}
+	_status = null
+
+
 ## Show the landing screen (call once per landing).
 func open() -> void:
 	_message = ""
 	visible = true
+	_modern_center.visible = not _classic()
 	_story_labels = JSON.parse_string(_nova.story_labels()) if _nova.has_game() else {}
 	_show_hub()
 	# The main spaceport makes one lane offer as the player lands (0x00448670):
@@ -109,6 +132,7 @@ func open() -> void:
 
 func close() -> void:
 	_close_overlay()
+	_c.clear_all()
 	visible = false
 	_screen = ""
 	_bar_active = false
@@ -203,6 +227,7 @@ func _msg(text: String) -> void:
 	_message = text
 	if _status != null:
 		_status.text = text
+	_c.set_message(text)
 
 
 func _add_status() -> void:
@@ -291,6 +316,10 @@ func _show_hub() -> void:
 	if not (_info is Dictionary) or _info.is_empty():
 		_info = {"name": "Spaceport", "description": "", "labels": {}}
 	var lb: Dictionary = _info.get("labels", {})
+	if _classic():
+		_begin(func(): launch_requested.emit())
+		_c.hub()
+		return
 	_clear(str(_info.name), func(): launch_requested.emit())
 
 	var pic: Texture2D = _pict_tex(_nova.spaceport_picture_id(1, int(_info.get("id", -1))))
@@ -364,6 +393,11 @@ func _show_trade() -> void:
 	_screen = "trade"
 	_trade_data = JSON.parse_string(_nova.trade_view())
 	var rows: Array = _trade_data.get("rows", [])
+	if _classic():
+		_trade_sel = clampi(_trade_sel, 0, maxi(rows.size() - 1, 0))
+		_begin(_show_hub)
+		_c.trade()
+		return
 	_clear("Trade Center", _show_hub)
 	var widths := [330, 90, 120, 140]
 	var hd: Array = _trade_data.get("headers", ["Commodity", "Price", "Hold"])
@@ -447,6 +481,9 @@ func _trade_prompt(buying: bool) -> void:
 # A modal "how many?" box, prefilled with the maximum as the original's is.
 # Left/right ±1, up/down ±10, digits type, Backspace erases; OK / Cancel.
 func _prompt(title: String, maxv: int, initial: int, on_ok: Callable) -> void:
+	if _classic():
+		_c.prompt(title, maxv, initial, on_ok)
+		return
 	_close_overlay()
 	_overlay = _make_overlay()
 	var box := _overlay_box(Vector2(520, 0))
@@ -528,12 +565,15 @@ func _overlay_box(min_size: Vector2) -> VBoxContainer:
 
 
 func _close_overlay() -> void:
+	var had := _overlay != null
 	if _overlay != null:
 		var o := _overlay
 		_overlay = null
 		o.get_parent().remove_child(o)
 		o.queue_free()
 	_overlay_back = Callable()
+	if had:
+		_c.overlay_closed()
 
 
 # --- outfitter ---------------------------------------------------------------------
@@ -545,6 +585,14 @@ func _show_outfitter() -> void:
 	_screen = "outfitter"
 	var parsed = JSON.parse_string(_nova.outfitter_list())
 	_items = parsed if parsed is Array else []
+	if _classic():
+		var fresh := _detail.is_empty()
+		if not _items.is_empty() and _find_item(_sel_id) < 0:
+			_sel_id = int(_items[0].id)
+		_begin(_show_hub)
+		_detail = {"classic": true}
+		_c.shop_window("outfit", fresh)
+		return
 	_clear("Outfitter", _show_hub)
 	if not _items.is_empty() and _find_item(_sel_id) < 0:
 		_sel_id = int(_items[0].id)
@@ -642,6 +690,9 @@ func _select(id: int) -> void:
 	var i := _find_item(id)
 	if _detail.is_empty():
 		return
+	if _detail.has("classic"):
+		_c.select(id)
+		return
 	if i < 0:
 		_detail.name.text = ""
 		return
@@ -717,6 +768,14 @@ func _show_shipyard() -> void:
 	_screen = "shipyard"
 	var parsed = JSON.parse_string(_nova.shipyard_list())
 	_items = parsed if parsed is Array else []
+	if _classic():
+		var fresh := _detail.is_empty()
+		if not _items.is_empty() and _find_item(_sel_id) < 0:
+			_sel_id = int(_items[0].id)
+		_begin(_show_hub)
+		_detail = {"classic": true}
+		_c.shop_window("ship", fresh)
+		return
 	_clear("Shipyard", _show_hub)
 	if not _items.is_empty() and _find_item(_sel_id) < 0:
 		_sel_id = int(_items[0].id)
@@ -802,6 +861,9 @@ func _ship_info() -> void:
 		return
 	var info = JSON.parse_string(_nova.shipyard_info(_sel_id))
 	if not (info is Dictionary) or info.is_empty():
+		return
+	if _classic():
+		_c.ship_info(info, _sel_id)
 		return
 	_close_overlay()
 	_overlay = _make_overlay()
@@ -895,6 +957,10 @@ func _show_bar() -> void:
 	var b = JSON.parse_string(_nova.bar_info())
 	if not (b is Dictionary):
 		b = {}
+	if _classic():
+		_begin(_show_hub)
+		_c.bar(b)
+		return
 	_clear("Bar", _show_hub)
 	var pic := _picture(_pict_tex(int(b.get("pict", -1))), Vector2(600, 220))
 	if int(b.get("pict", -1)) >= 0:
@@ -936,6 +1002,9 @@ func _holovid() -> void:
 	if not (h is Dictionary) or h.is_empty():
 		return
 	_nova.sound_beep(2)
+	if _classic():
+		_c.holovid(h)
+		return
 	_close_overlay()
 	_overlay = _make_overlay()
 	var box := _overlay_box(Vector2(780, 0))
@@ -987,9 +1056,13 @@ func _reopen_bbs() -> void:
 func _show_bbs(date: String) -> void:
 	_screen = "bbs"
 	_bbs_nodes = {}
-	_clear(str(_story_labels.get("missionBBS", "Mission BBS")), _show_hub)
 	var parsed = JSON.parse_string(_nova.bbs_list())
 	_bbs_list = parsed if parsed is Array else []
+	if _classic():
+		_begin(_show_hub)
+		_c.bbs(date)
+		return
+	_clear(str(_story_labels.get("missionBBS", "Mission BBS")), _show_hub)
 	_label(date, 14)
 	var body := HBoxContainer.new()
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1057,6 +1130,9 @@ func _bbs_show(id: int) -> void:
 		return
 	var o = JSON.parse_string(_nova.offer_state())
 	if not (o is Dictionary) or o.is_empty() or _bbs_nodes.is_empty():
+		return
+	if _classic():
+		_c.bbs_present(o)
 		return
 	_bbs_nodes.title.text = str(o.title)
 	_bbs_nodes.text.text = str(o.text)

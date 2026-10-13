@@ -356,7 +356,9 @@ func _process(delta: float) -> void:
 
 	if _spaceport.is_open():
 		_spaceport.close()
-	hud.visible = true
+	# The top-left status/key-hint line is a dev overlay — the original has none,
+	# so the Classic HUD hides it (Nova Swift presentation keeps it).
+	hud.visible = not (_has_data and ClassicTheme.classic("hud"))
 
 	if _nav.blocks_flight() or _interact.blocks_flight() or _story.blocks_flight():   # map / hail / plunder dialog up: sim paused
 		_drain_events_to_log(delta)

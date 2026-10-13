@@ -212,7 +212,7 @@ func _build_video() -> void:
 
 ## Presentation: Classic (the original's status bar / dialogs / menu, drawn from the
 ## player's own data -- the default) or Nova Swift (the port's own screens), as in
-## the Apple app's GameSettings presets; the three toggles below mix them. Reads
+## the Apple app's GameSettings presets; the toggles below mix them. Reads
 ## Prefs[presentation]; screens pick the change up the next time they open (the
 ## HUD immediately).
 func _build_presentation() -> void:
@@ -220,11 +220,11 @@ func _build_presentation() -> void:
 	modes.add_theme_constant_override("separation", 8)
 	_content.add_child(modes)
 	var mode_buttons := {}
-	for m in [[Prefs.UI_CLASSIC, "Classic"], [Prefs.UI_NOVA_SWIFT, "Nova Swift"]]:
+	for m in [[Prefs.UI_CLASSIC, "Classic"], [Prefs.UI_ENHANCED, "Enhanced"], [Prefs.UI_NOVA_SWIFT, "Nova Swift"]]:
 		var b := Button.new()
 		b.text = m[1]
 		b.toggle_mode = true
-		b.custom_minimum_size = Vector2(190, 40)
+		b.custom_minimum_size = Vector2(150, 40)
 		b.button_pressed = Prefs.ui_mode() == m[0]
 		b.pressed.connect(func():
 			Prefs.apply_ui_mode(m[0])
@@ -234,11 +234,13 @@ func _build_presentation() -> void:
 		mode_buttons[m[0]] = b
 	if first_control == null:
 		first_control = mode_buttons[Prefs.UI_CLASSIC]
-	ShellUI.label(_content, "Classic draws the original interface from your game data (status bar, dialogs, menu). Nova Swift uses the port's own modern screens.", 13)
-	for t in [["Modern main menu", "modern_menu"], ["Modern dialogs", "modern_dialogs"], ["Modern HUD (status bar)", "modern_hud"]]:
+	ShellUI.label(_content, "Classic draws the original interface from your game data (status bar, dialogs, menu). Enhanced adds the full-screen galaxy map. Nova Swift uses the port's own modern screens.", 13)
+	for t in [["Modern main menu", "modern_menu"], ["Modern dialogs", "modern_dialogs"], ["Modern HUD (status bar)", "modern_hud"],
+			["Full-screen galaxy map", "fullscreen_galaxy_map"]]:
 		var c := _check(t[0], "presentation", t[1])
 		c.toggled.connect(func(_on: bool): show_page.call_deferred("Presentation"))
-	var mode_name := {Prefs.UI_CLASSIC: "Classic", Prefs.UI_NOVA_SWIFT: "Nova Swift", Prefs.UI_CUSTOM: "Custom"}
+	var mode_name := {Prefs.UI_CLASSIC: "Classic", Prefs.UI_ENHANCED: "Enhanced", Prefs.UI_NOVA_SWIFT: "Nova Swift",
+		Prefs.UI_CUSTOM: "Custom"}
 	ShellUI.label(_content, "Current: " + str(mode_name[Prefs.ui_mode()]), 14, ShellUI.ACCENT)
 
 

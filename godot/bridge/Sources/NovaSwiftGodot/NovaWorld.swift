@@ -4121,6 +4121,30 @@ class NovaWorld: Node2D {
         sound.pending.append(SoundCue(soundID: id, priority: OriginalAudio.Priority.menuTransition))
     }
 
+    /// The original galaxy map's info text for system `id` (see `ClassicUIBackend.mapInfo`).
+    @Callable(autoSnakeCase: true) func classicMapInfo(systemID: Int) -> String {
+        game.map { ClassicUIBackend.mapInfo($0, pilot: pilot, system: systemID) } ?? "{}"
+    }
+
+    // -- Ambient starfield (the shared OriginalRendering rules) --
+
+    /// The current system's raw `sÿst` murk (stars hide while it is negative).
+    @Callable(autoSnakeCase: true) func systemMurk() -> Int {
+        guard let game, let id = currentSystemID else { return 0 }
+        return game.system(id)?.murk ?? 0
+    }
+
+    /// `OriginalRendering.starCount`: live stars for a view `viewHeight` px tall (<= 20).
+    @Callable(autoSnakeCase: true) func starCount(viewHeight: Double) -> Int { OriginalRendering.starCount(viewHeight: viewHeight) }
+
+    /// `OriginalRendering.starFactor`: a star's extra drift for `Random(35)` = `random35`.
+    @Callable(autoSnakeCase: true) func starFactor(random35: Int, parallax: Bool) -> Double {
+        OriginalRendering.starFactor(random35: random35, parallax: parallax)
+    }
+
+    /// `OriginalRendering.starTint`: the 5-bit tint (32 = neutral) for the system's raw murk.
+    @Callable(autoSnakeCase: true) func starTint(rawMurk: Int) -> Int { OriginalRendering.starTint(rawMurk: rawMurk) }
+
     // -- Authentic status-bar extras (ui/classic/AuthenticHUD.gd) --
 
     /// The target panel's text, as `GameScene.updateOriginalTargetText` builds it: `{name, subtitle, shipType,

@@ -8,6 +8,9 @@ extends SceneTree
 
 const Spaceport = preload("res://screens/Spaceport.gd")
 const Controls = preload("res://Controls.gd")
+const Prefs = preload("res://Prefs.gd")
+# NOVA_UI=modern drives the plain Nova Swift screens; the default is the Classic (original UI) ones.
+var classic := OS.get_environment("NOVA_UI") != "modern"
 var ok := true
 var launches := 0
 
@@ -31,6 +34,9 @@ func _focus_text() -> String:
 
 
 func _init() -> void:
+	Prefs.path = OS.get_user_data_dir() + "/menucheck_settings.cfg"
+	Prefs.load_all()
+	Prefs.apply_ui_mode(Prefs.UI_CLASSIC if classic else Prefs.UI_NOVA_SWIFT)
 	Controls.register()
 	var nova = ClassDB.instantiate("NovaWorld")
 	root.add_child(nova)
@@ -58,26 +64,34 @@ func _init() -> void:
 	await process_frame
 	var info = JSON.parse_string(nova.spaceport_info())
 	print("hub: ", info.name, " focus=", _focus_text())
-	_check("hub focuses a service button", root.gui_get_focus_owner() is Button)
+	_check("hub focuses a service button", root.gui_get_focus_owner() is BaseButton)
 
 	if info.trade:
 		sp._show_trade()
 		await process_frame
 		await process_frame
 		var rows: Array = sp._trade_data.rows
-		_check("trade: a row has focus", root.gui_get_focus_owner() is Button and sp._trade_sel == 0)
+		_check("trade: a row has focus", root.gui_get_focus_owner() is BaseButton and sp._trade_sel == 0)
 		_key("ui_down")
 		await process_frame
 		_check("trade: ui_down moves to row 1", sp._trade_sel == 1, "sel=%d" % sp._trade_sel)
 		var c0: int = nova.player_credits()
 		var price: int = int(rows[1].price)
-		root.gui_get_focus_owner().pressed.emit()
+		if classic:
+			# Classic: a row press selects (the original buys with the Buy button).
+			root.gui_get_focus_owner().pressed.emit()
+			await process_frame
+			var buy = sp.find_child("trade_buy", true, false)
+			_check("trade: Buy button is enabled for the selected row", buy != null and not buy.disabled)
+			buy.pressed.emit()
+		else:
+			root.gui_get_focus_owner().pressed.emit()
 		await process_frame
 		await process_frame
 		var spent: int = c0 - nova.player_credits()
-		_check("trade: pressing a row buys (credits drop by tons*price)", spent > 0 and spent % price == 0,
+		_check("trade: buying spends tons*price", spent > 0 and spent % price == 0,
 			"spent %d @ %d" % [spent, price])
-		_check("trade: focus kept on the same row after refresh", sp._trade_sel == 1 and root.gui_get_focus_owner() is Button)
+		_check("trade: selection kept after refresh", sp._trade_sel == 1 and root.gui_get_focus_owner() is BaseButton)
 		_key("trade_sell")
 		await process_frame
 		await process_frame
@@ -85,7 +99,7 @@ func _init() -> void:
 		_key("shop_buy_qty")
 		await process_frame
 		await process_frame
-		_check("trade: quantity prompt opens with focus", sp._overlay != null and root.gui_get_focus_owner() is Button)
+		_check("trade: quantity prompt opens with focus", sp._overlay != null and root.gui_get_focus_owner() is Control)
 		_key("ui_down")   # -10 on the quantity box
 		await process_frame
 		_key("ui_cancel")
@@ -101,7 +115,7 @@ func _init() -> void:
 		await process_frame
 		await process_frame
 		var first_id: int = sp._sel_id
-		_check("outfitter: a tile has focus", root.gui_get_focus_owner() is Button and first_id >= 0, _focus_text())
+		_check("outfitter: a tile has focus", root.gui_get_focus_owner() is BaseButton and first_id >= 0, _focus_text())
 		_key("ui_right")
 		await process_frame
 		_check("outfitter: ui_right moves selection", sp._sel_id != first_id, "%d -> %d" % [first_id, sp._sel_id])
@@ -124,7 +138,7 @@ func _init() -> void:
 		sp._show_shipyard()
 		await process_frame
 		await process_frame
-		_check("shipyard: a tile has focus", root.gui_get_focus_owner() is Button)
+		_check("shipyard: a tile has focus", root.gui_get_focus_owner() is BaseButton)
 		_key("ship_info")
 		await process_frame
 		await process_frame

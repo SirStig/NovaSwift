@@ -18,6 +18,10 @@ extends CanvasLayer
 signal log_message(text: String)
 signal screen_closed
 
+const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
+const CD = preload("res://ui/classic/ClassicDialog.gd")
+const CS = preload("res://ui/classic/ClassicScreen.gd")
+
 const COL_AMBER := Color(1.0, 0.82, 0.4)
 const COL_DIM := Color(0.62, 0.66, 0.74)
 const COL_RED := Color(1.0, 0.35, 0.3)
@@ -39,6 +43,7 @@ var _capture := {}
 func setup(world) -> void:
 	nova = world
 	layer = 30
+	ClassicTheme.setup(world)
 	_hud = PanelContainer.new()
 	_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hud.position = Vector2(24, 150)
@@ -48,6 +53,30 @@ func setup(world) -> void:
 	_hud.add_child(_hud_box)
 	_hud.visible = false
 	add_child(_hud)
+
+
+## Classic (original DLOG/DITL) presentation for the dialogs, or the plain Nova Swift ones.
+func _classic() -> bool:
+	return ClassicTheme.classic("dialogs")
+
+
+## A fresh dialog host for the Classic path: a dim scrim; add ClassicDialogs to it.
+func _begin_classic() -> Control:
+	_clear_dialog_nodes()
+	_dialog = Control.new()
+	_dialog.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(_dialog)
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.55)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_dialog.add_child(dim)
+	_box = null
+	return _dialog
+
+
+func _cbtn(d: Control, label: String, r: Rect2i, idx: int, cb: Callable, key: String, enabled := true) -> TextureButton:
+	var b := CS.button(d, label, r, idx, cb, enabled, "btn_" + key)
+	return b
 
 
 func blocks_flight() -> bool:
@@ -146,6 +175,9 @@ func _show_hail() -> void:
 	if st.is_empty():
 		_close_dialog()
 		return
+	if _classic():
+		_hail_classic(st)
+		return
 	_begin("")
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 16)
@@ -243,6 +275,9 @@ func _show_plunder() -> void:
 	if st.is_empty():
 		_close_dialog()
 		return
+	if _classic():
+		_plunder_classic(st)
+		return
 	_begin("")
 	_box.add_child(_label("Select what to plunder from this ship:", 16, COL_AMBER))
 	_box.add_child(_label(str(st["name"]), 14, COL_DIM))
@@ -293,6 +328,9 @@ func _show_capture() -> void:
 		return
 	_kind = "capture"
 	_focus_key = ""
+	if _classic():
+		_capture_classic()
+		return
 	_begin("")
 	_box.add_child(_label("Ship captured!", 18, COL_AMBER))
 	var msg := _label(str(_capture["message"]), 15, Color.WHITE)
@@ -317,6 +355,9 @@ func _capture_escort() -> void:
 func _show_name_prompt() -> void:
 	_beep(2)
 	_kind = "name"
+	if _classic():
+		_name_classic()
+		return
 	_begin("")
 	_box.add_child(_label(str(_capture["prompt"]), 16, COL_AMBER))
 	_name_edit = LineEdit.new()
@@ -360,6 +401,9 @@ func _show_escorts() -> void:
 	var roster = JSON.parse_string(nova.escort_roster())
 	if roster == null:
 		roster = []
+	if _classic():
+		_escorts_classic(labels, roster)
+		return
 	_begin("")
 	_box.add_child(_label("Escorts", 18, COL_AMBER))
 	var groups := HBoxContainer.new()
@@ -450,12 +494,25 @@ func _refresh_escort_panel() -> void:
 	for c in _hud_box.get_children():
 		_hud_box.remove_child(c)
 		c.queue_free()
-	_hud_box.add_child(_label(str(st["title"]), 14, COL_AMBER))
+	var classic := _classic()
+	_style_hud(classic)
+	if classic:
+		# Ui_DrawTargetCategoryPanel: black box, grey border, white title, green selected row.
+		var t := _label(str(st["title"]), 12, Color.WHITE)
+		t.add_theme_font_override("font", ClassicTheme.chrome_font())
+		_hud_box.add_child(t)
+	else:
+		_hud_box.add_child(_label(str(st["title"]), 14, COL_AMBER))
 	for r in st["rows"]:
 		var col: Color = Color.WHITE if r["enabled"] else Color(0.4, 0.42, 0.48)
 		if r["selected"]:
 			col = COL_AMBER
-		_hud_box.add_child(_label("%s   %s" % [r["label"], r["order"]], 13, col))
+		if classic:
+			col = (Color(0.3, 1.0, 0.3) if r["selected"] else Color.WHITE) if r["enabled"] else Color(0.25, 0.25, 0.25)
+		var l := _label("%s   %s" % [r["label"], r["order"]], 11 if classic else 13, col)
+		if classic:
+			l.add_theme_font_override("font", ClassicTheme.body_font())
+		_hud_box.add_child(l)
 	_hud.modulate.a = clampf(float(st["level"]) / 32.0, 0.0, 1.0)
 	_hud.visible = true
 
@@ -482,6 +539,25 @@ func _begin(title: String) -> void:
 	panel.add_child(_box)
 	if title != "":
 		_box.add_child(_label(title, 18, COL_AMBER))
+
+
+var _hud_classic := -1
+
+
+func _style_hud(classic: bool) -> void:
+	var want := 1 if classic else 0
+	if _hud_classic == want:
+		return
+	_hud_classic = want
+	if classic:
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color(0, 0, 0, 0.85)
+		sb.border_color = Color(0.4, 0.4, 0.4)
+		sb.set_border_width_all(1)
+		sb.set_content_margin_all(6)
+		_hud.add_theme_stylebox_override("panel", sb)
+	else:
+		_hud.add_theme_stylebox_override("panel", _style(Color(0.05, 0.06, 0.09, 0.82)))
 
 
 func _clear_dialog_nodes() -> void:
@@ -529,7 +605,7 @@ func _apply_focus(prefer: Array) -> void:
 	var want := [_focus_key] + prefer
 	for k in want:
 		var n := _dialog.find_child("btn_" + str(k), true, false) if _dialog != null else null
-		if n is Button and not n.disabled:
+		if n is BaseButton and not n.disabled:
 			n.call_deferred("grab_focus")
 			return
 
@@ -604,3 +680,261 @@ func _sprite_frame_tex(kind: int, id: int) -> Texture2D:
 			tex = atlas
 	_tex[key] = tex
 	return tex
+
+
+# MARK: Classic (original DITL) dialogs --------------------------------------------------
+# Mirrors the Apple HailDialogView (DITL 1007 / 1009 on PICT 8511 / 8512), NegotiationView
+# (1008 / 8514), PlunderView (1011 / 8515), the capture decision (DLOG 3002) and name prompt
+# (3001), and EscortsView (1022 / 8513).
+
+func _hail_classic(st: Dictionary) -> void:
+	var host := _begin_classic()
+	var planet: bool = st["kind"] == "planet"
+	var did := 1009 if planet else 1007
+	var d := CS.frame(nova, did, 8512 if planet else 8511)
+	d.beep = false
+	host.add_child(d)
+	var paying: bool = st.has("payment")
+	var pr: Rect2i
+	var tx: Rect2i
+	var idr: Rect2i
+	if planet:
+		pr = CS.rect(nova, did, 4, Rect2i(222, 5, 310, 283))
+		tx = CS.rect(nova, did, 3, Rect2i(5, 5, 200, 60))
+		idr = CS.rect(nova, did, 5, Rect2i(16, 82, 120, 50))
+	else:
+		pr = CS.rect(nova, did, 10, Rect2i(216, 7, 200, 200))
+		tx = CS.rect(nova, did, 9, Rect2i(11, 8, 192, 58))
+		idr = CS.rect(nova, did, 11, Rect2i(40, 73, 134, 46))
+	var tex: Texture2D = null
+	if planet:
+		var lp: int = nova.spaceport_picture_id(1, int(st["id"]))
+		tex = _pict_tex(lp) if lp >= 0 else _sprite_frame_tex(5, int(st["id"]))
+	else:
+		tex = _pict_tex(int(st["pict"]))
+	if tex != null:
+		CS.picture(d, tex, pr, TextureRect.STRETCH_KEEP_ASPECT_COVERED if planet and int(nova.spaceport_picture_id(1, int(st["id"]))) >= 0 else TextureRect.STRETCH_KEEP_ASPECT_CENTERED)
+	CS.text(d, str(st["text"]), Rect2i(tx.position, tx.size), 10, Color.WHITE)
+	var y := idr.position.y
+	CS.text(d, str(st["name"]), Rect2i(idr.position.x, y, idr.size.x, 16), 12, COL_AMBER, HORIZONTAL_ALIGNMENT_LEFT, true)
+	y += 18
+	if str(st["classLine"]) != "":
+		CS.text(d, str(st["classLine"]), Rect2i(idr.position.x, y, idr.size.x, 14), 10, Color(0.75, 0.75, 0.75))
+		y += 14
+	if str(st["status"]) != "":
+		CS.text(d, str(st["status"]), Rect2i(idr.position.x, y, idr.size.x, 14), 10,
+			Color(1, 0.3, 0.3) if st["statusHostile"] else Color(0.75, 0.75, 0.75))
+	if planet:
+		_cbtn(d, str(st["top"]), CS.rect(nova, did, 1, Rect2i(27, 184, 146, 26)), 1, _hail_top, "top", not paying)
+		if st["middleVisible"]:
+			_cbtn(d, str(st["middle"]), CS.rect(nova, did, 2, Rect2i(27, 214, 146, 26)), 2, _hail_middle, "middle",
+				st["middleEnabled"] and not paying)
+		_cbtn(d, str(st["close"]), CS.rect(nova, did, 0, Rect2i(27, 244, 146, 26)), 0, _hail_close, "close", not paying)
+	else:
+		_cbtn(d, str(st["top"]), CS.rect(nova, did, 2, Rect2i(21, 125, 166, 26)), 2, _hail_top, "top", not paying)
+		if st["middleVisible"]:
+			_cbtn(d, str(st["middle"]), CS.rect(nova, did, 1, Rect2i(21, 153, 166, 26)), 1, _hail_middle, "middle",
+				st["middleEnabled"] and not paying)
+		_cbtn(d, str(st["close"]), CS.rect(nova, did, 0, Rect2i(21, 181, 166, 26)), 0, _hail_close, "close", not paying)
+	if paying:
+		var p: Dictionary = st["payment"]
+		var h := CS.frame(nova, 1008, 8514)
+		h.beep = false
+		host.add_child(h)
+		CS.text(h, str(p["message"]), CS.rect(nova, 1008, 2, Rect2i(7, 6, 248, 25)), 11, Color.WHITE)
+		_cbtn(h, str(p["accept"]), CS.rect(nova, 1008, 1, Rect2i(58, 39, 146, 26)), 1, func(): _pay(true), "accept")
+		_cbtn(h, str(p["lower"]), CS.rect(nova, 1008, 0, Rect2i(58, 74, 146, 26)), 0, func(): _pay(false), "lower")
+		h.focus_first.call_deferred()
+	_apply_focus(["accept", "top", "middle", "close"] if paying else ["top", "middle", "close"])
+
+
+func _plunder_classic(st: Dictionary) -> void:
+	var host := _begin_classic()
+	var d := CS.frame(nova, 1011, 8515)
+	d.beep = false
+	host.add_child(d)
+	var pan := CS.rect(nova, 1011, 4, Rect2i(11, 7, 287, 96))
+	var bg := ColorRect.new()
+	bg.color = Color(0, 0, 0, 0.55)
+	bg.position = Vector2(pan.position)
+	bg.size = Vector2(pan.size)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	d.add_child(bg)
+	var cargo_t := int(st["cargoTons"])
+	var y := pan.position.y + 4
+	CS.text(d, "Select what to plunder from this ship:", Rect2i(pan.position.x + 6, y, pan.size.x - 12, 14), 11, COL_AMBER, HORIZONTAL_ALIGNMENT_LEFT, true)
+	y += 18
+	var rows := [["Cargo:", ("%d tons" % cargo_t) if cargo_t > 0 else "None"],
+		["Ammo:", str(int(st["ammo"])) if st["ammo"] > 0 else "None"]]
+	if st["capture"] >= 0:
+		rows.append(["Capture Odds:", "%d%%" % st["capture"]])
+	for r in rows:
+		CS.text(d, r[0], Rect2i(pan.position.x + 6, y, 100, 14), 11, Color.WHITE)
+		CS.text(d, r[1], Rect2i(pan.position.x + 106, y, 100, 14), 11, Color.WHITE, HORIZONTAL_ALIGNMENT_RIGHT)
+		y += 15
+	CS.text(d, "%d credits · %d energy" % [st["credits"], st["energy"]], Rect2i(pan.position.x + 6, pan.end.y - 16, pan.size.x - 12, 14), 10, Color(0.65, 0.65, 0.65))
+	var live := {0: st["energy"] > 0, 1: st["cargoTons"] > 0, 2: st["credits"] > 0, 3: st["ammo"] > 0, 4: st["capture"] >= 0}
+	# True DITL slots: Energy / Cargo / Credits, Ammo / Capture Ship, Abort.
+	var slots := {"Energy": [5, Rect2i(16, 110, 89, 25), 0], "Cargo": [1, Rect2i(110, 110, 89, 25), 1],
+		"Credits": [3, Rect2i(204, 110, 89, 25), 2], "Ammo": [2, Rect2i(35, 138, 89, 25), 3],
+		"Capture Ship": [6, Rect2i(129, 138, 146, 25), 4]}
+	for k in slots:
+		var sl: Array = slots[k]
+		var action: int = sl[2]
+		var b := _cbtn(d, k, CS.rect(nova, 1011, sl[0], sl[1]), sl[0], _plunder_press.bind(action), k, live[action])
+		b.refused.connect(func(): _beep(4))
+	_cbtn(d, "Abort", CS.rect(nova, 1011, 0, Rect2i(91, 166, 126, 25)), 0, _plunder_abort, "Abort")
+	_apply_focus(["Cargo", "Credits", "Abort"])
+
+
+func _capture_classic() -> void:
+	var host := _begin_classic()
+	var can_escort: bool = _capture["canEscort"]
+	var d := CD.from_ditl(nova, 3002, {"texts": {2: str(_capture["message"])}, "labels": {0: "Take Command", 4: "Use as Escort"},
+		"hidden": [] if can_escort else [4], "default_item": 0, "cancel_item": -1, "fallback_size": Vector2i(354, 140),
+		"actions": {0: _show_name_prompt, 4: _capture_escort}})
+	d.beep = false
+	host.add_child(d)
+	d.item(0).name = "btn_cmd"
+	if can_escort and d.item(4) != null:
+		d.item(4).name = "btn_esc"
+	_apply_focus(["cmd"])
+
+
+func _name_classic() -> void:
+	var host := _begin_classic()
+	var d := CD.text_prompt(nova, str(_capture["prompt"]), str(_capture["defaultName"]))
+	d.cancel_item = -1
+	d.beep = false
+	d.actions = {0: _name_ok, 5: _name_cancel}
+	_name_edit = d.texts[4]
+	_name_edit.max_length = 63
+	host.add_child(d)
+	d.item(0).name = "btn_ok"
+	d.item(5).name = "btn_cancel"
+	_apply_focus(["ok"])
+
+
+func _escorts_classic(labels: Dictionary, roster: Array) -> void:
+	var host := _begin_classic()
+	var d := CS.frame(nova, 1022, 8513)
+	d.beep = false
+	d.window_size = Vector2i(d.window_size.x, d.window_size.y + 78)
+	d.custom_minimum_size = Vector2(d.window_size)
+	d.size = Vector2(d.window_size)
+	host.add_child(d)
+	var names: Array = labels.get("groups", ["All"])
+	var has := not roster.is_empty()
+	var sm := CS.rect(nova, 1022, 9, Rect2i(14, 9, 192, 58))
+	CS.text(d, "Escort Wing" if has else "No escorts", Rect2i(sm.position.x, sm.position.y + 8, sm.size.x, 16), 12,
+		Color.WHITE if has else Color(0.5, 0.5, 0.5), HORIZONTAL_ALIGNMENT_CENTER, true)
+	CS.text(d, ("%d ship%s under command" % [roster.size(), "" if roster.size() == 1 else "s"]) if has else "Capture or hire ships to command",
+		Rect2i(sm.position.x + 6, sm.position.y + 28, sm.size.x - 12, 28), 10, Color(0.6, 0.6, 0.6), HORIZONTAL_ALIGNMENT_CENTER)
+	var orr := CS.rect(nova, 1022, 11, Rect2i(14, 79, 192, 52))
+	CS.text(d, ("Orders to: %s" % names[_esc_group + 1]) if has else "—", Rect2i(orr.position.x + 6, orr.position.y + 18, orr.size.x - 12, 16), 11,
+		COL_AMBER if has else Color(0.4, 0.4, 0.4), HORIZONTAL_ALIGNMENT_CENTER)
+	var ol: Dictionary = labels.get("orders", {})
+	# Items 2 / 3 / 1 / 0 top to bottom: Attack, Defend, Formation, Hold Position.
+	for spec in [[2, 2, Rect2i(29, 141, 146, 26)], [3, 1, Rect2i(29, 169, 146, 26)], [1, 0, Rect2i(29, 197, 146, 26)], [0, 4, Rect2i(29, 225, 146, 26)]]:
+		var code: int = spec[1]
+		_cbtn(d, str(ol.get(str(code), str(code))), CS.rect(nova, 1022, spec[0], spec[2]), spec[0],
+			func(): _escort_window_order(code), "o%d" % code, has)
+	# Roster list (item 10).
+	var lr := CS.rect(nova, 1022, 10, Rect2i(217, 30, 200, 200))
+	var sc := ScrollContainer.new()
+	sc.position = Vector2(lr.position)
+	sc.size = Vector2(lr.size)
+	sc.follow_focus = true
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	sc.get_v_scroll_bar().modulate = Color(1, 1, 1, 0)
+	d.add_child(sc)
+	var list := VBoxContainer.new()
+	list.add_theme_constant_override("separation", 2)
+	list.custom_minimum_size = Vector2(lr.size.x - 4, 0)
+	sc.add_child(list)
+	if not has:
+		var l := CS.text(d, "No escorts under your command.", lr, 11, Color(0.55, 0.55, 0.55), HORIZONTAL_ALIGNMENT_CENTER)
+		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	var sel = null
+	for m in roster:
+		var rid: int = m["record"] if m["record"] >= 0 else -1000 - int(m["entity"])
+		var rb := CS.Row.new()
+		rb.custom_minimum_size = Vector2(lr.size.x - 4, 30)
+		rb.name = "btn_r%d" % rid
+		rb.set_selected(rid == _esc_sel)
+		rb.pressed.connect(func(): _esc_sel = -1 if _esc_sel == rid else rid; _focus_key = "r%d" % rid; _show_escorts())
+		CS.cell(rb, str(m["name"]), 4, 120, 14, Color.WHITE, HORIZONTAL_ALIGNMENT_LEFT, 11)
+		var origin := "Fighter" if m.get("fighter", false) else str(m["origin"])
+		CS.cell(rb, origin, 120, lr.size.x - 128, 14, Color(0.6, 0.6, 0.6), HORIZONTAL_ALIGNMENT_RIGHT, 9)
+		for bar in [[0.4, 0.7, 1.0, float(m["shield"]), 4], [1.0, 0.72, 0.3, float(m["armor"]), 98]]:
+			var back := ColorRect.new()
+			back.color = Color(1, 1, 1, 0.12)
+			back.position = Vector2(bar[4], 20)
+			back.size = Vector2(70, 4)
+			back.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			rb.add_child(back)
+			var fill := ColorRect.new()
+			fill.color = Color(bar[0], bar[1], bar[2])
+			fill.position = back.position
+			fill.size = Vector2(70.0 * clampf(bar[3], 0.0, 1.0), 4)
+			fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			rb.add_child(fill)
+		list.add_child(rb)
+		if rid == _esc_sel:
+			sel = m
+	# Action strip under the frame (Apple appends the same).
+	var fh := int(d.window_size.y) - 78
+	var strip := ColorRect.new()
+	strip.color = Color(0.08, 0.08, 0.08)
+	strip.position = Vector2(0, fh)
+	strip.size = Vector2(d.window_size.x, 78)
+	strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	d.add_child(strip)
+	var line := ColorRect.new()
+	line.color = Color(1, 0.7, 0.28, 0.22)
+	line.size = Vector2(d.window_size.x, 1)
+	strip.add_child(line)
+	var status := ""
+	var rec := -1
+	if sel != null and int(sel["record"]) >= 0:
+		rec = int(sel["record"])
+		status = str(sel.get("status", ""))
+		if status == "":
+			var detail: Array[String] = []
+			if int(sel["upgradeCost"]) > 0 and sel["canUpgrade"]:
+				detail.append("upgrade to %s %s cr" % [sel["upgradeName"], str(int(sel["upgradeCost"]))])
+			if sel["canSell"]:
+				detail.append("sell %s cr" % str(int(sel["sellValue"])))
+			status = ", ".join(detail)
+	elif sel != null:
+		status = "Bay fighter - managed via its carrier"
+	elif has:
+		status = "Select an escort to hail it."
+	CS.text(d, (str(sel["name"]) + " - " if sel != null else "") + status, Rect2i(8, fh + 4, d.window_size.x - 16, 14), 10, Color(0.6, 0.6, 0.6))
+	var cur := [8, fh + 24]
+	var add := func(label: String, w: int, cb: Callable, key: String, on := true) -> void:
+		_cbtn(d, label, Rect2i(cur[0], cur[1], w, 25), 20 + cur[0] + cur[1], cb, key, on)
+		cur[0] += w + 6
+	var gnext := func():
+		_esc_group = -1 if _esc_group >= names.size() - 2 else _esc_group + 1
+		_focus_key = "grp"
+		_show_escorts()
+	add.call(str(names[_esc_group + 1]), 100, gnext, "grp", has)
+	add.call(str(ol.get("3", "Return to Hangar")), 120, func(): _escort_window_order(3), "o3", has)
+	var done_x := d.window_size.x - 66
+	if rec >= 0:
+		cur[0] = 8
+		cur[1] = fh + 50
+		if sel["pendingUpgrade"]:
+			add.call("Cancel Upgrade", 100, func(): nova.escort_cancel_upgrade(rec); _focus_key = "upg"; _show_escorts(), "upg")
+		elif sel["canUpgrade"]:
+			add.call("Upgrade", 70, func(): nova.escort_request_upgrade(rec); _focus_key = "upg"; _show_escorts(), "upg")
+		if sel["pendingSale"]:
+			add.call("Cancel Sale", 80, func(): nova.escort_cancel_sale(rec); _focus_key = "sell"; _show_escorts(), "sell")
+		elif sel["canSell"]:
+			add.call("Sell", 50, func(): nova.escort_request_sale(rec); _focus_key = "sell"; _show_escorts(), "sell")
+		if sel["canRelease"]:
+			add.call("Dismiss" if sel["origin"] == "Captured" else "Release", 80,
+				func(): nova.escort_release(rec); _esc_sel = -1; _focus_key = "close"; _show_escorts(), "rel")
+	_cbtn(d, "Done", Rect2i(done_x, fh + 24, 60, 25), 99, _close_dialog, "close")
+	_apply_focus(["close"])

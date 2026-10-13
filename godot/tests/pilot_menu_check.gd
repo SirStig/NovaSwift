@@ -3,10 +3,13 @@
 extends SceneTree
 
 const PilotMenu = preload("res://screens/PilotMenu.gd")
+const Prefs = preload("res://Prefs.gd")
 var _chosen := 0
 
 
 func _init() -> void:
+	Prefs.path = OS.get_user_data_dir() + "/pilot_menucheck_settings.cfg"
+	Prefs.set_value("presentation", "modern_dialogs", true)   # this checks the plain screen
 	var nova = ClassDB.instantiate("NovaWorld")
 	root.add_child(nova)
 	var dir := OS.get_user_data_dir() + "/pilot_menucheck"

@@ -167,14 +167,19 @@ static func text_prompt(nova_obj: Object, prompt: String, initial := "") -> Cont
 ## and footer_buttons (Arrays of {label, action: Callable, default, cancel,
 ## disabled}), body_buttons_width (200).
 static func panel(nova_obj: Object, opts := {}) -> Control:
-	var width := int(opts.get("width", 441))
+	var top_tex = Theme_.pict(8524)
+	var bot_tex = Theme_.pict(8526)
+	# The frame art is a fixed width; the strip is the bottom piece's height.
+	var width := int(opts.get("width", top_tex.get_width() if top_tex != null else 441))
+	var strip := bot_tex.get_height() if bot_tex != null else 40
+	var top_h := top_tex.get_height() if top_tex != null else 9
 	var title := str(opts.get("title", ""))
 	var text := str(opts.get("text", ""))
 	var body: Array = opts.get("body_buttons", [])
 	var footer: Array = opts.get("footer_buttons", [])
 	var bw := int(opts.get("body_buttons_width", 200))
 	var bh := Theme_.button_height()
-	var y := 9 + 14
+	var y := top_h + 14
 	var plan := []   # [kind, text, rect]
 	if title != "":
 		plan.append(["title", title, Rect2i(20, y, width - 40, 26)])
@@ -189,7 +194,7 @@ static func panel(nova_obj: Object, opts := {}) -> Control:
 		body_rects.append(Rect2i((width - bw) / 2, y, bw, bh))
 		y += bh + 8
 	y += 6
-	var height := y + 40   # the 40 px control strip
+	var height := y + strip   # the bottom piece is the control strip
 	var d: Control = _make(nova_obj, Vector2i(width, height), Chrome.PANEL)
 	d.fit_to_viewport = bool(opts.get("fit", true))
 	d.text_color = Theme_.color("listText")
@@ -209,7 +214,7 @@ static func panel(nova_obj: Object, opts := {}) -> Control:
 		var spec: Dictionary = footer[i]
 		var w := maxi(50, str(spec.get("label", "")).length() * 8 + 26)
 		fx -= w
-		d._add_spec_button(spec, Rect2i(fx, height - 40 + (40 - bh) / 2, w, bh), idx + i)
+		d._add_spec_button(spec, Rect2i(fx, height - strip + (strip - bh) / 2, w, bh), idx + i)
 		fx -= 10
 	return d
 
@@ -282,13 +287,19 @@ func _add_background(frame_tex: Texture2D) -> void:
 			if top == null or mid == null or bot == null:
 				_dark_fallback()
 				return
+			# Exactly as the original / Apple DescTextDialog: every piece at its
+			# NATIVE size (never stretched) — body under the top piece, top over
+			# it, bottom aligned to the dialog's bottom edge — clipped to the
+			# dialog. Stretching them is what tore the frame apart.
+			clip_contents = true
 			var h := float(window_size.y)
-			for part in [[top, 0.0, 9.0], [mid, 9.0, h - 49.0], [bot, h - 40.0, 40.0]]:
+			for part in [[mid, float(top.get_height())], [top, 0.0], [bot, h - float(bot.get_height())]]:
 				var tr := TextureRect.new()
 				tr.texture = part[0]
-				tr.stretch_mode = TextureRect.STRETCH_SCALE
+				tr.stretch_mode = TextureRect.STRETCH_KEEP
+				tr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 				tr.position = Vector2(0, part[1])
-				tr.size = Vector2(window_size.x, part[2])
+				tr.size = Vector2(part[0].get_size())
 				tr.mouse_filter = Control.MOUSE_FILTER_STOP
 				add_child(tr)
 
