@@ -14,7 +14,11 @@
 #             menu and framed galaxy map from the user's data (ui/classic/); Enhanced is Classic
 #             with the full-screen map; Nova Swift (all true) keeps the port's own screens. See
 #             ui_mode()/apply_ui_mode().
+#   [developer] debug_mode · ui_debug_overlay · collapsed_sections -- the debug suite (debug/)
 #   [data]    dir — the EV Nova data folder chosen in the data-setup screen
+#   [pilots]  dir (the Pilots folder; "" = the default, see screens/PilotFiles.gd) · recent (paths of
+#             pilot files opened lately) · migrated (user://pilots copied across once)
+#   [classic] the original Preferences window's (DLOG 4003) flags and levels (screens/ClassicPreferences.gd)
 #   [keys]    action -> { keys, buttons, alt_keys } — only what the player rebound
 #
 # Game speed (the Apple app's GameSpeedRules multiplier) is not exposed by the
@@ -35,6 +39,15 @@ const DEFAULTS := {
 	"video": {"fullscreen": false, "vsync": true, "scale": 1.0},
 	"input": {"deadzone": Controls.STICK_DEADZONE, "modern_keys": false},
 	"data": {"dir": ""},
+	"pilots": {"dir": "", "recent": [], "migrated": false},
+	# The original's Preferences window (NovaPrefs_ResetToDefaults: volume 5, brightness 3, all on
+	# but update checks). Only the flags the Godot build has an equivalent for take effect (see
+	# ClassicPreferences.gd); the rest are stored so the dialog round-trips.
+	"classic": {"share_processor_time": true, "intro_music": true, "play_movies": true,
+		"smoke_trails": true, "ship_animations": true, "engine_glow": true, "running_lights": true,
+		"weapon_effects": true, "parallax_starfield": true, "ambient_sounds": true,
+		"hyperspace_effects": true, "check_for_updates": false,
+		"sound_volume_step": 5, "brightness_step": 3},
 	"map": {"gate_links": false},
 	# Story Guide: the amber storyline badge on mission rows (Apple showMissionStorylineTags).
 	"story": {"show_mission_storyline_tags": true},
@@ -43,6 +56,9 @@ const DEFAULTS := {
 	# port's own "Nova Swift" screens. Classic = all off, Nova Swift = all on.
 	# fullscreen_galaxy_map: the map edge to edge instead of inside its original dialog frame
 	# (Apple fullscreenGalaxyMap; off in Classic, on in Enhanced and Nova Swift).
+	# Developer (Apple GameSettings.debugModeEnabled / uiDebugOverlay): gates the debug suite
+	# (debug/DevTools.gd). Settings > Support > Debug mode.
+	"developer": {"debug_mode": false, "ui_debug_overlay": false, "collapsed_sections": ""},
 	"presentation": {"modern_menu": false, "modern_dialogs": false, "modern_hud": false,
 		"fullscreen_galaxy_map": false},
 }

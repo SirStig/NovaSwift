@@ -11,6 +11,7 @@
 extends CanvasLayer
 
 const ShellUI = preload("res://screens/ShellUI.gd")
+const Prefs = preload("res://Prefs.gd")
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
 const ClassicDialog = preload("res://ui/classic/ClassicDialog.gd")
 
@@ -40,6 +41,9 @@ func setup(nova: Object, can_save: bool) -> void:
 	buttons.append(ShellUI.button(box, "Player Info", func(): player_info.emit(), nova))
 	buttons.append(ShellUI.button(box, "Story Map", func(): story_map.emit(), nova))
 	buttons.append(ShellUI.button(box, "Settings", func(): settings.emit(), nova))
+	buttons.append(ShellUI.button(box, "Report a Bug", func(): _devtools("report"), nova))
+	if Prefs.get_value("developer", "debug_mode"):
+		buttons.append(ShellUI.button(box, "Debug Suite", func(): _devtools("console"), nova))
 	if can_save:
 		buttons.append(ShellUI.button(box, "Save & Quit to Menu", func(): save_quit_to_menu.emit(), nova))
 	buttons.append(ShellUI.button(box, "Quit", func(): quit.emit(), nova))
@@ -52,7 +56,10 @@ func _setup_classic(nova: Object, can_save: bool) -> void:
 		{"label": "Player Info", "action": func(): player_info.emit()},
 		{"label": "Story Map", "action": func(): story_map.emit()},
 		{"label": "Settings", "action": func(): settings.emit()},
+		{"label": "Report a Bug", "action": func(): _devtools("report")},
 	]
+	if Prefs.get_value("developer", "debug_mode"):
+		specs.append({"label": "Debug Suite", "action": func(): _devtools("console")})
 	if can_save:
 		specs.append({"label": "Save & Quit to Menu", "action": func(): save_quit_to_menu.emit()})
 	specs.append({"label": "Quit", "action": func(): quit.emit()})
@@ -61,6 +68,13 @@ func _setup_classic(nova: Object, can_save: bool) -> void:
 	for i in specs.size():
 		buttons.append(classic_dialog.item(i))
 	first_button = buttons[0]
+
+
+## Close the menu (play continues underneath) and open the debug suite on `tab`.
+func _devtools(tab: String) -> void:
+	var tree := get_tree()
+	resume.emit()
+	tree.call_group("nova_devtools", "open_tab", tab)
 
 
 func _unhandled_input(event: InputEvent) -> void:

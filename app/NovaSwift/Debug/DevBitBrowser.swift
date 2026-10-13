@@ -1,5 +1,6 @@
 import SwiftUI
 import NovaSwiftKit
+import NovaSwiftStory
 
 /// The console's **control-bits (NCB) browser**.
 ///

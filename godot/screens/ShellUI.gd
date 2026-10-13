@@ -67,8 +67,75 @@ static func theme() -> Theme:
 	Theme_.track(null)
 	Theme_.on_nav_changed(_apply_nav)
 	t.set_color("font_color", "Label", TEXT)
+	_style_controls(t)
 	_theme = t
 	return t
+
+
+## Apple's NovaToggleStyle / NovaSlider look: an amber check box (not the stock switch) and a thin
+## amber-filled slider track with a round amber grabber.
+static func _style_controls(t: Theme) -> void:
+	var on := _box_icon(true, false)
+	var off := _box_icon(false, false)
+	var on_dis := _box_icon(true, true)
+	var off_dis := _box_icon(false, true)
+	for cls in ["CheckButton", "CheckBox"]:
+		t.set_icon("checked", cls, on)
+		t.set_icon("unchecked", cls, off)
+		t.set_icon("checked_disabled", cls, on_dis)
+		t.set_icon("unchecked_disabled", cls, off_dis)
+		t.set_constant("h_separation", cls, 10)
+	var track := StyleBoxFlat.new()
+	track.bg_color = Color(1, 1, 1, 0.12)
+	track.set_corner_radius_all(3)
+	track.content_margin_top = 3
+	track.content_margin_bottom = 3
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = ACCENT
+	fill.set_corner_radius_all(3)
+	fill.content_margin_top = 3
+	fill.content_margin_bottom = 3
+	t.set_stylebox("slider", "HSlider", track)
+	t.set_stylebox("grabber_area", "HSlider", fill)
+	t.set_stylebox("grabber_area_highlight", "HSlider", fill)
+	var knob := _knob_icon()
+	t.set_icon("grabber", "HSlider", knob)
+	t.set_icon("grabber_highlight", "HSlider", knob)
+	t.set_icon("grabber_disabled", "HSlider", knob)
+
+
+static func _box_icon(checked: bool, disabled: bool) -> Texture2D:
+	var n := 18
+	var img := Image.create(n, n, false, Image.FORMAT_RGBA8)
+	var a := 0.5 if disabled else 1.0
+	var edge := Color(ACCENT.r, ACCENT.g, ACCENT.b, a) if checked else Color(0.4, 0.4, 0.4, a)
+	var body := Color(ACCENT.r, ACCENT.g, ACCENT.b, a) if checked else Color(0.08, 0.08, 0.08, a)
+	for y in n:
+		for x in n:
+			var corner := (x < 2 or x >= n - 2) and (y < 2 or y >= n - 2)
+			if corner:
+				continue
+			img.set_pixel(x, y, edge if (x < 1 or y < 1 or x >= n - 1 or y >= n - 1) else body)
+	if checked:
+		# A black check mark: (4,9) -> (7,12) -> (13,5).
+		for seg in [[Vector2(4, 9), Vector2(7, 12)], [Vector2(7, 12), Vector2(13, 5)]]:
+			for i in 12:
+				var p: Vector2 = seg[0].lerp(seg[1], i / 11.0)
+				for dx in [0, 1]:
+					img.set_pixel(clampi(int(p.x) + dx, 0, n - 1), clampi(int(p.y), 0, n - 1), Color(0, 0, 0, a))
+	return ImageTexture.create_from_image(img)
+
+
+static func _knob_icon() -> Texture2D:
+	var n := 18
+	var img := Image.create(n, n, false, Image.FORMAT_RGBA8)
+	var c := Vector2(n / 2.0 - 0.5, n / 2.0 - 0.5)
+	for y in n:
+		for x in n:
+			var d := Vector2(x, y).distance_to(c)
+			if d <= 7.5:
+				img.set_pixel(x, y, ACCENT if d > 5.5 else Color(1.0, 0.82, 0.5))
+	return ImageTexture.create_from_image(img)
 
 
 ## A full-screen Control carrying the shell theme, with a dark backdrop.

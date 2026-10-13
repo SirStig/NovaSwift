@@ -100,6 +100,7 @@ static func scroll_text(d: Control, s: String, r: Rect2i, size := BODY, color :=
 	var sc := PaneScroll.new()
 	sc.position = Vector2(r.position)
 	sc.size = Vector2(r.size)
+	sc.set_deferred("size", Vector2(r.size))   # the pane's own minimum goes stale like a Label's
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	sc.mouse_filter = Control.MOUSE_FILTER_PASS
 	sc.get_v_scroll_bar().modulate = Color(1, 1, 1, 0)
@@ -186,15 +187,16 @@ static func cell(parent: Control, s: String, x: int, w: int, h: int, color: Colo
 	l.horizontal_alignment = align
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	l.clip_text = true
-	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	l.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING   # never "…": shrink to fit instead
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	l.add_theme_font_override("font", T.body_font())
-	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_font_size_override("font_size", T.fit_size(T.body_font(), s, w, size))
 	l.add_theme_color_override("font_color", color)
 	# Size LAST: a Control clamps `size` to its minimum at assignment time, and with the
 	# default 16 px theme font that minimum is 23 px — a 13 px row cell became 23 px tall
 	# with its text centred 5 px below the row highlight.
 	l.size = Vector2(w, h)
+	l.set_deferred("size", Vector2(w, h))    # the cached minimum is stale until the next frame
 	parent.add_child(l)
 	return l
 
@@ -275,21 +277,21 @@ class Tile extends Button:
 		add_child(pic)
 		lbl = Label.new()
 		lbl.position = Vector2(0, 41)
-		lbl.size = Vector2(83, 12)
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lbl.clip_text = true
-		lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		lbl.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 		lbl.add_theme_font_override("font", T.body_font())
 		lbl.add_theme_font_size_override("font_size", 10)
 		lbl.add_theme_constant_override("line_spacing", 0)
+		lbl.size = Vector2(83, 12)    # after the font overrides (see cell())
 		lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		add_child(lbl)
 		qty = Label.new()
 		qty.position = Vector2(40, 0)
-		qty.size = Vector2(41, 12)
 		qty.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		qty.add_theme_font_override("font", T.body_font())
 		qty.add_theme_font_size_override("font_size", 10)
+		qty.size = Vector2(41, 12)
 		qty.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		add_child(qty)
 		box = ReferenceRect.new()
@@ -313,7 +315,7 @@ class Tile extends Button:
 			modulate = Color.WHITE
 			return
 		pic.texture = item.get("tex")
-		lbl.text = str(item.get("name", ""))
+		T.fit_label(lbl, str(item.get("name", "")), 81.0, 10)
 		var q := int(item.get("qty", 0))
 		qty.text = str(q) if q > 0 else ""
 		var dim: bool = item.get("locked", false)

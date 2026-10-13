@@ -1,4 +1,5 @@
 import SwiftUI
+import NovaSwiftKit
 
 /// Shared state and control surface for the in-game **debug suite** — the
 /// developer panel that opens over a live play session once "Debug mode" is on

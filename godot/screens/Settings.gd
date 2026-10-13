@@ -1,18 +1,31 @@
-# NOVA Swift — Settings screen (Audio · Video · Controls), persisted by Prefs.gd.
+# NOVA Swift — Settings screen, laid out like the Apple app's SettingsView: a card titled in amber,
+# a category sidebar on the left (with a pinned "Reset All Settings"), and the selected category's
+# grouped sections on the right -- amber section headers over dark rounded groups, toggles as amber
+# check boxes, "title ........ 70%" slider rows, footers in muted caption text. Persisted by Prefs.gd.
 #
-# Opened from the main menu and the in-flight pause menu. Everything is reachable
-# by Godot focus navigation alone (arrows / d-pad / left stick move, Enter / A
-# activate, left/right adjust a focused slider, Esc / B go back), with the
-# thick focus ring from ShellUI's theme.
+#   Interface (page "Presentation")   presentation preset + Original Preferences Window, interface
+#                                     options, storyline tags
+#   Controls                          dead zone, key layout, every rebindable action
+#   Graphics (page "Video")           fullscreen, vsync, window scale, gate links
+#   Audio                             mute + master / effects / interface / music
+#   Data & Advanced (page "Support")  Saved Games (Pilots folder), Support, Developer
 #
-# Controls page: every rebindable action from Controls.BINDINGS with its key and
-# its pad button. Activate either to rebind: the next key (or pad button) pressed
-# is captured, Esc cancels (a pad press that is not wanted just times out after
-# 6 s). A binding already held by another action in the same group (Flight /
-# Docked / Galaxy map) is swapped onto it, as PadBindings.bind does in the Apple
-# app. Sticks, triggers and the analog axes are fixed. "Defaults" restores the
-# page; everything is re-applied immediately (Controls.register()) and written to
-# user://settings.cfg when the screen closes.
+# Opened from the main menu and the in-flight pause menu. Everything is reachable by Godot focus
+# navigation alone (arrows / d-pad / left stick move, Enter / A activate, left/right adjust a
+# focused slider, Esc / B go back), with the thick focus ring from ShellUI's theme. Moving focus
+# onto a sidebar entry shows its page; Right (or Down from the last entry) enters the page, Up from
+# its first control returns to the sidebar.
+#
+# The original Preferences window (DLOG 4003, screens/ClassicPreferences.gd) opens only from a
+# button on the Interface page -- it never replaces this screen.
+#
+# Controls page: every rebindable action from Controls.BINDINGS with its key and its pad button.
+# Activate either to rebind: the next key (or pad button) pressed is captured, Esc cancels (a pad
+# press that is not wanted just times out after 6 s). A binding already held by another action in
+# the same group (Flight / Docked / Galaxy map) is swapped onto it, as PadBindings.bind does in the
+# Apple app. Sticks, triggers and the analog axes are fixed. "Defaults" restores the page;
+# everything is re-applied immediately (Controls.register()) and written to user://settings.cfg
+# when the screen closes.
 #
 # Game speed is not here: the bridge doesn't expose GameSpeedRules yet.
 extends CanvasLayer
@@ -20,67 +33,134 @@ extends CanvasLayer
 const ShellUI = preload("res://screens/ShellUI.gd")
 const Controls = preload("res://Controls.gd")
 const Prefs = preload("res://Prefs.gd")
+const PilotFiles = preload("res://screens/PilotFiles.gd")
+const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
+const ClassicPreferences = preload("res://screens/ClassicPreferences.gd")
 
 ## Audio/video/deadzone changed (Main re-applies volumes to GameAudio + music).
 signal changed
 signal closed
 
 const CAPTURE_TIMEOUT := 6.0
-const PAGES := ["Audio", "Video", "Presentation", "Controls"]
+const DevSettingsPage = preload("res://debug/DevSettingsPage.gd")
+const PluginsScreen = preload("res://screens/Plugins.gd")
+## Page keys in sidebar order (Apple SettingsView category order), and what the sidebar calls them.
+const PAGES := ["Presentation", "Controls", "Video", "Audio", "Plugins", "Support"]
+const PAGE_TITLES := {"Presentation": "Interface", "Controls": "Controls", "Video": "Graphics",
+	"Audio": "Audio", "Plugins": "Plug-ins", "Support": "Data & Advanced"}
+const AMBER := Color(1.0, 0.7, 0.28)         # novaAmber
+const GROUP_BG := Color(0.085, 0.09, 0.115)
 
-var page := "Audio"
-var tab_buttons := {}          # page name -> Button
+var page := "Presentation"
+var tab_buttons := {}          # page name -> Button (the sidebar entries)
 var sliders := {}              # "section.key" -> HSlider
 var rebind_buttons := {}       # action -> {"key": Button, "pad": Button}
 var first_control: Control
+var classic_prefs: Node        # the original Preferences window while it is up
 
 var _nova: Object
 var _root: Control
 var _content: VBoxContainer
+var _group: VBoxContainer      # the section group rows are added to
 var _status: Label
+var _scroll: ScrollContainer
+var _reset_all_btn: Button
+var _reset_armed := false
 var _capture := {}             # {action, field, button} while waiting for an input
 var _capture_serial := 0
 var _dirty := false
 
 
-func setup(nova: Object, start_page := "Audio") -> void:
+func setup(nova: Object, start_page := "Presentation") -> void:
 	_nova = nova
 	layer = 70
 	_root = ShellUI.screen(self, 0.96)
-	var box := ShellUI.panel(_root, 780, 8)
-	ShellUI.title(box, "Settings", 28)
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_root.add_child(center)
+	var card := PanelContainer.new()
+	card.custom_minimum_size = Vector2(900, 600)
+	var cs := StyleBoxFlat.new()
+	cs.bg_color = ShellUI.PANEL
+	cs.border_color = Color(AMBER.r, AMBER.g, AMBER.b, 0.35)
+	cs.set_border_width_all(2)
+	cs.set_corner_radius_all(6)
+	cs.set_content_margin_all(16)
+	card.add_theme_stylebox_override("panel", cs)
+	center.add_child(card)
+	var outer := VBoxContainer.new()
+	outer.add_theme_constant_override("separation", 10)
+	card.add_child(outer)
 
-	var tabs := HBoxContainer.new()
-	tabs.add_theme_constant_override("separation", 8)
-	box.add_child(tabs)
+	var title := Label.new()
+	title.text = "Settings"
+	title.add_theme_font_size_override("font_size", 28)
+	title.add_theme_color_override("font_color", AMBER)
+	outer.add_child(title)
+
+	var body := HBoxContainer.new()
+	body.add_theme_constant_override("separation", 12)
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	outer.add_child(body)
+
+	# Sidebar: one entry per category, then the pinned destructive reset.
+	var side := VBoxContainer.new()
+	side.custom_minimum_size = Vector2(190, 0)
+	side.add_theme_constant_override("separation", 6)
+	body.add_child(side)
 	for p in PAGES:
 		var b := Button.new()
-		b.text = p
+		b.text = PAGE_TITLES[p]
 		b.toggle_mode = true
-		b.custom_minimum_size = Vector2(150, 38)
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.custom_minimum_size = Vector2(0, 40)
 		b.pressed.connect(show_page.bind(p))
-		tabs.add_child(b)
+		b.focus_entered.connect(_on_tab_focus.bind(p))
+		side.add_child(b)
 		tab_buttons[p] = b
+	var spacer := Control.new()
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	side.add_child(spacer)
+	_reset_all_btn = Button.new()
+	_reset_all_btn.text = "Reset All Settings"
+	_reset_all_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_reset_all_btn.custom_minimum_size = Vector2(0, 36)
+	_reset_all_btn.add_theme_color_override("font_color", Color(1.0, 0.45, 0.4))
+	_reset_all_btn.pressed.connect(_reset_all)
+	side.add_child(_reset_all_btn)
 
+	body.add_child(VSeparator.new())
+
+	_scroll = ScrollContainer.new()
+	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_scroll.custom_minimum_size = Vector2(0, 440)
+	_scroll.follow_focus = true
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	body.add_child(_scroll)
 	_content = VBoxContainer.new()
+	_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_content.add_theme_constant_override("separation", 6)
-	box.add_child(_content)
+	_scroll.add_child(_content)
 
-	_status = ShellUI.label(box, "", 14, Color(1.0, 0.75, 0.4))
+	_status = ShellUI.label(outer, "", 14, Color(1.0, 0.75, 0.4))
 	var foot := HBoxContainer.new()
 	foot.add_theme_constant_override("separation", 8)
-	box.add_child(foot)
+	outer.add_child(foot)
 	var defaults := Button.new()
 	defaults.text = "Defaults"
 	defaults.custom_minimum_size = Vector2(160, 40)
 	defaults.pressed.connect(_reset_page)
 	foot.add_child(defaults)
+	var fill := Control.new()
+	fill.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	foot.add_child(fill)
 	var back := Button.new()
-	back.text = "Back"
+	back.text = "Done"
 	back.custom_minimum_size = Vector2(160, 40)
 	back.pressed.connect(close)
 	foot.add_child(back)
-	show_page(start_page)
+	show_page(start_page if PAGES.has(start_page) else "Presentation")
 
 
 func _exit_tree() -> void:
@@ -105,9 +185,16 @@ func _mark_changed() -> void:
 
 # --- pages ---------------------------------------------------------------------
 
+func _on_tab_focus(p: String) -> void:
+	if p != page:
+		show_page(p)
+
+
 func show_page(p: String) -> void:
 	_cancel_capture()
 	page = p
+	_reset_armed = false
+	_reset_all_btn.text = "Reset All Settings"
 	for tab in tab_buttons:
 		tab_buttons[tab].button_pressed = tab == p
 	for c in _content.get_children():
@@ -117,13 +204,67 @@ func show_page(p: String) -> void:
 	rebind_buttons.clear()
 	_status.text = ""
 	first_control = null
+	_group = _content
+	_scroll.scroll_vertical = 0
 	match p:
 		"Audio": _build_audio()
 		"Video": _build_video()
 		"Presentation": _build_presentation()
 		"Controls": _build_controls()
-	# Land focus on the tab, so left/right flips pages and down enters the page.
+		"Plugins": _build_plugins()
+		"Support": _build_support()
+	_link_focus(p)
+	# Land focus on the sidebar entry, so up/down flips pages and right enters the page.
 	ShellUI.focus(tab_buttons[p])
+
+
+## Right from the sidebar enters the page; Up from the page's first control returns to it.
+func _link_focus(p: String) -> void:
+	var tab: Button = tab_buttons[p]
+	(func():
+		if not is_instance_valid(tab) or not tab.is_inside_tree():
+			return
+		for t in tab_buttons.values():
+			t.focus_neighbor_right = NodePath()
+		if first_control != null and is_instance_valid(first_control) and first_control.is_inside_tree():
+			tab.focus_neighbor_right = tab.get_path_to(first_control)
+			first_control.focus_neighbor_top = first_control.get_path_to(tab)
+			first_control.focus_neighbor_left = first_control.get_path_to(tab)).call_deferred()
+
+
+# --- Apple-style building blocks -------------------------------------------------------
+
+## A titled group: amber header, a dark rounded box the rows go into, a muted footer under it.
+## Everything added afterwards (rows, checks, sliders) lands in the box until the next section().
+func _section(title_text: String, footer := "") -> VBoxContainer:
+	var head := Label.new()
+	head.text = title_text
+	head.add_theme_font_size_override("font_size", 16)
+	head.add_theme_color_override("font_color", AMBER)
+	var top := _content.get_child_count() > 0
+	if top:
+		var gap := Control.new()
+		gap.custom_minimum_size = Vector2(0, 8)
+		_content.add_child(gap)
+	_content.add_child(head)
+	var box := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = GROUP_BG
+	sb.border_color = Color(1, 1, 1, 0.07)
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(8)
+	sb.set_content_margin_all(12)
+	box.add_theme_stylebox_override("panel", sb)
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_content.add_child(box)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 8)
+	box.add_child(v)
+	_group = v
+	if footer != "":
+		var f := ShellUI.label(_content, footer, 12)
+		f.add_theme_color_override("font_color", Color(0.58, 0.61, 0.69))
+	return v
 
 
 func _row(label: String) -> HBoxContainer:
@@ -131,33 +272,42 @@ func _row(label: String) -> HBoxContainer:
 	r.add_theme_constant_override("separation", 12)
 	var l := Label.new()
 	l.text = label
-	l.custom_minimum_size = Vector2(230, 0)
-	l.add_theme_font_size_override("font_size", 16)
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	l.add_theme_font_size_override("font_size", 15)
 	r.add_child(l)
-	_content.add_child(r)
+	_group.add_child(r)
 	return r
 
 
-## A labelled slider bound to Prefs[section][key].
+## A slider row as in Apple's sliderRow: title left, value right, the slider under them.
 func _slider(label: String, section: String, key: String, lo: float, hi: float, step: float,
 		fmt: Callable) -> HSlider:
-	var r := _row(label)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 2)
+	_group.add_child(v)
+	var head := HBoxContainer.new()
+	v.add_child(head)
+	var t := Label.new()
+	t.text = label
+	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	t.add_theme_font_size_override("font_size", 15)
+	head.add_child(t)
+	var val := Label.new()
+	val.add_theme_font_size_override("font_size", 13)
+	val.add_theme_color_override("font_color", ShellUI.MUTED)
+	head.add_child(val)
 	var s := HSlider.new()
 	s.min_value = lo
 	s.max_value = hi
 	s.step = step
 	s.value = float(Prefs.get_value(section, key))
-	s.custom_minimum_size = Vector2(320, 30)
+	s.custom_minimum_size = Vector2(0, 22)
 	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	s.focus_mode = Control.FOCUS_ALL
-	r.add_child(s)
-	var v := Label.new()
-	v.custom_minimum_size = Vector2(70, 0)
-	v.text = fmt.call(s.value)
-	r.add_child(v)
+	v.add_child(s)
+	val.text = fmt.call(s.value)
 	s.value_changed.connect(func(x: float):
-		v.text = fmt.call(x)
+		val.text = fmt.call(x)
 		Prefs.set_value(section, key, x)
 		_after_change(section))
 	sliders[section + "." + key] = s
@@ -170,14 +320,32 @@ func _check(label: String, section: String, key: String) -> CheckButton:
 	var c := CheckButton.new()
 	c.text = label
 	c.button_pressed = bool(Prefs.get_value(section, key))
-	c.custom_minimum_size = Vector2(0, 38)
+	c.custom_minimum_size = Vector2(0, 34)
 	c.toggled.connect(func(on: bool):
 		Prefs.set_value(section, key, on)
 		_after_change(section))
-	_content.add_child(c)
+	_group.add_child(c)
 	if first_control == null:
 		first_control = c
 	return c
+
+
+func _button(label: String, cb: Callable) -> Button:
+	var b := Button.new()
+	b.text = label
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.custom_minimum_size = Vector2(0, 38)
+	b.pressed.connect(cb)
+	_group.add_child(b)
+	if first_control == null:
+		first_control = b
+	return b
+
+
+func _caption(text: String) -> Label:
+	var l := ShellUI.label(_group, text, 12)
+	l.add_theme_color_override("font_color", Color(0.58, 0.61, 0.69))
+	return l
 
 
 func _after_change(section: String) -> void:
@@ -192,23 +360,29 @@ func _pct(x: float) -> String:
 	return "%d%%" % roundi(x * 100.0)
 
 
-func _build_audio() -> void:
-	_slider("Master volume", "audio", "master", 0.0, 1.0, 0.05, _pct)
-	_slider("Effects volume", "audio", "sfx", 0.0, 1.0, 0.05, _pct)
-	_slider("Interface volume", "audio", "ui", 0.0, 1.0, 0.05, _pct)
-	_slider("Music volume", "audio", "music", 0.0, 1.0, 0.05, _pct)
-	_check("Mute all sound", "audio", "muted")
-	ShellUI.label(_content, "Music plays over the main menu only, as in the original (if your data has the track as an mp3).", 13)
+# --- Audio ---------------------------------------------------------------------------
 
+func _build_audio() -> void:
+	_section("Audio", "Master scales everything; the individual sliders balance music, weapon/engine effects and interface clicks beneath it. Music plays over the main menu only, as in the original (if your data has the track as an mp3).")
+	_check("Mute all", "audio", "muted")
+	_slider("Master", "audio", "master", 0.0, 1.0, 0.05, _pct)
+	_slider("Effects", "audio", "sfx", 0.0, 1.0, 0.05, _pct)
+	_slider("Interface", "audio", "ui", 0.0, 1.0, 0.05, _pct)
+	_slider("Music", "audio", "music", 0.0, 1.0, 0.05, _pct)
+
+
+# --- Graphics ------------------------------------------------------------------------
 
 func _build_video() -> void:
+	_section("Graphics", "Window scale applies when not fullscreen. The play area adapts to 16:9 and 16:10 (Steam Deck) screens. Gate links draw hypergate and wormhole spokes on the plain galaxy map -- an enhancement the original lacks.")
 	_check("Fullscreen", "video", "fullscreen")
 	_check("VSync", "video", "vsync")
 	_slider("Window scale", "video", "scale", 0.75, 2.0, 0.25,
 		func(x: float): return "%dx%d" % [roundi(1280 * x), roundi(720 * x)])
 	_check("Gate links on the galaxy map (enhancement)", "map", "gate_links")
-	ShellUI.label(_content, "Window scale applies when not fullscreen. The play area adapts to 16:9 and 16:10 (Steam Deck) screens.", 13)
 
+
+# --- Interface (Presentation) ----------------------------------------------------------
 
 ## Presentation: Classic (the original's status bar / dialogs / menu, drawn from the
 ## player's own data -- the default) or Nova Swift (the port's own screens), as in
@@ -216,15 +390,18 @@ func _build_video() -> void:
 ## Prefs[presentation]; screens pick the change up the next time they open (the
 ## HUD immediately).
 func _build_presentation() -> void:
+	var mode_name := {Prefs.UI_CLASSIC: "Classic", Prefs.UI_ENHANCED: "Enhanced", Prefs.UI_NOVA_SWIFT: "Nova Swift",
+		Prefs.UI_CUSTOM: "Custom"}
+	_section("Presentation", "Classic draws the original interface from your game data (status bar, dialogs, menu). Enhanced adds the full-screen galaxy map. Nova Swift uses the port's own modern screens. Presets are templates -- pick one, then fine-tune the options below. Current: %s." % mode_name[Prefs.ui_mode()])
 	var modes := HBoxContainer.new()
 	modes.add_theme_constant_override("separation", 8)
-	_content.add_child(modes)
+	_group.add_child(modes)
 	var mode_buttons := {}
 	for m in [[Prefs.UI_CLASSIC, "Classic"], [Prefs.UI_ENHANCED, "Enhanced"], [Prefs.UI_NOVA_SWIFT, "Nova Swift"]]:
 		var b := Button.new()
 		b.text = m[1]
 		b.toggle_mode = true
-		b.custom_minimum_size = Vector2(150, 40)
+		b.custom_minimum_size = Vector2(130, 38)
 		b.button_pressed = Prefs.ui_mode() == m[0]
 		b.pressed.connect(func():
 			Prefs.apply_ui_mode(m[0])
@@ -234,38 +411,47 @@ func _build_presentation() -> void:
 		mode_buttons[m[0]] = b
 	if first_control == null:
 		first_control = mode_buttons[Prefs.UI_CLASSIC]
-	ShellUI.label(_content, "Classic draws the original interface from your game data (status bar, dialogs, menu). Enhanced adds the full-screen galaxy map. Nova Swift uses the port's own modern screens.", 13)
-	for t in [["Modern main menu", "modern_menu"], ["Modern dialogs", "modern_dialogs"], ["Modern HUD (status bar)", "modern_hud"],
-			["Full-screen galaxy map", "fullscreen_galaxy_map"]]:
+	if ClassicTheme.has_data():
+		_button("Original Preferences Window…", open_classic_preferences)
+	_section("Interface Options", "Mix the port's modern touches over the authentic EV Nova presentation. Full-screen map opens the galaxy map without its dialog frame. Storyline tags mark missions that continue a reconstructed campaign and jump to it in the Story Guide -- an aftermarket hint the original game never had.")
+	for t in [["Full-screen galaxy map", "fullscreen_galaxy_map"], ["Modern main menu", "modern_menu"],
+			["Modern dialog chrome", "modern_dialogs"], ["Modern HUD", "modern_hud"]]:
 		var c := _check(t[0], "presentation", t[1])
 		c.toggled.connect(func(_on: bool): show_page.call_deferred("Presentation"))
-	var mode_name := {Prefs.UI_CLASSIC: "Classic", Prefs.UI_ENHANCED: "Enhanced", Prefs.UI_NOVA_SWIFT: "Nova Swift",
-		Prefs.UI_CUSTOM: "Custom"}
-	ShellUI.label(_content, "Current: " + str(mode_name[Prefs.ui_mode()]), 14, ShellUI.ACCENT)
+	_check("Show mission storyline tags", "story", "show_mission_storyline_tags")
 
+
+## The original's Preferences window (DLOG 4003) over Settings; Settings comes back, focused, when
+## it closes.
+func open_classic_preferences() -> Node:
+	if classic_prefs != null:
+		return classic_prefs
+	_root.visible = false
+	classic_prefs = ClassicPreferences.new()
+	add_child(classic_prefs)
+	classic_prefs.setup(_nova)
+	classic_prefs.changed.connect(_mark_changed)
+	classic_prefs.key_settings.connect(func():
+		(func(): show_page("Controls")).call_deferred())
+	classic_prefs.closed.connect(func():
+		classic_prefs = null
+		_root.visible = true
+		show_page(page))
+	return classic_prefs
+
+
+# --- Controls ------------------------------------------------------------------------
 
 func _build_controls() -> void:
+	_section("Controls", "Off = the original's keys (arrows, Space, Ctrl, Z; W/Alt-W, R, N, E…). The dead zone is how far a stick must move before it registers. Sticks and triggers are fixed.")
 	_slider("Stick dead zone", "input", "deadzone", 0.0, 0.5, 0.01, _pct)
 	var modern := _check("Modern key layout (the port's earlier keys)", "input", "modern_keys")
 	modern.toggled.connect(func(_on: bool): show_page.call_deferred("Controls"))
-	ShellUI.label(_content, "Off = the original's keys (arrows, Space, Ctrl, Z; W/Alt-W, R, N, E…). Activate a key or pad button to rebind it (Esc cancels). Sticks and triggers are fixed.", 13)
-	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(0, 290)
-	scroll.follow_focus = true
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_content.add_child(scroll)
-	var list := VBoxContainer.new()
-	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	list.add_theme_constant_override("separation", 4)
-	scroll.add_child(list)
 	for group in Controls.GROUPS:
-		var h := Label.new()
-		h.text = group
-		h.add_theme_font_size_override("font_size", 17)
-		h.add_theme_color_override("font_color", ShellUI.ACCENT)
-		list.add_child(h)
+		_section("Keyboard & Controller Bindings -- " + group if group == Controls.GROUPS.keys()[0] else group,
+			"Activate a key or pad button to rebind it (Esc cancels)." if group == Controls.GROUPS.keys()[0] else "")
 		for action in Controls.GROUPS[group]:
-			_rebind_row(list, action)
+			_rebind_row(_group, action)
 
 
 func _rebind_row(list: Control, action: String) -> void:
@@ -273,18 +459,21 @@ func _rebind_row(list: Control, action: String) -> void:
 	r.add_theme_constant_override("separation", 8)
 	var l := Label.new()
 	l.text = Controls.ACTION_LABELS.get(action, action)
-	l.custom_minimum_size = Vector2(250, 0)
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	l.add_theme_font_size_override("font_size", 14)
 	r.add_child(l)
 	var kb := Button.new()
-	kb.custom_minimum_size = Vector2(230, 34)
+	kb.custom_minimum_size = Vector2(190, 32)
 	kb.pressed.connect(_begin_capture.bind(action, _key_field(action), kb))
 	r.add_child(kb)
 	var pb := Button.new()
-	pb.custom_minimum_size = Vector2(230, 34)
+	pb.custom_minimum_size = Vector2(170, 32)
 	pb.pressed.connect(_begin_capture.bind(action, "buttons", pb))
 	r.add_child(pb)
 	list.add_child(r)
 	rebind_buttons[action] = {"key": kb, "pad": pb}
+	if first_control == null:
+		first_control = kb
 	_refresh_row(action)
 
 
@@ -313,6 +502,88 @@ func _refresh_row(action: String) -> void:
 func _refresh_all_rows() -> void:
 	for action in rebind_buttons:
 		_refresh_row(action)
+
+
+# --- Data & Advanced (Support) ---------------------------------------------------------
+
+func _build_plugins() -> void:
+	_section("Plug-ins", "EV Nova plug-ins and total conversions. Every plug-in in your game's Nova Plug-ins folder and in the NovaSwift plug-in folder loads automatically, in the original's order. The manager browses the online catalog, installs and updates, imports your own files and (optionally) lets you choose and order them.")
+	_button("Open the Plug-ins Manager…", func(): _open_plugins("Installed"))
+	_button("Browse the Online Catalog…", func(): _open_plugins("Browse"))
+	_button("Load Order…", func(): _open_plugins("Load order"))
+
+
+func _open_plugins(start_tab: String) -> void:
+	var scr = PluginsScreen.new()
+	add_child(scr)
+	scr.setup(_nova, start_tab)
+	scr.closed.connect(func():
+		scr.queue_free()
+		show_page("Plugins"))
+
+
+func _build_support() -> void:
+	_section("Saved Games", "Pilots are ordinary .evpilot files -- copy them, back them up, or open one from anywhere with Open Pilot. Changing the folder copies the pilots already in the old one across (the originals stay). Rotating backups live in a Backups folder beside them.")
+	var r := _row("Saved to")
+	var path := Label.new()
+	path.text = PilotFiles.dir()
+	path.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+	path.custom_minimum_size = Vector2(380, 0)
+	path.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	path.add_theme_font_size_override("font_size", 12)
+	path.add_theme_color_override("font_color", ShellUI.MUTED)
+	r.add_child(path)
+	_button("Open Pilots Folder", func(): OS.shell_show_in_file_manager(PilotFiles.dir()))
+	_button("Change Pilots Folder…", func():
+		PilotFiles.pick_folder(self, PilotFiles.dir(), func(d: String):
+			PilotFiles.set_dir(d)
+			_mark_changed()
+			show_page("Support")))
+	if PilotFiles.is_custom() and OS.get_environment("NOVA_PILOTS_DIR") == "":
+		_button("Use the Default Folder", func():
+			PilotFiles.set_dir("")
+			_mark_changed()
+			show_page("Support"))
+	_section("Support and Developer")
+	DevSettingsPage.build(self, _group, _mark_changed)
+
+
+# --- resets ----------------------------------------------------------------------------
+
+func _reset_page() -> void:
+	match page:
+		"Audio": Prefs.reset_section("audio")
+		"Video":
+			Prefs.reset_section("video")
+			Prefs.reset_section("map")
+			Prefs.apply_video()
+		"Controls":
+			Prefs.reset_section("input")
+			Prefs.reset_bindings()
+			Controls.register()
+		"Presentation":
+			Prefs.reset_section("presentation")
+			Prefs.reset_section("story")
+	_dirty = true
+	changed.emit()
+	show_page(page)
+
+
+## Sidebar "Reset All Settings": asks for a second press (a pad can't answer a dialog).
+func _reset_all() -> void:
+	if not _reset_armed:
+		_reset_armed = true
+		_reset_all_btn.text = "Press again to reset everything"
+		return
+	for sec in ["audio", "video", "map", "input", "story", "presentation", "classic"]:
+		Prefs.reset_section(sec)
+	Prefs.reset_bindings()
+	Controls.register()
+	Prefs.apply_video()
+	_dirty = true
+	changed.emit()
+	show_page(page)
+	_status.text = "All settings restored to their defaults."
 
 
 # --- rebinding -----------------------------------------------------------------
@@ -392,17 +663,3 @@ func _unhandled_input(event: InputEvent) -> void:
 		close()
 
 
-func _reset_page() -> void:
-	match page:
-		"Audio": Prefs.reset_section("audio")
-		"Video":
-			Prefs.reset_section("video")
-			Prefs.reset_section("map")
-			Prefs.apply_video()
-		"Controls":
-			Prefs.reset_section("input")
-			Prefs.reset_bindings()
-			Controls.register()
-	_dirty = true
-	changed.emit()
-	show_page(page)

@@ -154,7 +154,8 @@ func _init() -> void:
 	await process_frame
 	await process_frame
 	_ok(pm2._cdialog.window_size.x == 460 and pm2._pilots.size() == 1, "Open Pilot lists the pilot in the classic panel")
-	_ok(pm2._cdialog.item(0).text.begins_with(rows[0].name), "pilot row label '%s'" % pm2._cdialog.item(0).text)
+	_ok(pm2._cdialog.item(0).text.begins_with("Choose Pilot File"), "Open Pilot's first row is the file picker")
+	_ok(pm2._cdialog.item(1).text.begins_with(rows[0].name), "recent pilot row label '%s'" % pm2._cdialog.item(1).text)
 	_compose_dialog_png(pm2._cdialog, "classic_open_pilot.png", -1)
 	pm2._confirm_delete(rows[0])
 	await process_frame

@@ -1,5 +1,7 @@
 import Foundation
+import NovaSwiftKit
 import OSLog
+import NovaSwiftKit
 
 /// Live scrollback for the in-game console — the app's own `Log.*` output
 /// (read back through `OSLogStore`, so no existing call site needs to know the

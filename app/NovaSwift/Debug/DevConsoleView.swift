@@ -1,5 +1,7 @@
 import SwiftUI
+import NovaSwiftKit
 import Foundation
+import NovaSwiftKit
 
 /// Shared chrome colour for every developer surface — the same green the debug
 /// suite has always used, hoisted out so the console, tools rail and browsers

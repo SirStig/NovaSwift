@@ -10,4 +10,6 @@ import SwiftGodot
 
 #initSwiftExtension(cdecl: "swift_entry_point", types: [
     NovaWorld.self,
+    NovaDebug.self,
+    NovaPlugins.self,
 ])

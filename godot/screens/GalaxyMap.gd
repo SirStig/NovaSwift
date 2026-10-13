@@ -103,6 +103,7 @@ var _ids := PackedInt32Array()
 var _info := {}                  # id -> {pos: Vector2, vis: int, color: Color}
 var _links := PackedInt32Array()
 var _names := {}                 # id -> String ("" = unnamed)
+var _marker := {}                # id -> Color: the Classic ring colour (bridge nav_marker_colors)
 var _current := -1
 var _route := PackedInt32Array()
 var _armed := false
@@ -231,6 +232,12 @@ func _reload() -> void:
 		}
 		_names[id] = nova.nav_system_name(id)
 		i += stride
+	_marker.clear()
+	var mk: PackedFloat32Array = nova.nav_marker_colors()
+	var mi := 0
+	while mi + 4 <= mk.size():
+		_marker[int(mk[mi])] = Color(mk[mi + 1], mk[mi + 2], mk[mi + 3])
+		mi += 4
 	_links = nova.nav_links()
 	_gate_links = nova.nav_gate_links() if bool(Prefs.get_value("map", "gate_links")) else PackedInt32Array()
 	var neb = JSON.parse_string(nova.nav_nebulae(false))
@@ -542,10 +549,97 @@ func _draw_nebulae() -> void:
 			_neb.draw_texture_rect(pick, rect, false)
 
 
+# --- Classic starmap (Apple GalaxyMapView.drawMap, non-fullscreen branch; orig 0x004a8100) ---
+
+func _visited(id: int) -> bool:
+	return _info.has(id) and int(_info[id]["vis"]) >= VIS_CHARTED
+
+
+func _draw_classic(c: Control, size: Vector2) -> void:
+	var view := Rect2(Vector2.ZERO, size).grow(60.0)
+	var gate_mode := not _gate.is_empty()
+	# Links: every one in theme grey 20000 (4000 in gate mode), 1 px; only those radiating
+	# from a visited / charted system. The armed link is 0x009900.
+	var w := (4000.0 if gate_mode else 20000.0) / 65535.0
+	var grey := Color(w, w, w)
+	var i := 0
+	while i + 1 < _links.size():
+		var a := _links[i]
+		var b := _links[i + 1]
+		i += 2
+		if not (_visited(a) or _visited(b)):
+			continue
+		var pa := _to_screen(_info[a]["pos"])
+		var pb := _to_screen(_info[b]["pos"])
+		if not view.has_point(pa) and not view.has_point(pb):
+			continue
+		c.draw_line(pa, pb, grey, 1.0)
+	if _armed and _route.size() > 0 and _info.has(_current) and _info.has(_route[0]):
+		c.draw_line(_to_screen(_info[_current]["pos"]), _to_screen(_info[_route[0]]["pos"]), Color(0, 0x99 / 255.0, 0), 1.0)
+	# Gate picker: spokes with +-45 degree barbs of 8 px, 3 px white for the selection, 2 px cyan.
+	if gate_mode:
+		var here := _to_screen(Vector2(_gate["hereX"], _gate["hereY"]))
+		var sel := _hover if _hover != -1 else _selected
+		for did in _gate_dests:
+			var dp := _to_screen(_gate_dests[did]["pos"])
+			var ang := (dp - here).angle()
+			var col := Color.WHITE if did == sel else Color.CYAN
+			var wd := 3.0 if did == sel else 2.0
+			c.draw_line(here, dp, col, wd)
+			for barb in [ang + PI * 3.0 / 4.0, ang - PI * 3.0 / 4.0]:
+				c.draw_line(dp, dp + Vector2(cos(barb), sin(barb)) * 8.0, col, wd)
+	elif _route.size() > 0 and _info.has(_current):
+		# The plotted course: one solid 2 px green line.
+		var pts := PackedVector2Array([_to_screen(_info[_current]["pos"])])
+		for hop in _route:
+			if not _info.has(hop):
+				break
+			pts.append(_to_screen(_info[hop]["pos"]))
+		if pts.size() > 1:
+			c.draw_polyline(pts, Color(0, 1, 0), 2.0)
+	var font := ClassicTheme.body_font()
+	var zoomed_in := 1.0 / _zoom <= 0.5
+	var half := 6.0 if zoomed_in else 4.0
+	var pen := 2.0 if zoomed_in else 1.0
+	var show_labels := _zoom >= 1.0 / 1.1
+	var selected := _selected
+	for id in _ids:
+		var p := _to_screen(_info[id]["pos"])
+		if not view.has_point(p):
+			continue
+		var known := _visited(id)
+		c.draw_circle(p, half, Color.BLACK)
+		c.draw_arc(p, half - pen / 2.0, 0.0, TAU, 24, _marker.get(id, Color(0.25, 0.25, 0.25)), pen, true)
+		if id == _current:
+			c.draw_circle(p, 3.0 if zoomed_in else 2.0, Color.CYAN)
+		if id == selected:
+			# Eight 3 px strokes, 1 px in from each corner of the box (half-size 6, or 8 zoomed).
+			var h := 8.0 if zoomed_in else 6.0
+			var l := p.x - h
+			var r := p.x + h
+			var t := p.y - h
+			var b := p.y + h
+			var green := Color(0, 1, 0)
+			for y in [t + 0.5, b + 0.5]:
+				c.draw_line(Vector2(l + 1, y), Vector2(l + 4, y), green, 1.0)
+				c.draw_line(Vector2(r - 1, y), Vector2(r - 4, y), green, 1.0)
+			for x in [l + 0.5, r + 0.5]:
+				c.draw_line(Vector2(x, t + 1), Vector2(x, t + 4), green, 1.0)
+				c.draw_line(Vector2(x, b - 1), Vector2(x, b - 4), green, 1.0)
+		# Geneva 9, white, pen at (x + 7, y + 4) on the baseline; explored / charted only.
+		if known and _names.get(id, "") != "" and (show_labels or id == selected):
+			c.draw_string(font, p + Vector2(7, 4), _names[id], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color.WHITE)
+	if _pad_mode:
+		c.draw_arc(_cursor, 10.0, 0.0, TAU, 24, Color(0.4, 0.85, 1.0, 0.9), 1.0, true)
+
+
 func _on_draw() -> void:
 	var c := _canvas
 	var size := c.size
 	_neb.queue_redraw()
+	if _framed:
+		_draw_classic(c, size)
+		return
 	var font := ThemeDB.fallback_font
 	var fs := ThemeDB.fallback_font_size
 	var view := Rect2(Vector2.ZERO, size).grow(60.0)
@@ -758,15 +852,9 @@ func _apply_mode() -> void:
 	_frame._focusables.clear()
 	_frame.default_item = -1
 	_info_key = ""
-	if _hint == null:
-		_hint = Label.new()
-		_hint.add_theme_font_size_override("font_size", 12)
-		_hint.add_theme_color_override("font_color", COLOR_DIM)
-		_hint.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-		_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		_hint.position.y = -22
-		add_child(_hint)
-	_hint.visible = true
+	# (the Classic frame has no help line under it: the original shows none)
+	if _hint != null:
+		_hint.visible = false
 
 
 func _text_item(parent: Control, r: Rect2i, drawer: Callable) -> Control:
@@ -820,8 +908,6 @@ func _update_classic() -> void:
 		_plus.disabled = _zoom >= CLASSIC_ZOOM_MAX - 0.0001
 	if _clear != null:
 		_clear.disabled = _route.size() == 0 or not _gate.is_empty()
-	_hint.text = ("L-stick cursor - D-pad next system - A plot - Y add hop - LB/RB zoom - D-pad up jump - B close"
-		if _pad_mode else "Click plot - Shift+click add hop - J jump - F find - wheel zoom - right-drag pan - C center - M/Esc close")
 
 
 func _qd(c: Control, text: String, x: float, y: float, color := Color.WHITE) -> float:

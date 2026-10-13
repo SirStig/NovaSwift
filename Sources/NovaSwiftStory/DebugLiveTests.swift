@@ -15,19 +15,23 @@ public enum DebugLiveTests {
     public static func run() -> [DiagnosticSection] {
         [
             DiagnosticSection(title: "Damage Model", results: [
-                check("Shields absorb fully; hull only after shields gone") {
+                // Original model (`Ship.applyDamage`, World.swift): the hit subtracts from the
+                // shield; only once the shield is at/below zero does the same hit land on armor,
+                // and the shield is floored at -10% of max. (Earlier revisions of this test
+                // asserted a "no bleed" model the engine no longer has.)
+                check("Shields absorb first; armor is hit once they break") {
                     let s = makeShip()
-                    _ = s.applyDamage(shield: 60, armor: 40)          // shields absorb fully
+                    _ = s.applyDamage(shield: 60, armor: 40)          // shield holds: armor untouched
                     guard close(s.shield, 40), close(s.armor, 100) else {
                         return (false, "After 60/40 hit: shield \(r(s.shield)), armor \(r(s.armor)) (want 40 / 100).")
                     }
-                    _ = s.applyDamage(shield: 60, armor: 30)          // shields empty — no bleed into hull
-                    guard close(s.shield, 0), close(s.armor, 100) else {
-                        return (false, "After depleting hit: shield \(r(s.shield)), armor \(r(s.armor)) (want 0 / 100 — no bleed).")
+                    _ = s.applyDamage(shield: 60, armor: 30)          // breaks the shield: armor takes 30, shield floors at -10
+                    guard close(s.shield, -10), close(s.armor, 70) else {
+                        return (false, "After breaking hit: shield \(r(s.shield)), armor \(r(s.armor)) (want -10 / 70).")
                     }
-                    _ = s.applyDamage(shield: 60, armor: 30)          // shields already 0 — hull takes full
-                    let ok = close(s.shield, 0) && close(s.armor, 70)
-                    return (ok, "Final shield \(r(s.shield)), armor \(r(s.armor)) (want 0 / 70).")
+                    _ = s.applyDamage(shield: 60, armor: 30)          // shield already gone: armor takes the full hit
+                    let ok = close(s.shield, -10) && close(s.armor, 40)
+                    return (ok, "Final shield \(r(s.shield)), armor \(r(s.armor)) (want -10 / 40).")
                 },
                 check("God mode negates all damage") {
                     let s = makeShip(); s.invulnerable = true
@@ -38,8 +42,8 @@ public enum DebugLiveTests {
                 check("Zeroing armor destroys the ship") {
                     let s = makeShip(); s.shield = 0
                     let killed = s.applyDamage(shield: 0, armor: 200)
-                    let ok = killed && !s.isAlive && close(s.armor, 0)
-                    return (ok, "applyDamage returned \(killed), isAlive=\(s.isAlive).")
+                    let ok = killed && !s.isAlive && s.armor <= 0          // armor simply subtracts past zero
+                    return (ok, "applyDamage returned \(killed), isAlive=\(s.isAlive), armor \(r(s.armor)).")
                 },
             ]),
             DiagnosticSection(title: "Projectile Combat", results: [

@@ -18,10 +18,16 @@ const PilotMenu = preload("res://screens/PilotMenu.gd")
 const MainMenu = preload("res://screens/MainMenu.gd")
 const PauseMenu = preload("res://screens/PauseMenu.gd")
 const Settings = preload("res://screens/Settings.gd")
+const PluginsScreen = preload("res://screens/Plugins.gd")
 const StoryGuide = preload("res://screens/StoryGuide.gd")
 const DataSetup = preload("res://screens/DataSetup.gd")
+const PilotFiles = preload("res://screens/PilotFiles.gd")
+const LoadingScreen = preload("res://screens/LoadingScreen.gd")
 
-const PILOT_DIR := "user://pilots"
+## Seconds a slow operation runs before the loading screen appears (no flash for quick ones),
+## and the least time it then stays up (no flicker when the work ends just after).
+const LOADING_DELAY := 0.25
+const LOADING_MIN_SHOW := 0.5
 
 ## A data folder was loaded on the bridge (path).
 signal data_loaded(dir: String)
@@ -45,7 +51,12 @@ var data_setup: Node
 var settings: Node
 var pause_menu: Node
 var story_map: Node
+var loading: Node              # the LoadingScreen while it is up
 var _data_from_menu := false
+var _loading_serial := 0       # bumped by every show/hide so stale delay timers do nothing
+var _loading_wanted := false
+var _booting := false          # start_async is still looking for / loading the data
+var _loading_label := ""
 
 
 func setup(world: Object, game_audio: Node) -> void:
@@ -55,7 +66,7 @@ func setup(world: Object, game_audio: Node) -> void:
 
 ## Any full-screen shell screen is up (the world is not shown / stepped).
 func in_menu() -> bool:
-	return main_menu != null or pilot_menu != null or data_setup != null
+	return main_menu != null or pilot_menu != null or data_setup != null or _booting
 
 
 func is_paused() -> bool:
@@ -64,7 +75,23 @@ func is_paused() -> bool:
 
 ## Startup: find data, then the main menu — or the data-setup screen.
 func start() -> void:
+	PilotFiles.migrate_legacy()
 	data_dir = Prefs.find_data(nova)
+	_after_data_search()
+
+
+## `start()` with the data loaded on a worker thread (`load_game_async`) while the loading screen
+## animates and reports real progress (once the load has run > LOADING_DELAY). Main uses this;
+## the synchronous `start()` stays for tests and tools.
+func start_async() -> void:
+	PilotFiles.migrate_legacy()
+	_booting = true
+	data_dir = await find_data_async()
+	_booting = false
+	_after_data_search()
+
+
+func _after_data_search() -> void:
 	if data_dir == "":
 		print("NOVA Swift: no EV Nova data found — showing data setup")
 		_open_data_setup(false)
@@ -73,6 +100,94 @@ func start() -> void:
 	has_data = true
 	data_loaded.emit(data_dir)
 	_open_main_menu()
+
+
+## First `Prefs.data_candidates()` folder that loads, or "" -- loaded off the main thread.
+func find_data_async() -> String:
+	for dir in Prefs.data_candidates():
+		if DirAccess.dir_exists_absolute(dir) and await load_data_async(dir):
+			return dir
+	return ""
+
+
+## Load the game data at `dir` on the bridge's worker thread; true on success. The loading screen
+## appears if it takes longer than LOADING_DELAY and shows the bridge's phase / fraction.
+func load_data_async(dir: String, label := "Loading game data") -> bool:
+	if not nova.load_game_async(dir):
+		return false
+	show_loading(label)
+	var ok := false
+	while true:
+		var st = JSON.parse_string(nova.load_status())
+		if st is Dictionary:
+			set_loading_progress(str(st.get("phase", label)), float(st.get("fraction", 0.0)))
+			if bool(st.get("done", false)):
+				ok = bool(st.get("ok", false))
+				break
+		await get_tree().process_frame
+	hide_loading()
+	return ok
+
+
+# --- loading screen (Apple LoadingView) ---------------------------------------------------
+#
+#   Shell.show_loading("Reloading plug-ins")            ; appears after LOADING_DELAY if still wanted
+#   Shell.set_loading_progress("Reading", 0.4, "3 / 7") ; real progress (else the bar just sweeps)
+#   Shell.hide_loading()                                ; gone (kept up >= LOADING_MIN_SHOW once shown)
+#
+# `show_loading(label, true)` skips the delay for work known to be long. Work that runs on the main
+# thread cannot animate it -- run it as a worker + poll (see load_data_async) or yield a couple of
+# frames after an immediate show_loading so it paints once.
+
+func show_loading(label := "Loading", immediate := false) -> void:
+	_loading_serial += 1
+	_loading_wanted = true
+	_loading_label = label
+	if loading != null:
+		loading.set_indeterminate(label)
+		return
+	if immediate:
+		_create_loading()
+		return
+	var serial := _loading_serial
+	get_tree().create_timer(LOADING_DELAY).timeout.connect(func():
+		if _loading_wanted and _loading_serial == serial and loading == null:
+			_create_loading())
+
+
+func _create_loading() -> void:
+	loading = LoadingScreen.new()
+	add_child(loading)
+	loading.set_indeterminate(_loading_label)
+
+
+func set_loading_progress(phase: String, fraction: float, count := "") -> void:
+	if _loading_label != phase:
+		_loading_label = phase
+	if loading != null:
+		loading.set_progress(phase, fraction, count)
+
+
+func hide_loading() -> void:
+	_loading_serial += 1
+	_loading_wanted = false
+	if loading == null:
+		return
+	var shown: float = loading.shown_seconds
+	var node := loading
+	if shown >= LOADING_MIN_SHOW:
+		loading = null
+		node.queue_free()
+		return
+	var serial := _loading_serial
+	get_tree().create_timer(LOADING_MIN_SHOW - shown).timeout.connect(func():
+		if _loading_serial == serial and loading == node:
+			loading = null
+			node.queue_free())
+
+
+func is_loading() -> bool:
+	return loading != null
 
 
 # --- main menu --------------------------------------------------------------------
@@ -87,13 +202,14 @@ func _open_main_menu() -> void:
 	main_menu.game_data.connect(func():
 		main_menu.visible = false
 		_open_data_setup(true))
+	main_menu.plugins.connect(_open_plugins.bind(main_menu))
 	main_menu.quit.connect(quit_game)
 	main_menu.enter_ship.connect(_enter_ship)
 
 
 ## Classic menu "Enter Ship": resume the newest pilot; with none, open the pilot list.
 func _enter_ship() -> void:
-	var dir := ProjectSettings.globalize_path(PILOT_DIR)
+	var dir := pilot_dir()
 	var rows = JSON.parse_string(nova.pilot_list(dir))
 	if rows is Array and not rows.is_empty() and nova.pilot_load(dir, str(rows[0]["id"])):
 		_on_pilot_chosen()
@@ -111,7 +227,12 @@ func _open_pilots(start_new: bool) -> void:
 		pilot_menu = null
 		main_menu.refresh_pilot()   # a pilot may have been deleted
 		main_menu.dialog_open(false))
-	pilot_menu.setup(nova, ProjectSettings.globalize_path(PILOT_DIR), start_new)
+	pilot_menu.setup(nova, pilot_dir(), start_new)
+
+
+## The Pilots folder (screens/PilotFiles.gd): a real, visible folder of .evpilot files.
+func pilot_dir() -> String:
+	return PilotFiles.dir()
 
 
 func _on_pilot_chosen() -> void:
@@ -172,6 +293,21 @@ func _open_settings(underneath: Node) -> void:
 	settings.changed.connect(apply_prefs)
 	settings.closed.connect(func():
 		settings = null
+		underneath.visible = true
+		if underneath.has_method("refocus"):
+			underneath.refocus()
+		elif underneath.has_method("set_active"):
+			underneath.set_active(true))
+
+
+## The Plug-ins manager (main menu / Settings); reloads the game data through the loading screen.
+func _open_plugins(underneath: Node) -> void:
+	underneath.visible = false
+	var scr = PluginsScreen.new()
+	add_child(scr)
+	scr.setup(nova)
+	scr.closed.connect(func():
+		scr.queue_free()
 		underneath.visible = true
 		if underneath.has_method("refocus"):
 			underneath.refocus()

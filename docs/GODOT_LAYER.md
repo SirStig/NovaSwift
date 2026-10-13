@@ -453,7 +453,7 @@ Esc/B) offers Resume, Settings, Save & Quit to Menu (`pilot_save_now`) and Quit
 (`pilot_autosave`). Original fidelity: no hover sounds; confirm beep snd 150 only.
 
 - **Settings** persist in `user://settings.cfg` via `Prefs.gd` (`[audio]`,
-  `[video]`, `[input] deadzone`, `[data] dir`, `[keys]` rebinds). Volumes go into
+  `[video]`, `[input] deadzone`, `[data] dir`, `[pilots]`, `[classic]`, `[keys]` rebinds). Volumes go into
   `GameAudio`'s existing `master/sfx/ui/muted`; `Controls.stick_deadzone` is the
   runtime dead zone; rebinds live in `Controls.overrides`, which `Controls.register()`
   layers over `BINDINGS` (so startup is `Prefs.load_all()` then `register()`).
@@ -466,7 +466,7 @@ Esc/B) offers Resume, Settings, Save & Quit to Menu (`pilot_save_now`) and Quit
   `AudioStreamMP3` over the main menu only. `.mov` or no file = silence.
 - **Display**: stretch aspect is `expand` so a 1280x800 Steam Deck screen gets the
   extra height instead of bars (the HUD and screens lay out from the viewport rect).
-- Not done: game speed (`GameSpeedRules` is not bridged), Plugins, About, the
+- Not done: game speed (`GameSpeedRules` is not bridged), About, the
   authentic (cölr/PICT) main menu art, per-pad glyph names beyond Xbox layout.
 
 ## Classic UI kit (`godot/ui/classic/`)
@@ -572,11 +572,11 @@ hidden while murk < 0); Nova Swift keeps the plain dot field.
   Data..." is a port-only button at the bottom-left. Native-size 1024x768 canvas, centred, no fill-scale.
   Bridge: `classic_main_menu`, `classic_spin_info/_tile_rgba`, `classic_menu_readout`, `sound_menu`,
   `classic_desc_text`. Not done: the "has been killed" / "Creating Pilot..." readout states.
-* **Pilot dialogs** -- `PilotMenu.gd` classic path (`over_menu` keeps the menu visible behind): New Pilot =
+* **Pilot dialogs** (see "Pilots as files" below for Open Pilot) -- `PilotMenu.gd` classic path (`over_menu` keeps the menu visible behind): New Pilot =
   DLOG/DITL 3102 (3101 with several scenarios) with gender / scenario as cycling buttons and Strict
   Play; a port-only **Random** button beside the gender control keeps name entry pad-friendly; OK
-  asks the ship name in DLOG/DITL 3001 (`pilot_ship_name_prompt`, `pilot_create_strict`). Open Pilot is the
-  dialog panel (the original used the Mac file picker; Apple draws a NovaDialog); delete = DLOG 3002.
+  asks the ship name in DLOG/DITL 3001 (`pilot_ship_name_prompt`, `pilot_create_strict`). Open Pilot is a file
+  open (picker + compact recent list, below); delete = DLOG 3002 under Manage.
   `ClassicDialog.add_cycle` is the new pop-up stand-in.
 * **Galaxy map** -- `GalaxyMap.gd` draws inside DLOG 2000 on PICT 8509 (item 2 = starmap, 5 = side panel,
   1 = status bar, buttons Done / Clear Route / Find / - / +, zoom 0.5..2.0 by 3/4) unless
@@ -585,6 +585,67 @@ hidden while murk < 0); Nova Swift keeps the plain dot field.
   `classic_map_info`. Frame buttons are pointer-only (pad A plots). Not done: Show/Hide Borders.
 * A greyed `ClassicDialog` button press beeps snd 153 (`refused`).
 * Test: `godot/tests/classic_reskin_selfcheck.gd` (also writes PNG previews).
+
+### Pilots as files, Settings like Apple, the loading screen
+
+**Pilots as files.** A pilot is a real `<uuid>.evpilot` (the Apple `PilotArchive` format, with its rotating
+`Backups/` beside it) in a visible **Pilots folder** -- no hidden `user://` store. `screens/PilotFiles.gd`
+resolves it: `$NOVA_PILOTS_DIR` (tests/portable) > Settings > Data & Advanced > Saved Games override
+(`Prefs [pilots] dir`, changing it copies the pilots across, originals stay) > default
+`<Documents>/NovaSwift/Pilots` (Windows `%USERPROFILE%\Documents`, macOS `~/Documents`, Linux/Steam Deck the
+XDG documents dir, usually `~/Documents`) > `~/.local/share/NovaSwift/Pilots` when Documents is unwritable >
+`user://pilots`. Documents rather than "next to the EV Nova data" because the data folder is frequently a
+read-only or repo-internal copy. **Migration:** the first start copies `user://pilots` into the Pilots folder
+(copy, originals kept; `Prefs [pilots] migrated`). `Shell.pilot_dir()` is the one place the folder is read.
+
+**Open Pilot** (`PilotMenu.gd`, Classic and plain): "Choose Pilot File..." runs the OS file picker
+(`PilotFiles.pick_file`, `FileDialog.use_native_dialog`, filters `.evpilot` + `.plt` + all) starting in the Pilots
+folder; under it a compact recent list (`PilotFiles.recent_rows`: files opened lately, topped up with the newest
+in the folder, one row per pilot; `Prefs [pilots] recent`), then New Pilot and **Manage** (the old per-pilot
+Play/Delete list of the folder). `open_path(path)`: an `.evpilot` from anywhere is copied into the folder when
+it is not already there (a newer copy already there wins) and loaded; an original EV Nova pilot (`.plt`,
+MacBinary/AppleDouble/resource fork) shows a summary (`import_preview`, Apple's PilotImportView) and
+`import_commit` saves it as "Imported from EV Nova" and plays it. **Gamepad:** the native picker cannot be
+driven by a pad, so `PilotFiles.want_native()` is false (Godot's focus-navigable FileDialog is used) when a
+pad is connected and navigation input is live (`ClassicTheme.nav_active`, which keyboard arrows also set) or on
+Steam Deck game mode (`SteamDeck=1`, `SteamGamepadUI`, gamescope), and when the platform has no native dialogs.
+Bridge (`// MARK: Pilot files`, logic in `PilotFiles.swift`): `pilot_file_path`, `pilot_inspect_file` (kind
+evpilot/original/unknown), `pilot_open_file(dir, path)`, `pilot_import_preview(path)`, `pilot_import_commit(dir)`.
+Tests: `tests/pilot_files_selfcheck.gd` (a synthetic `.plt` is built in GDScript; there is no on-disk fixture).
+
+**Settings like Apple** (`Settings.gd`): amber title card, category sidebar (Interface = page "Presentation",
+Controls, Graphics = "Video", Audio, Data & Advanced = "Support") with a pinned "Reset All Settings" (second
+press confirms; a pad cannot answer a dialog), grouped sections (amber header, dark rounded group, muted
+footer), amber check boxes and amber-track sliders (`ShellUI._style_controls`, so every shell screen shares
+them), "title ... 70%" slider rows. Focus entering a sidebar entry shows its page; Right enters the page, Up/Left
+from its first control returns. Data & Advanced holds Saved Games (shows the Pilots folder; Open, Change...,
+Use the Default) above the Support/Developer block. **Original Preferences Window...** (Interface page, needs
+game data) opens `screens/ClassicPreferences.gd`: DLOG/DITL 4003 through `ClassicDialog.from_ditl`, wired to
+`Prefs [classic]` (Apple defaults: volume 5, brightness 3, all on but update checks). Live effects: the volume
+arrows are the master volume in 1/8 steps (snd 154), Intro Music gates the title music; the other flags are stored
+only (the Godot renderer has no counterpart yet). Key Settings opens the NovaSwift Controls page -- the
+34-cell DITL 4002 dialog is not ported. The arrows are mouse-only (as in the original); pad players use the
+Audio sliders.
+
+**Loading screen** (`screens/LoadingScreen.gd`, a port of Apple `LoadingView` + `Branding`): the launch key art
+drifting behind seeded parallax stars (3 depths), the fire-lit gunmetal NOVA SWIFT wordmark with flickering
+flames (`godot/assets/branding/`, copied from the app's asset catalog), corner brackets, phase / count / percent
+readout, tips, and a bar that is the original's flat cölr ProgressBar in Classic and the amber segmented gauge in
+Nova Swift. API on `Shell` (the plug-in reload and anything else can call it):
+
+    Shell.show_loading("Reloading plug-ins")             # appears after 0.25 s if still wanted (no flash)
+    Shell.show_loading("...", true)                      # immediate, for work known to be long
+    Shell.set_loading_progress("Reading", 0.4, "3 / 7")  # real progress; without it the bar sweeps
+    Shell.hide_loading()                                 # stays up >= 0.5 s once shown (no flicker)
+    var ok = await Shell.load_data_async(dir)            # worker-thread data load with real phases
+
+`load_data_async` uses the bridge's `load_game_async(dir)` / `load_status()` (`// MARK: Async data load`): the
+merge runs on a worker thread, `load_status` returns JSON `{running, done, ok, phase, fraction}` and installs the
+result on the main thread when it first sees `done` (call nothing else on the bridge in between). The
+fraction is coarse (find files 0.04, read/merge 0.12, index 0.85) because `GameLibrary.merge` reports nothing
+finer. `Main` boots with `Shell.start_async()` (`in_menu()` is true meanwhile); `start()` stays synchronous for
+tests. A main-thread operation cannot animate the screen: pilot load and `make_world` take a few ms and do not
+show it. Not verified visually (no windowed run).
 
 ### Bridge (`// MARK: Classic UI` in `NovaWorld.swift`, logic in `ClassicUI.swift`)
 
@@ -637,6 +698,45 @@ moves focus to Buy), the Buy / Sell buttons transact; Alt- or right-click on Buy
 Player Info has the original 4 tabs and Mission Info is its own dialog. Test: `tests/classic_spaceport_selfcheck.gd` (composes
 PNG previews through `tests/UiCompose.gd`); `spaceport_menu_check` / `story_menu_check` take `NOVA_UI=modern` for the plain path.
 
+### UI polish (focus, lists, messages, dësc dialog, Classic map)
+
+* **No focus or hover outline.** The original has none, so the kit draws focus indication only while the last input
+  was keyboard navigation or a gamepad (`ClassicTheme.nav_active`, fed by a `NavTracker` node under the tree root; any
+  mouse / touch event clears it, a `ui_*` key or pad input sets it; `ClassicTheme.show_focus(control)`). It mirrors the
+  Apple controller cursor's target treatment: an ART `ClassicButton` grows 1.07x (CursorClickable hover-grow), NATIVE
+  and CHECK buttons get the original's dotted default ring, list `Row`s show the cölr `listHilite`, grid tiles use
+  their gridBright selection box, the main menu shows its highlighted art frame, edit fields rely on the caret. The
+  `ShellUI` theme (Settings, pause, data setup) swaps its amber ring in and out with the same signal.
+* **List highlight offset (root cause).** A `Control` clamps `size` to its minimum at assignment time, and with the
+  default 16 px theme font that minimum is 23 px, so every 10-13 px label (list cells, grid captions, DITL static
+  text) was 23 px tall with its text centred ~5 px below a 13 px highlight. Kit helpers now set the theme overrides
+  first and `size` last (also deferred). `ClassicScreen.Row` is a `BaseButton` (a `Button`'s font-line minimum had
+  stretched rows too).
+* **Shrink-to-fit, never "...".** `ClassicTheme.fit_size/fit_label` (Apple `NovaText(shrinkToFit:)`: one line, down to
+  50 % of nominal in whole pixels) is used for grid captions and list cells; classic labels no longer trim.
+* **Status line.** `Main.gd` shows ONE line (a new message replaces the old) at the bottom-left, 16 px in and 8 px up,
+  clipped at sidebar + 50 px, `.hud` face (the ïntf status font, semibold, 14 pt, white, black shadow), 5 s with a
+  0.6 s fade; the land prompt is centred over the play area on the same baseline, one line higher while a message is
+  up (Apple `MessageLogView` / `ContextualActionsView`). The texts are the bridge's (`polishNote`: STR# 2002 #287
+  disabled, #288 ship destroyed, #37 repair, #127/#128/#129 escorts, #374 stolen; "You are being scanned.";
+  overlay messages). The Apple app narrates nothing for a target dying, docking or launching, so those invented lines
+  are gone; the cannot-jump lines (#42, #36, #30, #31) arrive through the same channel.
+* **`ClassicDialog.desc_dialog(nova, text, graphic_id, opts)`.** The generic dësc reader: DITL 3003 on PICT
+  8524/8525/8526 (3004 on 8527 with a picture), shrunk by the shared `DescDialogLayout.shrink`
+  (`desc_dialog_shrink`), measured wrapped white 12 pt text in a clipped pane that scrolls (wheel, Up/Down, PgUp/PgDn,
+  right stick), OK at item 0, `<REG>` and `\r` resolved by `desc_dialog_text`. About Nova passes
+  `about_nova_text(version)` (NovaSwift header + dësc 32767; version from `application/config/version`).
+  `d.get_meta("desc")` exposes shrink / text height / rects for tests.
+* **Classic galaxy map** follows `GalaxyMapView.drawMap`'s non-fullscreen branch: black disc plus 1 px (2 px zoomed)
+  ring in the `OriginalMapMarker` colour (new shared `Sources/NovaSwiftStory/OriginalMapMarker.swift`, bridge
+  `nav_marker_colors`), cyan current-system dot, eight green corner strokes on the selection, Geneva-9 white labels at
+  (x+7, y+4) for explored / charted systems when zoom >= 1/1.1, linkGrey 1 px links from visited systems, green armed
+  link, 2 px green route, gate-picker barbs. No help line under the frame. Not ported: the political overlay
+  ("Show Borders"), mission-target cicn markers and their fog exception, the floatingMap frame border.
+* **No invented transaction text** in the Classic spaceport (no "Bought 3 t of ...", refuel, hire or gamble feedback):
+  counts, credits and button states only.
+* Selfcheck: `godot/tests/ui_polish_selfcheck.gd` (also counts engine errors with an `OS.add_logger` logger).
+
 ### Story Map / Story Guide (`screens/StoryGuide.gd`)
 
 Port of the Apple Story Guide (`StoryGuideView` / `StorylineFlowView` / `StorylineTagBadge`). Apple's current guide is a
@@ -669,3 +769,54 @@ at scale), right stick / wheel scroll, X / Y or PageUp / PageDown switch storyli
   display names (lanes show the plug-in id until plug-in loading, package 6, lands).
 * Test: `tests/story_map_selfcheck.gd` (real data lanes/flow, progress change after completing a mission / setting a bit, badge,
   focus walk, detail, zoom, lane cycling, pause-menu open/close; `NOVA_UI=modern`, `NOVA_PREVIEW=<png>` writes a layout preview).
+
+## Debug suite (`godot/debug/`, bridge `Debug.swift`)
+
+Port of `app/NovaSwift/Debug/`. Developer UI in Apple's dev style (dark/green monospace), keyboard and pad navigable.
+
+**Opening.** Gated by `Prefs developer/debug_mode` (= Apple `debugModeEnabled`; Settings > Support > Debug mode). With it on: **F12**, **Ctrl/Cmd+`**, **L3+R3**, pause menu > Debug Suite, Settings > Support > Open Debug Suite, or the corner chip (`>_` / fps). With it off none of these exist. **Report a Bug** is never gated (Settings > Support, pause menu). While open, Main.gd does not read flight input (`DevTools.captures_input()`) but the sim keeps running; Esc / pad B close, LB/RB or Ctrl+PgUp/PgDn switch tabs.
+
+**Files.** `debug/DevTools.gd` (host, hotkeys, metrics, Godot log capture via `OS.add_logger`), `ConsolePane` (filters, search, history, Tab completion, hints, entity-link chips), `ToolsPane` (SELECTED/PERFORMANCE/CHEATS/WORLD/HD/STRESS/EDITORS), `StatePane` (game-state editor), `BitsPane` (NCB browser), `BrowserPane` (ships/outfits/govts), `ChecksPane` (diagnostics + self-tests), `ReportPane` (bug-report zip), `DevOverlay` (AI overlay + measurement grid), `DevSettingsPage`. Main.gd hooks: create `DevTools`, `_dbg_to_screen`, and the `captures_input()` early-out.
+
+**Bridge.** `NovaDebug` (second `@Godot` class, registered beside `NovaWorld`) holds a `DebugConsole`, a `DebugLogBuffer` and a `FrameProfiler`, and reaches the engine through `dbg*` accessors in the `// MARK: Debug suite` extension at the end of `NovaWorld.swift`. All world-touching commands (god, fuel, heal, refuel, credits, spawn, ship, outfit, relation, bit, date, select, destroy, disable, capture, conquer, cycle, perf, ai, uidebug, ...) are registered there; extras for the state editor: `rebuild, outfits, rating, set, damage, escorts, hostiles, date set`. `hd` reports that HD is Apple-only.
+
+**Shared code (Apple calls it too).** `NovaSwiftStory`: `DebugDiagnostics`, `DebugLiveTests`, `NCBIndex`, `DebugConsole` (registry/tokenizer/completion), `DebugLogBuffer`, `DebugPilotOps`, `BugReportText`. `NovaSwiftKit`: `FrameProfiler`/`PerfPhase`, `DevEntityRef`/`DevLogLinking`, `DebugLogSink`.
+
+**Log capture.** Off-Apple the `FallbackLogger`s mirror every line into `DebugLogSink` -> ring buffer. On macOS the engine uses `os.Logger`, so the bridge tails `OSLogStore` on a utility thread. Godot's own log arrives through `DevLogger`. The buffer is always on (bug reports have history even with debug mode off).
+
+**Bug report.** `bug_report_files()` returns report.txt / pilot.json / diagnostics.txt / console.log; `ReportPane.make_report` zips them with `ZIPPacker` into `Documents/NovaSwift/Diagnostics` (fallback `user://Diagnostics`, `NOVA_REPORT_DIR` overrides).
+
+**Not ported.** HD/3D viewer and HD commands (NovaSwiftHD is Apple-only), PerfMonitor's os_signpost/mach memory counters (Godot `Performance` monitors are used), console "select a line -> run again/edit" action bar (history walk and Copy cover it), the right-click context menu on ships/planets (use the SELECTED section; mouse click-select works as in flight).
+
+Verify: `NOVA_DATA_DIR=$PWD/data/base godot --headless --path godot -s res://tests/debug_suite_selfcheck.gd`.
+
+
+## Plug-ins (work package 6)
+
+Godot loads plug-ins exactly like the Apple app; the rules are shared code.
+
+* **Shared (new)**: `Sources/NovaSwiftKit/PluginSet.swift` (`PluginSet.arrange/setEnabled/move`, `PluginEnableState`) is
+  the enabled-flag / persisted-order / total-conversion logic that used to live inline in
+  `GameDataController`; Apple now calls it (behaviour-identical). Discovery (`GameLibrary.discoverPlugins`), the original
+  alphabetical rule vs the "manual plug-in order" enhancement (`originalPluginOrder`), TC handling and `merge` were already shared.
+  Tests: `Tests/NovaSwiftKitTests/PluginSetTests.swift`.
+* **Bridge**: `Plugins.swift` has `PluginRuntime` (state; `NovaWorld.loadGame` and `load_game_async` both call
+  `PluginRuntime.shared.loadMerged`, so every `load_game` caller gets plug-ins) and the `NovaPlugins` class
+  (`list/state/rescan/set_manual_order/set_enabled/move/reload/import_from/delete/install/catalog_*/image/...`, JSON strings).
+  `NovaSwiftPluginStore` builds off-Apple (FoundationNetworking, ZIPFoundation, swift-crypto) and is linked into the bridge; the store's
+  download/verify/unpack runs on Swift tasks and GDScript polls `catalog_state`. `PluginCatalog.bundled` (SwiftPM `Bundle.module`) is
+  never touched in the bridge: the offline copy is `godot/data/PluginCatalog.json` (keep equal to
+  `Sources/NovaSwiftPluginStore/Resources/PluginCatalog.json`; the self-check compares them), loaded with `set_bundled_catalog`.
+* **Where it looks** (in order): `NOVA_PLUGINS_DIR` / `NOVASWIFT_PLUGINS` (dev); a "Nova Plug-ins" folder inside or next to the
+  chosen data folder (the original install layout; base files under it are excluded from the base set); the user folder
+  `<data root>/Plug-ins` (`~/.local/share/NovaSwift` or `$XDG_DATA_HOME/NovaSwift` on Linux/Deck, `~/Library/Application Support/NovaSwift`
+  on macOS, `%APPDATA%\NovaSwift` on Windows; override `NOVA_PLUGIN_HOME`) where downloads and imports land; folders added with `add_dir`.
+  The repo's `data/plugins` is deliberately not scanned (it would load every pooled plug-in into every test). State is JSON at
+  `<data root>/plugins-state.json` (`NOVA_PLUGIN_STATE`, `set_state_file`).
+* **UI**: `screens/Plugins.gd` (Installed / Browse / Load order, details, import, install/update/delete, Apply). Reached from the main
+  menu ("Plug-ins" in the plain menu, a Classic extra button beside Game Data...; `MainMenu.plugins` signal -> `Shell._open_plugins`)
+  and Settings > Plug-ins. Data reload goes through `Shell.load_data_async` (loading screen). Changes are batched and applied by Apply,
+  Done, or automatically when an install finishes (Apple reloads after every toggle).
+* **Story Map**: `story_map_lanes` now carries `pluginLabels`; `StoryGuide.plugin_label` shows plug-in names.
+* `NOVA_PLUGIN_OFFLINE=1` stops the catalog from touching the network (CI, self-checks).
+* Check: `NOVA_PLUGIN_OFFLINE=1 NOVA_DATA_DIR=$PWD/data/base godot --headless --path godot -s res://tests/plugins_selfcheck.gd`.

@@ -26,6 +26,7 @@ signal new_pilot
 signal open_pilot
 signal settings
 signal game_data
+signal plugins
 signal quit
 ## Classic menu: "Enter Ship" -- resume the newest pilot (the host opens the list if none).
 signal enter_ship
@@ -69,6 +70,8 @@ func setup(nova: Object, data_dir: String, has_data: bool) -> void:
 	ShellUI.button(box, "Settings", func(): settings.emit(), nova)
 	ShellUI.button(box, "Game Data…", func(): game_data.emit(), nova)
 	if has_data:
+		ShellUI.button(box, "Plug-ins", func(): plugins.emit(), nova)
+	if has_data:
 		ShellUI.button(box, "About Nova", _show_about, nova)
 	ShellUI.button(box, "Quit", func(): quit.emit(), nova)
 	ShellUI.focus(first_button)
@@ -102,6 +105,15 @@ func _setup_classic(nova: Object, data_dir: String) -> void:
 		nova.sound_beep(1)
 		game_data.emit())
 	_extra.add_child(gd)
+	var pg = ClassicButton.make("Plug-ins", 120)   # Apple's Classic menu has a "Plugins" extra button
+	pg.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	pg.position = Vector2(14 + 120 + 10, -(pg.size.y + 12))
+	pg.pressed.connect(func():
+		nova.sound_beep(1)
+		plugins.emit())
+	_extra.add_child(pg)
+	gd.focus_neighbor_right = gd.get_path_to(pg)
+	pg.focus_neighbor_left = pg.get_path_to(gd)
 	var q = classic_menu.buttons.get("quit")
 	if q != null:
 		q.focus_neighbor_bottom = q.get_path_to(gd)
@@ -142,12 +154,13 @@ func _show_about() -> void:
 		classic_menu.blocked = true
 	# AboutNovaText: the NovaSwift header over dësc 32767, in the generic dësc dialog.
 	var d = ClassicDialog.desc_dialog(nova, nova.about_nova_text(str(ProjectSettings.get_setting("application/config/version", "1.0.0"))))
-	d.accepted.connect(_close_about)
-	d.cancelled.connect(_close_about)
+	d.activated.connect(func(_i): _close_about())   # OK press and Esc / B: one close path
 	_about = ClassicDialog.modal(_root, d, 0.6)
 
 
 func _close_about() -> void:
+	if _about == null:
+		return    # accepted + cancelled can both fire for the one OK press
 	if _about != null:
 		_about.queue_free()
 		_about = null

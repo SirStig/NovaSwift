@@ -138,8 +138,12 @@ static func status_label(status: String) -> String:
 	return "Locked"
 
 
+## Plug-in display names by id, filled from the lanes read-out (bridge `pluginLabels`).
+static var plugin_names := {}
+
+
 static func plugin_label(id: String) -> String:
-	return "Base Game" if id == "" else id
+	return "Base Game" if id == "" else str(plugin_names.get(id, id))
 
 
 static func connector_color(label: String) -> Color:
@@ -162,6 +166,10 @@ class FocusBox extends Control:
 	func _init() -> void:
 		focus_mode = Control.FOCUS_ALL
 		mouse_filter = Control.MOUSE_FILTER_STOP
+
+	func _enter_tree() -> void:
+		ClassicTheme.track(self)
+		ClassicTheme.on_nav_changed(func(_on): queue_redraw())
 
 	func _ready() -> void:
 		focus_entered.connect(queue_redraw)
@@ -255,14 +263,21 @@ class BadgeButton extends Button:
 		custom_minimum_size = Vector2(24, 24)
 		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 
+	func _enter_tree() -> void:
+		ClassicTheme.track(self)
+		ClassicTheme.on_nav_changed(func(_on): queue_redraw())
+
 	func _ready() -> void:
 		focus_entered.connect(queue_redraw)
 		focus_exited.connect(queue_redraw)
 
 	func _draw() -> void:
 		var amber := Color(0.98, 0.75, 0.35)
-		var r := Rect2(Vector2(5, 3), size - Vector2(10, 6))
-		draw_rect(r, Color(amber.r, amber.g, amber.b, 0.25), true)
+		var mx := 5.0 if size.x >= 22.0 else 2.0
+		var my := 3.0 if size.y >= 22.0 else 1.0
+		var r := Rect2(Vector2(mx, my), size - Vector2(mx * 2.0, my * 2.0))
+		var fill := 0.5 if ClassicTheme.show_focus(self) else 0.25   # keyboard / pad focus: a brighter fill, no outline
+		draw_rect(r, Color(amber.r, amber.g, amber.b, fill), true)
 		draw_rect(r, amber, false, 1.5)
 		var mid := r.position.x + r.size.x * 0.5
 		draw_line(Vector2(mid, r.position.y), Vector2(mid, r.end.y), amber, 1.5)
@@ -270,8 +285,6 @@ class BadgeButton extends Button:
 			var y := r.position.y + 5.0 + i * 4.0
 			draw_line(Vector2(r.position.x + 2, y), Vector2(mid - 2, y), amber, 1.0)
 			draw_line(Vector2(mid + 2, y), Vector2(r.end.x - 2, y), amber, 1.0)
-		if has_focus():
-			draw_rect(Rect2(Vector2.ZERO, size), Color(1.0, 0.9, 0.55), false, 2.0)
 
 
 # ---------------------------------------------------------------- setup
@@ -409,6 +422,7 @@ func _map_loaded() -> void:
 	var d = _json(nova.story_map_lanes())
 	_lanes = d.get("lanes", []) if d is Dictionary else []
 	_untagged = int(d.get("untagged", 0)) if d is Dictionary else 0
+	plugin_names = d.get("pluginLabels", {}) if d is Dictionary else {}
 	for c in _body.get_children():
 		c.queue_free()
 	if _lanes.is_empty():

@@ -46,7 +46,10 @@ const StoryScreens = preload("res://screens/StoryScreens.gd") # story texts, mis
 const Spaceport = preload("res://screens/Spaceport.gd")     # landing, trade, outfitter, shipyard
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")   # Classic UI kit (original ïntf HUD, DLOG/DITL dialogs)
 const AuthenticHUD = preload("res://ui/classic/AuthenticHUD.gd")
+const DevTools = preload("res://debug/DevTools.gd")           # Debug suite (console, tools, bug report)
+const FlightRenderer = preload("res://flight/FlightRenderer.gd")   # the world drawn on screen (godot/flight/)
 
+var _dev: Node               # DevTools: debug suite host (always captures the log)
 var _shell: Node             # Shell: menus around the game (see screens/Shell.gd)
 
 var nova                     # NovaWorld (from the NovaSwiftGodot GDExtension)
@@ -57,21 +60,7 @@ var _audio: Node             # GameAudio: drains the bridge's sound cues every f
 
 var _story: Node            # StoryScreens: story text / offer dialogs, Player + Mission Info
 var _spaceport: Node         # Spaceport: the whole docked UI
-
-# Decoded-sprite cache, keyed by Vector2i(kind, id) — see SPRITE_* below. Each
-# entry is { tex, fw, fh, cols, frames, rate } or null for "this resource has no
-# graphic", so a spriteless id is asked for once rather than every frame.
-var _sprite_cache := {}
-
-var _stars_near: PackedVector2Array
-var _stars_far: PackedVector2Array
-var _field := Vector2(4096, 4096)
-# Classic presentation: the original's ambient field (0x0046ebf0), as the Apple app's
-# GameScene.buildOriginalStarfield -- at most 20 opaque spïn-700 stars at native size,
-# count from the view height, each streaming past at (1 + Random(35)*0.01)x the world's
-# scroll, wrapped across the view, tinted by system murk (hidden while murk < 0).
-var _orig_stars: Array = []       # [{base: Vector2, factor: float, frame: int}]
-var _orig_star_count := -1
+var _flight: Node2D          # FlightRenderer: stellars, ships, shots, effects, camera, starfield
 
 # Actions that must be released before they count again — set on a screen
 # change so the button that launched you (pad B) doesn't also fire a missile.
@@ -90,38 +79,10 @@ const MESSAGE_PAD_RIGHT := 50.0  # + the status-bar sidebar
 const MESSAGE_PAD_BOTTOM := 8.0
 const MESSAGE_FONT_SIZE := 14    # NovaFont .hud base size
 
-# Live transient effects spawned from the bridge's effect drain — see _spawn_fx.
-var _fx: Array = []
-const FX_MAX := 160
-
-# Per-frame snapshot of the bridge readbacks, filled once in _process and read
-# by the several _draw passes that need them. Without this the ship table would
-# be marshalled across the extension boundary three times a frame (ships, radar,
-# visuals) for identical data.
-var _ship_xf: PackedFloat32Array
-var _ship_sf: PackedInt32Array
-var _ship_ids: PackedInt32Array
-var _ship_rel: PackedInt32Array
-var _ship_vis: PackedFloat32Array
-var _shot_xf: PackedFloat32Array
-var _shot_style: PackedInt32Array
-var _beams: PackedFloat32Array
-var _roid_xf: PackedFloat32Array
-var _roid_style: PackedInt32Array
-var _box_xf: PackedFloat32Array       # floating boxes: a jettison's pods, a rock's yield
-var _box_style: PackedInt32Array
 var _death_timer := -1.0              # game over: seconds until the main menu (the wreck plays out first)
-var _background := Color(0.02, 0.02, 0.06)
 
-const SHIP_SIZE := 14.0
 const COLOR_PLAYER := Color(0.55, 0.85, 1.0)
-const COLOR_NPC := Color(0.95, 0.75, 0.35)
-const COLOR_DISABLED := Color(0.5, 0.5, 0.55)
-const COLOR_STAR_NEAR := Color(0.9, 0.9, 1.0, 0.9)
-const COLOR_STAR_FAR := Color(0.7, 0.7, 0.85, 0.5)
-const COLOR_JUMP_RING := Color(0.3, 0.5, 0.7, 0.25)
-const COLOR_SHOT := Color(1.0, 0.85, 0.4)
-const COLOR_ROCK := Color(0.45, 0.4, 0.36)
+
 # Body kind -> fallback circle color (0 landable, 1 planet, 2 hypergate, 3 wormhole, 4 deadly).
 const BODY_COLORS := [
 	Color(0.45, 0.7, 0.5),
@@ -139,37 +100,6 @@ const RELATIONSHIP_COLORS := [
 	Color(0.55, 0.55, 0.6),
 	COLOR_PLAYER,
 ]
-
-# Sprite kinds — these MUST match the bridge's SpriteKind enum
-# (godot/bridge/Sources/NovaSwiftGodot/NovaWorld.swift).
-const SPRITE_SHIP := 0
-const SPRITE_ENGINE_GLOW := 1
-const SPRITE_SPOB := 5
-const SPRITE_WEAPON := 7
-const SPRITE_BOOM := 8
-const SPRITE_ASTEROID := 9
-const SPRITE_STARFIELD := 10
-
-# Effect kinds — these MUST match the `kind` column of the bridge's drainEffects.
-const FX_EXPLOSION := 0
-const FX_SHIELD_HIT := 1
-const FX_ARMOR_HIT := 2
-const FX_DEBRIS := 3
-const FX_SHIP_DYING := 4
-const FX_SHIP_DESTROYED := 5
-const FX_MUZZLE := 6
-
-# How long each effect kind stays on screen, in seconds. A bööm-backed explosion
-# overrides its own entry with the authored frame count × frame duration.
-const FX_LIFETIME := {
-	FX_EXPLOSION: 0.55,
-	FX_SHIELD_HIT: 0.30,
-	FX_ARMOR_HIT: 0.30,
-	FX_DEBRIS: 0.70,
-	FX_SHIP_DYING: 0.80,
-	FX_SHIP_DESTROYED: 1.10,
-	FX_MUZZLE: 0.07,
-}
 
 const RADAR_CENTER_MARGIN := Vector2(120, 120)
 const RADAR_PIXEL_RADIUS := 90.0
@@ -231,12 +161,23 @@ func _ready() -> void:
 	_shell.resumed.connect(_suppress_held)
 	_shell.player_info_requested.connect(func(): _story.open_info("general"))
 
+	_dev = DevTools.new()
+	add_child(_dev)
+	_dev.setup(nova, Callable(self, "_dbg_to_screen"))
+
 	_start_world()
 	_seed_starfield()
 	_nav.run_selftest_if_requested()
 
 
 # The observe goal counts a mission ship as seen only inside the visible play area.
+# World (engine) -> screen position, for the debug suite's AI overlay (inverse of the click mapping).
+func _dbg_to_screen(w: Vector2) -> Vector2:
+	var pw: Vector2 = nova.player_position()
+	var ctr := _play_center(get_viewport_rect().size)
+	return Vector2(ctr.x + (w.x - pw.x), ctr.y - (w.y - pw.y))
+
+
 func _sync_story_view() -> void:
 	var sz := get_viewport_rect().size
 	nova.set_story_view_size(sz.x, sz.y)
@@ -258,7 +199,7 @@ func _start_world() -> void:
 		return
 	# Otherwise the shell shows the main menu (or the data-setup screen first);
 	# the world isn't built until a pilot is chosen or the demo is picked.
-	_shell.start()
+	_shell.start_async()   # the data loads on a worker thread behind the loading screen
 
 
 func _on_pilot_chosen() -> void:
@@ -366,6 +307,15 @@ func _process(delta: float) -> void:
 
 	if _nav.blocks_flight() or _interact.blocks_flight() or _story.blocks_flight():   # map / hail / plunder dialog up: sim paused
 		_drain_events_to_log(delta)
+		queue_redraw()
+		return
+
+	if _dev != null and _dev.captures_input():   # debug suite up: keys belong to it, the sim keeps running
+		nova.set_intent(false, false, false, false, false, false, false)
+		nova.step(delta)
+		_snapshot_frame()
+		_drain_events_to_log(delta)
+		_advance_fx(delta)
 		queue_redraw()
 		return
 
@@ -553,114 +503,14 @@ func _drain_events_to_log(delta: float) -> void:
 	nova.drain_events()   # names only; the narrated lines arrive through the message channels
 
 
-# MARK: Transient effects
-#
-# The bridge reports what happened and where; the look is ours. Each drained row
-# becomes one _fx entry that ages out on its own clock.
-
-func _advance_fx(delta: float) -> void:
-	for e in _fx:
-		e["age"] += delta
-	_fx = _fx.filter(func(e): return e["age"] < e["life"])
-
-	var rows: PackedFloat32Array = nova.drain_effects()
-	var stride: int = nova.effect_stride()
-	var i := 0
-	while i + stride <= rows.size():
-		_spawn_fx(int(rows[i]), Vector2(rows[i + 1], rows[i + 2]),
-			rows[i + 3], rows[i + 4], Color(rows[i + 5], rows[i + 6], rows[i + 7]))
-		i += stride
-	# A dense firefight can outrun the fade; drop the oldest rather than let the
-	# list grow without bound.
-	if _fx.size() > FX_MAX:
-		_fx = _fx.slice(_fx.size() - FX_MAX)
-
-
-func _spawn_fx(kind: int, pos: Vector2, p0: float, p1: float, col: Color) -> void:
-	var life: float = FX_LIFETIME.get(kind, 0.4)
-	var boom_id := -1
-	var radius := 12.0
-
-	match kind:
-		FX_EXPLOSION:
-			radius = maxf(p0, 8.0)
-			boom_id = int(p1)
-		FX_SHIP_DYING, FX_SHIP_DESTROYED:
-			radius = 34.0 if kind == FX_SHIP_DESTROYED else 22.0
-			boom_id = int(p0) if kind == FX_SHIP_DYING else -1
-			col = Color(1.0, 0.8, 0.45)
-		FX_SHIELD_HIT, FX_ARMOR_HIT:
-			radius = 7.0
-		FX_DEBRIS:
-			radius = 3.0
-		FX_MUZZLE:
-			radius = 5.0
-
-	var entry := {
-		"kind": kind, "pos": pos, "age": 0.0, "life": life,
-		"radius": radius, "color": col, "boom": -1, "dirs": PackedVector2Array(),
-	}
-
-	# A bööm-backed explosion plays its authored animation for its authored
-	# duration instead of the generic flash.
-	if boom_id >= 0:
-		var sheet = _sprite_entry(SPRITE_BOOM, boom_id)
-		if sheet != null:
-			entry["boom"] = boom_id
-			entry["life"] = maxf(0.1, sheet["frames"] * _boom_frame_seconds(sheet["rate"]))
-
-	# Particle bursts scatter fixed directions chosen once at spawn, so a chunk
-	# flies straight rather than jittering to a new random spot each frame.
-	if kind == FX_DEBRIS or kind == FX_SHIELD_HIT or kind == FX_ARMOR_HIT:
-		var count := clampi(int(p0), 4, 18) if kind == FX_DEBRIS else 7
-		var dirs := PackedVector2Array()
-		for n in count:
-			var a := randf() * TAU
-			dirs.append(Vector2(cos(a), sin(a)) * randf_range(0.4, 1.0))
-		entry["dirs"] = dirs
-
-	_fx.append(entry)
-
-
-# bööm FrameAdvance R: fps = R/100 × 30, so one frame lasts 100/(30R) seconds.
-func _boom_frame_seconds(rate: int) -> float:
-	return 100.0 / (30.0 * float(rate)) if rate > 0 else 1.0 / 30.0
-
-
 func _draw() -> void:
-	if nova == null or _shell.in_menu():
+	# The world itself is the FlightRenderer's (godot/flight/), drawn behind this node; this draws the
+	# primitive HUD and the text overlays over it.
+	if nova == null or _shell.in_menu() or nova.is_landed():
 		return
-
 	var vp := get_viewport_rect().size
-
-	if nova.is_landed():
-		return   # the Spaceport screen (a CanvasLayer) draws everything
-
-	# The system's own background, not a hardcoded near-black — Nova's nebula
-	# systems are visibly tinted and clearing wrong loses that entirely.
-	draw_rect(Rect2(Vector2.ZERO, vp), _background)
-
-	var center := _play_center(vp)
 	var pw: Vector2 = nova.player_position()
-
-	if _has_data and ClassicTheme.classic("hud") and _draw_original_stars(vp, center, pw):
-		pass
-	else:
-		_draw_starfield(_stars_far, pw, 0.35, COLOR_STAR_FAR, 1.0, vp)
-		_draw_starfield(_stars_near, pw, 0.7, COLOR_STAR_NEAR, 1.5, vp)
-
-	if _has_data:
-		_draw_bodies(center, pw)
-		_draw_asteroids(center, pw)
-		_draw_freeflight(center, pw)
-
 	var target_id: int = nova.player_target_id()
-	# Beams under the hulls so a beam reads as coming *out* of the barrel;
-	# shots and blasts over them so nothing hides an impact.
-	_draw_beams(center, pw)
-	_draw_ships(center, pw, target_id)
-	_draw_projectiles(center, pw)
-	_draw_effects(center, pw)
 
 	if not _sync_classic_hud():   # Classic presentation: the ïntf status bar (a CanvasLayer) draws these
 		_draw_status_bars(vp)
@@ -701,84 +551,6 @@ func _sync_classic_hud() -> bool:
 	return _classic_hud_on
 
 
-func _to_screen(world_pos: Vector2, center: Vector2, pw: Vector2) -> Vector2:
-	# Engine space is +y-up; Godot screen is +y-down, so flip y. Camera follows
-	# the player by subtracting the player's world position.
-	return center + Vector2(world_pos.x - pw.x, -(world_pos.y - pw.y))
-
-
-func _draw_bodies(center: Vector2, pw: Vector2) -> void:
-	# Jump-radius ring, centered on the system origin.
-	var jr: float = nova.jump_radius()
-	if jr > 0.0:
-		draw_arc(_to_screen(Vector2.ZERO, center, pw), jr, 0.0, TAU, 96, COLOR_JUMP_RING, 2.0, true)
-
-	var xf: PackedFloat32Array = nova.body_transforms()
-	var ids: PackedInt32Array = nova.body_spob_ids()
-	var selected_spob: int = nova.selected_stellar_id()
-	var i := 0
-	var n := 0
-	while i + 3 < xf.size():
-		var pos := _to_screen(Vector2(xf[i], xf[i + 1]), center, pw)
-		var radius: float = xf[i + 2]
-		var kind := int(xf[i + 3])
-		var spob_id: int = ids[n] if n < ids.size() else -1
-		var entry = _sprite_entry(SPRITE_SPOB, spob_id)
-		if entry != null:
-			_draw_sprite(entry, pos, 0)
-		else:
-			var col: Color = BODY_COLORS[kind] if kind < BODY_COLORS.size() else BODY_COLORS[1]
-			draw_circle(pos, maxf(radius, 6.0), col)
-		# A lit hypergate / live wormhole glows; the travel-selected stellar is bracketed.
-		if kind == 2 or kind == 3:
-			if kind == 3 or nova.gate_is_open(spob_id):
-				var glow := Color(0.3, 0.85, 0.98) if kind == 2 else Color(0.78, 0.45, 1.0)
-				draw_arc(pos, maxf(radius, 20.0) * 1.2, 0.0, TAU, 32, glow, 2.0, true)
-		if spob_id == selected_spob:
-			var half := maxf(maxf(radius, entry["fw"] * 0.5 if entry != null else 0.0), 14.0) + 8.0
-			var bc := Color(0.55, 0.8, 1.0, 0.95)
-			for sx in [-1.0, 1.0]:
-				for sy in [-1.0, 1.0]:
-					var corner := pos + Vector2(sx * half, sy * half)
-					draw_line(corner, corner - Vector2(sx * 9.0, 0.0), bc, 2.0)
-					draw_line(corner, corner - Vector2(0.0, sy * 9.0), bc, 2.0)
-		i += 4
-		n += 1
-
-
-func _draw_asteroids(center: Vector2, pw: Vector2) -> void:
-	var i := 0
-	var n := 0
-	while i + 3 < _roid_xf.size():
-		var pos := _to_screen(Vector2(_roid_xf[i], _roid_xf[i + 1]), center, pw)
-		var radius: float = _roid_xf[i + 2]
-		var roid_type: int = _roid_style[n * 2] if n * 2 + 1 < _roid_style.size() else -1
-		var frame: int = _roid_style[n * 2 + 1] if n * 2 + 1 < _roid_style.size() else 0
-		var entry = _sprite_entry(SPRITE_ASTEROID, roid_type) if roid_type >= 0 else null
-		if entry != null:
-			# röid art is a pre-rotated sheet like a hull's: pick the frame.
-			_draw_sprite(entry, pos, frame)
-		else:
-			draw_circle(pos, maxf(radius, 4.0), COLOR_ROCK)
-		i += 4
-		n += 1
-
-
-# Jettisoned cargo pods and a destroyed rock's resource boxes: spïn 500+n rotation sheets.
-func _draw_freeflight(center: Vector2, pw: Vector2) -> void:
-	var n := 0
-	while n * 2 + 1 < _box_xf.size():
-		var pos := _to_screen(Vector2(_box_xf[n * 2], _box_xf[n * 2 + 1]), center, pw)
-		var spin_id: int = _box_style[n * 2] if n * 2 + 1 < _box_style.size() else -1
-		var frame: int = _box_style[n * 2 + 1] if n * 2 + 1 < _box_style.size() else 0
-		var entry = _sprite_entry(SPRITE_WEAPON, spin_id) if spin_id >= 0 else null
-		if entry != null:
-			_draw_sprite(entry, pos, frame % maxi(entry["frames"], 1))
-		else:
-			draw_circle(pos, 3.0, Color(0.7, 0.7, 0.7))
-		n += 1
-
-
 # The death sequence ran out with no eject: let the wreck play out, then back to the main
 # menu without saving — the pilot resumes from its last launch (OS-02, FL-03).
 func _check_game_over(delta: float) -> void:
@@ -788,321 +560,6 @@ func _check_game_over(delta: float) -> void:
 		_death_timer -= delta
 		if _death_timer < 0.0:
 			_shell.return_to_menu()
-
-
-func _draw_ships(center: Vector2, pw: Vector2, target_id: int) -> void:
-	var i := 0
-	var n := 0
-	while i + 3 < _ship_xf.size():
-		var pos := _to_screen(Vector2(_ship_xf[i], _ship_xf[i + 1]), center, pw)
-		var angle: float = _ship_xf[i + 2]
-		var kind := int(_ship_xf[i + 3])
-		var ship_type: int = _ship_sf[n * 2] if n * 2 + 1 < _ship_sf.size() else -1
-		var frame: int = _ship_sf[n * 2 + 1] if n * 2 + 1 < _ship_sf.size() else 0
-
-		# [cloak, ionize, thrusting] per ship, same order as the transforms.
-		var v := n * 3
-		var cloak: float = _ship_vis[v] if v + 2 < _ship_vis.size() else 0.0
-		var ionize: float = _ship_vis[v + 1] if v + 2 < _ship_vis.size() else 0.0
-		var thrusting: bool = (_ship_vis[v + 2] if v + 2 < _ship_vis.size() else 0.0) > 0.5
-
-		# A cloaking ship dissolves rather than popping out. Never quite zero —
-		# the player's own hull staying faintly visible is how EV Nova draws it.
-		var alpha := 1.0 - cloak * (0.92 if kind != 0 else 0.75)
-		var tint := Color(1, 1, 1, alpha)
-		if ionize > 0.02:
-			# Ionization crackle: bleed the hull toward its charge colour.
-			tint = tint.lerp(Color(0.55, 0.75, 1.0, alpha), minf(ionize, 0.8))
-
-		var entry = _sprite_entry(SPRITE_SHIP, ship_type) if ship_type >= 0 else null
-		if entry != null:
-			# The exhaust overlay sits under the hull so the plume reads as
-			# coming out from behind it.
-			if thrusting:
-				var glow = _sprite_entry(SPRITE_ENGINE_GLOW, ship_type)
-				if glow != null:
-					_draw_sprite(glow, pos, frame, tint)
-				else:
-					# No authored exhaust art — fall back to the synthetic plume,
-					# sized off this hull's own frame so a freighter and a
-					# fighter don't get the same flame.
-					_draw_thruster_flame(pos, angle, alpha, entry["fw"] * 0.5)
-			# EV Nova sprites are pre-rotated: pick the frame, don't rotate the texture.
-			_draw_sprite(entry, pos, frame, tint)
-		else:
-			if thrusting:
-				_draw_thruster_flame(pos, angle, alpha, SHIP_SIZE)
-			_draw_ship_primitive(pos, angle, kind, alpha)
-
-		if target_id >= 0 and n < _ship_ids.size() and _ship_ids[n] == target_id:
-			draw_arc(pos, SHIP_SIZE * 1.8, 0.0, TAU, 24, Color(1.0, 0.35, 0.3, 0.85), 1.5, true)
-		i += 4
-		n += 1
-
-
-func _draw_projectiles(center: Vector2, pw: Vector2) -> void:
-	var i := 0
-	var n := 0
-	while i + 2 < _shot_xf.size():
-		var pos := _to_screen(Vector2(_shot_xf[i], _shot_xf[i + 1]), center, pw)
-		var facing: float = _shot_xf[i + 2]
-		var s := n * 3
-		var spin_id: int = _shot_style[s] if s + 2 < _shot_style.size() else -1
-		var spins: bool = (_shot_style[s + 1] if s + 2 < _shot_style.size() else 0) != 0
-		var translucent: bool = (_shot_style[s + 2] if s + 2 < _shot_style.size() else 0) != 0
-		# wëap Flags3 0x0002: translucent shots draw at reduced opacity.
-		var tint := Color(1, 1, 1, 0.45 if translucent else 1.0)
-
-		var entry = _sprite_entry(SPRITE_WEAPON, spin_id) if spin_id >= 0 else null
-		if entry == null:
-			# No authored art — a small hot bolt, pointed along travel so a
-			# volley still reads as directional.
-			var dir := Vector2(sin(facing), -cos(facing))
-			var col := COLOR_SHOT
-			col.a = tint.a
-			draw_line(pos - dir * 4.0, pos + dir * 4.0, col, 2.0, true)
-			draw_circle(pos, 2.0, col)
-		elif entry["frames"] >= 16 and not spins:
-			# A many-frame sheet that doesn't spin is a rotation sheet: index it
-			# by heading rather than rotating the texture (same rule the Apple
-			# renderer uses, and the same 36-way bucketing hulls get).
-			var count: int = entry["frames"]
-			var a: float = fposmod(facing, TAU)
-			_draw_sprite(entry, pos, int(round(a / TAU * count)) % count, tint)
-		else:
-			# A spinning mine animates its strip; a single-frame shot just points
-			# where it flies. Godot's +rotation is clockwise on screen, which is
-			# the same sense as the engine's compass heading, so `facing` is the
-			# rotation directly.
-			var frame := int(_effect_clock() * 15.0) % maxi(entry["frames"], 1) if spins else 0
-			_draw_sprite_rotated(entry, pos, frame, facing, tint)
-		i += 3
-		n += 1
-
-
-func _draw_beams(center: Vector2, pw: Vector2) -> void:
-	# 13 floats per beam: x0 y0 x1 y1 width alpha r g b coronaR coronaG coronaB falloff.
-	var i := 0
-	while i + 12 < _beams.size():
-		var a := _to_screen(Vector2(_beams[i], _beams[i + 1]), center, pw)
-		var b := _to_screen(Vector2(_beams[i + 2], _beams[i + 3]), center, pw)
-		var width: float = _beams[i + 4]
-		var alpha: float = _beams[i + 5]
-		var core := Color(_beams[i + 6], _beams[i + 7], _beams[i + 8], alpha)
-		var corona := Color(_beams[i + 9], _beams[i + 10], _beams[i + 11], alpha)
-		var falloff: float = _beams[i + 12]
-
-		# BeamWidth 0 is a deliberate authoring choice meaning "corona only, no
-		# centre beam" — give it real glow room instead of collapsing it to a
-		# hairline. Real Nova beams ship no sprite art at all: this core→corona
-		# gradient IS what makes two beam weapons look different, so draw the
-		# halo first and the core over it rather than a single flat bar.
-		var coreless := width <= 0.0
-		var core_w := maxf(width, 1.0)
-		var halo_w := core_w * (2.6 if coreless else 1.0 + 1.8 / maxf(falloff, 1.0))
-
-		var halo := corona
-		halo.a = alpha * (0.5 if coreless else 0.35)
-		draw_line(a, b, halo, halo_w, true)
-		if not coreless:
-			draw_line(a, b, core, core_w, true)
-		i += 13
-
-
-func _draw_effects(center: Vector2, pw: Vector2) -> void:
-	for e in _fx:
-		var pos := _to_screen(e["pos"], center, pw)
-		var t: float = clampf(e["age"] / maxf(e["life"], 0.001), 0.0, 1.0)
-		var col: Color = e["color"]
-		var kind: int = e["kind"]
-
-		match kind:
-			FX_DEBRIS, FX_SHIELD_HIT, FX_ARMOR_HIT:
-				var reach: float = e["radius"] * 6.0
-				var size: float = maxf(e["radius"] * (1.0 - t), 0.8)
-				col.a = 1.0 - t
-				for d in e["dirs"]:
-					draw_circle(pos + Vector2(d.x, -d.y) * reach * t, size, col)
-			FX_MUZZLE:
-				col = Color(1.0, 0.95, 0.7, 1.0 - t)
-				draw_circle(pos, e["radius"] * (1.0 - t * 0.5), col)
-			_:
-				# Explosion / death blast. Real bööm art when the data has it,
-				# otherwise an expanding, fading ring of flame.
-				var boom_id: int = e["boom"]
-				var played := false
-				if boom_id >= 0:
-					var sheet = _sprite_entry(SPRITE_BOOM, boom_id)
-					if sheet != null:
-						var count: int = maxi(sheet["frames"], 1)
-						var frame := mini(int(t * count), count - 1)
-						_draw_sprite(sheet, pos, frame)
-						played = true
-				if not played:
-					var r: float = e["radius"] * (0.4 + 1.6 * t)
-					col.a = 1.0 - t
-					draw_circle(pos, r, Color(col.r, col.g, col.b, col.a * 0.35))
-					draw_arc(pos, r, 0.0, TAU, 24, col, maxf(2.0 * (1.0 - t), 0.5), true)
-
-
-# A free-running clock for animations that loop rather than age out (spinning
-# mines, animated beam art). Wall time, not sim time — these are decoration.
-func _effect_clock() -> float:
-	return float(Time.get_ticks_msec()) / 1000.0
-
-
-# Return a cached { tex, fw, fh, cols, frames, rate } for one decoded sheet,
-# building it on first use. Caches nulls too, so a spriteless id isn't
-# re-queried every frame.
-func _sprite_entry(kind: int, id: int):
-	var key := Vector2i(kind, id)
-	if _sprite_cache.has(key):
-		return _sprite_cache[key]
-
-	var info: PackedInt32Array = nova.sprite_info(kind, id)
-	if info.size() < 7:
-		_sprite_cache[key] = null
-		return null
-	var fw := info[0]
-	var fh := info[1]
-	var frames := info[2]
-	var cols := info[3]
-	var sw := info[5]
-	var sh := info[6]
-	var rate: int = info[7] if info.size() > 7 else 0
-	if sw <= 0 or sh <= 0:
-		_sprite_cache[key] = null
-		return null
-
-	var bytes: PackedByteArray = nova.sprite_rgba(kind, id)
-	if bytes.size() < sw * sh * 4:
-		_sprite_cache[key] = null
-		return null
-
-	var img := Image.create_from_data(sw, sh, false, Image.FORMAT_RGBA8, bytes)
-	var entry := {
-		"tex": ImageTexture.create_from_image(img),
-		"fw": fw, "fh": fh, "cols": maxi(cols, 1), "frames": maxi(frames, 1), "rate": rate,
-	}
-	_sprite_cache[key] = entry
-	return entry
-
-
-func _sprite_src(entry: Dictionary, frame: int) -> Rect2:
-	var fw: int = entry["fw"]
-	var fh: int = entry["fh"]
-	var cols: int = entry["cols"]
-	var f: int = clampi(frame, 0, entry["frames"] - 1)
-	return Rect2((f % cols) * fw, (f / cols) * fh, fw, fh)
-
-
-func _draw_sprite(entry: Dictionary, pos: Vector2, frame: int,
-		tint: Color = Color(1, 1, 1, 1)) -> void:
-	var size := Vector2(entry["fw"], entry["fh"])
-	draw_texture_rect_region(entry["tex"], Rect2(pos - size * 0.5, size),
-		_sprite_src(entry, frame), tint)
-
-
-# Same, but spun about its centre — for shot art that points along travel rather
-# than shipping a pre-rotated sheet.
-func _draw_sprite_rotated(entry: Dictionary, pos: Vector2, frame: int, spin_angle: float,
-		tint: Color = Color(1, 1, 1, 1)) -> void:
-	var size := Vector2(entry["fw"], entry["fh"])
-	draw_set_transform(pos, spin_angle, Vector2.ONE)
-	draw_texture_rect_region(entry["tex"], Rect2(-size * 0.5, size),
-		_sprite_src(entry, frame), tint)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-
-
-## The centre of the flight view: the middle of the play area. With the Classic status bar up
-## the original never lets the play area run under the sidebar, so the world is centred in the
-## part of the window to its left (Apple: sceneLayer shrinks the play viewport by the sidebar).
-func _play_center(vp: Vector2) -> Vector2:
-	var bar := 0.0
-	if _has_data and ClassicTheme.classic("hud") and _classic_hud != null:
-		bar = _classic_hud.get_child(0).bar_width(vp)
-	return Vector2((vp.x - bar) * 0.5, vp.y * 0.5)
-
-
-func _build_original_stars(vp: Vector2, count: int) -> void:
-	_orig_stars.clear()
-	var entry = _sprite_entry(SPRITE_STARFIELD, 0)
-	var frames: int = entry["frames"] if entry != null else 1
-	for i in count:
-		_orig_stars.append({
-			"base": Vector2(randf_range(-vp.x * 0.5, vp.x * 0.5), randf_range(-vp.y * 0.5, vp.y * 0.5)),
-			"factor": nova.star_factor(randi() % 35, true),
-			"frame": randi() % maxi(1, frames)})
-	_orig_star_count = count
-
-
-## The original's field; false when the data has no star sprite (the plain field draws instead).
-func _draw_original_stars(vp: Vector2, center: Vector2, pw: Vector2) -> bool:
-	var entry = _sprite_entry(SPRITE_STARFIELD, 0)
-	if entry == null:
-		return false
-	var murk: int = nova.system_murk()
-	if murk < 0:
-		return true   # stars are hidden while murk < 0
-	var count: int = nova.star_count(vp.y)
-	if count != _orig_star_count:
-		_build_original_stars(vp, count)
-	var t := float(nova.star_tint(murk)) / 32.0
-	var tint := Color(minf(1.0, t), minf(1.0, t), minf(1.0, t), 1.0)
-	var span := Vector2(vp.x + 12.0, vp.y + 12.0)
-	for st in _orig_stars:
-		var k: float = 1.0 + float(st["factor"])
-		var b: Vector2 = st["base"]
-		var p := Vector2(fposmod(b.x - pw.x * k + span.x * 0.5, span.x) - span.x * 0.5,
-			fposmod(b.y + pw.y * k + span.y * 0.5, span.y) - span.y * 0.5)
-		_draw_sprite(entry, center + p, int(st["frame"]), tint)
-	return true
-
-
-func _draw_starfield(stars: PackedVector2Array, pw: Vector2, parallax: float,
-		col: Color, radius: float, vp: Vector2) -> void:
-	var offset := Vector2(
-		fposmod(-pw.x * parallax, _field.x),
-		fposmod(pw.y * parallax, _field.y))
-	for s in stars:
-		var p := Vector2(fposmod(s.x + offset.x, vp.x), fposmod(s.y + offset.y, vp.y))
-		draw_circle(p, radius, col)
-
-
-func _draw_ship_primitive(pos: Vector2, angle: float, kind: int, alpha: float = 1.0) -> void:
-	var dir := Vector2(sin(angle), -cos(angle))
-	var side := Vector2(dir.y, -dir.x)
-	var nose := pos + dir * SHIP_SIZE
-	var tail_l := pos - dir * (SHIP_SIZE * 0.7) + side * (SHIP_SIZE * 0.62)
-	var tail_r := pos - dir * (SHIP_SIZE * 0.7) - side * (SHIP_SIZE * 0.62)
-	var col := COLOR_NPC
-	if kind == 0:
-		col = COLOR_PLAYER
-	elif kind == 2:
-		col = COLOR_DISABLED
-	col.a = alpha
-	draw_colored_polygon(PackedVector2Array([nose, tail_l, tail_r]), col)
-
-
-# Synthetic exhaust for hulls whose data ships no engine-glow art (and for the
-# demo world's primitive ship): a short amber plume off the tail.
-func _draw_thruster_flame(pos: Vector2, angle: float, alpha: float, radius: float) -> void:
-	var r := maxf(radius, 4.0)
-	var dir := Vector2(sin(angle), -cos(angle))
-	var side := Vector2(dir.y, -dir.x)
-	var tail := pos - dir * (r * 0.65)
-	var flicker := randf_range(0.75, 1.15)
-	var tip := tail - dir * (r * flicker)
-	draw_colored_polygon(PackedVector2Array([
-			tail + side * (r * 0.30),
-			tail - side * (r * 0.30),
-			tip,
-		]), Color(1.0, 0.55, 0.18, 0.85 * alpha))
-	draw_colored_polygon(PackedVector2Array([
-			tail + side * (r * 0.14),
-			tail - side * (r * 0.14),
-			tail - dir * (r * 0.55 * flicker),
-		]), Color(1.0, 0.95, 0.8, 0.9 * alpha))
 
 
 # MARK: HUD — status bars, weapon readout, target panel, radar, message log.

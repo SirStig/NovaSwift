@@ -20,6 +20,7 @@ extends CanvasLayer
 signal launch_requested
 
 const BarScreens = preload("res://screens/BarScreens.gd")   # Hire Escort, Gamble
+const StoryGuide = preload("res://screens/StoryGuide.gd")
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
 const SpaceportClassic = preload("res://screens/SpaceportClassic.gd")   # the original-UI look
 
@@ -1115,6 +1116,10 @@ func _show_bbs(date: String) -> void:
 		# Stepping to a listing presents it (Tab / Down in the original).
 		b.focus_entered.connect(_bbs_show.bind(id))
 		b.pressed.connect(_bbs_show.bind(id))
+		var _b = StoryGuide.make_badge(_nova, id, self)
+		if _b != null:
+			b.add_child(_b)
+			_b.set_anchors_and_offsets_preset(Control.PRESET_CENTER_RIGHT, Control.PRESET_MODE_KEEP_SIZE, 6)
 		list.add_child(b)
 		if first == null:
 			first = b

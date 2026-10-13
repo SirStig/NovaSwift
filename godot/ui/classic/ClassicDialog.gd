@@ -247,11 +247,24 @@ static func desc_dialog(nova_obj: Object, text: String, graphic_id := -1, opts :
 	var back_tex: Texture2D = Theme_.pict(int(info["backdrop"])) if with_pic else null
 	if with_pic and back_tex != null:
 		size = Vector2i(back_tex.get_size())
-	# Measure the wrapped text at the item's width with the real font.
+	# Measure the wrapped text at the item's width with the very Label that will show it.
 	var fs := 12
 	var font: Font = Theme_.body_font()
-	var th := int(ceil(font.get_multiline_string_size(body, HORIZONTAL_ALIGNMENT_LEFT, float(txt_r.size.x), fs,
-		-1, TextServer.BREAK_MANDATORY | TextServer.BREAK_WORD_BOUND).y))
+	var l := Label.new()
+	l.text = body
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# The pane's (hidden) scroll bar still takes its width from the wrap width.
+	var wrap_w := txt_r.size.x - int(VScrollBar.new().get_minimum_size().x)
+	l.custom_minimum_size = Vector2(wrap_w, 0)
+	l.add_theme_font_override("font", font)
+	l.add_theme_font_size_override("font_size", fs)
+	l.add_theme_color_override("font_color", Color.WHITE)
+	l.add_theme_constant_override("line_spacing", 0)
+	l.mouse_filter = Control.MOUSE_FILTER_PASS
+	# (a wrapping Label's minimum height needs its width applied, so shape the paragraph
+	# with the very break flags AUTOWRAP_WORD_SMART uses)
+	var th := int(ceil(font.get_multiline_string_size(body, HORIZONTAL_ALIGNMENT_LEFT, float(wrap_w), fs, -1,
+		TextServer.BREAK_MANDATORY | TextServer.BREAK_WORD_BOUND | TextServer.BREAK_ADAPTIVE).y))
 	var shrink := 0
 	if not with_pic:
 		shrink = int(nova_obj.desc_dialog_shrink(th, txt_r.size.y)) if nova_obj != null else 0
@@ -281,20 +294,10 @@ static func desc_dialog(nova_obj: Object, text: String, graphic_id := -1, opts :
 	sc.size = Vector2(view_r.size)
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	sc.get_v_scroll_bar().modulate = Color(1, 1, 1, 0)
-	var l := Label.new()
-	l.text = body
-	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	l.custom_minimum_size = Vector2(view_r.size.x, 0)
-	l.add_theme_font_override("font", font)
-	l.add_theme_font_size_override("font_size", fs)
-	l.add_theme_color_override("font_color", Color.WHITE)
-	l.add_theme_constant_override("line_spacing", 0)
-	l.mouse_filter = Control.MOUSE_FILTER_PASS
 	sc.add_child(l)
 	sc.label = l
 	d.add_child(sc)
 	d.texts[2] = l
-	d.actions[0] = Callable()
 	d.default_item = 0
 	d.cancel_item = 0
 	var ok_rect := Rect2i(ok_r.position.x, ok_r.position.y - shrink, ok_r.size.x, ok_r.size.y)
@@ -473,6 +476,7 @@ func add_label(text: String, rect: Rect2i, index := -1, font_size := 12, color :
 	l.add_theme_color_override("font_color", color if color != Color() else text_color)
 	l.add_theme_constant_override("line_spacing", 0)
 	l.size = Vector2(rect.size)   # after the font overrides (size clamps to the minimum at assignment)
+	l.set_deferred("size", Vector2(rect.size))
 	add_child(l)
 	if index >= 0:
 		texts[index] = l
@@ -598,7 +602,14 @@ func _activate(index: int) -> void:
 	if beep and nova != null and nova.has_method("sound_beep") and items.get(index) is BaseButton:
 		nova.sound_beep(1)
 	if actions.has(index):
-		actions[index].call()
+		# The action's owner can already be gone (a press that closed the screen,
+		# then a second press/accept in the same frame) — skip a dead Callable
+		# instead of erroring.
+		var action: Callable = actions[index]
+		if action.is_valid():
+			action.call()
+		else:
+			actions.erase(index)
 	activated.emit(index)
 	if index >= 0 and index == default_item:
 		accepted.emit()

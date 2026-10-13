@@ -242,7 +242,9 @@ final class StoryMapState: @unchecked Sendable {
                     "current": cur ?? -1, "currentName": curNode?.step.displayName ?? "",
                     "currentStatus": curNode?.step.status.rawValue ?? ""]
         }
-        return ["lanes": lanes, "untagged": map.untaggedCount]
+        // Display names of the plug-ins lanes can come from (Apple `StoryGuideModel.pluginLabel`).
+        let labels = Dictionary(PluginRuntime.shared.plugins.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        return ["lanes": lanes, "untagged": map.untaggedCount, "pluginLabels": labels]
     }
 
     func flowJSON(key: String, game: NovaGame, player: PlayerState) -> [[String: Any]] {

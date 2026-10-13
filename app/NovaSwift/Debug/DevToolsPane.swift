@@ -1,4 +1,5 @@
 import SwiftUI
+import NovaSwiftKit
 
 /// The dev console's **tools** pane: the live performance readout plus the
 /// switches and one-shot actions that used to make up the debug suite.

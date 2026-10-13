@@ -135,6 +135,8 @@ enum BugReport {
                                      game: model.data.game, state: pilot.state)
     }
 
+}
+
 private extension URL {
     var modificationDate: Date? {
         try? resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate

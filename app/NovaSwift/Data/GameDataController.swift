@@ -385,33 +385,12 @@ final class GameDataController: ObservableObject {
         // in-memory state is folded into "enabled" too so a toggle earlier this
         // launch survives a reload that races the save.
         let persisted = Self.loadPluginState()
-        let persistedOrder = Dictionary(uniqueKeysWithValues: persisted.enumerated().map { ($1.id, $0) })
-        let previouslyEnabled = Set(pluginsAreManual ? plugins.filter(\.isEnabled).map(\.id) : [])
-            .union(persisted.filter(\.isEnabled).map(\.id))
-        for i in discovered.indices where previouslyEnabled.contains(discovered[i].id) {
-            discovered[i].isEnabled = true
-        }
-        // Known IDs sort by their persisted position; newly-discovered plug-ins
-        // (never seen before) fall after all known ones, alphabetically among themselves.
-        discovered.sort { a, b in
-            switch (persistedOrder[a.id], persistedOrder[b.id]) {
-            case let (ai?, bi?): return ai < bi
-            case (nil, nil): return (a.id.uppercased(), a.id) < (b.id.uppercased(), b.id)
-            case (nil, _): return false
-            case (_, nil): return true
-            }
-        }
-        if manualPluginOrder {
-            // A total conversion replaces the base scenario, so at most one is selected.
-            var seenTC = false
-            for i in discovered.indices.reversed() where discovered[i].isTotalConversion && discovered[i].isEnabled {
-                if seenTC { discovered[i].isEnabled = false }
-                seenTC = true
-            }
-        }
-        plugins = manualPluginOrder ? discovered : GameLibrary.originalPluginOrder(discovered)
+        let inMemory = Set(pluginsAreManual ? plugins.filter(\.isEnabled).map(\.id) : [])
+        plugins = PluginSet.arrange(discovered: discovered,
+                                    persisted: persisted.map { PluginEnableState(id: $0.id, isEnabled: $0.isEnabled) },
+                                    inMemoryEnabled: inMemory, manual: manualPluginOrder)
         pluginsAreManual = manualPluginOrder
-        Log.data.debug("reload: \(discovered.count, privacy: .public) plug-in(s) discovered, \(self.plugins.filter(\.isEnabled).count, privacy: .public) enabled")
+        Log.data.debug("reload: \(self.plugins.count, privacy: .public) plug-in(s) discovered, \(self.plugins.filter(\.isEnabled).count, privacy: .public) enabled")
 
         guard let baseDir = resolveBaseDir() else {
             hasBaseData = false
@@ -526,13 +505,7 @@ final class GameDataController: ObservableObject {
     func setPlugin(_ id: String, enabled: Bool) {
         // The enable switch is the manual-order enhancement, except for total
         // conversions: choosing one to play is always the player's call.
-        guard let i = plugins.firstIndex(where: { $0.id == id }),
-              manualPluginOrder || plugins[i].isTotalConversion else { return }
-        plugins[i].isEnabled = enabled
-        if enabled && plugins[i].isTotalConversion {
-            // One total conversion at a time.
-            for j in plugins.indices where j != i && plugins[j].isTotalConversion { plugins[j].isEnabled = false }
-        }
+        guard PluginSet.setEnabled(&plugins, id: id, enabled: enabled, manual: manualPluginOrder) else { return }
         Self.savePluginState(plugins)
         reload()
     }
@@ -543,10 +516,7 @@ final class GameDataController: ObservableObject {
     /// and lets a later one override an earlier one's same `(type,id)`
     /// resource). No-op if the move would run off either end.
     func movePlugin(id: String, by offset: Int) {
-        guard manualPluginOrder, let i = plugins.firstIndex(where: { $0.id == id }) else { return }
-        let j = i + offset
-        guard plugins.indices.contains(j) else { return }
-        plugins.swapAt(i, j)
+        guard PluginSet.move(&plugins, id: id, by: offset, manual: manualPluginOrder) else { return }
         Self.savePluginState(plugins)
         reload()
     }

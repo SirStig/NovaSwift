@@ -49,6 +49,7 @@ private enum SpriteKind: Int {
     case boom = 8            // a `bööm` explosion animation
     case asteroid = 9        // a `röid` rock's rotation sheet
     case starfield = 10      // the background star tile
+    case shipAlt = 11        // the shän alternating-sprite overlay (plug-in hulls)
 }
 
 /// A decoded sheet and the rate to animate it at (0 = not a timed animation).
@@ -79,6 +80,10 @@ class NovaWorld: Node2D {
     /// The pilot directory in use and the save id the live pilot writes to.
     private var pilotArchive: PilotArchive?
     private var pilotSaveID: UUID?
+    /// An original EV Nova pilot converted by `pilotImportPreview`, held until `pilotImportCommit`.
+    private var pendingImport: EVNovaPilotImportResult?
+    /// Progress / result of `loadGameAsync` (see PilotFiles.swift).
+    private let asyncLoad = AsyncLoadState()
 
     // MARK: Fixed-step simulation
     //
@@ -113,6 +118,8 @@ class NovaWorld: Node2D {
     private var pendingEffects: [Float] = []
     /// Sound cues + the voice board (see "Audio" at the end of this class).
     private var sound = SoundState()
+    /// Per-ship overlay clocks, animated stellars, weapon visuals (see `// MARK: Flight visuals`).
+    private let flightVisuals = FlightVisuals()
 
     /// Stride of one `drainEffects()` row: `[kind, x, y, p0, p1, r, g, b]`.
     /// Kinds and what `p0`/`p1` mean per kind are documented on `drainEffects`.
@@ -131,6 +138,7 @@ class NovaWorld: Node2D {
         interactionsWorldRebuilt()   // close hail/plunder windows, bring the escort wing back
         storyWorldRebuilt()          // attach the mission-ship host, drop active missions' ships in
         gaps.resetForNewWorld()      // përs offer, self-destruct, pod respawn latches
+        flightVisuals.reset()        // overlay clocks / stellar animators
     }
 
     // MARK: World setup
@@ -176,11 +184,9 @@ class NovaWorld: Node2D {
     /// Apple app). Returns false if the directory holds no readable game data.
     @Callable(autoSnakeCase: true)
     func loadGame(baseDir: String) -> Bool {
-        let base = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: baseDir))
-        // `merge` never throws on an empty file list (it just yields an empty
-        // collection), so a missing/empty directory has to be rejected explicitly
-        // here rather than relying on `try?` to catch it.
-        guard !base.isEmpty, let collection = try? GameLibrary.merge(baseFiles: base) else { return false }
+        // Base data + the enabled plug-ins (Nova Plug-ins folder / user plug-in folder), merged in
+        // load order exactly as the Apple app does — see Plugins.swift. Empty/missing base is rejected.
+        guard let collection = PluginRuntime.shared.loadMerged(baseDir: URL(fileURLWithPath: baseDir)) else { return false }
         let g = NovaGame(collection)
         self.game = g
         self.galaxy = Galaxy(game: g)
@@ -293,6 +299,7 @@ class NovaWorld: Node2D {
         tickStory(dt: dt)             // sightings, queued world edits
         gapsTick()                    // the escape pod's respawn
         advanceHyperjump()            // arrival once the engine's jump has fired
+        advanceFlightVisuals(dt: dt)  // hull overlay clocks, animated stellars
         interpolationAlpha = fixed > 0 ? simAccumulator / fixed : 0
     }
 
@@ -344,6 +351,7 @@ class NovaWorld: Node2D {
             storyNote(event)              // mission ship goals / losses, fail-if-disabled
             gapsNote(event)               // scans, eject, pod respawn, game over
             polishNote(event)             // original STR# 2002 status lines
+            flightVisuals.note(event: event, game: game)   // weapon-glow flare on fire
             if case let .combatChatter(soundID) = event { sound.chatterSoundID = soundID }
             pendingEventNames.append(String(String(describing: event).prefix { $0 != "(" }))
 
@@ -368,6 +376,12 @@ class NovaWorld: Node2D {
                 push(5, at, Float(shipTypeID))
             case let .weaponFired(_, at, heading, _, weaponID):
                 push(6, at, Float(heading), Float(weaponID))
+            case let .shipDisabled(_, at):
+                push(7, at, 0)
+            case .playerDying:
+                if let w = self.world { push(4, w.player.position, Float(w.player.explosionBoomID ?? -1), 1) }
+            case let .areaBlast(at, blastRadius):
+                push(8, at, Float(blastRadius))
             default:
                 break   // everything else is narrative, not visual — names only
             }
@@ -1680,6 +1694,7 @@ class NovaWorld: Node2D {
         case .boom:          return game.boomSprite(id)
         case .asteroid:      return untimed(game.asteroidSprite(id))
         case .starfield:     return untimed(game.starfieldSprite())
+        case .shipAlt:       return untimed(game.altSprite(id))
         }
     }
 
@@ -1838,6 +1853,123 @@ class NovaWorld: Node2D {
     @Callable(autoSnakeCase: true) func hasPilotSave() -> Bool { pilotSaveID != nil }
 
     @Callable(autoSnakeCase: true) func pilotName() -> String { pilot.pilotName }
+
+    // MARK: Pilot files
+    //
+    // Pilots are real files: `<Pilots folder>/<uuid>.evpilot` (the Apple app's format). These
+    // let the frontend open one from anywhere (the OS file picker) and bring in an original
+    // EV Nova pilot (`EVNovaPilotImporter`), both ending up as `.evpilot` in the Pilots folder.
+
+    /// The save file for `id` in `dir`.
+    @Callable(autoSnakeCase: true) func pilotFilePath(dir: String, id: String) -> String {
+        guard let uuid = UUID(uuidString: id) else { return "" }
+        return archive(at: dir).fileURL(for: uuid).path
+    }
+
+    /// What `path` is, without changing anything: JSON `{kind: "evpilot" | "original" | "unknown",
+    /// ...}`. evpilot rows match `pilot_list`'s (plus `id`); an original pilot gives its format
+    /// and name (the full summary needs `pilot_import_preview` and the game data).
+    @Callable(autoSnakeCase: true) func pilotInspectFile(path: String) -> String {
+        let url = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: path) else { return Self.json(["kind": "unknown", "error": "File not found."]) }
+        if let save = PilotFiles.decodeNative(url) { return Self.json(PilotFiles.row(save)) }
+        if let blocks = try? EVNovaPilotFile.load(url: url) {
+            return Self.json(["kind": "original", "format": blocks.format.rawValue,
+                              "name": blocks.containerName ?? url.deletingPathExtension().lastPathComponent])
+        }
+        return Self.json(["kind": "unknown", "error": "This is not an EV Nova or NovaSwift pilot file."])
+    }
+
+    /// Open the `.evpilot` at `path` from anywhere: a file outside `dir` is copied in first (a
+    /// copy already there is replaced only by a newer one), then it is loaded as the live
+    /// pilot exactly as `pilot_load` does. Returns the save id, or "" when it is not a readable
+    /// pilot. The frontend follows with `make_world(-1)`.
+    @Callable(autoSnakeCase: true) func pilotOpenFile(dir: String, path: String) -> String {
+        guard game != nil, var save = PilotFiles.decodeNative(URL(fileURLWithPath: path)) else { return "" }
+        let a = archive(at: dir)
+        let inside = URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL.path
+            == a.root.standardizedFileURL.path
+        if !inside {
+            if a.exists(id: save.id), let have = try? a.load(id: save.id), have.updatedAt >= save.updatedAt {
+                // keep the newer copy already in the Pilots folder
+            } else {
+                guard let written = try? a.save(save, backup: a.exists(id: save.id)) else { return "" }
+                save = written
+            }
+        }
+        return pilotLoad(dir: dir, id: save.id.uuidString) ? save.id.uuidString : ""
+    }
+
+    /// Step 1 of importing an original EV Nova pilot (`.plt` / Mac pilot): decode and convert
+    /// it against the loaded game data, hold the result, and return its summary as JSON
+    /// (`kind: "original"`, name, ship, credits, ..., `warnings`, `unmapped`) — or
+    /// `{error}`. The source file is only ever read.
+    @Callable(autoSnakeCase: true) func pilotImportPreview(path: String) -> String {
+        pendingImport = nil
+        guard let game else { return Self.json(["error": "Load the game data first."]) }
+        do {
+            let result = try EVNovaPilotImporter.importPilot(from: URL(fileURLWithPath: path), game: game)
+            pendingImport = result
+            return Self.json(PilotFiles.summaryJSON(result.summary, date: result.player.date.description))
+        } catch {
+            return Self.json(["error": error.localizedDescription])
+        }
+    }
+
+    /// Step 2: write the held conversion into `dir` as a new `.evpilot` ("Imported from EV Nova",
+    /// as Apple's `PilotRoster.importConverted`) and make it the live pilot. Returns the save id
+    /// or "".
+    @Callable(autoSnakeCase: true) func pilotImportCommit(dir: String) -> String {
+        guard let game, let result = pendingImport else { return "" }
+        let name = result.summary.pilotName
+        var save = PilotSave(displayName: name.isEmpty ? "Captain" : name,
+                             scenarioName: "Imported from EV Nova",
+                             player: result.player, game: game,
+                             dataFingerprint: PilotSaves.fingerprint(for: game))
+        save.player.rosterID = save.id
+        guard let written = try? archive(at: dir).save(save, backup: false) else { return "" }
+        pendingImport = nil
+        var state = written.player
+        PilotSaves.migrate(&state, game: game)
+        adoptPilot(state, saveID: written.id)
+        return written.id.uuidString
+    }
+
+    // MARK: Async data load
+    //
+    // `load_game` blocks for as long as the ~60 MB of containers take to read and merge. This
+    // runs the same work on a worker thread so the frontend's loading screen can animate;
+    // GDScript polls `load_status` and the result is adopted on the main thread when it
+    // reports `done` (the same call installs it, so no other bridge call may overlap).
+
+    /// Start `load_game` for `baseDir` on a worker thread. False if a load is already running.
+    @Callable(autoSnakeCase: true) func loadGameAsync(baseDir: String) -> Bool {
+        guard asyncLoad.begin() else { return false }
+        let state = asyncLoad
+        Thread.detachNewThread {
+            state.report("Finding resource files", 0.04)
+            state.report("Reading game data and plug-ins", 0.12)
+            // Same merge as `load_game`: base data + enabled plug-ins (Plugins.swift).
+            guard let collection = PluginRuntime.shared.loadMerged(baseDir: URL(fileURLWithPath: baseDir)) else { state.finish(nil); return }
+            state.report("Indexing the galaxy", 0.85)
+            let g = NovaGame(collection)
+            let galaxy = Galaxy(game: g)
+            state.finish((g, galaxy))
+        }
+        return true
+    }
+
+    /// JSON `{running, done, ok, phase, fraction}`. When a finished load is first seen here the
+    /// result is installed (like `load_game`) before this returns.
+    @Callable(autoSnakeCase: true) func loadStatus() -> String {
+        var snap = asyncLoad.snapshot()
+        if snap["done"] as? Bool == true, snap["ok"] as? Bool == true, let (g, galaxy) = asyncLoad.take() {
+            self.game = g
+            self.galaxy = galaxy
+        }
+        snap["installed"] = game != nil
+        return Self.json(snap)
+    }
 
     private static func saveReason(_ name: String) -> PilotSaveReason? {
         switch name {
@@ -3403,6 +3535,110 @@ class NovaWorld: Node2D {
         return pilot.completedMissions.contains(id)
     }
 
+    // MARK: Flight visuals
+    //
+    // Per-ship overlay state (shän layers), animated + destroyed stellars, weapon visual specs and the
+    // target reticle for the Godot flight renderer (godot/flight/). The rules are the Apple Classic
+    // path's own (HullAnimConfig / ShieldFlare / StellarAnimator / MurkFog -- see FlightVisuals.swift);
+    // GDScript only draws what these return.
+
+    /// Advance once per display frame, after the sim ticks (as `GameScene.syncNPCs` runs on `frameDT`).
+    private func advanceFlightVisuals(dt: Double) {
+        guard let world = self.world else { return }
+        flightVisuals.advance(world: world, game: game, dt: dt, playerThrusting: intent.thrust,
+                              renderAngle: { self.renderAngle(of: $0) }, renderPosition: { self.renderPosition(of: $0) })
+        flightVisuals.advanceStellars(world: world, game: game, systemID: currentSystemID, dt: dt,
+                                      destroyed: pilot.destroyedStellars ?? [])
+    }
+
+    /// Floats per ship in `shipLayers()`.
+    @Callable(autoSnakeCase: true) func shipLayerStride() -> Int { FlightVisuals.layerStride }
+
+    /// Per live ship, SAME order as `shipTransforms()`, `shipLayerStride()` floats each:
+    /// 0 base set, 1 heading frame within a set, 2 framesPerSet, 3 alt-layer set, 4 running-light alpha (0 = off),
+    /// 5 weapon-glow alpha (0 = off), 6 shield-flare alpha (0 = off), 7 engine-glow alpha (0 = off), 8 disabled,
+    /// 9 bank (+1 left / -1 right), 10 hull opacity (shän BaseTransp), 11-13 tint multiply rgb, 14 murk fog level 0-31,
+    /// 15 blend factor 0-1 (murk / ionize / gate wash), 16-18 blend rgb, 19 gate-hidden, 20 gate-white,
+    /// 21 ion intensity, 22 thrust (0 / 1 / 2 afterburner), 23 raw shield flare.
+    /// Overlay frame = `(set * framesPerSet + heading) % sheetFrameCount` (the original's Sprite_SetCurrentFrame wrap).
+    @Callable(autoSnakeCase: true) func shipLayers() -> PackedFloat32Array {
+        guard let world = self.world else { return PackedFloat32Array() }
+        return PackedFloat32Array(flightVisuals.shipLayerRows(world: world))
+    }
+
+    /// Per stellar body, SAME order as `bodyTransforms()`: `[animation frame, destroyed (0/1), murk fog level]`.
+    @Callable(autoSnakeCase: true) func stellarStates() -> PackedFloat32Array {
+        PackedFloat32Array(flightVisuals.stellarRows)
+    }
+
+    /// Per live shot, SAME order as `projectileTransforms()`: `[wëap id, animFrame, heading degrees]`.
+    @Callable(autoSnakeCase: true) func projectileExtra() -> PackedFloat32Array {
+        guard let world = self.world else { return PackedFloat32Array() }
+        var flat: [Float] = []
+        flat.reserveCapacity(world.projectiles.count * 3)
+        for shot in world.projectiles {
+            flat.append(Float(shot.weaponID)); flat.append(Float(shot.animFrame)); flat.append(Float(shot.headingDegrees))
+        }
+        return PackedFloat32Array(flat)
+    }
+
+    /// Per live beam, SAME order as `beamSegments()`: the `wëap` id.
+    @Callable(autoSnakeCase: true) func beamWeapons() -> PackedInt32Array {
+        guard let world = self.world else { return PackedInt32Array() }
+        return PackedInt32Array(world.activeBeams.map { Int32($0.weaponID) })
+    }
+
+    /// One weapon's visual spec (trail, smoke, hit sparks, lightning); see `FlightVisuals.weaponVisual`. Empty = unknown.
+    @Callable(autoSnakeCase: true) func weaponVisual(weaponID: Int) -> PackedFloat32Array {
+        PackedFloat32Array(flightVisuals.weaponVisual(weaponID, game: game))
+    }
+
+    /// Classic preferences the bridge needs: "Ship Animations" (no banking / animation sets when off) and
+    /// "Reduce flashing" (steady exhaust).
+    @Callable(autoSnakeCase: true) func setFlightOptions(shipAnimations: Bool, reduceFlashing: Bool) {
+        flightVisuals.setShipAnimations(shipAnimations)
+        flightVisuals.reduceFlashing = reduceFlashing
+    }
+
+    /// The ship target's reticle: `[x, y, hullRadius, class]` (class 0 threat, 1 other, 2 squad, 3 disabled --
+    /// `cicn` 10008 + 4 * class + corner), render-interpolated; empty with no target.
+    @Callable(autoSnakeCase: true) func targetReticle() -> PackedFloat32Array {
+        guard let world = self.world, let tid = world.player.currentTargetID, let ship = world.ship(id: tid)
+        else { return PackedFloat32Array() }
+        let r = renderPosition(of: ship)
+        let cls: Float
+        switch world.reticleClass(of: ship) {
+        case .threat: cls = 0
+        case .other: cls = 1
+        case .squad: cls = 2
+        case .disabled: cls = 3
+        }
+        return PackedFloat32Array([Float(r.x), Float(r.y), Float(ship.radius), cls])
+    }
+
+    /// Whether the player has dominated stellar `id` (the nav cursor then uses cicn 10004-10007).
+    @Callable(autoSnakeCase: true) func stellarDominatedVisual(id: Int) -> Bool {
+        world?.dominatedStellars.contains(id) ?? false
+    }
+
+    /// The player's top speed (px/s), for the look-ahead camera's lead.
+    @Callable(autoSnakeCase: true) func playerMaxSpeed() -> Double {
+        guard let w = world else { return 0 }
+        return w.player.stats.maxSpeed
+    }
+
+    /// A `cicn` as raw RGBA: `[w, h]` in `cicnInfo`, the pixels from `cicnRGBA`; empty if absent. Used for the
+    /// target reticle (10008-10023), nav cursor (10000-10007) and smoke puffs (1000 + 8n).
+    @Callable(autoSnakeCase: true) func cicnInfo(id: Int) -> PackedInt32Array {
+        guard let d = flightVisuals.cicn(id, game: game) else { return PackedInt32Array() }
+        return PackedInt32Array([Int32(d.surfaceWidth), Int32(d.surfaceHeight)])
+    }
+
+    @Callable(autoSnakeCase: true) func cicnRgba(id: Int) -> PackedByteArray {
+        guard let d = flightVisuals.cicn(id, game: game) else { return PackedByteArray() }
+        return PackedByteArray(d.rgba)
+    }
+
     // MARK: Gameplay gaps
     //
     // What the Apple app does around hire / escorts / gambling / scans / përs
@@ -4357,6 +4593,23 @@ class NovaWorld: Node2D {
         Double(rawCalls <= 0 ? 0xf0 : rawCalls) * OriginalClock.rawCallSeconds
     }
 
+    /// Classic star-map marker ring colour per drawable system: rows of `[id, r, g, b]`
+    /// (0...1). The class rule (`OriginalMapMarker`) is shared with `GalaxyMapView`.
+    @Callable(autoSnakeCase: true) func navMarkerColors() -> PackedFloat32Array {
+        guard let game, let nv = navigator() else { return PackedFloat32Array() }
+        let known = knownSets()
+        let adjacent = nv.adjacentToKnown(explored: known.explored, charted: known.charted)
+        var flat: [Float] = []
+        for s in game.systems() where !nav.hidden.contains(s.id) {
+            let vis = StarMapNavigator.visibility(of: s.id, explored: known.explored, adjacent: adjacent, charted: known.charted)
+            if vis == .unknown { continue }
+            let kind = OriginalMapMarker.kind(system: s, state: pilot, game: game, visited: vis == .explored || vis == .chartered)
+            let c = OriginalMapMarker.rgb(kind)
+            flat += [Float(s.id), Float(c.r), Float(c.g), Float(c.b)]
+        }
+        return PackedFloat32Array(flat)
+    }
+
     /// The About Nova text exactly as `AboutNovaText.text(game:)` builds it: the
     /// NovaSwift header (version, unofficial-port notice, repo) over `dësc` 32767
     /// with `<REG>` as "EV Nova Community". Carriage returns become newlines.
@@ -4379,4 +4632,41 @@ class NovaWorld: Node2D {
     @Callable(autoSnakeCase: true) func descDialogShrink(textHeight: Int, textItemHeight: Int) -> Int {
         DescDialogLayout.shrink(textHeight: textHeight, textItemHeight: textItemHeight)
     }
+}
+
+// MARK: Debug suite
+//
+// Internal (non-@Callable) accessors for `Debug.swift`'s `NovaDebug` class, which owns the whole
+// dev-console / diagnostics / bug-report surface. They live here only because `world`, `game`,
+// `pilot`, `travel` are `private` to this file; nothing here is game logic.
+
+extension NovaWorld {
+    var dbgWorld: World? { world }
+    var dbgGame: NovaGame? { game }
+    var dbgGalaxy: Galaxy? { galaxy }
+    var dbgPilot: PlayerState {
+        get { pilot }
+        set { pilot = newValue }
+    }
+    var dbgSystemID: Int? { currentSystemID }
+    var dbgDockedSpob: Int? { dockedSpobID }
+    var dbgSelectedStellar: Int? { travel.selectedSpob }
+
+    /// Select a stellar of the live system as the travel target (as clicking it would).
+    func dbgSelectStellar(_ id: Int) -> Bool {
+        guard stellarBody(id) != nil else { return false }
+        selectStellar(id)
+        return true
+    }
+
+    /// Autosave-style write of the live pilot (the Apple console's `pilot.save()`); false when
+    /// no roster pilot is bound (throwaway pilot / demo).
+    @discardableResult
+    func dbgPersistPilot() -> Bool { writePilot(backup: false) }
+
+    /// Rebuild the flight world around the pilot's (possibly changed) hull and outfits now.
+    func dbgRebuildShip() { rebuildAfterShipSwap() }
+
+    /// Status-line message (the one-line message log).
+    func dbgPost(_ line: String) { post(line) }
 }

@@ -11,6 +11,11 @@
 # requirement — the dice button fills in a name (PilotNames, shared with the
 # Apple app's pad keyboard suggestions) — but a LineEdit is there for keyboards.
 #
+# Open Pilot is a real file open, as in the original: "Choose Pilot File..." runs the OS file picker
+# (screens/PilotFiles.gd) starting in the Pilots folder, so a pilot opens from anywhere, an original
+# EV Nova pilot (.plt / Mac) is converted and saved as .evpilot, and a compact recent list sits
+# under it. "Manage Pilots..." keeps the old per-pilot list (play / delete) for the Pilots folder.
+#
 # Presentation: with the data loaded and Settings > Presentation > "Modern dialogs" off (the
 # default) the screens are the Classic UI kit's, as in the Apple app: New Pilot is the original's
 # native DLOG/DITL 3102 (3101 with several scenarios) -- Full Name, Nickname, gender, Strict Play,
@@ -25,6 +30,7 @@ extends CanvasLayer
 
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
 const ClassicDialog = preload("res://ui/classic/ClassicDialog.gd")
+const PilotFiles = preload("res://screens/PilotFiles.gd")
 
 ## The player picked or created a pilot; the live pilot is already bound on the
 ## bridge, so the host only has to build the world (`make_world(-1)`).
@@ -46,6 +52,9 @@ var _dir: String
 var _root: Control
 var _panel: VBoxContainer
 var _pilots: Array = []
+var _recent: Array = []        # rows of the Open Pilot screen (pilot_inspect_file + path)
+var _picker: Node
+var _import_path := ""
 var _scenarios: Array = []
 
 # New-pilot form state.
@@ -153,16 +162,129 @@ func _focus(b: Control) -> void:
 	(func(): if is_instance_valid(b) and b.is_inside_tree(): b.grab_focus()).call_deferred()
 
 
-# --- pilot list --------------------------------------------------------------
+# --- open pilot (picker + recent) ----------------------------------------------------
+
+func _refresh_pilots() -> void:
+	var parsed = JSON.parse_string(_nova.pilot_list(_dir))
+	_pilots = parsed if parsed is Array else []
+	_recent = PilotFiles.recent_rows(_nova, _dir)
+
 
 func _show_list() -> void:
+	_refresh_pilots()
 	if _classic:
 		_c_list()
 		return
 	var hosted := not cancelled.get_connections().is_empty()
-	_clear("Select Pilot", _cancel if hosted else Callable())
-	var parsed = JSON.parse_string(_nova.pilot_list(_dir))
-	_pilots = parsed if parsed is Array else []
+	_clear("Open Pilot", _cancel if hosted else Callable())
+	var browse := _button("Choose Pilot File…", _browse)
+	_label("Pilots are files in %s. Open one from anywhere, or an original EV Nova pilot." % _dir, 13)
+	var first: Button = browse
+	for r in _recent:
+		_button("%s — %s · %s" % [r.name, r.ship, r.system], open_path.bind(r.path))
+	if _recent.is_empty():
+		_label("No recent pilots yet.")
+	var new_btn := _button("New Pilot…", _show_new)
+	if not _pilots.is_empty():
+		_button("Manage Pilots…", _show_manage)
+	if hosted:
+		_button("Back", _cancel)
+	_status = _label("", 14, Color(1.0, 0.55, 0.5))
+	_focus(first if first != null else new_btn)
+
+
+## The OS file picker (or Godot's pad-friendly one, see PilotFiles.want_native), starting in the
+## Pilots folder.
+func _browse() -> void:
+	_picker = PilotFiles.pick_file(self, _dir, open_path)
+
+
+## Open the pilot file at `path` -- a NovaSwift .evpilot (from anywhere) or an original EV Nova
+## pilot (shown for confirmation, then converted). True when a native pilot was opened.
+func open_path(path: String) -> bool:
+	var info = JSON.parse_string(_nova.pilot_inspect_file(path))
+	var kind: String = info.get("kind", "unknown") if info is Dictionary else "unknown"
+	if kind == "evpilot":
+		var id: String = _nova.pilot_open_file(_dir, path)
+		if id == "":
+			_notice("Could not open that pilot.")
+			return false
+		PilotFiles.note_recent(path)
+		_finish()
+		return true
+	if kind == "original":
+		import_preview(path)
+		return false
+	_notice(str(info.get("error", "This is not an EV Nova or NovaSwift pilot file.")) if info is Dictionary else "Could not read that file.")
+	return false
+
+
+## Original EV Nova pilot: convert against the loaded data and ask before creating the NovaSwift
+## pilot (Apple's PilotImportView).
+func import_preview(path: String) -> void:
+	var sum = JSON.parse_string(_nova.pilot_import_preview(path))
+	if not (sum is Dictionary) or sum.has("error"):
+		_notice("Could not import that pilot: %s" % (str(sum.get("error", "unreadable file")) if sum is Dictionary else "unreadable file"))
+		return
+	_import_path = path
+	var lines := PackedStringArray([
+		"%s%s - %s" % [sum.name, (" \"%s\"" % sum.nickname) if str(sum.nickname) != "" else "", sum.format],
+		"Ship: %s" % sum.ship,
+		"Credits: %s cr   Date: %s" % [_commas(int(sum.credits)), sum.date],
+		"Combat rating: %s" % sum.rating,
+		"Story progress: %s. Escorts: %d" % [sum.story, int(sum.escorts)]])
+	if str(sum.location) != "":
+		lines.append("Location: %s" % sum.location)
+	for w in sum.warnings:
+		lines.append("! " + str(w))
+	if not (sum.unmapped as Array).is_empty():
+		lines.append("Not carried over: " + "; ".join(PackedStringArray(sum.unmapped)))
+	var text := "\n".join(lines)
+	if _classic:
+		_c_show(ClassicDialog.panel(_nova, {"title": "Import EV Nova Pilot", "width": 480, "text": text,
+			"footer_buttons": [{"label": "Cancel", "action": _show_list, "cancel": true},
+				{"label": "Create Pilot", "action": import_commit, "default": true}]}))
+		return
+	_clear("Import EV Nova Pilot", _show_list)
+	_label(text)
+	var go := _button("Create Pilot", import_commit)
+	_button("Cancel", _show_list)
+	_focus(go)
+
+
+## Write the previewed conversion into the Pilots folder as a new .evpilot and play it.
+func import_commit() -> bool:
+	var id: String = _nova.pilot_import_commit(_dir)
+	if id == "":
+		_notice("Could not create the pilot.")
+		return false
+	PilotFiles.note_recent(_nova.pilot_file_path(_dir, id))
+	_finish()
+	return true
+
+
+## A one-button message on whichever screen is up; OK returns to the Open Pilot screen.
+func _notice(text: String) -> void:
+	_nova.sound_beep(3)
+	if _classic:
+		var d := ClassicDialog.confirm(_nova, text, {"ok": "OK", "cancel": "Back"})
+		d.actions[0] = _show_list
+		d.actions[4] = _show_list
+		_c_show(d)
+		return
+	_clear("Open Pilot", _show_list)
+	_label(text)
+	_focus(_button("OK", _show_list))
+
+
+# --- manage pilots (the Pilots folder, one row per pilot) ------------------------------------
+
+func _show_manage() -> void:
+	if _classic:
+		_c_manage()
+		return
+	_clear("Pilots", _show_list)
+	_refresh_pilots()
 	var first: Button = null
 	for p in _pilots:
 		var b := _button("%s — %s · %s · %s cr" % [p.name, p.ship, p.system, _commas(int(p.credits))],
@@ -170,11 +292,9 @@ func _show_list() -> void:
 		if first == null:
 			first = b
 	if _pilots.is_empty():
-		_label("No pilots yet. Create one to begin.")
-	var new_btn := _button("New Pilot…", _show_new)
-	if hosted:
-		_button("Back", _cancel)
-	_focus(first if first != null else new_btn)
+		_label("No pilots in the Pilots folder.")
+	var back := _button("Back", _show_list)
+	_focus(first if first != null else back)
 
 
 func _cancel() -> void:
@@ -186,18 +306,19 @@ func _show_pilot(p: Dictionary) -> void:
 	if _classic:
 		_c_pilot(p)
 		return
-	_clear(p.name, _show_list)
+	_clear(p.name, _show_manage)
 	_label("%s · %s\n%s credits · %s\nScenario: %s · saved %s" % [
 		p.ship, p.system, _commas(int(p.credits)), p.rating,
 		p.scenario if p.scenario != "" else "—", p.updated])
 	var play := _button("Play", _load.bind(p))
 	_button("Delete…", _confirm_delete.bind(p))
-	_button("Back", _show_list)
+	_button("Back", _show_manage)
 	_focus(play)
 
 
 func _load(p: Dictionary) -> void:
 	if _nova.pilot_load(_dir, p.id):
+		PilotFiles.note_recent(_nova.pilot_file_path(_dir, p.id))
 		_finish()
 	else:
 		_status_msg("Could not open that pilot.")
@@ -213,7 +334,7 @@ func _confirm_delete(p: Dictionary) -> void:
 	var no := _button("No, keep this pilot", _show_pilot.bind(p))
 	_button("Yes, delete", func():
 		_nova.pilot_delete(_dir, p.id)
-		_show_list())
+		_show_manage())
 	_focus(no)
 
 
@@ -284,6 +405,7 @@ func _create() -> void:
 	if id == "":
 		_status_msg("Could not create the pilot.")
 		return
+	PilotFiles.note_recent(_nova.pilot_file_path(_dir, id))
 	_finish()
 
 
@@ -319,8 +441,25 @@ func _c_show(d: Control) -> void:
 
 func _c_list() -> void:
 	var hosted := not cancelled.get_connections().is_empty()
-	var parsed = JSON.parse_string(_nova.pilot_list(_dir))
-	_pilots = parsed if parsed is Array else []
+	var body := [{"label": "Choose Pilot File...", "action": _browse}]
+	for r in _recent:
+		body.append({"label": "%s - %s" % [r.name, r.ship], "action": open_path.bind(r.path)})
+	var footer := [{"label": "New Pilot", "action": _show_new, "default": _recent.is_empty()}]
+	if not _pilots.is_empty():
+		footer.append({"label": "Manage", "action": _show_manage})
+	if hosted:
+		footer.append({"label": "Back", "action": _cancel, "cancel": true})
+	var opts := {"title": "Open Pilot", "width": 460, "body_buttons": body, "body_buttons_width": 360,
+		"footer_buttons": footer,
+		"text": "Pick a pilot file from anywhere, or one of your recent pilots." if not _recent.is_empty()
+			else "Pick a pilot file from anywhere, or create a new pilot."}
+	_c_show(ClassicDialog.panel(_nova, opts))
+	(func(): if is_instance_valid(_cdialog): _cdialog.item(1 if not _recent.is_empty() else 0).grab_focus()).call_deferred()
+
+
+## The per-pilot list of the Pilots folder (play / delete), paged like the original's lists.
+func _c_manage() -> void:
+	_refresh_pilots()
 	_page = clampi(_page, 0, maxi(0, (_pilots.size() - 1) / PAGE))
 	var body := []
 	for i in range(_page * PAGE, mini(_pilots.size(), (_page + 1) * PAGE)):
@@ -330,14 +469,12 @@ func _c_list() -> void:
 	if _pilots.size() > PAGE:
 		footer.append({"label": "More", "action": func():
 			_page = (_page + 1) % ((_pilots.size() + PAGE - 1) / PAGE)
-			_c_list()})
-	footer.append({"label": "New Pilot", "action": _show_new, "default": _pilots.is_empty()})
-	if hosted:
-		footer.append({"label": "Back", "action": _cancel, "cancel": true})
-	var opts := {"title": "Select Pilot", "width": 460, "body_buttons": body, "body_buttons_width": 360,
+			_c_manage()})
+	footer.append({"label": "Back", "action": _show_list, "cancel": true})
+	var opts := {"title": "Pilots", "width": 460, "body_buttons": body, "body_buttons_width": 360,
 		"footer_buttons": footer}
 	if _pilots.is_empty():
-		opts["text"] = "No pilots yet. Create one to begin."
+		opts["text"] = "No pilots in the Pilots folder."
 	_c_show(ClassicDialog.panel(_nova, opts))
 	if not body.is_empty():
 		(func(): if is_instance_valid(_cdialog): _cdialog.item(0).grab_focus()).call_deferred()
@@ -350,7 +487,7 @@ func _c_pilot(p: Dictionary) -> void:
 	_c_show(ClassicDialog.panel(_nova, {"title": p.name, "width": 460, "text": text,
 		"body_buttons": [{"label": "Play", "action": _load.bind(p)},
 			{"label": "Delete…", "action": _confirm_delete.bind(p)}],
-		"footer_buttons": [{"label": "Back", "action": _show_list, "cancel": true}]}))
+		"footer_buttons": [{"label": "Back", "action": _show_manage, "cancel": true}]}))
 
 
 ## The original's yes/no prompt (DLOG 3002); the safe answer (Cancel) holds the focus.
@@ -360,7 +497,7 @@ func _c_confirm_delete(p: Dictionary) -> void:
 		{"ok": "Delete", "cancel": "Keep"})
 	d.actions[0] = func():
 		_nova.pilot_delete(_dir, p.id)
-		_show_list()
+		_show_manage()
 	d.actions[4] = _show_pilot.bind(p)
 	_c_show(d)
 	(func(): if is_instance_valid(d): d.item(4).grab_focus()).call_deferred()
@@ -448,4 +585,5 @@ func _c_start(nm: String, ship_name: String) -> void:
 		_nova.sound_beep(3)
 		_show_new()
 		return
+	PilotFiles.note_recent(_nova.pilot_file_path(_dir, id))
 	_finish()

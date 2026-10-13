@@ -64,7 +64,7 @@ func _init() -> void:
 	var mm_buttons := []
 	for b in shell.main_menu.find_children("*", "Button", true, false):
 		mm_buttons.append(b.text)
-	_ok(mm_buttons == ["Open Pilot", "New Pilot", "Settings", "Game Data…", "Quit"], "menu buttons: %s" % str(mm_buttons))
+	_ok(mm_buttons == ["Open Pilot", "New Pilot", "Settings", "Game Data…", "Plug-ins", "About Nova", "Quit"], "menu buttons: %s" % str(mm_buttons))
 	var tm = shell.main_menu.music
 	_ok(tm != null, "title music node exists (found track: '%s')" % tm.track_path)
 	var track := TitleMusic.locate(shell.data_dir, nova.title_music_name())
@@ -85,7 +85,9 @@ func _init() -> void:
 	var st = shell.settings
 	_ok(st != null and not shell.main_menu.visible, "Settings opens over the menu")
 	fo = root.gui_get_focus_owner()
-	_ok(fo == st.tab_buttons["Audio"], "settings focus starts on the Audio tab")
+	_ok(fo == st.tab_buttons["Presentation"], "settings focus starts on the Interface sidebar entry")
+	st.show_page("Audio")
+	await process_frame
 	var master: HSlider = st.sliders["audio.master"]
 	master.grab_focus()
 	await process_frame
@@ -190,7 +192,7 @@ func _init() -> void:
 	var pb := []
 	for b in shell.pause_menu.find_children("*", "BaseButton", true, false):
 		pb.append(b.text)
-	_ok(pb == ["Resume", "Player Info", "Story Map", "Settings", "Save & Quit to Menu", "Quit"], "pause buttons: " + str(pb))
+	_ok(pb == ["Resume", "Player Info", "Story Map", "Settings", "Report a Bug", "Save & Quit to Menu", "Quit"], "pause buttons: " + str(pb))
 	shell._open_settings(shell.pause_menu)
 	await process_frame
 	_ok(shell.is_paused() and not shell.pause_menu.visible, "settings over pause hides pause")

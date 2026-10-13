@@ -12,6 +12,7 @@
 # prompt, ship info, holovid, hire escort, gamble). Only the top one is focusable.
 extends RefCounted
 
+const StoryGuide = preload("res://screens/StoryGuide.gd")
 const T = preload("res://ui/classic/ClassicTheme.gd")
 const CD = preload("res://ui/classic/ClassicDialog.gd")
 const CS = preload("res://ui/classic/ClassicScreen.gd")
@@ -135,12 +136,13 @@ func overlay_closed() -> void:
 
 
 func set_message(t: String) -> void:
-	if msg_label != null and is_instance_valid(msg_label):
-		msg_label.text = t
+	# The original shows no transaction feedback ("Bought 3 t of ...", "Refuelled ...");
+	# it only updates counts, credits and button states. Kept as a no-op so callers need no branch.
+	pass
 
 
 func _msg_label(d: Control, r: Rect2i, size := CS.BODY, align := HORIZONTAL_ALIGNMENT_LEFT) -> void:
-	msg_label = CS.text(d, str(sp._message), r, size, CS.AMBER, align)
+	msg_label = CS.text(d, "", r, size, CS.AMBER, align)
 
 
 # --- landing screen (DLOG/DITL 1000, PICT 8500) ------------------------------------------------
@@ -279,7 +281,7 @@ func _trade_sync(row_nodes: Array, b: Dictionary) -> void:
 		can_sell = nova.trade_quantity(sel, false, -1) > 0
 	b.buy.disabled = not can_buy
 	b.sell.disabled = not can_sell
-	var head: String = sp._message if sp._message != "" else "%s cr" % CS.credits(int(nova.player_credits()))
+	var head: String = "%s cr" % CS.credits(int(nova.player_credits()))
 	var sc: CS.PaneScroll = b.status
 	var txt := head
 	if b.stat_text != "":
@@ -594,7 +596,14 @@ func bbs(date: String) -> void:
 		b.position = Vector2(0, i * 13)
 		b.name = "bbs_row%d" % i
 		b.set_meta("fkey", "bbs_row%d" % i)
-		var lb := CS.cell(b, str(m.name), 3, lr.size.x - 6, 13, Color(0.65, 0.65, 0.65))
+		# Apple MissionBoardView: the storyline badge sits at the row's right end.
+		var _b = StoryGuide.make_badge(nova, id, sp._root)
+		if _b != null:
+			_b.custom_minimum_size = Vector2(16, 13)
+			_b.size = Vector2(16, 13)
+			_b.position = Vector2(lr.size.x - 18, 0)
+			b.add_child(_b)
+		var lb := CS.cell(b, str(m.name), 3, lr.size.x - 6 - (18 if _b != null else 0), 13, Color(0.65, 0.65, 0.65))
 		b.focus_entered.connect(func():
 			for k in rows.size():
 				rows[k].set_selected(k == i)

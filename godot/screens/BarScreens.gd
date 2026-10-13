@@ -377,11 +377,7 @@ func _hire_classic() -> void:
 		var y := info_r.position.y + i * 22
 		rows.append([CS.text(d, "", Rect2i(info_r.position.x, y, 66, 16), 10, Color(0.6, 0.6, 0.6)),
 			CS.text(d, "", Rect2i(info_r.position.x + 66, y, info_r.size.x - 66, 16), 10, Color.WHITE)])
-	var msg := ""
-	if not bool(data.get("hasRoom", true)):
-		msg = "You can't command any more escorts."
-	if _hire_msg != "":
-		msg = _hire_msg
+	var msg := ""   # the original shows no hire feedback; the roster / counts just update
 	var status := CS.text(d, msg, Rect2i(205, 289, 155, 25), 9, CS.AMBER)
 	status.name = "hire_status"
 	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -481,7 +477,7 @@ func _choose_classic() -> void:
 	var cr := CS.text(d, "%s cr" % CS.credits(int(data.get("credits", 0))), Rect2i(13, 203, 100, 14), 11, CS.GOLD,
 		HORIZONTAL_ALIGNMENT_CENTER)
 	cr.name = "gamble_credits"
-	var st := CS.text(d, _gamble_msg, Rect2i(13, 66, 444, 16), 11, CS.AMBER, HORIZONTAL_ALIGNMENT_CENTER)
+	var st := CS.text(d, "", Rect2i(13, 66, 444, 16), 11, CS.AMBER, HORIZONTAL_ALIGNMENT_CENTER)
 	st.name = "gamble_status"
 	CS.button(d, str(labels.get("leave", "Leave")), Rect2i(357, 196, 99, 25), 20, _close_overlay_beep, true, "gamble_leave")
 	_gamble_bg(_gamble_dlg, d, first_key)

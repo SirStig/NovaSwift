@@ -122,7 +122,7 @@ func _run() -> void:
 	var win = sp._c.win_dlg
 	var tv = _j(nova.trade_view())
 	_ok(win.window_size == Vector2i(426, 252), "trade window is the 426x252 frame (PICT 8510)", str(win.window_size))
-	_ok(_count(win, "Button") >= tv.rows.size(), "one row button per commodity (%d)" % tv.rows.size())
+	_ok(_count(win, "BaseButton") >= tv.rows.size(), "one row button per commodity (%d)" % tv.rows.size())
 	_ok(win.find_child("trade_buy", true, false) != null and win.find_child("trade_sell", true, false) != null and win.find_child("trade_done", true, false) != null, "Buy / Sell / Done buttons")
 	_ok(not hub.find_child("hub_leave", true, false).focus_mode == Control.FOCUS_ALL, "hub is not focusable under the window")
 	var scale := (win as Control).scale.x

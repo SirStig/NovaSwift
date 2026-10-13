@@ -1,4 +1,5 @@
 import SwiftUI
+import NovaSwiftStory
 
 /// The coaching overlay drawn over the training flight: a bottom card with the
 /// current step's instruction, a progress row, and the controls to advance or

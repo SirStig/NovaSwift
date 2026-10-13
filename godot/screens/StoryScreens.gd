@@ -25,6 +25,7 @@ signal close_spaceport_screen
 ## A `Q` fired while landed bounced the pilot into space.
 signal forced_launch
 
+const StoryGuide = preload("res://screens/StoryGuide.gd")
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
 const CD = preload("res://ui/classic/ClassicDialog.gd")
 const CS = preload("res://ui/classic/ClassicScreen.gd")
@@ -272,7 +273,12 @@ func _open_offer() -> void:
 		_open_offer_classic(o)
 		return
 	var box := _dialog_root(620)
-	_lbl(str(o.get("title", "")), 22, COL_AMBER, box)
+	var title_row := HBoxContainer.new()
+	box.add_child(title_row)
+	var title_l := _lbl(str(o.get("title", "")), 22, COL_AMBER, title_row)
+	var _bo = StoryGuide.make_badge(nova, int(o.get("id", -1)), self)
+	if _bo != null:
+		title_row.add_child(_bo)
 	var pic := _picture(int(o.get("pict", -1)), 140)
 	if pic != null:
 		box.add_child(pic)
@@ -476,6 +482,10 @@ func _build_missions(box: VBoxContainer, tab_btn: Button) -> Control:
 		b.clip_text = true
 		b.focus_entered.connect(show.bind(i))
 		b.pressed.connect(show.bind(i))
+		var _bm = StoryGuide.make_badge(nova, int(m.id), self)
+		if _bm != null:
+			b.add_child(_bm)
+			_bm.set_anchors_and_offsets_preset(Control.PRESET_CENTER_RIGHT, Control.PRESET_MODE_KEEP_SIZE, 6)
 		list.add_child(b)
 		if i == sel:
 			first = b
@@ -575,7 +585,14 @@ func _open_offer_classic(o: Dictionary) -> void:
 	title.add_theme_font_override("font", ClassicTheme.chrome_font())
 	title.add_theme_font_size_override("font_size", 12)
 	title.add_theme_color_override("font_color", Color.WHITE)
-	content.add_child(title)
+	var title_row := HBoxContainer.new()
+	title_row.add_theme_constant_override("separation", 4)
+	title_row.add_child(title)
+	var _bo = StoryGuide.make_badge(nova, int(o.get("id", -1)), self)
+	if _bo != null:
+		_bo.custom_minimum_size = Vector2(22, 16)
+		title_row.add_child(_bo)
+	content.add_child(title_row)
 	var tex := ClassicTheme.pict(int(o.get("pict", -1))) if int(o.get("pict", -1)) >= 0 else null
 	if tex != null:
 		var tr := TextureRect.new()
@@ -784,7 +801,13 @@ func _mission_info_dialog(data: Dictionary) -> Control:
 		rb.size = Vector2(lr.size.x, 16)
 		rb.name = "btn_m%d" % i
 		rb.hi.color = Color(1.0, 0.7, 0.28, 0.28)
-		CS.cell(rb, ("• " if m.failed else "") + str(m.name), 5, lr.size.x - 8, 16, Color.WHITE if i == sel else Color(0.78, 0.78, 0.78), HORIZONTAL_ALIGNMENT_LEFT, 11)
+		var _bm = StoryGuide.make_badge(nova, int(m.id), self)
+		if _bm != null:
+			_bm.custom_minimum_size = Vector2(18, 16)
+			_bm.size = Vector2(18, 16)
+			_bm.position = Vector2(lr.size.x - 22, 0)
+			rb.add_child(_bm)
+		CS.cell(rb, ("• " if m.failed else "") + str(m.name), 5, lr.size.x - 8 - (22 if _bm != null else 0), 16, Color.WHITE if i == sel else Color(0.78, 0.78, 0.78), HORIZONTAL_ALIGNMENT_LEFT, 11)
 		rb.focus_entered.connect(show.bind(i))
 		rb.pressed.connect(show.bind(i))
 		box.add_child(rb)

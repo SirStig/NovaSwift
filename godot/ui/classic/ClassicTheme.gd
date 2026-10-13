@@ -152,6 +152,23 @@ static func chrome_font() -> Font:
 	return RUBIK
 
 
+## Shrink-to-fit (Apple NovaText `shrinkToFit`: one line, minimumScaleFactor 0.5): the
+## largest whole-pixel size <= `nominal` at which `text` fits `width`, never below half the
+## nominal. The classic kit never ellipsizes; only below that floor does the label clip.
+static func fit_size(font: Font, text: String, width: float, nominal: int) -> int:
+	var floor_px := maxi(1, int(ceil(nominal * 0.5)))
+	var s := nominal
+	while s > floor_px and font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, s).x > width:
+		s -= 1
+	return s
+
+
+## Set `l.text` and the font size that makes it fit `width` (see fit_size).
+static func fit_label(l: Label, text: String, width: float, nominal: int) -> void:
+	l.text = text
+	l.add_theme_font_size_override("font_size", fit_size(l.get_theme_font("font"), text, width, nominal))
+
+
 # --- cölr palette ---------------------------------------------------------------
 
 ## The cölr palette: Color values keyed buttonUp, buttonDown, buttonGrey, gridBright,

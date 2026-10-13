@@ -58,6 +58,8 @@ func start(nova: Object, data_dir: String) -> void:
 	if nova == null or not nova.has_method("title_music_name"):
 		return
 	track_path = locate(data_dir, str(nova.title_music_name()))
+	if not bool(Prefs.get_value("classic", "intro_music")):   # the original Preferences window's "Intro Music"
+		return
 	if track_path == "" or track_path.get_extension().to_lower() != "mp3":
 		return
 	var stream := AudioStreamMP3.load_from_file(track_path)

@@ -46,24 +46,24 @@ Section 13 (About) is a root-cause write-up, counted under section 1 and package
 |---|---|---|---|---|
 | Authentic main menu (PICT 8000, 6 buttons, shutters, pilot readout) | `Launcher/AuthenticMainMenuView.swift` | PARTIAL | `ui/classic/ClassicMainMenu.gd` done; missing "has been killed" and "Creating Pilot..." readout states (noted in GODOT_LAYER) | S |
 | Modern main menu (New/Open/Enter/Settings/About/Plug-ins/Import) | `Launcher/ModernMainMenuView.swift` | PARTIAL | `screens/MainMenu.gd` plain path has no About, Plug-ins entries | S |
-| **About Nova (dësc 32767)** | `Launcher/AuthenticMainMenuView.swift:298`, `UI/DescTextDialog.swift`, `Sources/NovaSwiftKit/DescDialogLayout.swift`, `Launcher/Branding.swift` (`AboutNovaText`) | PARTIAL (broken) | See section 13: wrong layout, no header, no `<REG>` fix, text height guessed so long text overflows, no scroll | M |
+| **About Nova (dësc 32767)** | `Launcher/AuthenticMainMenuView.swift:298`, `UI/DescTextDialog.swift`, `Sources/NovaSwiftKit/DescDialogLayout.swift`, `Launcher/Branding.swift` (`AboutNovaText`) | DONE (2026-10-12) | `ClassicDialog.desc_dialog` on DITL 3003/3004, shared shrink, scroll, NovaSwift header, `<REG>`; plain menu has an About button too | - |
 | NovaSwift About box (version, credits, repo/report links) | `Launcher/Branding.swift` `AboutView` | MISSING | No version/credits/links screen anywhere in Godot | S |
-| Preferences (Classic DLOG 4003: Smoke Trails, Engine Glows, Running Lights, Weapon Effects, Parallax, Ambient, Hyperspace Fx, volume/brightness arrows, Key Settings) | `Launcher/ClassicPreferencesView.swift`, `ClassicKeySettingsView.swift` | MISSING | Godot's "Preferences" button goes straight to the port's own Settings; no DLOG 4003, no Key Settings dialog; none of the 4003 flags exist (see section 2) | M |
-| Settings screen (port's own) | `Launcher/SettingsView.swift` | PARTIAL | `screens/Settings.gd` has 4 pages (Audio, Video, Presentation, Controls); Apple has ~10 categories (see section 2) | M |
+| Preferences (Classic DLOG 4003: Smoke Trails, Engine Glows, Running Lights, Weapon Effects, Parallax, Ambient, Hyperspace Fx, volume/brightness arrows, Key Settings) | `Launcher/ClassicPreferencesView.swift`, `ClassicKeySettingsView.swift` | PARTIAL | `screens/ClassicPreferences.gd` (DLOG 4003 via the kit, from Settings > Interface > Original Preferences Window...; Preferences still opens NovaSwift Settings first). Prefs `[classic]` holds every flag; only volume (master, snd 154) and Intro Music take effect. Key Settings opens the NovaSwift Controls page; the 34-cell DITL 4002 dialog is not ported | S |
+| Settings screen (port's own) | `Launcher/SettingsView.swift` | PARTIAL | `screens/Settings.gd` restyled like Apple (sidebar + grouped sections, amber check boxes/sliders, Reset All, Pilots folder); still 5 pages (Interface, Controls, Graphics, Audio, Data & Advanced); gameplay/enhancements/accessibility categories are the section 2 gaps | M |
 | Controls/key rebinding UI | `Launcher/ControlsView.swift`, `Input/KeyBindings.swift`, `PadBindings.swift` | DONE | `Settings.gd` Controls page, `Controls.gd`, swap-on-conflict, original vs modern layout | - |
 | Launcher/first-run data wizard (platform guide, import, legal framing) | `Launcher/DataSetupWizard.swift`, `LauncherView.swift` | PARTIAL | `screens/DataSetup.gd` = folder picker + rescan + Run Demo; no guided wizard, no "I don't have it yet" help | M |
 | Data import (copy .rez/.ndat, music mp3, fonts, race video into app dir) | `Data/DataImporter.swift`, `GameDataController.swift` | PARTIAL | Godot reads an in-place folder (`Prefs [data] dir`); no copy/managed data dir; music/fonts located by search only | S |
 | Web import server (phone to desktop upload) | `Data/WebImportServer.swift` | N/A | iOS/Mac convenience; desktop uses folder picker | - |
 | Game data cloud sync | `Data/GameDataCloudSync.swift`, `docs/ICLOUD_SYNC.md` | N/A | iCloud | - |
-| Loading screen with progress, tips | `Launcher/LoadingView.swift`, `Data/GameDataController.swift` (prewarm) | MISSING | Godot blocks on `load_game`; no progress bar or tips (verify: `Shell.gd`) | S |
+| Loading screen with progress, tips | `Launcher/LoadingView.swift`, `Data/GameDataController.swift` (prewarm) | DONE | `screens/LoadingScreen.gd` + `Shell.show_loading/set_loading_progress/hide_loading`; data loads on a worker thread (`load_game_async`/`load_status`, coarse real phases); shown only after 0.25 s. No sprite prewarm exists in Godot to report. Not verified visually | S |
 | Pause menu (Resume, Galaxy Map, Pilot Info, Missions, **Story Guide**, Preferences, Report Issue, Full Screen, **Debug Suite**, Multiplayer, Save, Load, Main Menu) | `Game/GameMenuView.swift` | PARTIAL | `screens/PauseMenu.gd` has Resume, Settings, Save & Quit, Quit, Player Info and Story Map; no Debug, Report, Load Pilot, sidebar variant | S |
 | Classic dialog kit (DLOG/DITL, 3-state art buttons, prompts) | `UI/ClassicDITLDialog.swift`, `ClassicPrompts.swift`, `ClassicUiWindow.swift`, `DITLPlacement.swift`, `NovaButton` | DONE | `ui/classic/ClassicDialog.gd`, `ClassicButton.gd` | - |
 | Modern dialog chrome (NovaDialog, NovaAlert, form controls) | `UI/NovaDialog.swift`, `NovaAlert.swift`, `NovaFormControls.swift`, `NovaUITheme.swift` | PARTIAL | `screens/ShellUI.gd` is a simpler stand-in; no per-screen NovaDialog art chrome in Nova Swift mode | M |
 | Fonts (Arimo/Rubik stand-ins, original Charcoal/Geneva if user supplies) | `UI/NovaFont.swift`, `Resources/Fonts` | DONE | `godot/ui/classic/fonts` (verify user-supplied Charcoal/Geneva loading) | S |
 | Government palette, credits formatting | `UI/GovernmentPalette.swift`, `CreditsFormatting.swift` | DONE | shared `GovernmentMapPalette`, `creditsHUD` | - |
 | HD graphics prompt | `UI/HDGraphicsPromptView.swift` | MISSING | tied to HD packs (section 9) | S |
-| Branding (procedural wordmark/icon/loading art) | `Launcher/Branding.swift` | MISSING | Godot uses the classic art or plain text; no NovaSwift wordmark in Nova Swift mode | S |
-| Bug report (Settings > Support) | `Debug/BugReport*.swift` | MISSING | see section 12 | M |
+| Branding (procedural wordmark/icon/loading art) | `Launcher/Branding.swift` | PARTIAL | the loading screen uses the app's wordmark/flames/key-art PNGs (`godot/assets/branding/`); the plain main menu still shows the icon + text title | S |
+| Bug report (Settings > Support) | `Debug/BugReport*.swift` | DONE | see section 12 | M |
 | App Store / TestFlight / update check | `App/*`, `checkForUpdates` | N/A | | - |
 
 ## 2. Settings (every `GameSettings` field, `App/GameSettings.swift`)
@@ -82,7 +82,7 @@ No gameplay setting reaches the engine: the bridge never builds a `GameplayEnhan
 | autoLanding | MISSING | | S |
 | tutorialHints | MISSING | no hints at all (section 11) | S |
 | pauseOnFocusLoss | MISSING | `Main.gd` only autosaves on close request | S |
-| enhancements.manualPluginOrder | MISSING | no plugin loading | M |
+| enhancements.manualPluginOrder | DONE | Load order tab toggle (stored in plugins-state.json, not Prefs) | - |
 | enhancements.formationFlying (tight formations) | MISSING | not wired in bridge | S |
 | enhancements.forgivingLanding | PARTIAL | `attempt_land` test seam exists; no setting | S |
 | enhancements.quickHyperjump | MISSING | | S |
@@ -114,7 +114,7 @@ No gameplay setting reaches the engine: the bridge never builds a `GameplayEnhan
 | showMissionStorylineTags | PARTIAL | `Prefs` `story/show_mission_storyline_tags` (default on) gates `StoryGuide.badge_for_mission`; no Settings toggle yet |
 | showRadar | MISSING | | S |
 | hudOpacity | MISSING | | S |
-| debugModeEnabled / uiDebugOverlay | MISSING | no debug suite (section 12) | S |
+| debugModeEnabled / uiDebugOverlay | DONE | Prefs developer/*; Settings > Support | S |
 | iCloudSaves / iCloudGameData | N/A | | - |
 | largerHUD / highContrastHUD / colorblindMode / reduceFlashing / noHyperspaceEffects | MISSING | Godot has none of the accessibility options | M |
 | uiScale | PARTIAL | `video/scale` is window size, not UI scale | S |
@@ -173,7 +173,7 @@ exposes only 11 sprite kinds, and `Main.gd` uses SHIP, ENGINE_GLOW, SPOB, WEAPON
 |---|---|---|---|---|
 | Authentic `ïntf` status bar (shield/armor/fuel, radar, target, secondary, nav, cargo, IFF) | `AuthenticHUDView.swift` | DONE | `ui/classic/AuthenticHUD.gd` | - |
 | Modern HUD (Nova Swift mode) | `GameHUD.swift` | PARTIAL | `Main.gd` primitive bars/radar/target panel; no hull/shield bars over ships, no opacity/larger/high-contrast/colorblind | M |
-| Message log text sources | `GameContainerView` STR# 2002 usage | PARTIAL | `Main.gd:EVENT_MESSAGES` hard-codes "Target destroyed", "Cargo scanned", "Boarding complete", "Launched", "Docked at ..." which are not original strings; Apple pulls STR# 2002 / 150 lines. Land prompt "Press L to land on X" also hard-coded | M |
+| Message log text sources | `GameContainerView` STR# 2002 usage | DONE (2026-10-12) | invented lines removed; bridge `polishNote` posts the STR# 2002 / GameScene lines; one bottom-left line, Apple placement and font; the land prompt text is Apple's own literal (GameScene), now Apple-positioned | - |
 | Message buoy (sÿst.Message, STR# 1000) | `GameContainerView.swift:161` | MISSING | | S |
 | Contextual action pills (Land/Board/Hail/Jump/Escorts) | `ContextualActionsView.swift` | N/A | touch-first; desktop keeps text hint | - |
 | Escort command panel | `EscortsView.swift` | DONE | `Interactions.gd` (E key); no Upgrade/Sell | S |
@@ -257,9 +257,9 @@ Reached on Apple: Pause menu > Story Guide; the storyline badge on a mission (BB
 | Feature | Apple file(s) | Godot status | Gap detail | Effort |
 |---|---|---|---|---|
 | New Pilot (chär scenarios, ship name, Strict Play) | `NewPilotView.swift` | DONE | `PilotMenu.gd` classic + plain | - |
-| Open / delete pilot | `PilotListView.swift` | DONE | | - |
+| Open / delete pilot | `PilotListView.swift` | DONE | Pilots are real `.evpilot` files in a visible Pilots folder (`screens/PilotFiles.gd`; Documents/NovaSwift/Pilots, configurable in Settings, one-time copy from `user://pilots`); Open Pilot = OS file picker (pad: Godot FileDialog) + recent list; Manage = per-pilot play/delete | - |
 | Pilot groups: multiple save slots per pilot, backups history, duplicate | `PilotGroupDetailView.swift`, `PilotBackupsView.swift`, `PilotRoster.swift` | MISSING | Godot shows one entry per pilot; backups exist on disk (`PilotArchive`) but no browse/restore UI | M |
-| Import pilot (.plt / .evpilot) | `PilotImportView.swift` | MISSING | `PilotMenu.gd` mentions import but only for the dir listing (verify) | M |
+| Import pilot (.plt / .evpilot) | `PilotImportView.swift` | DONE | `PilotMenu.open_path` -> `pilot_inspect_file`; original `.plt`/Mac pilots show the converter summary then `pilot_import_commit` (shared `EVNovaPilotImporter`); `.evpilot` opens from anywhere (copied into the Pilots folder). Tested with a synthetic `.plt` only | M |
 | Intro sequence (chär intro PICT slideshow then intro dësc) | `IntroSequenceView.swift` | MISSING | no `intro` anywhere in Godot after New Pilot; goes straight to play | M |
 | Death flow: "killed" readout, Strict Play permadeath, load last save | `GameContainerView.swift:400` | PARTIAL | `Main.gd:_check_game_over` waits 2.2 s then returns to menu; no killed state, no Strict Play delete (not wired per GODOT_LAYER) | S |
 | Escape pod / eject | `GameScene.requestEject`, `OriginalEscapePod` | PARTIAL | `request_eject` bridge call exists; verify post-eject respawn dialog / ship loss flow | S |
@@ -270,9 +270,9 @@ Reached on Apple: Pause menu > Story Guide; the storyline badge on a mission (BB
 
 | Feature | Apple file(s) | Godot status | Gap detail | Effort |
 |---|---|---|---|---|
-| Load plug-ins (merge into data set, load order) | `Data/PluginsModel.swift`, `GameDataController.swift` | MISSING | `NovaWorld.loadGame` calls `GameLibrary.discoverResourceFiles` on the base dir and `merge(baseFiles:)` only; the Plug-ins folder is never scanned. Big content gap | M |
-| Plugin store (browse catalog, install, update, enable/disable, load order) | `Plugins/*.swift`, `Launcher/PluginsView.swift`, `Sources/NovaSwiftPluginStore` | MISSING | shared package exists; no Godot UI or bridge | L |
-| Plugin storyline lane labels | `StoryGuideModel.pluginLabel` | MISSING | | S |
+| Load plug-ins (merge into data set, load order) | `Data/PluginsModel.swift`, `GameDataController.swift` | DONE | `PluginRuntime.loadMerged` (Plugins.swift) used by `load_game` + `load_game_async`; shared `PluginSet`; see GODOT_LAYER.md Plug-ins | - |
+| Plugin store (browse catalog, install, update, enable/disable, load order) | `Plugins/*.swift`, `Launcher/PluginsView.swift`, `Sources/NovaSwiftPluginStore` | DONE | `screens/Plugins.gd` over bridge `NovaPlugins` + `NovaSwiftPluginStore` (browse/install/update/delete/import, enable, load order). Downloads untested live (no network in checks) | - |
+| Plugin storyline lane labels | `StoryGuideModel.pluginLabel` | DONE | lanes `pluginLabels` -> `StoryGuide.plugin_label` | - |
 | HD graphics packs (NSgx/NSbl, `.nsx`), bake/cache, HD viewer | `Data/HDGraphics.swift`, `Sources/NovaSwiftHD`, `Debug/HDViewerView.swift` | MISSING | no HD in bridge; shared module may need Linux build check | L |
 | Sprite pipeline (decode + persistent cache) | `Data/SpriteTextures.swift`, `SpriteDiskCache` | DONE | raw RGBA via bridge; cache off-Apple stores uncompressed | - |
 | Audio data (snd decode, voices, music mp3) | `Audio/*` | DONE | see section 10 | - |
@@ -302,34 +302,34 @@ Reached on Apple: Pause menu > Story Guide; the storyline badge on a mission (BB
 | Flight training course (fly, turn, afterburner, target, fire, change weapon, land) | `TutorialModel.swift`, `TutorialContainerView.swift`, `TutorialCoachView.swift`, `TutorialOfferView.swift` | MISSING | whole feature; mostly touch-scheme driven on Apple, keyboard variant would need new copy | M |
 | One-time contextual hints (spaceport, BBS, outfitter) + reset | `GameHints.swift` | MISSING | | S |
 | Story intro slideshow | `IntroSequenceView.swift` | MISSING | see section 8 | M |
-| Loading tips | `LoadingView.swift` | MISSING | | S |
+| Loading tips | `LoadingView.swift` | DONE | `LoadingScreen.TIPS` (Apple's list, minus the Flight Training tip) | S |
 
 ## 12. Debug suite and dev tools (Apple: `Debug/`)
 
-Godot has none of this as a user feature. The bridge has about 25 `debug_*` @Callables used only by `godot/tests/*_selfcheck.gd` (e.g. `debug_set_credits`, `debug_dock_at`, `debug_add_escort`, `debug_make_hulk`, `debug_place_player_at_spob`); they are a head start for cheat commands.
+**Status: ported (package 2) except the HD viewer; see GODOT_LAYER "Debug suite".** Previously Godot had none of this. The bridge has about 25 `debug_*` @Callables used only by `godot/tests/*_selfcheck.gd` (e.g. `debug_set_credits`, `debug_dock_at`, `debug_add_escort`, `debug_make_hulk`, `debug_place_player_at_spob`); they are a head start for cheat commands.
 There is no way to open a console: `debugModeEnabled` is not a setting.
 
 | Tool | Apple file(s) | What it does | Portable vs SwiftUI-bound | Godot status | Effort |
 |---|---|---|---|---|---|
-| Dev console (drop-down, command line, scrollback, history, clickable `«ship:id:name»` links) | `DevConsoleView.swift` (1066), `ConsoleController.swift`, `ConsoleLogStore.swift`, `DevEntityRef.swift` | command registry with `register(name, summary, usage, closure)`; log tail merged with command echoes | `ConsoleController` is portable logic with `ObservableObject`; `ConsoleLogStore` reads `OSLogStore` (Apple only, needs a ring-buffer logger replacement); view is SwiftUI | MISSING | M |
-| Console commands (registered in `GameContainerView.registerConsoleCommands`, ~line 4178) | `GameContainerView.swift` + `GameScene.swift` "Debug suite" MARKs | god, fuel (infinite), ai overlay, uidebug, heal, refuel, credits add/set, fps, perf start/stop stress, clearnpcs, killhostiles, hd (status/on/off/detail/overlay/reload/clear cache/viewer), spawn hostile/escort/neutral, ship, outfit add/remove, relation, bit set/clear/toggle/explain, date +days, select, destroy, disable, capture, conquer, cycle | closures touch `GameScene`/`PilotStore`/`World`; logic maps 1:1 onto bridge calls | MISSING | M |
-| Tools pane (SELECTED, PERFORMANCE, CHEATS, WORLD, HD/3D, STRESS TEST, EDITORS sections, collapsible) | `DevToolsPane.swift` | each control submits a console command | SwiftUI | MISSING | M |
-| Metrics chip (corner fps/ships readout) | `DevToolsPane.swift` `DebugMetricsChip`, `DebugController.swift` | | SwiftUI; data from `FrameProfiler` | MISSING | S |
-| Context menu on right-click (Destroy/Disable/Capture/Conquer) | `DevToolsPane.swift` `DevContextMenu` | | SwiftUI | MISSING | S |
-| Game-state editor (credits, fuel, ship health sliders, date, relations, control bits, hull, outfits, spawn enemies) | `DebugGameStateView.swift` (625) | writes `PlayerState` and live `World` | SwiftUI form; state ops portable | MISSING | M |
-| Diagnostics self-test battery (Data Set, Navigation, Pilot, Live World; pass/warn/fail) | `DebugDiagnosticsView.swift` (`DebugDiagnostics.run`) | pure functions over `NovaGame` + `PlayerState` + optional ship | battery is portable pure Swift (move to `Sources/`); view SwiftUI | MISSING | M |
-| Behavioral engine tests (damage, physics, combat, regen in throwaway `World`s) | `DebugTestsView.swift` (`DebugLiveTests`) | | portable (only `Engine`); view SwiftUI | MISSING | S |
-| Control-bit (NCB) browser with SET BY / TESTED BY | `DevBitBrowser.swift`, `NCBIndex.swift` | inverts all NCB expressions into a bit-first index | `NCBIndex` portable (pure data walk); view SwiftUI | MISSING | M |
-| Ship / Outfit / Government browsers (searchable, submit console commands) | `DevBrowsers.swift` | | SwiftUI; data via bridge lists | MISSING | M |
-| Frame profiler (phase timings, worst frame) | `FrameProfiler.swift` | | portable timing struct; Godot has `Performance`/`Time` equivalents | MISSING | S |
-| Perf monitor (5 s log line: fps, hitches, mem, threads) | `PerfMonitor.swift` | | os_signpost parts Apple-only; counters portable | MISSING | S |
-| AI overlay, UI measurement grid, god/fuel cheats | `GameScene` "AI overlay", `NovaDebug.swift`, `DebugController.swift` | | need Godot draw overlay (AI states from `World`) | MISSING | M |
-| Performance stress test (spawn N ships) | `GameScene.swift:6831` | | | MISSING | S |
+| Dev console (drop-down, command line, scrollback, history, clickable `«ship:id:name»` links) | `DevConsoleView.swift` (1066), `ConsoleController.swift`, `ConsoleLogStore.swift`, `DevEntityRef.swift` | command registry with `register(name, summary, usage, closure)`; log tail merged with command echoes | `ConsoleController` is portable logic with `ObservableObject`; `ConsoleLogStore` reads `OSLogStore` (Apple only, needs a ring-buffer logger replacement); view is SwiftUI | DONE | M |
+| Console commands (registered in `GameContainerView.registerConsoleCommands`, ~line 4178) | `GameContainerView.swift` + `GameScene.swift` "Debug suite" MARKs | god, fuel (infinite), ai overlay, uidebug, heal, refuel, credits add/set, fps, perf start/stop stress, clearnpcs, killhostiles, hd (status/on/off/detail/overlay/reload/clear cache/viewer), spawn hostile/escort/neutral, ship, outfit add/remove, relation, bit set/clear/toggle/explain, date +days, select, destroy, disable, capture, conquer, cycle | closures touch `GameScene`/`PilotStore`/`World`; logic maps 1:1 onto bridge calls | DONE | M |
+| Tools pane (SELECTED, PERFORMANCE, CHEATS, WORLD, HD/3D, STRESS TEST, EDITORS sections, collapsible) | `DevToolsPane.swift` | each control submits a console command | SwiftUI | DONE | M |
+| Metrics chip (corner fps/ships readout) | `DevToolsPane.swift` `DebugMetricsChip`, `DebugController.swift` | | SwiftUI; data from `FrameProfiler` | DONE | S |
+| Context menu on right-click (Destroy/Disable/Capture/Conquer) | `DevToolsPane.swift` `DevContextMenu` | | SwiftUI | DONE | S |
+| Game-state editor (credits, fuel, ship health sliders, date, relations, control bits, hull, outfits, spawn enemies) | `DebugGameStateView.swift` (625) | writes `PlayerState` and live `World` | SwiftUI form; state ops portable | DONE | M |
+| Diagnostics self-test battery (Data Set, Navigation, Pilot, Live World; pass/warn/fail) | `DebugDiagnosticsView.swift` (`DebugDiagnostics.run`) | pure functions over `NovaGame` + `PlayerState` + optional ship | battery is portable pure Swift (move to `Sources/`); view SwiftUI | DONE | M |
+| Behavioral engine tests (damage, physics, combat, regen in throwaway `World`s) | `DebugTestsView.swift` (`DebugLiveTests`) | | portable (only `Engine`); view SwiftUI | DONE | S |
+| Control-bit (NCB) browser with SET BY / TESTED BY | `DevBitBrowser.swift`, `NCBIndex.swift` | inverts all NCB expressions into a bit-first index | `NCBIndex` portable (pure data walk); view SwiftUI | DONE | M |
+| Ship / Outfit / Government browsers (searchable, submit console commands) | `DevBrowsers.swift` | | SwiftUI; data via bridge lists | DONE | M |
+| Frame profiler (phase timings, worst frame) | `FrameProfiler.swift` | | portable timing struct; Godot has `Performance`/`Time` equivalents | DONE | S |
+| Perf monitor (5 s log line: fps, hitches, mem, threads) | `PerfMonitor.swift` | | os_signpost parts Apple-only; counters portable | DONE | S |
+| AI overlay, UI measurement grid, god/fuel cheats | `GameScene` "AI overlay", `NovaDebug.swift`, `DebugController.swift` | | need Godot draw overlay (AI states from `World`) | DONE | M |
+| Performance stress test (spawn N ships) | `GameScene.swift:6831` | | | DONE | S |
 | HD / 3D viewer (turntable classic vs HD, spawn hull) | `HDViewerView.swift` (833) | | needs HD pipeline first | MISSING | L |
-| Bug report bundle (report.txt, pilot.json, diagnostics.txt, console.log -> zip -> share) | `BugReport.swift`, `BugReportView.swift`, `GameDataArchiver.zip` | | bundle assembly portable; share sheet replaced by "reveal in file manager" | MISSING | M |
+| Bug report bundle (report.txt, pilot.json, diagnostics.txt, console.log -> zip -> share) | `BugReport.swift`, `BugReportView.swift`, `GameDataArchiver.zip` | | bundle assembly portable; share sheet replaced by "reveal in file manager" | DONE | M |
 | Plugin Editor "test run" debug panel | `Editor/Run/EditorDebugPanel.swift` | | | DESKTOP | L |
 
-## 13. About Nova: why the Godot About is wrong
+## 13. About Nova: why the Godot About was wrong (FIXED 2026-10-12, see package 3; kept as the root-cause record)
 
 Apple (`AuthenticMainMenuView.swift:298-306`) opens `DescTextDialog(text: AboutNovaText.text(game:), graphicID: nil)`:
 
@@ -364,11 +364,11 @@ Fix: new `ClassicDialog.desc_dialog(nova, text, graphic_id)` that reads DITL 300
 Ordered by user value. Each is sized for one agent. "Do not touch" lists keep concurrent agents from colliding (the spaceport-reskin agent owns `Spaceport.gd`, `SpaceportClassic.gd`, `BarScreens.gd`, `Interactions.gd`, `StoryScreens.gd` until it lands).
 
 1. **Story Map / Story Guide (L) -- DONE except the badge placement.** See section 7 and GODOT_LAYER "Story Map".
-2. **Debug Suite + Report a Bug (L).** Add `debugModeEnabled`/`uiDebugOverlay` to `Prefs.gd`/Settings; move `DebugDiagnostics`, `DebugLiveTests`, `NCBIndex` and the console command parsing/registry into `Sources/` (Apple keeps using them); new bridge file `Debug.swift` exposing `console_run(line)`, `console_commands()`, `diagnostics_run()`, `ncb_explain(bit)`, ship/outfit/govt lists, and a ring-buffer log; new `godot/screens/DevConsole.gd` (drop-down console, tools pane with the same sections, ship/outfit/govt/bit browsers, metrics chip using Godot `Performance`), bug-report zip (pilot.json + diagnostics + log, reveal in file manager). Do not touch: `Main.gd` beyond a toggle key hook (a one-line `~` hook), HD viewer (package 9).
+2. **Debug Suite + Report a Bug (L) -- DONE except the HD viewer (package 9).** Add `debugModeEnabled`/`uiDebugOverlay` to `Prefs.gd`/Settings; move `DebugDiagnostics`, `DebugLiveTests`, `NCBIndex` and the console command parsing/registry into `Sources/` (Apple keeps using them); new bridge file `Debug.swift` exposing `console_run(line)`, `console_commands()`, `diagnostics_run()`, `ncb_explain(bit)`, ship/outfit/govt lists, and a ring-buffer log; new `godot/screens/DevConsole.gd` (drop-down console, tools pane with the same sections, ship/outfit/govt/bit browsers, metrics chip using Godot `Performance`), bug-report zip (pilot.json + diagnostics + log, reveal in file manager). Do not touch: `Main.gd` beyond a toggle key hook (a one-line `~` hook), HD viewer (package 9).
 3. **About Nova fix + desc dialog (M).** Implement section 13: `ClassicDialog.desc_dialog`, bridge helpers (`classic_desc_dialog_layout`, `about_nova_text`, `<REG>` replace, shrink), real NovaSwift About box (version, credits, links) behind Settings/Modern menu. Touch: `ui/classic/ClassicDialog.gd`, `MainMenu.gd` (`_show_about`), `Settings.gd`, `ClassicUI.swift`. Also reused by package 8 intro text.
 4. **Flight visual fidelity pass (L).** Draw the exported-but-unused layers (running lights kind 3, weapon glow kind 4, shield overlay + flare kind 2), shän bank frames, animated + destroyed stellars, ship tint by govt, disable flash, ship-target corner brackets, smoke puffs and weapon trails, staggered visual death bursts, lightning beams, murk fog layer, nebula backdrop, screen shake (opt-in), proper hyperjump phases/no-jump indicator. Mirror `GameScene` helper names; take as much logic as possible from `OriginalRendering`/`HullAnimation` into shared code. Touch: `Main.gd` (split drawing out into new `godot/FlightRender.gd` first), `HyperjumpFx.gd`, bridge `NovaWorld.swift` render queries. Do not touch HUD files.
 5. **Settings parity + engine settings plumbing (M).** Extend `Prefs.gd`/`Settings.gd` with the missing gameplay and presentation fields (difficulty, system aliveness, game speed incl. Caps Lock, auto-target, confirm/auto landing, all `GameplayEnhancements`, show radar/FPS/planet labels, HUD opacity/larger/high-contrast/colorblind/reduce flashing, starfield density, particle density, frame cap, engine glow, smoke, camera view) and a bridge `apply_settings(json)` that builds `GameplayEnhancements`, difficulty and spawn model. Add the Classic Preferences dialog (DLOG 4003) behind Preferences, with the 4003 flags. Touch: `Prefs.gd`, `Settings.gd`, `Controls.gd` (new actions), new bridge `Settings.swift`. Do not touch: render code (it reads the prefs in package 4).
-6. **Plug-in loading + manager (L).** Scan `Nova Plug-ins`, merge in load order (`GameLibrary` + `manualPluginOrder`), show plug-in label in story lanes, then a Godot Plug-ins screen (browse/installed/load order) over `NovaSwiftPluginStore` (verify it builds on Linux/Windows). Touch: bridge `NovaWorld.swift loadGame`, new `Plugins.swift`, new `screens/Plugins.gd`, `MainMenu.gd`, `DataSetup.gd`. Do not touch: HD (package 9).
+6. **Plug-in loading + manager (L) -- DONE (see GODOT_LAYER.md).** Scan `Nova Plug-ins`, merge in load order (`GameLibrary` + `manualPluginOrder`), show plug-in label in story lanes, then a Godot Plug-ins screen (browse/installed/load order) over `NovaSwiftPluginStore` (verify it builds on Linux/Windows). Touch: bridge `NovaWorld.swift loadGame`, new `Plugins.swift`, new `screens/Plugins.gd`, `MainMenu.gd`, `DataSetup.gd`. Do not touch: HD (package 9).
 7. **HUD and message-source fidelity (M).** Replace invented `EVENT_MESSAGES`, "Press L to land", "Docked at ..." and plain-screen English literals with the STR# 2002/150/1000 lines the Apple app uses (add a shared `OriginalMessages` lookup, bridge `msg(id)`), add sÿst.Message buoy, ship bars over hulls, radar toggle/opacity, and the Modern HUD parity items. Audit `Spaceport.gd`/`BarScreens.gd`/`Interactions.gd` literals after the reskin lands. Touch: `Main.gd` HUD functions (after package 4 splits), `AuthenticHUD.gd`, bridge message helpers.
 8. **New-pilot flow: intro, death, pilot slots, tutorial/hints (M).** Intro slideshow + dësc (reuses package 3 widget), "killed" menu state and Strict Play deletion, pilot groups/slots/backups browser and import, one-time hints, loading screen with tips, optional keyboard flight tutorial. Touch: `PilotMenu.gd`, `Shell.gd`, `MainMenu.gd` (killed readout), bridge `PilotSaves` calls, new `Hints.gd`, `Tutorial.gd`.
 9. **HD packs and viewer (L).** Verify `NovaSwiftHD` compiles off Apple, bridge HD sprite lookup (replace hull/stellar/weapon sprites with pack art, bake cache), HD settings, HD viewer tool. Optional 3D hulls stay out of scope. Touch: bridge `HD.swift`, sprite cache in `Main.gd`/`FlightRender.gd`, viewer screen. Do last of the large items.

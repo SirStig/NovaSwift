@@ -1,5 +1,6 @@
 import Foundation
 import NovaSwiftKit
+import NovaSwiftStory
 
 /// Command registry and parser for the in-game **command console**. Owns the
 /// log tail (`ConsoleLogStore`) and whether the console is on screen; game-
@@ -114,22 +115,7 @@ final class ConsoleController: ObservableObject {
     /// Whitespace-separated tokens, with `"quoted strings"` kept as one token
     /// (so e.g. a ship-name search can contain spaces).
     static func tokenize(_ input: String) -> [String] {
-        var tokens: [String] = []
-        var current = ""
-        var inQuotes = false
-        for ch in input {
-            if ch == "\"" {
-                inQuotes.toggle()
-                continue
-            }
-            if ch.isWhitespace, !inQuotes {
-                if !current.isEmpty { tokens.append(current); current = "" }
-            } else {
-                current.append(ch)
-            }
-        }
-        if !current.isEmpty { tokens.append(current) }
-        return tokens
+        DebugConsole.tokenize(input)   // shared with the Godot dev console (NovaSwiftStory/DebugConsole.swift)
     }
 
     private func registerBuiltins() {

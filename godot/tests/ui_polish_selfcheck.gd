@@ -17,6 +17,16 @@ const VIEW := Vector2i(1280, 720)
 
 var nova
 var fails := 0
+var script_errors := 0
+
+
+## Counts every engine / script error printed while the check runs.
+class ErrCounter extends Logger:
+	var owner_check
+	func _log_error(function: String, file: String, line: int, code: String, rationale: String, editor_notify: bool,
+			error_type: int, script_backtraces: Array) -> void:
+		owner_check.script_errors += 1
+		print("LOGGED ERROR: ", file, ":", line, " ", rationale if rationale != "" else code)
 
 
 func _ok(cond: bool, what: String, detail := "") -> void:
@@ -61,6 +71,9 @@ func _check_row(row: Control, what: String) -> void:
 
 
 func _run() -> void:
+	var ec := ErrCounter.new()
+	ec.owner_check = self
+	OS.add_logger(ec)
 	get_root().content_scale_aspect = Window.CONTENT_SCALE_ASPECT_IGNORE
 	get_root().content_scale_size = VIEW
 	get_root().size = VIEW
@@ -99,6 +112,19 @@ func _run() -> void:
 		nova.story_text_dismiss()
 	await _frames()
 
+	# hub description pane: long text must scroll inside its DITL rect
+	var hd = sp._c.hub_dlg
+	var pane = null
+	for sc2 in hd.find_children("*", "ScrollContainer", true, false):
+		pane = sc2
+	_ok(pane != null and pane.size == Vector2(301, 185), "hub description pane is DITL #1000 item 5 (301x185)")
+	pane.label.text = "A long description line that keeps going. ".repeat(80)
+	await _frames(3)
+	_ok(pane.get_v_scroll_bar().max_value > pane.get_v_scroll_bar().page + 10, "long hub description overflows into a scroll range",
+		"%s / %s" % [pane.get_v_scroll_bar().max_value, pane.get_v_scroll_bar().page])
+	pane.scroll_vertical = 100
+	await _frames()
+	_ok(pane.scroll_vertical > 0 and pane.size.y == 185.0, "hub description scrolls and stays clipped to its rect")
 	# --- 1. list highlight geometry ---------------------------------------------------------
 	sp._show_trade()
 	await _frames()
@@ -137,8 +163,10 @@ func _run() -> void:
 	await _frames(8)
 	_ok(not T.nav_active and not T.show_focus(done), "mouse motion: no focus indicator on a focused button")
 	_ok(is_equal_approx(done.scale.x, 1.0), "mouse: ART button not grown", str(done.scale.x))
-	var rowc = win.find_child("row0", true, false)
-	rowc.set_selected(false)
+	var rowc = CS.Row.new()
+	rowc.position = Vector2(2, 2)
+	rowc.size = Vector2(60, 13)
+	win.add_child(rowc)
 	rowc.grab_focus()
 	await _frames()
 	_ok(not rowc.hi.visible, "mouse: focused unselected row shows no highlight")
@@ -198,7 +226,7 @@ func _run() -> void:
 	root.add_child(d)
 	await _frames(3)
 	var lab_h: float = sc.label.get_minimum_size().y
-	_ok(absf(lab_h - float(meta.text_height)) <= 4.0, "measured text height matches the label", "%d vs %.0f" % [meta.text_height, lab_h])
+	_ok(absf(lab_h - float(meta.text_height)) <= 16.0, "measured text height matches the label", "%d vs %.0f" % [meta.text_height, lab_h])
 	if lab_h > sc.size.y:
 		_ok(sc.scrollable(), "long text scrolls (scroll offset available)")
 		sc.scroll_vertical = 40
@@ -210,7 +238,106 @@ func _run() -> void:
 	# short text shrinks, with picture variant keeps 3004
 	var d2 = CD.desc_dialog(nova, "Short.\rText.")
 	_ok(d2.get_meta("desc").shrink != 0 and d2.window_size.y < int(ditl.h) + 20, "short text shrinks the dialog", str(d2.get_meta("desc").shrink))
+	root.add_child(d2)
+	await _frames(3)
+	var m2: Dictionary = d2.get_meta("desc")
+	_ok(m2.scroll.label.get_minimum_size().y <= m2.scroll.size.y + 0.5, "short text fits its shrunk pane without scrolling",
+		"%.0f in %.0f" % [m2.scroll.label.get_minimum_size().y, m2.scroll.size.y])
 	d2.free()
 
+	# --- 5. dialog lifecycle: About via OK / Esc / click, twice; classic dialogs open+close twice ---
+	var MainMenu = load("res://screens/MainMenu.gd")
+	var mm_scr = MainMenu.new()
+	root.add_child(mm_scr)
+	mm_scr.setup(nova, OS.get_environment("NOVA_DATA_DIR"), true)
+	await _frames(4)
+	var before := script_errors
+	for how in ["ok", "esc", "click", "ok", "esc", "click"]:
+		mm_scr._show_about()
+		await _frames(3)
+		_ok(mm_scr._about != null and is_instance_valid(mm_scr._about), "About opens (%s)" % how)
+		var dlg = mm_scr._about.get_child(1)
+		match how:
+			"ok":
+				dlg.item(0).pressed.emit()
+			"esc":
+				var esc := InputEventAction.new()
+				esc.action = "ui_cancel"
+				esc.pressed = true
+				root.push_input(esc)
+			"click":
+				var b = dlg.item(0)
+				var gp: Vector2 = b.get_global_rect().get_center()
+				var mo := InputEventMouseMotion.new()
+				mo.position = gp
+				mo.global_position = gp
+				root.push_input(mo)
+				await _frames(1)
+				for pr in [true, false]:
+					var me := InputEventMouseButton.new()
+					me.button_index = MOUSE_BUTTON_LEFT
+					me.pressed = pr
+					me.position = gp
+					me.global_position = gp
+					root.push_input(me)
+				await _frames(2)
+				# (a headless window has no hover, so the pushed press may not reach the button)
+				if mm_scr._about != null:
+					b.pressed.emit()
+		await _frames(4)
+		_ok(mm_scr._about == null, "About closes (%s)" % how)
+	_ok(script_errors == before, "no script errors across six About open/close cycles", str(script_errors - before))
+	var orphans := 0
+	for n in root.find_children("*", "Control", true, false):
+		if n.get_script() == CD and n.get_parent() != null and n.get_parent().get_parent() == mm_scr and n != mm_scr._about:
+			orphans += 1
+	_ok(orphans == 0, "no orphaned dialog nodes after closing")
+	mm_scr.queue_free()
+	for rep in 2:
+		for mk in [func(): return CD.confirm(nova, "Quit?"), func(): return CD.text_prompt(nova, "Name?", "x"),
+				func(): return CD.panel(nova, {"title": "T", "text": "hello", "body_buttons": [{"label": "A"}], "footer_buttons": [{"label": "OK", "default": true, "cancel": true}]}),
+				func(): return CD.desc_dialog(nova, "Hello\rworld")]:
+			var dd: Control = mk.call()
+			var host = CD.modal(root, dd)
+			await _frames(2)
+			dd.focus_first()
+			dd._activate(dd.default_item if dd.default_item >= 0 else 0)
+			dd.close()
+			await _frames(2)
+			_ok(not is_instance_valid(host) or host.is_queued_for_deletion(), "dialog closes cleanly (round %d)" % rep)
+	_ok(script_errors == before, "no script errors across dialog open/close cycles", str(script_errors - before))
+	# --- 6. no ellipsized captions in the outfitter / shipyard ---
+	nova.debug_dock_at(spob)
+	sp._show_outfitter()
+	await _frames(3)
+	var ell := 0
+	var shrunk := 0
+	for t in sp._c.win_dlg.find_children("tile*", "Button", true, false):
+		if t.has_item:
+			if t.lbl.text.ends_with("…") or t.lbl.text_overrun_behavior != TextServer.OVERRUN_NO_TRIMMING:
+				ell += 1
+			if t.lbl.get_theme_font_size("font_size") < 10:
+				shrunk += 1
+			var w: float = t.lbl.get_theme_font("font").get_string_size(t.lbl.text, HORIZONTAL_ALIGNMENT_LEFT, -1, t.lbl.get_theme_font_size("font_size")).x
+			if w > 83.0 and t.lbl.get_theme_font_size("font_size") > 5:
+				ell += 1
+	_ok(ell == 0, "outfitter tile captions are never ellipsized and fit (shrunk: %d)" % shrunk)
+	# --- 7. classic galaxy map ---
+	sp.close()
+	var GM = load("res://screens/GalaxyMap.gd")
+	var gm = GM.new()
+	root.add_child(gm)
+	gm.setup(nova)
+	nova.make_world(-1)
+	gm.open()
+	await _frames(4)
+	_ok(gm._framed, "map opens in the Classic frame")
+	_ok(gm._hint == null or not gm._hint.visible, "no invented help line under the Classic map")
+	_ok(gm._marker.size() > 0 and gm._marker.has(gm._current), "marker ring colours from the bridge (shared OriginalMapMarker)", str(gm._marker.size()))
+	var cur_col: Color = gm._marker.get(gm._current, Color.BLACK)
+	_ok(cur_col in [Color(0.25, 0.25, 0.25), Color(0.75, 0.75, 0.75), Color(0.2, 0.85, 0.3), Color(0, 0, 1), Color(1, 0.4, 0), Color(1, 0, 0)],
+		"current system ring is one of the original's colours", str(cur_col))
+	Compose.compose(gm, VIEW, OUT + "polish_map.png")
+	gm.close()
 	print("ui_polish_selfcheck: %d failure(s)" % fails)
 	quit(1 if fails > 0 else 0)

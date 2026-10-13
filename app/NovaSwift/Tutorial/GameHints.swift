@@ -1,23 +1,17 @@
 import SwiftUI
+import NovaSwiftStory
 
 /// A one-time, contextual in-game hint — an inline, highlighted, dismissible tip
 /// shown the first time the player reaches a moment that benefits from a nudge
 /// (their first landing, first look at the Mission BBS, and so on). Every hint is
 /// gated by the "Tutorial hints" setting and shown at most once, so it stays
 /// helpful without becoming noise.
-struct GameHint: Identifiable, Equatable {
-    /// Stable id — also the persistence key suffix, so it must never change once
-    /// shipped or the hint would re-appear for players who've already seen it.
-    let id: String
-    let title: String
-    let systemImage: String
-    let message: String
-}
+typealias GameHint = NovaHint
 
 /// Remembers which contextual hints the player has already dismissed. Backed by
 /// `UserDefaults` so a hint fires only once per install (independent of pilots).
 enum HintTracker {
-    private static func key(_ id: String) -> String { "novaswift.hint.\(id)" }
+    private static func key(_ id: String) -> String { NovaHints.storageKey(id) }
 
     static func seen(_ id: String) -> Bool { UserDefaults.standard.bool(forKey: key(id)) }
     static func markSeen(_ id: String) { UserDefaults.standard.set(true, forKey: key(id)) }
@@ -29,25 +23,14 @@ enum HintTracker {
     }
 }
 
-/// The catalog of contextual hints. Keeping them in one place makes it easy to
-/// add more and to reset them all at once.
+/// The catalog of contextual hints (shared with the Godot frontend as
+/// `NovaHints`, NovaSwiftStory). Keeping them in one place makes it easy to add
+/// more and to reset them all at once.
 enum GameHints {
-    static let spaceportServices = GameHint(
-        id: "spaceport.services", title: "Welcome to the spaceport",
-        systemImage: "building.2.fill",
-        message: "Visit the Mission BBS and the Bar to find jobs and meet people, the Trade Center to buy and sell cargo, and the Outfitter or Shipyard to upgrade your ship. Tap Leave to take off again.")
-
-    static let missionBBS = GameHint(
-        id: "missionBBS.howto", title: "Taking a job",
-        systemImage: "list.bullet.rectangle.fill",
-        message: "Select a listing to read its briefing, then Accept to take the job. Cargo and courier missions pay when you deliver — watch for any deadline.")
-
-    static let outfitter = GameHint(
-        id: "outfitter.howto", title: "Upgrading your ship",
-        systemImage: "wrench.and.screwdriver.fill",
-        message: "Outfits install permanently — afterburners, shields, weapons and cargo space. Some need free mass or a specific hull, so check the description before you buy.")
-
-    static let all: [GameHint] = [spaceportServices, missionBBS, outfitter]
+    static let spaceportServices = NovaHints.spaceportServices
+    static let missionBBS = NovaHints.missionBBS
+    static let outfitter = NovaHints.outfitter
+    static let all: [GameHint] = NovaHints.all
 }
 
 /// The inline hint card itself: an amber-accented, dismissible banner in the EV
@@ -95,7 +78,8 @@ extension View {
     func gameHint(_ hint: GameHint, active: Bool,
                   dismissed: Binding<Bool>) -> some View {
         overlay(alignment: .top) {
-            if active && !dismissed.wrappedValue && !HintTracker.seen(hint.id) {
+            if NovaHints.shouldShow(active: active, dismissed: dismissed.wrappedValue,
+                                    seen: HintTracker.seen(hint.id)) {
                 HintBanner(hint: hint) {
                     HintTracker.markSeen(hint.id)
                     dismissed.wrappedValue = true
