@@ -114,6 +114,10 @@ private struct NovaHUDFontFamilyKey: EnvironmentKey {
     static let defaultValue: String? = nil
 }
 
+private struct NovaDesignSpaceTextKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
     /// The device-responsive scale ambient text should render at. Set once per
     /// screen (see `NovaCanvas`, `NovaMenu`, `.novaResponsive()`) — individual
@@ -139,6 +143,16 @@ extension EnvironmentValues {
     var novaHUDFontFamily: String? {
         get { self[NovaHUDFontFamilyKey.self] }
         set { self[NovaHUDFontFamilyKey.self] = newValue }
+    }
+
+    /// True inside an authentic design-space canvas (`NovaCanvas`): text there
+    /// lives in fixed PICT rectangles, so it must scale *exactly* with the
+    /// chrome — no readable-minimum floor, no UI-scale multiplier. Flooring it
+    /// made a phone's status bar shrink while its text didn't, so every
+    /// readout overflowed its box and truncated.
+    var novaDesignSpaceText: Bool {
+        get { self[NovaDesignSpaceTextKey.self] }
+        set { self[NovaDesignSpaceTextKey.self] = newValue }
     }
 }
 
@@ -170,6 +184,7 @@ private struct NovaFontModifier: ViewModifier {
     @Environment(\.novaTextScale) private var scale
     @Environment(\.novaUIScale) private var uiScale
     @Environment(\.novaHUDFontFamily) private var hudFamily
+    @Environment(\.novaDesignSpaceText) private var designSpace
     let role: NovaFontRole
     let weight: Font.Weight
     let baseSize: CGFloat
@@ -180,7 +195,10 @@ private struct NovaFontModifier: ViewModifier {
         // The role's readable min/max floor/ceiling apply to the device-scaled
         // size; the player's global UI-scale then multiplies on top so it can go
         // beyond those bounds intentionally.
-        let size = (baseSize * scale).clamped(to: minimumSize...maximumSize) * uiScale
+        // Design-space text (authentic canvases) tracks its chrome exactly.
+        let size = designSpace
+            ? baseSize * scale
+            : (baseSize * scale).clamped(to: minimumSize...maximumSize) * uiScale
         // Only the HUD role defers to a plug-in-supplied family (ïntf.statusFont);
         // every other role keeps its own so the override can't leak into chrome.
         let family = (role == .hud ? hudFamily : nil) ?? role.family

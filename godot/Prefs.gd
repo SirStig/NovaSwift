@@ -7,6 +7,8 @@
 #   [video]   fullscreen · vsync · scale (window size multiple of 1280×720)
 #   [input]   deadzone (Controls.stick_deadzone) · modern_keys (Controls.layout: the port's
 #             earlier key layout instead of the original's, default off)
+#   [graphics] screen_shake · reduce_flashing · camera_view (0-3) · camera_zoom · chase_tilt -- flight camera and
+#             accessibility (flight/FlightRenderer.gd reads them)
 #   [map]     gate_links — draw hypergate / wormhole spokes on the plain galaxy map (an
 #             enhancement; the original draws them only in the gate picker), default off
 #   [presentation] modern_menu · modern_dialogs · modern_hud · fullscreen_galaxy_map — Classic
@@ -49,6 +51,18 @@ const DEFAULTS := {
 		"hyperspace_effects": true, "check_for_updates": false,
 		"sound_volume_step": 5, "brightness_step": 3},
 	"map": {"gate_links": false},
+	# Tutorial hints (Apple GameSettings.tutorialHints + the per-install UserDefaults seen flags):
+	# enabled gates the one-time hint cards, flight training offer; seen = the NovaHints storage keys
+	# already dismissed, flight_card = the first-flight "Getting started" card, completed = flight
+	# training finished or skipped once (TutorialProgress.hasCompleted).
+	"hints": {"enabled": true, "seen": [], "flight_card": false, "completed": false},
+	# Apple GameplayEnhancements.frequentAutosave (default off = the original's save points only).
+	"gameplay": {"frequent_autosave": false},
+	# In-flight presentation (Apple GameSettings: enhancements.screenShake, reduceFlashing, cameraView,
+	# cameraZoom, chaseTilt). Classic defaults: no shake, the original's fixed north-up camera at 1:1.
+	# camera_view indexes flight/FlightCamera.gd VIEWS (0 Classic, 1 Look ahead, 2 Ship up, 3 Chase).
+	"graphics": {"screen_shake": false, "reduce_flashing": false, "camera_view": 0, "camera_zoom": 1.0,
+		"chase_tilt": 30.0},
 	# Story Guide: the amber storyline badge on mission rows (Apple showMissionStorylineTags).
 	"story": {"show_mission_storyline_tags": true},
 	# Presentation (mirrors the Apple GameSettings modernMainMenu / modernDialogs /
@@ -116,6 +130,48 @@ static func reset_section(section: String) -> void:
 
 static func reset_bindings() -> void:
 	Controls.reset_defaults()
+
+
+## Push the saving settings (Frequent autosave) onto the bridge.
+static func apply_saving(nova: Object) -> void:
+	if nova != null and nova.has_method("set_frequent_autosave"):
+		nova.set_frequent_autosave(bool(get_value("gameplay", "frequent_autosave")))
+
+
+# --- tutorial hints (Apple HintTracker / TutorialProgress) -----------------------------------
+
+static func hints_enabled() -> bool:
+	return bool(get_value("hints", "enabled"))
+
+
+static func hint_seen(key: String) -> bool:
+	var seen = get_value("hints", "seen")
+	return seen is Array and seen.has(key)
+
+
+static func mark_hint_seen(key: String) -> void:
+	var seen = get_value("hints", "seen")
+	var list: Array = seen.duplicate() if seen is Array else []
+	if not list.has(key):
+		list.append(key)
+		set_value("hints", "seen", list)
+		save()
+
+
+## "Show all hints again": the contextual hints and the first-flight card.
+static func reset_hints() -> void:
+	set_value("hints", "seen", [])
+	set_value("hints", "flight_card", false)
+	save()
+
+
+static func tutorial_completed() -> bool:
+	return bool(get_value("hints", "completed"))
+
+
+static func mark_tutorial_completed() -> void:
+	set_value("hints", "completed", true)
+	save()
 
 
 ## Push the audio settings onto a GameAudio node (master / sfx / ui / muted).

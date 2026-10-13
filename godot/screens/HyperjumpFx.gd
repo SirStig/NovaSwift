@@ -2,16 +2,20 @@
 #
 # The engine flies the maneuver itself (brake -> turn -> spin-up tunnel, then the
 # fire); this layer only reads `hyperjump_state()` and dresses it: speed streaks
-# along the bearing while the tunnel runs, the original's fade to white once the
-# jump's progress passes 55, and a white flash that clears on arrival. Deliberately
-# simple — fidelity polish (sound cues, reduced-flashing option) comes later.
+# the original's fade to white once the jump's progress passes 55 (1.5 s, the Mac build), then the
+# arrival boom flash that fades back out over 1.5 s -- exactly GameScene.stepJump `.engaged` / `.arrive`.
+# The original draws NO speed streaks (the tunnel is only the ship's own position step and the parallax
+# dust the starfield already shows), so none are drawn here. "Reduce flashing" caps the white at 0.45;
+# Classic Preferences > Hyperspace Fx off skips the fade and flashes black for 0.1 s.
 
 extends CanvasLayer
 
 signal arrived(system_name: String)
 
 const FADE_SECONDS := 1.5       # the Mac's fade to white (GameScene .engaged)
-const FLASH_DECAY := 1.0        # arrival flash fall-off, seconds
+const ARRIVE_FADE := 1.5        # arrival flash fall-off (jumpArriveFade, Mac look)
+const ARRIVE_FADE_NO_FX := 0.1
+const Prefs = preload("res://Prefs.gd")
 const STREAKS := 90
 
 var nova
@@ -42,6 +46,16 @@ func setup(world) -> void:
 		})
 
 
+## Reduce flashing caps the white at 0.45 (Apple `cap`).
+func _cap() -> float:
+	return 0.45 if bool(Prefs.get_value("graphics", "reduce_flashing")) else 1.0
+
+
+## Classic Preferences "Hyperspace Fx" off = the original's noHyperspaceEffects.
+func _no_fx() -> bool:
+	return not bool(Prefs.get_value("classic", "hyperspace_effects"))
+
+
 func _process(delta: float) -> void:
 	if nova == null:
 		return
@@ -52,22 +66,15 @@ func _process(delta: float) -> void:
 
 	if _phase == 0:
 		_fade = 0.0
-	elif st[2] > 0.5:
-		_fade = minf(1.0, _fade + delta / FADE_SECONDS)
+	elif st[2] > 0.5 and not _no_fx():
+		_fade = minf(_cap(), _fade + delta / FADE_SECONDS * _cap())
 
-	_flash = maxf(0.0, _flash - delta / FLASH_DECAY)
+	_flash = maxf(0.0, _flash - delta / (ARRIVE_FADE_NO_FX if _no_fx() else ARRIVE_FADE) * _cap())
 	var arrival: String = nova.take_jump_arrival()
 	if arrival != "":
-		_flash = 1.0
+		_flash = _cap()
 		_fade = 0.0
 		arrived.emit(arrival)
-
-	if _phase == 2:
-		for s in _streaks:
-			var p: Vector2 = s["pos"]
-			var dir := Vector2(sin(_bearing), -cos(_bearing))
-			p -= dir * s["speed"] * clampf(_progress / 40.0, 0.05, 1.5) * delta
-			s["pos"] = Vector2(fposmod(p.x, 1.0), fposmod(p.y, 1.0))
 
 	var active := _phase != 0 or _flash > 0.0
 	_canvas.visible = active
@@ -77,13 +84,8 @@ func _process(delta: float) -> void:
 
 func _on_draw() -> void:
 	var size := _canvas.size
-	if _phase == 2:
-		var dir := Vector2(sin(_bearing), -cos(_bearing))
-		var strength := clampf(_progress / 30.0, 0.05, 1.0)
-		for s in _streaks:
-			var a: Vector2 = Vector2(s["pos"].x * size.x, s["pos"].y * size.y)
-			var b: Vector2 = a + dir * (8.0 + 160.0 * strength * s["len"])
-			_canvas.draw_line(a, b, Color(0.85, 0.92, 1.0, 0.25 + 0.55 * strength), 1.5)
 	var white := maxf(_fade, _flash)
 	if white > 0.0:
-		_canvas.draw_rect(Rect2(Vector2.ZERO, size), Color(1, 1, 1, white))
+		var c := Color.BLACK if _no_fx() else Color.WHITE
+		c.a = white
+		_canvas.draw_rect(Rect2(Vector2.ZERO, size), c)

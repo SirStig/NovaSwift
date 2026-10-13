@@ -1667,6 +1667,10 @@ public final class World {
             ship.entryOverspeedDecayPerSec = OriginalSpawnRules.arrivalBrakePerSecondSquared
             events.append(.shipEmergedFromGate(entityID: ship.entityID, gateSpobID: spobID, at: ship.position))
         }
+        // Callers place the ship (position / heading) after construction; seed the render pose so the
+        // first drawn frame is AT the spawn point, not interpolated in from wherever `init` left it.
+        ship.renderPrevPosition = ship.position
+        ship.renderPrevAngle = ship.angle
         applyDerelictGovtIfNeeded(ship)
         refreshRoster()
         return ship.entityID

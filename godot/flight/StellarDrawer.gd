@@ -111,7 +111,7 @@ func draw_selection(ci: CanvasItem, dt: float) -> void:
 	if sel < 0:
 		_cursor_id = -1
 		return
-	var idx := r.body_ids.find(sel)
+	var idx: int = r.body_ids.find(sel)
 	if idx < 0:
 		return
 	var wpos := Vector2(r.body_xf[idx * 4], r.body_xf[idx * 4 + 1])

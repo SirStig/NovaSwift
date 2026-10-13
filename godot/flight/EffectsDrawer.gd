@@ -25,6 +25,8 @@ const FX_SHIP_DESTROYED := 5
 const FX_MUZZLE := 6
 const FX_DISABLED := 7
 const FX_AREA_BLAST := 8
+const FX_LAUNCHED := 9
+const FX_LANDED := 10
 
 const EXPLOSION_POOL := 32          # OriginalRendering.explosionPoolSize
 const SMOKE_POOL := 64              # OriginalRendering.smokePoolSize
@@ -44,6 +46,7 @@ var deaths: Array = []      # {pos, boom, age, fired, final, player}
 var delayed: Array = []     # area-blast puffs waiting to start {pos, boom, delay, diameter}
 var _flash_tex: ImageTexture
 var _clock := 0.0
+var death_bursts := 0          # bursts fired by death sequences so far (9 staggered + 1 final per hull)
 
 
 func setup(renderer) -> void:
@@ -136,10 +139,12 @@ func _age_all(dt: float) -> void:
 				randf_range(-BURST_JITTER, BURST_JITTER))
 			spawn_explosion(at, 32.0 + i * 4.0, s["boom"])
 			r.shake(at, 60.0)
+			death_bursts += 1
 			s["fired"] = i + 1
 		if not s["final"] and s["age"] >= BURSTS * BURST_INTERVAL:
 			spawn_explosion(s["pos"], 96.0, s["boom"])
 			r.shake(s["pos"], 110.0)
+			death_bursts += 1
 			s["final"] = true
 		if not s["final"]:
 			keep.append(s)
@@ -163,6 +168,11 @@ func _spawn_row(kind: int, pos: Vector2, p0: float, p1: float, col: Color) -> vo
 			rings.append({"pos": pos, "age": 0.0})
 		FX_AREA_BLAST:
 			spawn_area_blast(pos, int(p0))
+		FX_LAUNCHED:
+			r.ships.launches[int(p0)] = 0.0
+		FX_LANDED:
+			r.ships.ghosts.append({"type": int(p0), "frame": int(p1), "from": pos,
+				"to": Vector2(col.r, col.g), "age": 0.0})
 		_:
 			pass   # kinds 5 (destroyed) and 6 (muzzle): the Apple app draws nothing for them
 
@@ -273,7 +283,7 @@ func draw_add(ci: CanvasItem) -> void:
 		if e == null:
 			continue
 		var idx := mini(int(b["age"] / b["dur"]), e["frames"] - 1)
-		var sz := Vector2(e["fw"], e["fh"]) * b["scale"]
+		var sz: Vector2 = Vector2(e["fw"], e["fh"]) * float(b["scale"])
 		ci.draw_set_transform_matrix(base * Transform2D(b["rot"], r.w2l(b["pos"])))
 		ci.draw_texture_rect_region(e["tex"], Rect2(-sz * 0.5, sz), Sprites.src(e, idx), Color.WHITE)
 	ci.draw_set_transform_matrix(base)

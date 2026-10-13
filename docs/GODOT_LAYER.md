@@ -820,3 +820,64 @@ Godot loads plug-ins exactly like the Apple app; the rules are shared code.
 * **Story Map**: `story_map_lanes` now carries `pluginLabels`; `StoryGuide.plugin_label` shows plug-in names.
 * `NOVA_PLUGIN_OFFLINE=1` stops the catalog from touching the network (CI, self-checks).
 * Check: `NOVA_PLUGIN_OFFLINE=1 NOVA_DATA_DIR=$PWD/data/base godot --headless --path godot -s res://tests/plugins_selfcheck.gd`.
+
+
+## Flight rendering (`godot/flight/`) -- Apple Classic parity pass
+
+`Main.gd` no longer draws the world. `flight/FlightRenderer.gd` (a `show_behind_parent` child) owns it and stacks `FlightLayer`s (one blend mode each: `mix`, `add`, `fill`) in the Apple scene's z order: world, murk fog, hulls, hull fog, additive glows, shots, additive fx, beams, fx. Main calls `_flight.frame(delta, bar_width, sim_ran)` once per frame after `nova.step`; the renderer snapshots every bridge readback once, moves the camera and advances effects.
+
+Drawers: `FlightSprites` (decoded-sheet cache incl. cicn), `FlightCamera` (CameraRig port + shake), `StarfieldDrawer`, `StellarDrawer` (animated/destroyed stellars, murk, nav cursor cicn 10000-10007), `ShipDrawer` (shan layers, launch grow-in, landing ghosts, reticle cicn 10008-10023), `ShotDrawer` (art/rotation sheets, trails, corona beams, beam art, lightning), `EffectsDrawer` (boom sprites, flashes, SWParticles, smoke cicn, death sequence, area blasts, hit sprays).
+
+Bridge additions (`FlightVisuals.swift`, section `// MARK: Flight visuals` in NovaWorld.swift): `ship_layers()` (stride `ship_layer_stride()` = 26: set, heading, fps, alt set, light/weapon-glow/shield/engine alphas, disabled, bank, opacity, tint, fog, blend, gate wash, ion, thrust, over-speed, gate flag), `stellar_states()`, `projectile_extra()`, `beam_weapons()`, `weapon_visual(id)`, `target_reticle()`, `stellar_dominated_visual(id)`, `player_max_speed()`, `cicn_info/cicn_rgba`, `set_flight_options()`, sprite kind 11 (shan alt layer), effect kinds 7-10 (disabled, area blast, launched, landed). Rules live in `Sources/NovaSwiftEngine/HullAnimator.swift` (Foundation-only port of `HullAnimation.swift` + shield flare) and the existing `StellarAnimator`, `MurkFog`, `OriginalRendering`. `World.addNPC` now seeds the render pose so an arriving ship is drawn at its spawn point.
+
+Arrivals/departures follow Apple Classic exactly: a hyperspace jump-in draws nothing special (the engine's own 50 px/tick over-speed braking carries the ship in), departure just vanishes, gate emergence/entry is the white wash from the AI record, a launch grows in (0.08 to 1 over 0.5 s, fade 0.4 s), a landing shrinks into the stellar (0.5 s). The player's jump (`screens/HyperjumpFx.gd`) is the Mac look: 1.5 s fade to white after the cue, boom flash on arrival fading over 1.5 s, no streaks (the original draws none); Reduce flashing caps the white at 0.45; Classic Preferences Hyperspace Fx off = 0.1 s black flash.
+
+Settings: Graphics > Flight View (`[graphics] camera_view/camera_zoom/screen_shake/reduce_flashing`); the Classic Preferences flags Engine Glows, Running Lights, Weapon Effects, Smoke Trails, Parallax, Ship Animations are honoured. Chase falls back to Ship up as in Apple without live 3D. Check: `godot/tests/flight_visuals_selfcheck.gd`.
+
+
+## New-pilot flow (intro, training, hints, death, slots, autosave)
+
+Ports Apple's `IntroSequenceView`, `Tutorial/`, `PilotGroupDetailView` / `PilotBackupsView`,
+`GameContainerView.onPlayerDestroyed` and `frequentAutosave`. Shared Swift (new files in
+`Sources/NovaSwiftStory`, Apple calls them too): `TutorialCurriculum.swift` (steps, wording per
+control style, `TutorialProgression` state machine), `GameHintCatalog.swift` (`NovaHints`, the
+should-show rule), `PilotGroups.swift` (slots, backup history, Strict Play group delete). Tests:
+`Tests/NovaSwiftStoryTests/NewPilotFlowTests.swift`. Apple files changed (behaviour-identical
+refactors only): `Tutorial/TutorialModel.swift` (types + wording moved; `TutorialCourse.build` keeps
+its signature and supplies the control style / labels, `TutorialRun` mirrors a shared
+`TutorialProgression`), `Tutorial/GameHints.swift` (`GameHint` = `NovaHint`, catalog and `shouldShow`
+shared), `TutorialCoachView.swift` / `TutorialContainerView.swift` (import only).
+
+Flow (`Shell.gd`): New Pilot (`PilotMenu.pilot_created`, only when a host listens) -> `IntroSequence.gd`
+(chär intro PICTs, each `IntroPictDelay x 60 ms`, then the intro dësc text page; click / Enter / A
+advance, Esc / B / the corner button skip) -> `Tutorial.make_offer` (first pilot only, Tutorial
+hints on) -> play, or `start_training("play")`. Training swaps a throwaway pilot into the bridge
+(`tutorial_begin` / `tutorial_end`): invulnerable, nothing saves, landing only completes the lesson
+(no spaceport). The coach (`Tutorial.gd`) words the steps for the pad (button names) or the bound
+keys and watches the flight at 5 Hz exactly like Apple. Buttons are mouse-only (A / Space fire the
+ship): Enter / A continue manual cards, Backspace skips a step, Delete skips the tutorial, Esc /
+Start opens the pause menu whose entry reads "Leave Training". Settings > Interface > Tutorial has
+Tutorial hints, Show all hints again and (from the main menu) Flight Training (exit = main menu).
+
+Hints (`Hints.gd`): the first-flight "Getting started" card and the spaceport / Mission BBS / Outfitter
+banners, seen flags in Prefs `[hints]`. Dismissed by the X / Got it button or after 20 s (so pad and
+keyboard players never need the mouse); the docked screen is read from Main's Spaceport `_screen`.
+
+Death: Main's `_check_game_over` (2.2 s) calls `Shell.on_player_killed` -> bridge `pilot_killed`:
+Strict Play deletes every slot and backup (`PilotGroups.deleteGroupAfterStrictPlayDeath`), else the
+pilot is marked killed and the Classic menu readout shows "<name> has been killed" (STR# 2002 #277,
+the Kenny easter egg) while Enter Ship only beeps (`classic_menu_readout_state`). While the New
+Pilot dialog is up the readout says "Creating Pilot..." (#275). The menu readout now reads the
+configured Pilots folder (it still read `user://pilots`).
+
+Slots and backups (`PilotMenu.gd`): Manage > pilot > Slots & Backups -> group screen (play slot, New
+Save Slot up to 3, delete slot, rename, View All Backups) -> backups browser (all slots, newest
+first; picking one restores that slot, backing up the current state first, and plays it). Classic
+panels or plain panels; focus navigation only.
+
+Frequent autosave: Settings > Data & Advanced > Frequent autosave (Prefs `[gameplay]`,
+`Prefs.apply_saving` -> `set_frequent_autosave`). Off = the original (launch / quit while landed /
+event saves only). On adds land, jump and a 180 s in-flight heartbeat, and the in-flight position is
+saved and restored (`PilotSaveReason.shouldSave`).
+
+Verify: `godot/tests/new_pilot_flow_selfcheck.gd` (headless; NOVA_PILOTS_DIR scratch).

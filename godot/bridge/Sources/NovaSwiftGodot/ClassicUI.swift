@@ -267,9 +267,18 @@ enum ClassicUIBackend {
     /// The loaded-pilot readout as JSON `{lines:[{text, dx, baseline, label}], pict, centred}` for `save`
     /// (offsets from the menu centre, baselines too -- `MainMenuReadout`), or the single
     /// centred line for the no-pilot state when `save` is nil.
-    static func menuReadout(_ game: NovaGame, save: PilotSave?) -> String {
+    static func menuReadout(_ game: NovaGame, save: PilotSave?, state: String = "") -> String {
         let s2002 = game.stringList(2002)
         func misc(_ i: Int) -> String { s2002?.string(at: i) ?? "" }
+        // The two single-line states of the menu redraw (AuthenticMainMenuView.pilotStatus).
+        if state == "creating" {
+            return json(["lines": [], "pict": -1, "centred": misc(MainMenuReadout.creatingPilotString)])
+        }
+        if state == "killed", let save {
+            return json(["lines": [], "pict": -1,
+                         "centred": MainMenuReadout.killedLine(pilotName: save.displayName,
+                                                               killedText: misc(MainMenuReadout.killedString))])
+        }
         guard let save else {
             return json(["lines": [], "pict": -1, "centred": misc(MainMenuReadout.noPilotString)])
         }

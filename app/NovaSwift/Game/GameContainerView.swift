@@ -2665,7 +2665,7 @@ struct GameContainerView: View {
         if let style = activeHUDStyle(host) {
             return Self.sidebarWidth(in: size, style: style)
         }
-        return GameHUDView.reservedRightWidth(largerHUD: model.settings.largerHUD)
+        return GameHUDView.reservedRightWidth(largerHUD: model.settings.largerHUD, viewportHeight: size.height)
     }
 
     /// The authentic status-bar style to actually render, or nil to fall back to

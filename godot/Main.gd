@@ -119,6 +119,9 @@ func _ready() -> void:
 	Prefs.apply_video()
 	nova = ClassDB.instantiate("NovaWorld")
 	add_child(nova)
+	_flight = FlightRenderer.new()
+	add_child(_flight)
+	_flight.setup(nova)
 	_audio = GameAudio.new()
 	add_child(_audio)
 	_audio.setup(nova)
@@ -129,7 +132,7 @@ func _ready() -> void:
 	_nav.setup(nova)
 	_nav.log_message.connect(_push_log)
 	_nav.screen_closed.connect(_suppress_held)
-	_nav.arrived.connect(func(_n): _fx.clear(); _refresh_background())
+	_nav.arrived.connect(func(_n): _refresh_flight())
 
 	_interact = Interactions.new()
 	add_child(_interact)
@@ -166,16 +169,13 @@ func _ready() -> void:
 	_dev.setup(nova, Callable(self, "_dbg_to_screen"))
 
 	_start_world()
-	_seed_starfield()
 	_nav.run_selftest_if_requested()
 
 
 # The observe goal counts a mission ship as seen only inside the visible play area.
 # World (engine) -> screen position, for the debug suite's AI overlay (inverse of the click mapping).
 func _dbg_to_screen(w: Vector2) -> Vector2:
-	var pw: Vector2 = nova.player_position()
-	var ctr := _play_center(get_viewport_rect().size)
-	return Vector2(ctr.x + (w.x - pw.x), ctr.y - (w.y - pw.y))
+	return _flight.world_to_screen(w)
 
 
 func _sync_story_view() -> void:
@@ -195,7 +195,7 @@ func _start_world() -> void:
 			nova.make_demo_world()
 			_has_data = false
 			print("NOVA Swift: no data found — running demo world")
-		_refresh_background()
+		_refresh_flight()
 		return
 	# Otherwise the shell shows the main menu (or the data-setup screen first);
 	# the world isn't built until a pilot is chosen or the demo is picked.
@@ -207,14 +207,14 @@ func _on_pilot_chosen() -> void:
 		nova.make_demo_world()
 		_has_data = false
 	_suppress_held()
-	_refresh_background()
+	_refresh_flight()
 
 
 func _on_demo_chosen() -> void:
 	nova.make_demo_world()
 	_has_data = false
 	_suppress_held()
-	_refresh_background()
+	_refresh_flight()
 
 
 # Esc / Start in plain flight opens the pause menu. Every screen that uses those
@@ -228,11 +228,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			and _can_pause():
 		# Click to select (GameScene.selectAt): a ship under the pointer locks as the target,
 		# a stellar takes the travel selection, your own ship clears the target, empty
-		# space clears the stellar. Screen -> world is the inverse of _to_screen.
-		var vp := get_viewport_rect().size
-		var pw: Vector2 = nova.player_position()
-		var ctr := _play_center(vp)
-		var world_pos := Vector2(pw.x + (event.position.x - ctr.x), pw.y - (event.position.y - ctr.y))
+		# space clears the stellar. Screen -> world is FlightRenderer.screen_to_world.
+		var world_pos: Vector2 = _flight.screen_to_world(event.position)
 		nova.click_select(world_pos.x, world_pos.y)
 
 
@@ -248,27 +245,24 @@ func _notification(what: int) -> void:
 		nova.pilot_autosave("backgroundLanded" if nova.is_landed() else "background")
 
 
-# The system's own sÿst.BkgndColor. Re-read whenever the world is rebuilt, not
-# per frame — it only changes when the system does.
-func _refresh_background() -> void:
-	var rgb: PackedFloat32Array = nova.system_background_color()
-	if rgb.size() >= 3 and (rgb[0] + rgb[1] + rgb[2]) > 0.0:
-		_background = Color(rgb[0], rgb[1], rgb[2])
-	else:
-		# Pure black is what the demo world and most ordinary systems report;
-		# lift it a hair so the starfield has something to sit against.
-		_background = Color(0.02, 0.02, 0.06)
+# The world was (re)built: the renderer re-reads the system's sÿst.BkgndColor, drops transient effects and
+# snaps the camera. Not per frame — it only changes when the system does.
+func _refresh_flight() -> void:
+	_flight.has_data = _has_data
+	_flight.reset_world()
 
 
-func _seed_starfield() -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 0x50FA
-	_stars_near = PackedVector2Array()
-	_stars_far = PackedVector2Array()
-	for i in 220:
-		_stars_far.append(Vector2(rng.randf() * _field.x, rng.randf() * _field.y))
-	for i in 140:
-		_stars_near.append(Vector2(rng.randf() * _field.x, rng.randf() * _field.y))
+## The width the Classic status bar reserves (the world is centred in the part to its left).
+func _hud_bar_width() -> float:
+	if _has_data and ClassicTheme.classic("hud") and _classic_hud != null:
+		return _classic_hud.get_child(0).bar_width(get_viewport_rect().size)
+	return 0.0
+
+
+func _flight_frame(delta: float, sim_ran: bool) -> void:
+	_flight.has_data = _has_data
+	_flight.set_active(true)
+	_flight.frame(delta, _hud_bar_width(), sim_ran)
 
 
 func _process(delta: float) -> void:
@@ -276,6 +270,7 @@ func _process(delta: float) -> void:
 		return
 	if _shell.in_menu():
 		$HUD.visible = false
+		_flight.set_active(false)
 		return
 	if _shell.is_paused():
 		return   # pause menu up: the sim, HUD and last frame stay frozen
@@ -293,6 +288,7 @@ func _process(delta: float) -> void:
 		# flight HUD label is a Control child, so it draws *over* this script's
 		# _draw output and has to be hidden explicitly.
 		hud.visible = false
+		_flight.set_active(false)
 		if not _spaceport.is_open():
 			_spaceport.open()   # screens/Spaceport.gd owns input while docked
 		_drain_events_to_log(delta)
@@ -306,6 +302,7 @@ func _process(delta: float) -> void:
 	hud.visible = not (_has_data and ClassicTheme.classic("hud"))
 
 	if _nav.blocks_flight() or _interact.blocks_flight() or _story.blocks_flight():   # map / hail / plunder dialog up: sim paused
+		_flight_frame(0.0, false)
 		_drain_events_to_log(delta)
 		queue_redraw()
 		return
@@ -313,9 +310,8 @@ func _process(delta: float) -> void:
 	if _dev != null and _dev.captures_input():   # debug suite up: keys belong to it, the sim keeps running
 		nova.set_intent(false, false, false, false, false, false, false)
 		nova.step(delta)
-		_snapshot_frame()
+		_flight_frame(delta, true)
 		_drain_events_to_log(delta)
-		_advance_fx(delta)
 		queue_redraw()
 		return
 
@@ -327,35 +323,17 @@ func _process(delta: float) -> void:
 	nova.step(delta)
 	_check_game_over(delta)
 
-	_snapshot_frame()
+	_flight_frame(delta, true)
 	_process_hotkeys()
 	_drain_events_to_log(delta)
-	_advance_fx(delta)
 	_update_top_label()
 	queue_redraw()
-
-
-# Pull every per-frame table across the bridge exactly once.
-func _snapshot_frame() -> void:
-	_ship_xf = nova.ship_transforms()
-	_ship_sf = nova.ship_sprite_frames()
-	_ship_ids = nova.ship_ids()
-	_ship_rel = nova.ship_relationships()
-	_ship_vis = nova.ship_visuals()
-	_shot_xf = nova.projectile_transforms()
-	_shot_style = nova.projectile_styles()
-	_beams = nova.beam_segments()
-	_roid_xf = nova.asteroid_transforms()
-	_roid_style = nova.asteroid_styles()
-	_box_xf = nova.freeflight_transforms()
-	_box_style = nova.freeflight_styles()
 
 
 func _on_launch() -> void:
 	if nova.launch():
 		_suppress_held()
-		_fx.clear()
-		_refresh_background()
+		_refresh_flight()
 
 
 func _update_top_label() -> void:
@@ -458,7 +436,6 @@ func _on_land() -> void:
 	match result:
 		"landed":
 			_suppress_held()
-			_fx.clear()
 		"gate":
 			_suppress_held()
 			_nav.open_gate_picker()
@@ -559,7 +536,7 @@ func _check_game_over(delta: float) -> void:
 	if _death_timer >= 0.0:
 		_death_timer -= delta
 		if _death_timer < 0.0:
-			_shell.return_to_menu()
+			_shell.on_player_killed()
 
 
 # MARK: HUD — status bars, weapon readout, target panel, radar, message log.
@@ -660,6 +637,8 @@ func _draw_radar(vp: Vector2, pw: Vector2) -> void:
 
 	var j := 0
 	var n := 0
+	var _ship_xf: PackedFloat32Array = _flight.ship_xf
+	var _ship_rel: PackedInt32Array = _flight.ship_rel
 	while j + 3 < _ship_xf.size():
 		if n > 0:  # index 0 is the player; drawn as the fixed center dot below.
 			var world_offset := Vector2(_ship_xf[j], _ship_xf[j + 1]) - pw

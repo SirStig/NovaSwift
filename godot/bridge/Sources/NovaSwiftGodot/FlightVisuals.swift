@@ -16,7 +16,7 @@ import NovaSwiftKit
 
 final class FlightVisuals {
     /// Floats per ship in `shipLayers()`. Column meanings are documented there.
-    static let layerStride = 24
+    static let layerStride = 26
 
     // Options pushed by the frontend (Classic preferences / accessibility).
     var shipAnimations = true
@@ -32,10 +32,15 @@ final class FlightVisuals {
     /// Per body (same order as `bodyTransforms`): [frame, destroyed, fog].
     private(set) var stellarRows: [Float] = []
     private var lastFlickerSeed = 0
+    /// Last drawn type / heading frame / position per ship, so a landing ship (already removed from the world
+    /// when its event arrives) can still be drawn shrinking into the stellar.
+    private var lastInfo: [Int: (type: Int, frame: Int, pos: Vec2)] = [:]
+    /// Effect rows raised by `note` (landing ghosts), drained into `pendingEffects` by the caller.
+    var extraEffects: [Float] = []
 
     /// A new world was built: drop every per-entity clock.
     func reset() {
-        layers.removeAll(); rows.removeAll(); animators.removeAll(); stellarRows.removeAll()
+        layers.removeAll(); rows.removeAll(); lastInfo.removeAll(); extraEffects.removeAll(); animators.removeAll(); stellarRows.removeAll()
         animatorSystem = Int.min
     }
 
@@ -63,10 +68,19 @@ final class FlightVisuals {
     // MARK: Events
 
     /// `GameScene`: firing a weapon whose `Flags2` has 0x0200 flashes the shooter's weapon glow.
+    var bodies: [StellarBody]?
     func note(event: WorldEvent, game: NovaGame?) {
         switch event {
         case let .weaponFired(shooterID, _, _, _, weaponID):
             if usesShipWeaponSprite(weaponID, game: game) { layers[shooterID, default: ShipLayerState()].weaponGlowFlare = 1 }
+        case let .shipLanded(entityID, spobID, at):
+            if let info = lastInfo[entityID], let body = bodies?.first(where: { $0.id == spobID }) {
+                // kind 10: ghost = shipType, frame; rgb carry the stellar position.
+                extraEffects.append(contentsOf: [10, Float(at.x), Float(at.y), Float(info.type), Float(info.frame),
+                                                 Float(body.position.x), Float(body.position.y), 0])
+            }
+        case let .shipLaunched(entityID, at):
+            extraEffects.append(contentsOf: [9, Float(at.x), Float(at.y), Float(entityID), 0, 0, 0, 0])
         case let .beam(shooterID, _, _, _, _, _, weaponID):
             if usesShipWeaponSprite(weaponID, game: game) { layers[shooterID, default: ShipLayerState()].weaponGlowFlare = 1 }
         default:
@@ -208,6 +222,7 @@ final class FlightVisuals {
             }
 
             layers[id] = st
+            lastInfo[id] = (ship.shipTypeID, heading, pos)
             let altSet = cfg.altSet(animClock: st.animClock)
             rows[id] = [
                 Float(set), Float(heading), Float(cfg.framesPerSet), Float(altSet),
@@ -217,6 +232,9 @@ final class FlightVisuals {
                 Float(fog), Float(blend.f), Float(blend.r), Float(blend.g), Float(blend.b),
                 Float(gateHidden), Float(gateWhite), Float(ionIntensity), Float(thrust),
                 Float(st.shieldFlare),
+                // 24: hyperspace jump-in over-speed still braking (px/s; the engine's own arrival kinematics),
+                // 25: gate emergence in progress (1) -- the AI record's fade is already in 19/20.
+                Float(ship.entryOverspeed), Float(world.originalAI.record(for: id)?.gateFade != nil ? 1 : 0),
             ]
         }
 

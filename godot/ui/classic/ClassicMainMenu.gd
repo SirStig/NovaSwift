@@ -278,9 +278,13 @@ func _menu_sound(id: int) -> void:
 
 # --- the pilot readout ------------------------------------------------------------------
 
-## Show the readout for save `id` in `dir` ("" = no pilot loaded).
-func set_pilot(dir: String, id: String) -> void:
-	var parsed = JSON.parse_string(nova.classic_menu_readout(dir, id))
+## Show the readout for save `id` in `dir` ("" = no pilot loaded). `state`: "" (the normal readout),
+## "killed" ("<name> has been killed", or the Kenny line) or "creating" ("Creating Pilot...") -- the
+## two single-line states of Apple's AuthenticMainMenuView.pilotStatus.
+func set_pilot(dir: String, id: String, state := "") -> void:
+	var raw: String = nova.classic_menu_readout_state(dir, id, state) if state != "" \
+			else nova.classic_menu_readout(dir, id)
+	var parsed = JSON.parse_string(raw)
 	_readout.data = parsed if parsed is Dictionary else {}
 	var pid := int(_readout.data.get("pict", -1))
 	var tex: Texture2D = Theme_.pict(pid) if pid >= 0 else null

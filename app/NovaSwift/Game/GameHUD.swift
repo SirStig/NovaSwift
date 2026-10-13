@@ -333,14 +333,31 @@ struct GameHUDView: View {
     /// other top-right/right-edge screen UI — the touch-controls Actions
     /// cluster, the land prompt — must inset by this instead, or they paint
     /// directly over the target/landing readouts this stack shows.
-    static func reservedRightWidth(largerHUD: Bool) -> CGFloat {
-        baseSidebarWidth * (largerHUD ? 1.28 : 1) + 12
+    static func reservedRightWidth(largerHUD: Bool, viewportHeight: CGFloat) -> CGFloat {
+        baseSidebarWidth * scale(largerHUD: largerHUD, viewportHeight: viewportHeight) + 12
+    }
+
+    /// The whole stack's uniform scale. A full stack (system + radar + status
+    /// + nav + target) stands ~540pt tall, so on a landscape phone (~375–430pt)
+    /// it ran off the bottom and claimed a quarter of the width; there it's
+    /// shrunk as one piece — every panel, bar and glyph together — instead of
+    /// some text staying big and truncating. "Larger HUD" multiplies on top.
+    static func scale(largerHUD: Bool, viewportHeight: CGFloat) -> CGFloat {
+        let fit = viewportHeight > 0 ? min(1, max(0.72, viewportHeight / 540)) : 1
+        return fit * (largerHUD ? 1.28 : 1)
     }
 
     private var panel: Color { Color.black.opacity(highContrast ? 0.75 : 0.42) }
     private var edge: Color { .white.opacity(highContrast ? 0.4 : 0.12) }
 
     var body: some View {
+        GeometryReader { geo in
+            stack(scale: Self.scale(largerHUD: largerHUD, viewportHeight: geo.size.height))
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func stack(scale: CGFloat) -> some View {
         HStack(alignment: .top, spacing: 0) {
             Spacer(minLength: 0)
             VStack(alignment: .leading, spacing: 7) {
@@ -351,12 +368,11 @@ struct GameHUDView: View {
                 targetPanel
             }
             .frame(width: sidebarW)
-            // "Larger HUD" scales the whole stack up, anchored to the top-right
-            // corner so it still hugs the edge.
-            .scaleEffect(largerHUD ? 1.28 : 1.0, anchor: .topTrailing)
+            // Scaled as one piece (compact screens down, "Larger HUD" up),
+            // anchored to the top-right corner so it still hugs the edge.
+            .scaleEffect(scale, anchor: .topTrailing)
             .padding(.top, 12).padding(.trailing, 12)
         }
-        .allowsHitTesting(false)
         .font(.system(.caption, design: .monospaced))
         .foregroundStyle(.white)
     }
@@ -377,7 +393,7 @@ struct GameHUDView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(model.shipName.isEmpty ? "SHIP" : model.shipName.uppercased())
                     .font(.system(.footnote, design: .monospaced).weight(.bold))
-                    .foregroundStyle(amber).lineLimit(1)
+                    .foregroundStyle(amber).lineLimit(1).minimumScaleFactor(0.6)
                 if !model.systemName.isEmpty {
                     infoRow("location.fill", model.systemName)
                 }
@@ -393,7 +409,7 @@ struct GameHUDView: View {
         HStack(spacing: 5) {
             Image(systemName: icon).font(.system(size: 9)).foregroundStyle(.secondary).frame(width: 12)
             Text(text).font(.system(size: 10, design: .monospaced)).foregroundStyle(.white.opacity(0.9))
-                .lineLimit(1)
+                .lineLimit(1).minimumScaleFactor(0.6)
             Spacer(minLength: 0)
         }
     }
@@ -435,7 +451,7 @@ struct GameHUDView: View {
                     HStack(spacing: 5) {
                         Image(systemName: "scope").font(.system(size: 9))
                         Text(model.weaponAmmo >= 0 ? "\(model.weaponName) ×\(model.weaponAmmo)" : model.weaponName)
-                            .lineLimit(1)
+                            .lineLimit(1).minimumScaleFactor(0.6)
                         Spacer(minLength: 0)
                     }
                     .font(.system(size: 9, design: .monospaced)).foregroundStyle(.cyan)
@@ -454,7 +470,8 @@ struct GameHUDView: View {
                     // Grayed while too close to the system's centre to actually
                     // engage hyperspace right now.
                     Text(model.navCourseSystemName.uppercased())
-                        .font(.system(size: 11, design: .monospaced).weight(.semibold)).lineLimit(1)
+                        .font(.system(size: 11, design: .monospaced).weight(.semibold))
+                        .lineLimit(1).minimumScaleFactor(0.6)
                         .foregroundStyle(model.canJumpNow ? Color.primary : Color.secondary)
                     Text("\(model.navCourseJumps) JUMP\(model.navCourseJumps == 1 ? "" : "S")")
                         .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
@@ -465,7 +482,8 @@ struct GameHUDView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     sectionLabel("DESTINATION")
                     Text(model.navTargetName.uppercased())
-                        .font(.system(size: 11, design: .monospaced).weight(.semibold)).lineLimit(1)
+                        .font(.system(size: 11, design: .monospaced).weight(.semibold))
+                        .lineLimit(1).minimumScaleFactor(0.6)
                     Text(model.navTargetLandable ? "Landable" : "No clearance")
                         .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
                 }
@@ -483,7 +501,7 @@ struct GameHUDView: View {
                     Text(model.targetName.uppercased())
                         .font(.system(.caption, design: .monospaced).weight(.bold))
                         .foregroundStyle(model.targetHostile ? Color(red: 0.95, green: 0.35, blue: 0.3) : .white)
-                        .lineLimit(1)
+                        .lineLimit(1).minimumScaleFactor(0.6)
                     if !model.targetGovtLabel.isEmpty {
                         Text(model.targetGovtLabel)
                             .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)

@@ -140,6 +140,8 @@ struct AuthenticHUDView: View {
                     Text(model.targetSubtitle).novaFont(.hud, size: subtitleSize)
                         .foregroundStyle(color(style.intf.dimText))
                         .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.7)
                 }
                 // The silhouette claims every point the text rows don't, kept
                 // square by its aspect ratio, so the ship fills the `targetArea`
@@ -169,20 +171,24 @@ struct AuthenticHUDView: View {
                 if model.targetHidesShieldArmorLine {
                     Text(model.targetCode).novaFont(.hud, size: subtitleSize)
                         .foregroundStyle(color(style.intf.dimText))
+                        .lineLimit(1).minimumScaleFactor(0.6)
                         .frame(maxWidth: .infinity)
                 } else {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
                         if !model.targetStatusLabel.isEmpty {
                             Text(model.targetStatusLabel).novaFont(.hud, size: subtitleSize)
                                 .foregroundStyle(color(style.intf.dimText))
+                                .lineLimit(1).minimumScaleFactor(0.6)
                         }
                         Text(model.targetStatusValue)
                             .novaFont(.hud, weight: .semibold, size: subtitleSize).monospacedDigit()
                             .foregroundStyle(color(style.intf.brightText))
+                            .lineLimit(1).minimumScaleFactor(0.6)
                         Spacer(minLength: 0)
                         if !model.targetCode.isEmpty {
                             Text(model.targetCode).novaFont(.hud, size: subtitleSize)
                                 .foregroundStyle(color(style.intf.dimText))
+                                .lineLimit(1).minimumScaleFactor(0.6)
                         }
                     }
                 }
@@ -243,6 +249,7 @@ struct AuthenticHUDView: View {
                 // stellar, or "Nav System Off".
                 Text(model.navTitle).novaFont(.hud, size: subtitleSize)
                     .foregroundStyle(color(style.intf.dimText))
+                    .lineLimit(1).minimumScaleFactor(0.6)
                 if !model.navName.isEmpty {
                     Text(model.navName)
                         .novaFont(.hud, weight: .semibold, size: statusSize)
@@ -283,6 +290,7 @@ struct AuthenticHUDView: View {
                 HStack(spacing: 4) {
                     Text(row.name).novaFont(.hud, size: subtitleSize)
                         .foregroundStyle(color(style.intf.dimText))
+                        .lineLimit(1).minimumScaleFactor(0.6)
                     Spacer(minLength: 2)
                     Text("\(row.tons)").novaFont(.hud, size: subtitleSize).monospacedDigit()
                         .foregroundStyle(color(style.intf.brightText))
@@ -311,6 +319,7 @@ struct AuthenticHUDView: View {
                 Text(model.credits.creditsHUD)
                     .novaFont(.hud, weight: .semibold, size: statusSize).monospacedDigit()
                     .foregroundStyle(color(style.intf.brightText))
+                    .lineLimit(1).minimumScaleFactor(0.6)
             }
             Spacer(minLength: 2)
         }

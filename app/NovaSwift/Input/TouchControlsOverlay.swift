@@ -43,8 +43,8 @@ struct TouchControlsOverlay: View {
 
     @State private var menuOpen = false
 
-    /// Button/spacing sizes from the smaller screen edge: 1× on a small iPhone,
-    /// up to 1.35× on an iPad, so controls read the same relative size
+    /// Button/spacing sizes from the smaller screen edge: ~0.9× on a landscape
+    /// iPhone, up to 1.25× on an iPad, so controls read the same relative size
     /// everywhere. Sized to stay clear on a landscape iPhone's short (~375–430pt)
     /// edge — the whole cockpit (toggle + drive cluster) has to fit in that
     /// height alongside the open middle, so every control is deliberately
@@ -53,14 +53,19 @@ struct TouchControlsOverlay: View {
         let s: CGFloat
         init(_ size: CGSize) {
             let minEdge = min(size.width == 0 ? 430 : size.width, size.height == 0 ? 430 : size.height)
-            s = min(max(minEdge / 430, 0.86), 1.35)
+            s = min(max(minEdge / 430, 0.8), 1.25)
+            // Captions under every cap were half the clutter on a phone, where
+            // the glyphs already say it; they stay on the roomier iPad.
+            captions = minEdge >= 600
         }
-        var big: CGFloat { 58 * s }     // fire / thrust / turn
-        var small: CGFloat { 40 * s }   // target / next / afterburner / fire-2nd
-        var toggle: CGFloat { 44 * s }  // actions open/close
-        var tile: CGFloat { 56 * s }    // action-grid tile
-        var gap: CGFloat { 10 * s }
-        var edge: CGFloat { 14 * s }
+        let captions: Bool
+        // Visual caps; each control's hit box is 12% larger on every side.
+        var big: CGFloat { 52 * s }     // fire / thrust / turn
+        var small: CGFloat { 36 * s }   // target / next / afterburner / fire-2nd
+        var toggle: CGFloat { 40 * s }  // actions open/close
+        var tile: CGFloat { 54 * s }    // action-grid tile
+        var gap: CGFloat { 8 * s }
+        var edge: CGFloat { 12 * s }
     }
 
     private var m: Metrics { Metrics(viewportSize) }
@@ -182,6 +187,14 @@ struct TouchControlsOverlay: View {
     /// meant for the cap above them.
     @ViewBuilder
     private func labeled<Content: View>(_ text: String, @ViewBuilder _ content: () -> Content) -> some View {
+        if !m.captions {
+            content().accessibilityLabel(text)
+        } else {
+            captioned(text, content)
+        }
+    }
+
+    private func captioned<Content: View>(_ text: String, _ content: () -> Content) -> some View {
         VStack(spacing: 2 * m.s) {
             content()
             Text(text)
@@ -219,11 +232,12 @@ struct TouchControlsOverlay: View {
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.system(size: 11 * m.s, weight: .bold))
                     Text(hud.weaponName.isEmpty ? "No 2nd weapon" : hud.weaponName)
-                        .font(.system(size: 11 * m.s, weight: .semibold)).lineLimit(1)
+                        .font(.system(size: 11 * m.s, weight: .semibold))
+                        .lineLimit(1).minimumScaleFactor(0.65)
                 }
                 .foregroundStyle(novaAmber)
-                .padding(.horizontal, 10 * m.s).padding(.vertical, 5 * m.s)
-                .frame(maxWidth: 140 * m.s)
+                .padding(.horizontal, 8 * m.s).padding(.vertical, 4 * m.s)
+                .frame(maxWidth: 150 * m.s)
             }
             .buttonStyle(.novaPlain)
         }
@@ -317,7 +331,8 @@ struct TouchControlsOverlay: View {
         } label: {
             VStack(spacing: 5 * m.s) {
                 Image(systemName: system).font(.system(size: 19 * m.s, weight: .semibold))
-                Text(label).font(.system(size: 10 * m.s, weight: .medium)).lineLimit(1)
+                Text(label).font(.system(size: 10 * m.s, weight: .medium))
+                    .lineLimit(1).minimumScaleFactor(0.7)
             }
             .foregroundStyle(enabled ? novaAmber : Color(white: 0.4))
             .frame(width: m.tile, height: m.tile * 0.92)
@@ -343,7 +358,7 @@ private struct NovaControlCap: View {
             .font(.system(size: size * glyphScale, weight: .bold))
             .foregroundStyle(accent ? novaAmber : .white)
             .frame(width: size, height: size)
-            .background(Circle().fill(Color.black.opacity(0.5)))
+            .background(Circle().fill(Color.black.opacity(0.38)))
             .overlay(
                 Circle().strokeBorder(
                     LinearGradient(colors: [(accent ? novaAmber : .white).opacity(0.6),

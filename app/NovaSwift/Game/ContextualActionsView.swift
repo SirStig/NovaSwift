@@ -161,10 +161,10 @@ struct ContextualActionsView: View {
         switch action {
         case .land(let name):
             landPill(name)
-        case .board(let name):
-            actionPill(icon: "shippingbox.fill", label: "Board \(name)") { onAction(.board) }
-        case .hail(let name):
-            actionPill(icon: "antenna.radiowaves.left.and.right", label: "Hail \(name)") { onAction(.hailTarget) }
+        case .board:
+            actionPill(icon: "shippingbox.fill", label: "Board") { onAction(.board) }
+        case .hail:
+            actionPill(icon: "antenna.radiowaves.left.and.right", label: "Hail") { onAction(.hailTarget) }
         case .jump(let system):
             actionPill(icon: "bolt.horizontal.circle.fill", label: "Jump: \(system)") { onAction(.hyperjump) }
         case .escorts:
@@ -180,7 +180,7 @@ struct ContextualActionsView: View {
         Button { onAction(.land) } label: {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.down.to.line")
-                Text("Land on \(name)").lineLimit(1).frame(maxWidth: 150)
+                Text("Land on \(name)").lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: 170)
                 // Pad players see which physical button lands, right on
                 // the pill (renders nothing without a controller).
                 PadGlyph(.land, size: 13, tint: .black)
@@ -203,7 +203,7 @@ struct ContextualActionsView: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: icon).font(.system(size: 11, weight: .semibold))
-                Text(label).lineLimit(1).frame(maxWidth: 130)
+                Text(label).lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: 150)
             }
             .novaFont(.hud, weight: .semibold, size: 12)
             .foregroundStyle(novaAmber)

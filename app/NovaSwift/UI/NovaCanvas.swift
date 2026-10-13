@@ -72,6 +72,7 @@ struct NovaCanvas<Content: View>: View {
             let layout = NovaLayout(design: design, viewSize: geo.size, fit: fit)
             ZStack {
                 content(layout).novaTextScale(layout.scale)
+                    .environment(\.novaDesignSpaceText, true)
                 if novaDebug { NovaDebugGrid.forLayout(layout, viewSize: geo.size) }
             }
         }

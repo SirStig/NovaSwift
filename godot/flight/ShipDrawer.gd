@@ -21,7 +21,7 @@ const SHIP_SIZE := 14.0
 const COLOR_PLAYER := Color(0.55, 0.85, 1.0)
 const COLOR_NPC := Color(0.95, 0.75, 0.35)
 const COLOR_DISABLED := Color(0.5, 0.5, 0.55)
-const STRIDE := 24
+const STRIDE := 26
 # column indices in a ship_layers row
 const C_SET := 0
 const C_HEADING := 1
@@ -47,6 +47,43 @@ var r                       # FlightRenderer
 var order: PackedInt32Array = PackedInt32Array()
 var reticle_zoom := 0.0
 var _locked_id := -1
+var launches := {}          # entity id -> age: a ship lifting off a planet grows in (0.08 -> 1 over 0.5 s, fades in 0.4 s)
+var ghosts: Array = []      # landing ships shrinking into their stellar {type, frame, from, to, age}
+const LAUNCH_GROW := 0.5
+const LAUNCH_FADE := 0.4
+const LAND_TIME := 0.5
+
+
+func advance(dt: float) -> void:
+	for k in launches.keys():
+		launches[k] += dt
+		if launches[k] >= LAUNCH_GROW:
+			launches.erase(k)
+	var keep: Array = []
+	for g in ghosts:
+		g["age"] += dt
+		if g["age"] < LAND_TIME:
+			keep.append(g)
+	ghosts = keep
+
+
+## (scale, alpha) of a launching ship's whole container (GameScene.applyEntrance(.launch)).
+func _launch(n: int) -> Vector2:
+	var id: int = r.ship_ids[n] if n < r.ship_ids.size() else -1
+	if not launches.has(id):
+		return Vector2.ONE
+	var t: float = launches[id]
+	return Vector2(lerpf(0.08, 1.0, minf(1.0, t / LAUNCH_GROW)), minf(1.0, t / LAUNCH_FADE))
+
+
+## Draw `frame` of `e` at `pos`; when `scale` != 1 it scales about its centre (a launching ship).
+func _put(ci: CanvasItem, e: Dictionary, pos: Vector2, frame: int, tint: Color, scale: float) -> void:
+	if scale >= 0.999:
+		Sprites.draw(ci, e, pos, frame, tint)
+	else:
+		ci.draw_set_transform_matrix(r.base_xf * Transform2D(0.0, Vector2(scale, scale), 0.0, pos))
+		Sprites.draw(ci, e, Vector2.ZERO, frame, tint)
+		ci.draw_set_transform_matrix(r.base_xf)
 
 
 func setup(renderer) -> void:
@@ -58,7 +95,7 @@ func build_order() -> void:
 	var disabled: Array = []
 	var escorts: Array = []
 	var ships: Array = []
-	var n := r.ship_xf.size() / 4
+	var n: int = r.ship_xf.size() / 4
 	for k in range(1, n):
 		var kind := int(r.ship_xf[k * 4 + 3])
 		var rel: int = r.ship_rel[k] if k < r.ship_rel.size() else 1
@@ -100,7 +137,8 @@ func draw_hulls(ci: CanvasItem) -> void:
 		var L: PackedFloat32Array = r.ship_layers
 		if row >= 0 and L[row + C_GATE_HIDDEN] > 0.5:
 			continue
-		var alpha := _alpha_of(n, kind)
+		var lf := _launch(n)
+		var alpha := _alpha_of(n, kind) * lf.y
 		var entry = r.sprites.entry(Sprites.SHIP, ship_type) if ship_type >= 0 else null
 		var thrusting: bool = (r.ship_vis[n * 3 + 2] if n * 3 + 2 < r.ship_vis.size() else 0.0) > 0.5
 		if entry == null:
@@ -119,17 +157,31 @@ func draw_hulls(ci: CanvasItem) -> void:
 		if thrusting and not r.classic_world and r.engine_glow \
 				and r.sprites.entry(Sprites.ENGINE_GLOW, ship_type) == null:
 			_draw_thruster_flame(ci, pos, angle, alpha, entry["fw"] * 0.5)
-		Sprites.draw(ci, entry, pos, frame, tint)
+		_put(ci, entry, pos, frame, tint, lf.x)
 		if row >= 0:
 			var alt = r.sprites.entry(Sprites.ALT, ship_type)
 			if alt != null:
 				var af := Sprites.wrap(int(L[row + C_ALT]) * int(L[row + C_FPS]) + int(L[row + C_HEADING]), alt["frames"])
-				Sprites.draw(ci, alt, pos, af, Color(1, 1, 1, alpha))
+				_put(ci, alt, pos, af, Color(1, 1, 1, alpha), lf.x)
 			# One blend slot: murk, overwritten by ionization when stronger, or the gate wash.
 			var f: float = L[row + C_BLEND]
-			if f > 0.0:
+			if f > 0.0 and lf.x >= 0.999:
 				r.fog_ships.append([entry, pos, frame,
 					Color(L[row + C_BLEND + 1], L[row + C_BLEND + 2], L[row + C_BLEND + 3], 1.0), f * hull_alpha])
+
+
+## Landing ships (GameScene.landNode): move into the stellar, shrink to 0.05 and fade over 0.5 s.
+func draw_ghosts(ci: CanvasItem) -> void:
+	for g in ghosts:
+		var e = r.sprites.entry(Sprites.SHIP, g["type"])
+		if e == null:
+			continue
+		var t: float = g["age"] / LAND_TIME
+		var pos: Vector2 = r.w2l((g["from"] as Vector2).lerp(g["to"], t))
+		var sc := lerpf(1.0, 0.05, t)
+		ci.draw_set_transform_matrix(r.base_xf * Transform2D(0.0, Vector2(sc, sc), 0.0, pos))
+		Sprites.draw(ci, e, Vector2.ZERO, g["frame"], Color(1, 1, 1, 1.0 - t))
+		ci.draw_set_transform_matrix(r.base_xf)
 
 
 # MARK: Overlays (additive layer): engine glow, running lights, weapon glow, shield
@@ -146,31 +198,32 @@ func draw_glows(ci: CanvasItem) -> void:
 		if ship_type < 0:
 			continue
 		var pos: Vector2 = r.w2l(Vector2(r.ship_xf[xf], r.ship_xf[xf + 1]))
-		var alpha := _alpha_of(n, kind)
+		var lf := _launch(n)
+		var alpha := _alpha_of(n, kind) * lf.y
 		var base := int(L[row + C_SET]) * int(L[row + C_FPS]) + int(L[row + C_HEADING])
 		var heading := int(L[row + C_HEADING])
 		var a: float = L[row + C_ENGINE]
 		if a > 0.0 and r.engine_glow:
 			var e = r.sprites.entry(Sprites.ENGINE_GLOW, ship_type)
 			if e != null:
-				Sprites.draw(ci, e, pos, Sprites.wrap(base, e["frames"]), Color(1, 1, 1, a * alpha))
+				_put(ci, e, pos, Sprites.wrap(base, e["frames"]), Color(1, 1, 1, a * alpha), lf.x)
 		a = L[row + C_LIGHT]
 		if a > 0.0 and r.running_lights:
 			var e2 = r.sprites.entry(Sprites.LIGHTS, ship_type)
 			if e2 != null:
-				Sprites.draw(ci, e2, pos, Sprites.wrap(base, e2["frames"]), Color(1, 1, 1, a * alpha))
+				_put(ci, e2, pos, Sprites.wrap(base, e2["frames"]), Color(1, 1, 1, a * alpha), lf.x)
 		a = L[row + C_WGLOW]
 		if a > 0.0 and r.weapon_effects:
 			var e3 = r.sprites.entry(Sprites.WEAPON_GLOW, ship_type)
 			if e3 != null:
-				Sprites.draw(ci, e3, pos, Sprites.wrap(base, e3["frames"]), Color(1, 1, 1, a * alpha))
+				_put(ci, e3, pos, Sprites.wrap(base, e3["frames"]), Color(1, 1, 1, a * alpha), lf.x)
 		a = L[row + C_SHIELD]
 		if a > 0.0:
 			var e4 = r.sprites.entry(Sprites.SHIELD, ship_type)
 			if e4 != null:
 				# The bubble has one frame per heading; keep it turned with the hull.
 				var sf := Sprites.wrap(heading, e4["frames"]) if e4["frames"] > 1 else 0
-				Sprites.draw(ci, e4, pos, sf, Color(1, 1, 1, a * alpha))
+				_put(ci, e4, pos, sf, Color(1, 1, 1, a * alpha), lf.x)
 
 
 # MARK: Target reticle / brackets (fx layer)

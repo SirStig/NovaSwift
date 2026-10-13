@@ -21,6 +21,7 @@ const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
 const ClassicMainMenu = preload("res://ui/classic/ClassicMainMenu.gd")
 const ClassicDialog = preload("res://ui/classic/ClassicDialog.gd")
 const ClassicButton = preload("res://ui/classic/ClassicButton.gd")
+const PilotFiles = preload("res://screens/PilotFiles.gd")
 
 signal new_pilot
 signal open_pilot
@@ -38,6 +39,9 @@ var classic_menu: Control    # the ClassicMainMenu when drawn in Classic present
 var _about: Control
 var _extra: Control
 var _nova: Object
+## The loaded pilot that was killed ("" = none): the readout says "<name> has been killed".
+var killed_id := ""
+var _creating := false   # the New Pilot dialog is up: the readout says "Creating Pilot..."
 
 
 func setup(nova: Object, data_dir: String, has_data: bool) -> void:
@@ -126,13 +130,27 @@ func _setup_classic(nova: Object, data_dir: String) -> void:
 	music.start(nova, data_dir)
 
 
-## Re-read the newest pilot for the readout (the host calls it when the pilot list changed).
+## Re-read the pilot for the readout (the host calls it when the pilot list changed): the killed
+## pilot when there is one, else the newest. "Creating Pilot..." wins while the New Pilot dialog is up.
 func refresh_pilot() -> void:
 	if classic_menu == null:
 		return
-	var dir := ProjectSettings.globalize_path("user://pilots")
+	var dir := PilotFiles.dir()
 	var parsed = JSON.parse_string(classic_menu.nova.pilot_list(dir))
-	classic_menu.set_pilot(dir, str(parsed[0]["id"]) if (parsed is Array and not parsed.is_empty()) else "")
+	var id: String = str(parsed[0]["id"]) if (parsed is Array and not parsed.is_empty()) else ""
+	var state := ""
+	if _creating:
+		state = "creating"
+	elif killed_id != "" and FileAccess.file_exists(classic_menu.nova.pilot_file_path(dir, killed_id)):
+		id = killed_id
+		state = "killed"
+	classic_menu.set_pilot(dir, id, state)
+
+
+## The New Pilot dialog opened / closed (Apple: sheet == .newPilot).
+func set_creating(on: bool) -> void:
+	_creating = on
+	refresh_pilot()
 
 
 func _on_classic_choice(action: String) -> void:

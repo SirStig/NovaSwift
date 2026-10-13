@@ -84,6 +84,21 @@ class NovaWorld: Node2D {
     private var pendingImport: EVNovaPilotImportResult?
     /// Progress / result of `loadGameAsync` (see PilotFiles.swift).
     private let asyncLoad = AsyncLoadState()
+    /// Settings > Saved Games > Frequent autosave (Apple `GameplayEnhancements.frequentAutosave`):
+    /// save on landing, jumping and a 180 s in-flight heartbeat, and keep the in-flight position.
+    private var frequentAutosave = false
+    /// Unpaused flight seconds since the last rotating in-flight backup (Apple `backupHeartbeat`).
+    private var periodicClock = 0.0
+    /// The flight-training sandbox (Apple `GameHost.makeTrainingHost`): a throwaway pilot that
+    /// never saves; the real pilot waits here until `tutorialEnd`.
+    private var training: TrainingSession?
+    private var tutorialRun = TutorialProgression()
+    private struct TrainingSession {
+        var pilot: PlayerState
+        var started: Bool
+        var saveID: UUID?
+        var landed = false
+    }
 
     // MARK: Fixed-step simulation
     //
@@ -227,7 +242,15 @@ class NovaWorld: Node2D {
             player.position = body.position
             player.angle = Double(Int.random(in: 0..<360)) * .pi / 180
             player.velocity = Vec2()
+        } else if training != nil {
+            player.position = w.systemContext.center + Vec2(0, -700)   // the sandbox flies, it doesn't launch
+        } else if sysID == pilot.currentSystem, let x = pilot.shipPositionX, let y = pilot.shipPositionY {
+            // A frequent-autosave pilot resumes where it was in flight (Apple `GameHost` restore).
+            player.position = Vec2(x, y)
+            player.angle = pilot.shipHeading ?? 0
+            player.velocity = Vec2()
         }
+        if training != nil { player.invulnerable = true }   // the trainee cannot die
         pilot.landedSpob = nil
         self.world = w
         self.intent = ControlIntent()
@@ -300,6 +323,7 @@ class NovaWorld: Node2D {
         gapsTick()                    // the escape pod's respawn
         advanceHyperjump()            // arrival once the engine's jump has fired
         advanceFlightVisuals(dt: dt)  // hull overlay clocks, animated stellars
+        tickPeriodicAutosave(dt: dt)  // frequent autosave's in-flight heartbeat
         interpolationAlpha = fixed > 0 ? simAccumulator / fixed : 0
     }
 
@@ -351,6 +375,7 @@ class NovaWorld: Node2D {
             storyNote(event)              // mission ship goals / losses, fail-if-disabled
             gapsNote(event)               // scans, eject, pod respawn, game over
             polishNote(event)             // original STR# 2002 status lines
+            flightVisuals.bodies = world.systemContext.bodies
             flightVisuals.note(event: event, game: game)   // weapon-glow flare on fire
             if case let .combatChatter(soundID) = event { sound.chatterSoundID = soundID }
             pendingEventNames.append(String(String(describing: event).prefix { $0 != "(" }))
@@ -657,6 +682,12 @@ class NovaWorld: Node2D {
 
     /// Set the ship down at `spobID` and open the docked state.
     private func touchDown(spobID: Int, chargeFee: Bool) {
+        // The training sandbox never docks: the landing just completes the lesson.
+        if training != nil {
+            training?.landed = true
+            post("Docking clamps engaged — nicely done, Captain.")
+            return
+        }
         // Hand the flight ship's hold back to the pilot before the spaceport
         // screens read it. Anything picked up in flight — mined ore, plundered
         // cargo — lives on the `Ship` until touchdown, and `launch()` re-seeds
@@ -688,6 +719,7 @@ class NovaWorld: Node2D {
         if let galaxy, let spob = game?.spob(spobID) {
             SpaceportShops.autoRecharge(&pilot, spob: spob, galaxy: galaxy)
         }
+        _ = autosave(.land)           // `frequentAutosave` only; the original saves on leaving
     }
 
     /// Take off from the current dock: rebuilds the system (fresh NPC spawn,
@@ -1121,6 +1153,7 @@ class NovaWorld: Node2D {
         sound.board.stop(soundID: SoundCues.hyperspaceChargeID)   // the jump cut its Warp up
         sound.board.stop(soundID: SoundCues.warpUp2xID)
         sound.pending.append(SoundCues.hyperspaceArrive)           // arriving: Warp out
+        _ = autosave(.jump)                                        // `frequentAutosave` only (UI-01)
     }
 
     // MARK: Spaceport (outfitter/shipyard)
@@ -1439,12 +1472,15 @@ class NovaWorld: Node2D {
     /// - `4` ship dying — `p0` the hull's death `bööm` id (-1 = none)
     /// - `5` ship destroyed — `p0` the `shïp` id that died
     /// - `6` weapon fired — `p0` muzzle heading (radians), `p1` the `wëap` id
+    /// - `7` ship disabled; `8` area blast (`p0` blast radius); `9` ship launched (`p0` entity id);
+    ///   `10` ship landed (`p0` shïp id, `p1` heading frame, `r`/`g` the stellar's x/y to shrink into)
     ///
     /// Everything else in `WorldEvent` is narrative rather than visual and comes
     /// through `drainEvents()` by name only.
     @Callable(autoSnakeCase: true) func drainEffects() -> PackedFloat32Array {
-        let rows = pendingEffects
+        let rows = pendingEffects + flightVisuals.extraEffects
         pendingEffects.removeAll(keepingCapacity: true)
+        flightVisuals.extraEffects.removeAll(keepingCapacity: true)
         return PackedFloat32Array(rows)
     }
 
@@ -1841,8 +1877,8 @@ class NovaWorld: Node2D {
 
     /// Save for `reason` only if the original does at that moment
     /// (`PilotSaveReason.shouldSave`): new pilot / launch / quit-while-landed
-    /// always, the rest only under the `frequentAutosave` enhancement, which the
-    /// Godot build doesn't offer yet. `reason` is a `PilotSaveReason` case name
+    /// always, the rest only under the `frequentAutosave` setting (`set_frequent_autosave`).
+    /// `reason` is a `PilotSaveReason` case name
     /// ("launch", "background", "backgroundLanded", ...). Returns whether it wrote.
     @Callable(autoSnakeCase: true) func pilotAutosave(reason: String) -> Bool {
         guard let r = Self.saveReason(reason) else { return false }
@@ -1853,6 +1889,206 @@ class NovaWorld: Node2D {
     @Callable(autoSnakeCase: true) func hasPilotSave() -> Bool { pilotSaveID != nil }
 
     @Callable(autoSnakeCase: true) func pilotName() -> String { pilot.pilotName }
+
+    // MARK: New-pilot flow (intro, death, slots and backups, frequent autosave, training)
+    //
+    // Mirrors Apple's `IntroSequenceView`, `GameContainerView.onPlayerDestroyed`,
+    // `PilotGroupDetailView` / `PilotBackupsView`, `frequentAutosave` and the flight-training
+    // sandbox. The rules are shared (`PilotGroups`, `PilotSavePolicy`, `TutorialCurriculum`).
+
+    /// The scenario's intro as JSON `{slides: [{pict, duration}], text}`: its `chär` intro PICTs
+    /// (shown `duration` s each) and the intro `dësc` text. Both empty when it has none.
+    @Callable(autoSnakeCase: true) func pilotIntro(scenarioID: Int) -> String {
+        guard let game, let sc = game.selectableScenarios().first(where: { $0.id == scenarioID }) else {
+            return "{\"slides\":[],\"text\":\"\"}"
+        }
+        let text = sc.introTextID.map { game.descText($0) } ?? ""
+        return Self.json(["slides": sc.introSlides.map { ["pict": $0.pictID, "duration": $0.duration] as [String: Any] },
+                          "text": text])
+    }
+
+    /// Settings > Saved Games > Frequent autosave.
+    @Callable(autoSnakeCase: true) func setFrequentAutosave(on: Bool) { frequentAutosave = on }
+    @Callable(autoSnakeCase: true) func frequentAutosaveOn() -> Bool { frequentAutosave }
+
+    /// Pilots grouped into save slots, newest first, as JSON `[{group, name, scenario, most_recent,
+    /// can_add, max_slots, slots: [{id, slot, ship, system, credits, rating, updated, backups}]}]`.
+    @Callable(autoSnakeCase: true) func pilotGroups(dir: String) -> String {
+        let a = archive(at: dir)
+        let rows = PilotGroups.groups(a.list()).map { g -> [String: Any] in
+            ["group": g.id.uuidString, "name": g.mostRecent.displayName, "scenario": g.mostRecent.scenarioName,
+             "most_recent": g.mostRecent.id.uuidString, "can_add": g.canAddSlot,
+             "max_slots": PilotGroups.maxSlotsPerPilot,
+             "slots": g.slots.enumerated().map { i, s -> [String: Any] in
+                var row = PilotFiles.row(s)
+                row["slot"] = i + 1
+                row["backups"] = a.backups(for: s.id).count
+                return row
+             }]
+        }
+        return Self.json(rows)
+    }
+
+    /// Every backup across the group's slots, newest first: JSON `[{slot_id, slot, path, system,
+    /// credits, updated}]` (`PilotRoster.groupHistory`).
+    @Callable(autoSnakeCase: true) func pilotGroupHistory(dir: String, groupID: String) -> String {
+        let a = archive(at: dir)
+        guard let gid = UUID(uuidString: groupID),
+              let group = PilotGroups.groups(a.list()).first(where: { $0.id == gid }) else { return "[]" }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd HH:mm"
+        return Self.json(PilotGroups.history(of: group, in: a).map { h -> [String: Any] in
+            ["slot_id": h.slotID.uuidString, "slot": h.slotIndex + 1, "path": h.url.path,
+             "system": h.save.snapshot.systemName, "ship": h.save.snapshot.shipName,
+             "credits": h.save.snapshot.credits, "updated": fmt.string(from: h.save.updatedAt)]
+        })
+    }
+
+    /// Roll slot `slotID` back to the backup file at `path` (the current state is backed up first,
+    /// so this is undoable). The caller then plays it with `pilot_load`.
+    @Callable(autoSnakeCase: true) func pilotRestore(dir: String, slotID: String, path: String) -> Bool {
+        let a = archive(at: dir)
+        guard let id = UUID(uuidString: slotID), a.exists(id: id) else { return false }
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        guard url.path.hasPrefix(a.backupsRoot.standardizedFileURL.path),
+              (try? a.restore(id: id, from: url)) != nil else { return false }
+        return true
+    }
+
+    /// Add a save slot to a group, cloned from its most recent slot (capped at 3). New slot's id or "".
+    @Callable(autoSnakeCase: true) func pilotAddSlot(dir: String, groupID: String) -> String {
+        let a = archive(at: dir)
+        guard let gid = UUID(uuidString: groupID),
+              let group = PilotGroups.groups(a.list()).first(where: { $0.id == gid }), group.canAddSlot,
+              let created = try? a.createSlot(from: group.mostRecent.id) else { return "" }
+        return created.id.uuidString
+    }
+
+    /// Rename every slot of a group (the display name is the pilot's identity).
+    @Callable(autoSnakeCase: true) func pilotRenameGroup(dir: String, groupID: String, name: String) -> Bool {
+        let a = archive(at: dir)
+        guard let gid = UUID(uuidString: groupID), !name.isEmpty, name.count <= PilotFactory.maxNameLength,
+              let group = PilotGroups.groups(a.list()).first(where: { $0.id == gid }) else { return false }
+        for slot in group.slots {
+            var s = slot
+            s.displayName = name
+            _ = try? a.save(s, backup: false)
+        }
+        return true
+    }
+
+    /// Delete one save slot and its backups, keeping the rest of the pilot.
+    @Callable(autoSnakeCase: true) func pilotDeleteSlot(dir: String, id: String) -> Bool {
+        guard let uuid = UUID(uuidString: id) else { return false }
+        try? archive(at: dir).delete(id: uuid)
+        if pilotSaveID == uuid { pilotSaveID = nil }
+        return true
+    }
+
+    /// The death sequence ran out with no eject (`GameContainerView.onPlayerDestroyed`): under Strict
+    /// Play the pilot is deleted outright (every slot and backup, FL-03), otherwise it is marked
+    /// killed and resumes from its last launch. JSON `{result: "deleted"|"killed"|"none", id, name}`.
+    @Callable(autoSnakeCase: true) func pilotKilled() -> String {
+        guard training == nil, pilotStarted, let id = pilotSaveID, let a = pilotArchive else {
+            return Self.json(["result": "none", "id": "", "name": ""])
+        }
+        let name = pilot.pilotName
+        if pilot.strictPlayDeathDeletesPilot {
+            PilotGroups.deleteGroupAfterStrictPlayDeath(id: id, in: a)
+            pilotSaveID = nil          // nothing left to resume or autosave
+            pilotStarted = false
+            pilot = PlayerState()
+            return Self.json(["result": "deleted", "id": id.uuidString, "name": name])
+        }
+        return Self.json(["result": "killed", "id": id.uuidString, "name": name])
+    }
+
+    // -- Flight training (Apple TutorialContainerView's throwaway GameHost) --
+
+    /// Swap in a throwaway pilot for the training flight; nothing saves while it runs. The frontend
+    /// follows with `make_world(-1)`. False with no game loaded or a session already running.
+    @Callable(autoSnakeCase: true) func tutorialBegin() -> Bool {
+        guard let game, training == nil else { return false }
+        training = TrainingSession(pilot: pilot, started: pilotStarted, saveID: pilotSaveID)
+        var p = PilotFactory.makeDefault(name: "Trainee", isMale: true, game: game)
+        p.landedSpob = nil
+        pilot = p
+        pilotStarted = true
+        pilotSaveID = nil
+        dockedSpobID = nil
+        return true
+    }
+
+    /// End the training flight: the real pilot (if any) is back, untouched.
+    @Callable(autoSnakeCase: true) func tutorialEnd() {
+        guard let t = training else { return }
+        pilot = t.pilot
+        pilotStarted = t.started
+        pilotSaveID = t.saveID
+        training = nil
+        dockedSpobID = nil
+    }
+
+    @Callable(autoSnakeCase: true) func tutorialActive() -> Bool { training != nil }
+
+    /// True once (then false) after the trainee set down on a planet.
+    @Callable(autoSnakeCase: true) func tutorialTakeLanded() -> Bool {
+        defer { training?.landed = false }
+        return training?.landed ?? false
+    }
+
+    /// What the training ship can do, as JSON `{afterburner, secondary}` (steps it can't do are dropped).
+    @Callable(autoSnakeCase: true) func tutorialCapabilities() -> String {
+        let p = world?.player
+        return Self.json(["afterburner": p?.afterburner != nil, "secondary": !(p?.secondaryWeaponIDs.isEmpty ?? true)])
+    }
+
+    @Callable(autoSnakeCase: true) func tutorialAfterburnerActive() -> Bool { world?.player.afterburnerActive ?? false }
+
+    /// Begin the coached course (the shared `TutorialCurriculum` + `TutorialProgression` Apple's
+    /// `TutorialRun` drives): worded for `style` ("keyboard" | "pad"), `labels` = JSON
+    /// `{action: "label"}` naming each control (`TutorialAction` raw values). Steps the ship can't do
+    /// are dropped (`has_afterburner` / `has_secondary` from `tutorial_capabilities`).
+    @Callable(autoSnakeCase: true)
+    func tutorialStart(style: String, labels: String, hasAfterburner: Bool, hasSecondary: Bool) {
+        let names = (try? JSONSerialization.jsonObject(with: Data(labels.utf8))) as? [String: String] ?? [:]
+        tutorialRun.configure(TutorialCurriculum.build(
+            style: style == "pad" ? .pad : .keyboard,
+            label: { names[$0.rawValue] ?? $0.rawValue },
+            hasAfterburner: hasAfterburner, hasSecondary: hasSecondary))
+    }
+
+    /// The run's state as JSON `{index, count, number, finished, is_last, steps: [{id, title, icon, body,
+    /// goal}]}`; `goal` is "" for a manual (Continue) card.
+    @Callable(autoSnakeCase: true) func tutorialState() -> String {
+        let r = tutorialRun
+        return Self.json(["index": r.index, "count": r.stepCount, "number": r.stepNumber,
+                          "finished": r.finished, "is_last": r.isLast,
+                          "steps": r.steps.map { ["id": $0.id, "title": $0.title, "icon": $0.systemImage,
+                                                  "body": $0.body, "goal": $0.goal?.rawValue ?? ""] as [String: Any] }])
+    }
+
+    /// Continue / Skip step.
+    @Callable(autoSnakeCase: true) func tutorialAdvance() { tutorialRun.advance() }
+
+    /// The frontend observed `goal` ("fly", "turn", "afterburner", "target", "fire", "changeWeapon",
+    /// "land"); advances only if the current step waits on exactly that.
+    @Callable(autoSnakeCase: true) func tutorialComplete(goal: String) {
+        if let g = TutorialGoal(rawValue: goal) { tutorialRun.complete(g) }
+    }
+
+    /// The hint for docked screen `screen` ("hub" | "bbs" | "outfitter") as JSON `{id, title, message,
+    /// key}`, or "" when that screen has none (`NovaHints.hint(forSpaceportScreen:)`).
+    @Callable(autoSnakeCase: true) func gameHintForScreen(screen: String) -> String {
+        guard let h = NovaHints.hint(forSpaceportScreen: screen) else { return "" }
+        return Self.json(["id": h.id, "title": h.title, "message": h.message, "key": NovaHints.storageKey(h.id)])
+    }
+
+    /// The contextual hint catalog as JSON `[{id, title, message, key}]` (`NovaHints`).
+    @Callable(autoSnakeCase: true) func gameHints() -> String {
+        Self.json(NovaHints.all.map { ["id": $0.id, "title": $0.title, "message": $0.message,
+                                       "key": NovaHints.storageKey($0.id)] as [String: Any] })
+    }
 
     // MARK: Pilot files
     //
@@ -1998,17 +2234,33 @@ class NovaWorld: Node2D {
     @discardableResult
     private func autosave(_ reason: PilotSaveReason) -> Bool {
         guard pilotSaveID != nil,
-              reason.shouldSave(frequentAutosave: false, strictPlay: pilot.isStrictPlay) else { return false }
+              reason.shouldSave(frequentAutosave: frequentAutosave, strictPlay: pilot.isStrictPlay) else { return false }
         return writePilot(backup: reason.wantsBackup)
+    }
+
+    /// Apple's `backupHeartbeat`: every 180 s of unpaused flight, under `frequentAutosave`.
+    private func tickPeriodicAutosave(dt: Double) {
+        guard frequentAutosave, training == nil, dockedSpobID == nil else { return }
+        periodicClock += dt
+        if periodicClock >= 180 {
+            periodicClock = 0
+            _ = autosave(.periodic)
+        }
     }
 
     private func writePilot(backup: Bool) -> Bool {
         guard let a = pilotArchive, let id = pilotSaveID else { return false }
         // Without `frequentAutosave` the original keeps no in-flight position: a
         // pilot reloads at the stellar it last launched from (UI-01).
-        pilot.shipPositionX = nil
-        pilot.shipPositionY = nil
-        pilot.shipHeading = nil
+        if frequentAutosave, let ship = world?.player {
+            pilot.shipPositionX = ship.position.x
+            pilot.shipPositionY = ship.position.y
+            pilot.shipHeading = ship.angle
+        } else {
+            pilot.shipPositionX = nil
+            pilot.shipPositionY = nil
+            pilot.shipHeading = nil
+        }
         if let ship = world?.player, let game { Munitions.record(ship, into: &pilot, game: game) }
         return PilotSaves.persist(archive: a, id: id, state: pilot, game: game, backup: backup)
     }
@@ -3551,6 +3803,17 @@ class NovaWorld: Node2D {
                                       destroyed: pilot.destroyedStellars ?? [])
     }
 
+    /// Test seam: bring a `shipType` NPC out of hyperspace 500 px from the player along the player's heading
+    /// (mode 0 = jump-in, 1 = gate emergence at the first gate). Returns its entity id, or -1.
+    @Callable(autoSnakeCase: true) func debugSpawnArrival(shipType: Int, mode: Int) -> Int {
+        guard let world, let galaxy else { return -1 }
+        let p = world.player
+        let pos = Vec2(p.position.x + 500 * sin(p.angle), p.position.y + 500 * cos(p.angle))
+        guard let ship = galaxy.makeShip(shipType, at: pos, angle: p.angle + .pi) else { return -1 }
+        _ = mode
+        return world.addNPC(ship, arrival: .hyperspace)
+    }
+
     /// Floats per ship in `shipLayers()`.
     @Callable(autoSnakeCase: true) func shipLayerStride() -> Int { FlightVisuals.layerStride }
 
@@ -3559,7 +3822,8 @@ class NovaWorld: Node2D {
     /// 5 weapon-glow alpha (0 = off), 6 shield-flare alpha (0 = off), 7 engine-glow alpha (0 = off), 8 disabled,
     /// 9 bank (+1 left / -1 right), 10 hull opacity (shän BaseTransp), 11-13 tint multiply rgb, 14 murk fog level 0-31,
     /// 15 blend factor 0-1 (murk / ionize / gate wash), 16-18 blend rgb, 19 gate-hidden, 20 gate-white,
-    /// 21 ion intensity, 22 thrust (0 / 1 / 2 afterburner), 23 raw shield flare.
+    /// 21 ion intensity, 22 thrust (0 / 1 / 2 afterburner), 23 raw shield flare, 24 jump-in over-speed still
+    /// braking (px/s), 25 gate emergence in progress.
     /// Overlay frame = `(set * framesPerSet + heading) % sheetFrameCount` (the original's Sprite_SetCurrentFrame wrap).
     @Callable(autoSnakeCase: true) func shipLayers() -> PackedFloat32Array {
         guard let world = self.world else { return PackedFloat32Array() }
@@ -4386,6 +4650,14 @@ class NovaWorld: Node2D {
     @Callable(autoSnakeCase: true) func classicSpinTileRgba(spin: Int, frame: Int, mode: Int) -> PackedByteArray {
         guard let game, let t = ClassicUIBackend.spinTile(game, spin: spin, frame: frame, mode: mode) else { return PackedByteArray() }
         return PackedByteArray(t.rgba)
+    }
+
+    /// The main-menu readout for a one-line state: `"killed"` (<name> has been killed, the Kenny line),
+    /// `"creating"` (Creating Pilot...) or `""` (the normal readout).
+    @Callable(autoSnakeCase: true) func classicMenuReadoutState(dir: String, id: String, state: String) -> String {
+        guard let game else { return "{}" }
+        let save = UUID(uuidString: id).flatMap { try? archive(at: dir).load(id: $0) }
+        return ClassicUIBackend.menuReadout(game, save: save, state: state)
     }
 
     /// The main-menu pilot readout JSON for save `id` in `dir` (`""` = no pilot loaded).

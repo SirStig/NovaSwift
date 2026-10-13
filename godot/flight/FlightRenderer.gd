@@ -135,9 +135,7 @@ func refresh_settings() -> void:
 	parallax_starfield = bool(Prefs.get_value("classic", "parallax_starfield"))
 	screen_shake = bool(Prefs.get_value("graphics", "screen_shake"))
 	reduce_flashing = bool(Prefs.get_value("graphics", "reduce_flashing"))
-	camera_view = str(Prefs.get_value("graphics", "camera_view"))
-	if not Camera.VIEWS.has(camera_view):
-		camera_view = "classic"
+	camera_view = Camera.VIEWS[clampi(int(Prefs.get_value("graphics", "camera_view")), 0, Camera.VIEWS.size() - 1)]
 	chase_tilt = float(Prefs.get_value("graphics", "chase_tilt"))
 	zoom = clampf(float(Prefs.get_value("graphics", "camera_zoom")), 0.5, 3.0)
 	if nova != null:
@@ -150,6 +148,8 @@ func reset_world() -> void:
 	sprites.clear()
 	_weapon_cache.clear()
 	ships.reticle_zoom = 0.0
+	ships.launches.clear()
+	ships.ghosts.clear()
 	stellars.cursor_zoom = 0.0
 	refresh_background()
 	var vp := get_viewport_rect().size
@@ -226,6 +226,7 @@ func frame(delta: float, bar_width: float, advance_sim_effects: bool = true) -> 
 	base_xf = Transform2D(cam.rotation, play_ctr).scaled_local(Vector2(1.0 / zoom, 1.0 / zoom))
 	if advance_sim_effects:
 		fx.advance(delta)
+		ships.advance(delta)
 		shots.spawn_trails()
 	ships.build_order()
 	fog_world.clear()
@@ -301,6 +302,7 @@ func _draw_hulls(ci: CanvasItem) -> void:
 		return
 	ci.draw_set_transform_matrix(base_xf)
 	ships.draw_hulls(ci)
+	ships.draw_ghosts(ci)
 
 
 func _draw_fog_ships(ci: CanvasItem) -> void:

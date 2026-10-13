@@ -37,6 +37,10 @@ window/stretch/aspect="expand"
 
 [rendering]
 
+; Black, not Godot's default grey: any frame where no screen has drawn yet
+; (e.g. main menu -> flight hand-off) shows black like the original.
+environment/defaults/default_clear_color=Color(0, 0, 0, 1)
+
 ; Compatibility (OpenGL) renderer for the widest Linux/Windows GPU coverage.
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"

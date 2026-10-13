@@ -40,6 +40,8 @@ const ClassicPreferences = preload("res://screens/ClassicPreferences.gd")
 ## Audio/video/deadzone changed (Main re-applies volumes to GameAudio + music).
 signal changed
 signal closed
+## "Flight Training" (Apple Settings > Gameplay): the host closes Settings and runs the course.
+signal training_requested
 
 const CAPTURE_TIMEOUT := 6.0
 const DevSettingsPage = preload("res://debug/DevSettingsPage.gd")
@@ -56,6 +58,8 @@ var tab_buttons := {}          # page name -> Button (the sidebar entries)
 var sliders := {}              # "section.key" -> HSlider
 var rebind_buttons := {}       # action -> {"key": Button, "pad": Button}
 var first_control: Control
+## Set by the host before setup(): Settings was opened from the main menu, so Flight Training can run.
+var allow_training := false
 var classic_prefs: Node        # the original Preferences window while it is up
 
 var _nova: Object
@@ -380,6 +384,13 @@ func _build_video() -> void:
 	_slider("Window scale", "video", "scale", 0.75, 2.0, 0.25,
 		func(x: float): return "%dx%d" % [roundi(1280 * x), roundi(720 * x)])
 	_check("Gate links on the galaxy map (enhancement)", "map", "gate_links")
+	_section("Flight View", "Classic is the original's fixed, north-up camera. Look ahead drifts the view ahead of your ship; Ship up turns the world so your ship always points up; Chase falls back to Ship up (the 3D tilt needs live 3D hulls). Screen shake and the camera views are enhancements the original lacks; Reduce flashing also steadies the exhaust and removes sparks and flashes.")
+	_slider("Camera view", "graphics", "camera_view", 0, 3, 1,
+		func(x: float): return ["Classic", "Look ahead", "Ship up", "Chase"][clampi(int(x), 0, 3)])
+	_slider("Camera zoom", "graphics", "camera_zoom", 0.5, 2.0, 0.25,
+		func(x: float): return "%.2fx world per pixel" % x)
+	_check("Screen shake (enhancement)", "graphics", "screen_shake")
+	_check("Reduce flashing", "graphics", "reduce_flashing")
 
 
 # --- Interface (Presentation) ----------------------------------------------------------
@@ -419,6 +430,15 @@ func _build_presentation() -> void:
 		var c := _check(t[0], "presentation", t[1])
 		c.toggled.connect(func(_on: bool): show_page.call_deferred("Presentation"))
 	_check("Show mission storyline tags", "story", "show_mission_storyline_tags")
+	_section("Tutorial", "Tutorial hints show one-time tips as you play (your first flight, the spaceport, the Mission BBS, the Outfitter) -- \"Show all hints again\" brings them back. Flight Training is a safe practice flight that never touches your pilot.")
+	var hc := _check("Tutorial hints", "hints", "enabled")
+	hc.toggled.connect(func(_on: bool): show_page.call_deferred("Presentation"))
+	if Prefs.hints_enabled():
+		_button("Show all hints again", func():
+			Prefs.reset_hints()
+			_status.text = "Hints will show again.")
+	if allow_training:
+		_button("Flight Training", func(): training_requested.emit())
 
 
 ## The original's Preferences window (DLOG 4003) over Settings; Settings comes back, focused, when
@@ -533,6 +553,9 @@ func _build_support() -> void:
 	path.add_theme_font_size_override("font_size", 12)
 	path.add_theme_color_override("font_color", ShellUI.MUTED)
 	r.add_child(path)
+	var fa := _check("Frequent autosave", "gameplay", "frequent_autosave")
+	fa.tooltip_text = "Off = the original: pilots save only when you leave a spaceport."
+	_caption("Frequent autosave (an enhancement, off by default) also saves when you land and jump, every few minutes in flight, and remembers where you were. Off is the original's cadence.")
 	_button("Open Pilots Folder", func(): OS.shell_show_in_file_manager(PilotFiles.dir()))
 	_button("Change Pilots Folder…", func():
 		PilotFiles.pick_folder(self, PilotFiles.dir(), func(d: String):

@@ -24,6 +24,8 @@ signal quit
 
 var first_button: Control
 var buttons: Array[Control] = []
+## The save-and-leave entry's label ("Leave Training" during the training flight).
+var save_label := "Save & Quit to Menu"
 var classic_dialog: Control     # the ClassicDialog when drawn in Classic presentation
 
 
@@ -45,7 +47,7 @@ func setup(nova: Object, can_save: bool) -> void:
 	if Prefs.get_value("developer", "debug_mode"):
 		buttons.append(ShellUI.button(box, "Debug Suite", func(): _devtools("console"), nova))
 	if can_save:
-		buttons.append(ShellUI.button(box, "Save & Quit to Menu", func(): save_quit_to_menu.emit(), nova))
+		buttons.append(ShellUI.button(box, save_label, func(): save_quit_to_menu.emit(), nova))
 	buttons.append(ShellUI.button(box, "Quit", func(): quit.emit(), nova))
 	ShellUI.focus(first_button)
 
@@ -61,7 +63,7 @@ func _setup_classic(nova: Object, can_save: bool) -> void:
 	if Prefs.get_value("developer", "debug_mode"):
 		specs.append({"label": "Debug Suite", "action": func(): _devtools("console")})
 	if can_save:
-		specs.append({"label": "Save & Quit to Menu", "action": func(): save_quit_to_menu.emit()})
+		specs.append({"label": save_label, "action": func(): save_quit_to_menu.emit()})
 	specs.append({"label": "Quit", "action": func(): quit.emit()})
 	classic_dialog = ClassicDialog.panel(nova, {"title": "Paused", "body_buttons": specs, "body_buttons_width": 220})
 	ClassicDialog.modal(self, classic_dialog, 0.78)

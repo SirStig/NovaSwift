@@ -168,7 +168,7 @@ func draw_beams_normal(ci: CanvasItem) -> void:
 			var z: Vector2 = r.w2l(Vector2(b[i + 2], b[i + 3]))
 			var len := maxf(1.0, a.distance_to(z))
 			var width := maxf(2.0, b[i + 4] if b[i + 4] > 0.0 else 8.0)
-			var idx := (int(r.clock * 15.0) % art["frames"]) if art["frames"] > 1 else 0
+			var idx: int = (int(r.clock * 15.0) % int(art["frames"])) if art["frames"] > 1 else 0
 			ci.draw_set_transform_matrix(r.base_xf * Transform2D((z - a).angle(), a))
 			ci.draw_texture_rect_region(art["tex"], Rect2(Vector2(0, -width * 0.5), Vector2(len, width)),
 				Sprites.src(art, idx), Color(1, 1, 1, b[i + 5]))

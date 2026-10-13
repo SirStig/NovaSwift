@@ -37,6 +37,11 @@ const PilotFiles = preload("res://screens/PilotFiles.gd")
 signal pilot_chosen
 ## Esc / B (or Back) on the pilot list, when a host (the main menu) is listening.
 signal cancelled
+## A NEW pilot was written (scenario id): the host plays the intro / training offer before play.
+## Only emitted when something listens; otherwise `pilot_chosen` fires as before.
+signal pilot_created(scenario_id: int)
+## The New Pilot form opened (true) / closed (false): the main menu reads "Creating Pilot...".
+signal creating_changed(on: bool)
 
 ## Set by the host before setup(): the classic main menu is on screen behind this screen (so no
 ## opaque backdrop of its own).
@@ -171,6 +176,7 @@ func _refresh_pilots() -> void:
 
 
 func _show_list() -> void:
+	creating_changed.emit(false)
 	_refresh_pilots()
 	if _classic:
 		_c_list()
@@ -298,6 +304,7 @@ func _show_manage() -> void:
 
 
 func _cancel() -> void:
+	creating_changed.emit(false)
 	cancelled.emit()
 	queue_free()
 
@@ -311,6 +318,7 @@ func _show_pilot(p: Dictionary) -> void:
 		p.ship, p.system, _commas(int(p.credits)), p.rating,
 		p.scenario if p.scenario != "" else "—", p.updated])
 	var play := _button("Play", _load.bind(p))
+	_button("Save Slots & Backups…", _show_group.bind(p.id))
 	_button("Delete…", _confirm_delete.bind(p))
 	_button("Back", _show_manage)
 	_focus(play)
@@ -341,6 +349,7 @@ func _confirm_delete(p: Dictionary) -> void:
 # --- new pilot -----------------------------------------------------------------
 
 func _show_new() -> void:
+	creating_changed.emit(true)
 	var parsed = JSON.parse_string(_nova.pilot_scenarios())
 	_scenarios = parsed if parsed is Array else []
 	if _classic:
@@ -367,6 +376,9 @@ func _show_new() -> void:
 	_gender_btn = _button("", func():
 		_is_male = not _is_male
 		_refresh_new())
+	_strict_btn = _button("", func():
+		_strict = not _strict
+		_refresh_new())
 	_start_btn = _button("Start", _create)
 	_button("Back", _show_list)
 	_status = _label("", 14, Color(1.0, 0.55, 0.5))
@@ -375,6 +387,7 @@ func _show_new() -> void:
 
 
 var _start_btn: Button
+var _strict_btn: Button
 
 
 func _refresh_new() -> void:
@@ -382,6 +395,8 @@ func _refresh_new() -> void:
 	_scenario_btn.text = "Scenario: %s%s" % [s.name,
 		("  (%d/%d)" % [_scenario_index + 1, _scenarios.size()]) if _scenarios.size() > 1 else ""]
 	_gender_btn.text = "Pilot: %s" % ("Male" if _is_male else "Female")
+	if _strict_btn != null:
+		_strict_btn.text = "Strict Play: %s" % ("On" if _strict else "Off")
 
 
 func _cycle_scenario() -> void:
@@ -400,13 +415,13 @@ func _create() -> void:
 	var s: Dictionary = _scenarios[_scenario_index]
 	# Nickname and ship name take the dialog's prefilled STR# 128 defaults, as
 	# the Apple flow does when the player accepts them.
-	var id: String = _nova.pilot_create(_dir, int(s.id), nm, _is_male,
-			_nova.pilot_default_name(1), _nova.pilot_default_name(2))
+	var id: String = _nova.pilot_create_strict(_dir, int(s.id), nm, _is_male,
+			_nova.pilot_default_name(1), _nova.pilot_default_name(2), _strict)
 	if id == "":
 		_status_msg("Could not create the pilot.")
 		return
 	PilotFiles.note_recent(_nova.pilot_file_path(_dir, id))
-	_finish()
+	_finish_new(int(s.id))
 
 
 func _status_msg(t: String) -> void:
@@ -416,7 +431,18 @@ func _status_msg(t: String) -> void:
 
 
 func _finish() -> void:
+	creating_changed.emit(false)
 	pilot_chosen.emit()
+	queue_free()
+
+
+## A new pilot was written: tell a host that plays the intro (Shell), else just choose it.
+func _finish_new(scenario_id: int) -> void:
+	if pilot_created.get_connections().is_empty():
+		_finish()
+		return
+	creating_changed.emit(false)
+	pilot_created.emit(scenario_id)
 	queue_free()
 
 
@@ -486,6 +512,7 @@ func _c_pilot(p: Dictionary) -> void:
 		p.scenario if p.scenario != "" else "-", p.updated]
 	_c_show(ClassicDialog.panel(_nova, {"title": p.name, "width": 460, "text": text,
 		"body_buttons": [{"label": "Play", "action": _load.bind(p)},
+			{"label": "Slots & Backups", "action": _show_group.bind(p.id)},
 			{"label": "Delete…", "action": _confirm_delete.bind(p)}],
 		"footer_buttons": [{"label": "Back", "action": _show_manage, "cancel": true}]}))
 
@@ -586,4 +613,199 @@ func _c_start(nm: String, ship_name: String) -> void:
 		_show_new()
 		return
 	PilotFiles.note_recent(_nova.pilot_file_path(_dir, id))
-	_finish()
+	_finish_new(int(s.id))
+
+
+# --- save slots and backups (Apple PilotGroupDetailView / PilotBackupsView) ---------------------
+#
+# A pilot is a group of up to 3 independent save slots (Slot 1 is the original), each with its own
+# rotating backup history. The group screen plays a slot, adds one (a copy of the most recent),
+# deletes one (when there are several), renames the pilot, and opens the backups browser: every
+# backup of every slot, newest first; picking one rolls that slot back to it (the current state is
+# backed up first) and plays it. Classic dialogs or the plain Nova Swift panel; keyboard + pad only
+# need focus navigation.
+
+var _group_id := ""            # the group on screen (re-read from the bridge after every change)
+var _backup_page := 0
+
+
+func _groups() -> Array:
+	var parsed = JSON.parse_string(_nova.pilot_groups(_dir))
+	return parsed if parsed is Array else []
+
+
+## The group row containing save id `any_id` (a slot id), or {}.
+func _group_row(any_id: String) -> Dictionary:
+	for g in _groups():
+		if str(g.group) == any_id:
+			return g
+		for sl in g.slots:
+			if str(sl.id) == any_id:
+				return g
+	return {}
+
+
+func _slot_text(sl: Dictionary) -> String:
+	return "%s - %s. %s cr - %s - %s" % [sl.ship, sl.system if str(sl.system) != "" else "-",
+		_commas(int(sl.credits)), sl.rating, sl.updated]
+
+
+## The group detail screen for the pilot owning save `any_id`.
+func _show_group(any_id: String) -> void:
+	var g := _group_row(any_id)
+	if g.is_empty():
+		_show_manage()
+		return
+	_group_id = str(g.group)
+	var slots: Array = g.slots
+	if _classic:
+		var body := []
+		for sl in slots:
+			body.append({"label": "Play Slot %d" % int(sl.slot), "action": _play_slot.bind(str(sl.id))})
+		if slots.size() > 1:
+			for sl in slots:
+				body.append({"label": "Delete Slot %d" % int(sl.slot), "action": _confirm_delete_slot.bind(str(sl.id), int(sl.slot))})
+		if bool(g.can_add):
+			body.append({"label": "New Save Slot (%d/%d)" % [slots.size(), int(g.max_slots)], "action": _add_slot})
+		body.append({"label": "View All Backups", "action": _show_backups.bind(0)})
+		body.append({"label": "Rename", "action": _rename_group.bind(str(g.name))})
+		var lines := PackedStringArray()
+		lines.append(str(g.scenario) if str(g.scenario) != "" else "Pilot")
+		for sl in slots:
+			lines.append("Slot %d: %s" % [int(sl.slot), _slot_text(sl)])
+		_c_show(ClassicDialog.panel(_nova, {"title": str(g.name), "width": 520, "text": "\n".join(lines),
+			"body_buttons": body, "body_buttons_width": 300,
+			"footer_buttons": [{"label": "Back", "action": _show_manage, "cancel": true},
+				{"label": "Continue", "action": _play_slot.bind(str(g.most_recent)), "default": true}]}))
+		return
+	_clear(str(g.name), _show_manage)
+	_label(str(g.scenario) if str(g.scenario) != "" else "Pilot", 13)
+	var first: Button = null
+	for sl in slots:
+		var b := _button("Slot %d - %s" % [int(sl.slot), _slot_text(sl)], _play_slot.bind(str(sl.id)))
+		if first == null:
+			first = b
+		if slots.size() > 1:
+			_button("   Delete Slot %d…" % int(sl.slot), _confirm_delete_slot.bind(str(sl.id), int(sl.slot)))
+	if bool(g.can_add):
+		_button("New Save Slot (%d/%d)" % [slots.size(), int(g.max_slots)], _add_slot)
+	_button("View All Backups", _show_backups.bind(0))
+	_button("Rename…", _rename_group.bind(str(g.name)))
+	_button("Back", _show_manage)
+	_status = _label("", 14, Color(1.0, 0.55, 0.5))
+	_focus(first)
+
+
+func _play_slot(slot_id: String) -> void:
+	if _nova.pilot_load(_dir, slot_id):
+		PilotFiles.note_recent(_nova.pilot_file_path(_dir, slot_id))
+		_finish()
+	else:
+		_notice("Could not open that pilot.")
+
+
+func _add_slot() -> void:
+	_nova.sound_beep(1)
+	if _nova.pilot_add_slot(_dir, _group_id) == "":
+		_nova.sound_beep(3)
+	_show_group(_group_id)
+
+
+## "Delete this save slot?" -- the safe answer (Keep) holds the focus.
+func _confirm_delete_slot(slot_id: String, slot: int) -> void:
+	var msg := "Delete this save slot? Slot %d and its backups will be removed. This can't be undone." % slot
+	var back := _show_group.bind(_group_id)
+	var del := func():
+		_nova.pilot_delete_slot(_dir, slot_id)
+		_show_group(_group_id)
+	if _classic:
+		var d := ClassicDialog.confirm(_nova, msg, {"ok": "Delete", "cancel": "Keep"})
+		d.actions[0] = del
+		d.actions[4] = back
+		_c_show(d)
+		(func(): if is_instance_valid(d): d.item(4).grab_focus()).call_deferred()
+		return
+	_clear("Delete Slot %d?" % slot, back)
+	_label(msg)
+	var no := _button("No, keep it", back)
+	_button("Yes, delete", del)
+	_focus(no)
+
+
+func _rename_group(current: String) -> void:
+	if _classic:
+		var d := ClassicDialog.text_prompt(_nova, "Rename Pilot", current)
+		d.texts[4].max_length = int(_nova.pilot_max_name_length())
+		d.actions[0] = func(): _do_rename(d.edit_text(4))
+		d.actions[5] = _show_group.bind(_group_id)
+		_c_show(d)
+		(func(): if is_instance_valid(d): d.texts[4].grab_focus()).call_deferred()
+		return
+	_clear("Rename Pilot", _show_group.bind(_group_id))
+	var edit := LineEdit.new()
+	edit.text = current
+	edit.max_length = int(_nova.pilot_max_name_length())
+	edit.custom_minimum_size = Vector2(0, 38)
+	edit.text_submitted.connect(func(t): _do_rename(t))
+	_panel.add_child(edit)
+	_button("Save", func(): _do_rename(edit.text))
+	_button("Cancel", _show_group.bind(_group_id))
+	_focus(edit)
+
+
+func _do_rename(name_text: String) -> void:
+	var nm := name_text.strip_edges()
+	if nm != "":
+		_nova.pilot_rename_group(_dir, _group_id, nm)
+	_show_group(_group_id)
+
+
+## Every backup across the group's slots, newest first, paged like the other lists.
+func _show_backups(page: int) -> void:
+	var parsed = JSON.parse_string(_nova.pilot_group_history(_dir, _group_id))
+	var rows: Array = parsed if parsed is Array else []
+	_backup_page = clampi(page, 0, maxi(0, (rows.size() - 1) / PAGE))
+	var empty_text := "No backups yet -- they are made automatically each time you launch from a spaceport, and on manual saves."
+	var slice := rows.slice(_backup_page * PAGE, (_backup_page + 1) * PAGE)
+	var more := rows.size() > PAGE
+	if _classic:
+		var body := []
+		for r in slice:
+			body.append({"label": "Slot %d - %s - %s cr" % [int(r.slot), r.system if str(r.system) != "" else "-", _commas(int(r.credits))],
+				"action": _restore.bind(str(r.slot_id), str(r.path))})
+		var footer := []
+		if more:
+			footer.append({"label": "More", "action": func(): _show_backups((_backup_page + 1) % ((rows.size() + PAGE - 1) / PAGE))})
+		footer.append({"label": "Close", "action": _show_group.bind(_group_id), "cancel": true})
+		var opts := {"title": "Backups", "width": 480, "body_buttons": body, "body_buttons_width": 400,
+			"footer_buttons": footer}
+		if rows.is_empty():
+			opts["text"] = empty_text
+		else:
+			opts["text"] = "Pick a backup to roll that slot back and play it."
+		_c_show(ClassicDialog.panel(_nova, opts))
+		if not body.is_empty():
+			(func(): if is_instance_valid(_cdialog): _cdialog.item(0).grab_focus()).call_deferred()
+		return
+	_clear("Backups", _show_group.bind(_group_id))
+	var first: Button = null
+	for r in slice:
+		var b := _button("Slot %d - %s - %s cr - %s" % [int(r.slot), r.system if str(r.system) != "" else "-",
+				_commas(int(r.credits)), r.updated], _restore.bind(str(r.slot_id), str(r.path)))
+		if first == null:
+			first = b
+	if rows.is_empty():
+		_label(empty_text)
+	if more:
+		_button("More", func(): _show_backups((_backup_page + 1) % ((rows.size() + PAGE - 1) / PAGE)))
+	var close := _button("Close", _show_group.bind(_group_id))
+	_status = _label("", 14, Color(1.0, 0.55, 0.5))
+	_focus(first if first != null else close)
+
+
+## Roll `slot_id` back to the backup file and play it (Apple: restore, then model.play).
+func _restore(slot_id: String, path: String) -> void:
+	if _nova.pilot_restore(_dir, slot_id, path):
+		_play_slot(slot_id)
+	else:
+		_notice("Could not restore that backup.")
