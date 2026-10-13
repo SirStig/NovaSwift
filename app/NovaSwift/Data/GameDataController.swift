@@ -89,30 +89,24 @@ final class GameDataController: ObservableObject {
     /// Community Edition's `Nova Music.mp3`). Shared with `DataImporter` so the
     /// import step actually copies the track alongside the `.rez`/`.ndat` files
     /// — `GameLibrary.discoverResourceFiles` deliberately excludes it.
-    nonisolated static let audioExtensions: Set<String> = ["mp3", "m4a", "aac", "aiff", "aif", "wav"]
+    nonisolated static let audioExtensions: Set<String> = GameFileDiscovery.audioExtensions
 
     /// Recursively find audio files under `directory` (music lives a folder
     /// down from wherever the resource files are, e.g. "Nova Files/Nova Music.mp3").
     nonisolated static func discoverAudioFiles(in directory: URL) -> [URL] {
-        let fm = FileManager.default
-        guard let e = fm.enumerator(at: directory, includingPropertiesForKeys: nil,
-                                    options: [.skipsHiddenFiles]) else { return [] }
-        return e.compactMap { $0 as? URL }.filter { audioExtensions.contains($0.pathExtension.lowercased()) }
+        GameFileDiscovery.discoverAudioFiles(in: directory)
     }
 
     /// The game's original fonts (Charcoal.ttf, Geneva.ttf) — copyrighted, so
     /// like audio they're not part of `GameLibrary.resourceExtensions` and must
     /// be discovered/copied separately by the importer, then registered with
     /// CoreText at runtime (see `registerFonts(from:)`) rather than bundled.
-    nonisolated static let fontExtensions: Set<String> = ["ttf", "otf"]
+    nonisolated static let fontExtensions: Set<String> = GameFileDiscovery.fontExtensions
 
     /// Recursively find font files under `directory` (they ship a folder up
     /// from "Nova Files", alongside the .exe, in the CE Windows distribution).
     nonisolated static func discoverFontFiles(in directory: URL) -> [URL] {
-        let fm = FileManager.default
-        guard let e = fm.enumerator(at: directory, includingPropertiesForKeys: nil,
-                                    options: [.skipsHiddenFiles]) else { return [] }
-        return e.compactMap { $0 as? URL }.filter { fontExtensions.contains($0.pathExtension.lowercased()) }
+        GameFileDiscovery.discoverFontFiles(in: directory)
     }
 
     /// Holovid clip extensions — the base install's Galaxy Racing Network races
@@ -121,14 +115,11 @@ final class GameDataController: ObservableObject {
     /// `GameLibrary.discoverResourceFiles` skips them and the importer must copy
     /// them explicitly — otherwise `raceVideoURL()` finds nothing in the sandbox
     /// copy and the Bar's Gambling screen hangs on a loading spinner.
-    nonisolated static let videoExtensions: Set<String> = ["mov", "mp4", "m4v"]
+    nonisolated static let videoExtensions: Set<String> = GameFileDiscovery.videoExtensions
 
     /// Recursively find holovid files under `directory`.
     nonisolated static func discoverVideoFiles(in directory: URL) -> [URL] {
-        let fm = FileManager.default
-        guard let e = fm.enumerator(at: directory, includingPropertiesForKeys: nil,
-                                    options: [.skipsHiddenFiles]) else { return [] }
-        return e.compactMap { $0 as? URL }.filter { videoExtensions.contains($0.pathExtension.lowercased()) }
+        GameFileDiscovery.discoverVideoFiles(in: directory)
     }
 
     /// Registers any imported font files with CoreText for this process, so
@@ -470,28 +461,7 @@ final class GameDataController: ObservableObject {
     /// absence wedges the app (no menu art) or the game (no ships/systems),
     /// so an unusual-but-valid data set never gets stuck behind the gate.
     private nonisolated static func findMissingEssentials(in merged: ResourceCollection) -> [String] {
-        var missing: [String] = []
-        let counts = Dictionary(uniqueKeysWithValues: merged.typeCounts.map { ($0.type, $0.count) })
-        // The gameplay catalog — all of it ships in the "Nova Data" files.
-        let gameplay: [(NovaSwiftKit.FourCharCode, String)] = [
-            (NovaType.ship, "ships"), (NovaType.syst, "star systems"),
-            (NovaType.spob, "planets"), (NovaType.outfit, "outfits"),
-            (NovaType.weapon, "weapons"),
-        ]
-        let absent = gameplay.filter { counts[$0.0, default: 0] == 0 }.map(\.1)
-        if !absent.isEmpty {
-            missing.append("game data (\(absent.joined(separator: "/")))")
-        }
-        // The main-menu button art (rlëD 8050 "Main menu buttons") — without it
-        // the authentic menu can never render and the app sits on the loading
-        // visual forever. It ships in **Nova Graphics 3**, alongside cölr 128
-        // and the spïn sheets (verified against the shipping data — the Nova
-        // Titles files are all PICT: title screens and the 8000 backdrop). The
-        // old wording sent players hunting through the wrong file.
-        if merged.resource(NovaType.rleD, 8050) == nil {
-            missing.append("menu art (Nova Graphics)")
-        }
-        return missing
+        GameFileDiscovery.missingEssentials(in: merged)   // shared with the Godot frontend's importer
     }
 
     private func applyMergeFailure(_ message: String, baseDir: URL) {

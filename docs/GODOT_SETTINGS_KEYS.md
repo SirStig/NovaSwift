@@ -142,3 +142,18 @@ Settings button can call `SettingsPlumbing.set_caps_lock(bool)`.
 `ui/PadKeyboard.gd` is an autoload; any `LineEdit` that takes focus while the last input was a gamepad opens it. A row
 for `ui/pad_keyboard` (`auto` / `off`) is optional. API: `PadKeyboard.attach(line_edit, {title, suggestions, style, auto})`,
 `PadKeyboard.open_for(line_edit)`, `PadKeyboard.close(commit)`, `PadKeyboard.is_open()`, `PadKeyboard.pad_active()`.
+
+## Game data (Settings > Data & Advanced, the Data Setup wizard)
+
+No Apple `GameSettings` field (Apple keeps its data in the sandbox `importedBaseDir`); these are Godot-only keys, wired by
+`screens/DataSetup.gd` / `Shell.gd` (see docs/GODOT_LAYER.md "Game data import"). Env: `NOVA_DATA_DIR` (search override),
+`NOVA_DATA_IMPORT_DIR` (import destination override, tests/dev).
+
+| Prefs `section/key` | Type | Default | Meaning | Wired |
+|---|---|---|---|---|
+| `data/dir` | string path | `""` | the data folder in use; the wizard stores the managed folder here after an import | yes (`Prefs.data_candidates`) |
+| `data/recent` | array of paths | `[]` | sources imported from lately (newest first, max 6), shown on the wizard's source page | yes |
+| `data/import_plugins` | bool | true | also copy plug-in folders found alongside the game (`Nova Plug-ins`) into `<managed>/Nova Plug-ins/` | yes (the inspect page's check box) |
+
+Settings > Data & Advanced rows: **Re-import / Change Game Data…** (opens the wizard on the source page) and **Preview Setup Wizard**
+(debug mode; the full guide from the top).

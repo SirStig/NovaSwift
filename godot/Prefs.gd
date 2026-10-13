@@ -26,7 +26,8 @@
 #   [wheels]  pause (pause the game while an action wheel is open) · one key per customised wheel
 #             (combat | nav | info -> {trigger, slots, anchor}); see ActionWheels.gd
 #   [developer] debug_mode · ui_debug_overlay · collapsed_sections -- the debug suite (debug/)
-#   [data]    dir — the EV Nova data folder chosen in the data-setup screen
+#   [data]    dir — the EV Nova data folder (the managed copy made by the data-setup wizard, or one chosen
+#             by hand) · recent (sources imported from lately) · import_plugins (also copy plug-in folders)
 #   [pilots]  dir (the Pilots folder; "" = the default, see screens/PilotFiles.gd) · recent (paths of
 #             pilot files opened lately) · migrated (user://pilots copied across once)
 #   [classic] the original Preferences window's (DLOG 4003) flags and levels (screens/ClassicPreferences.gd)
@@ -59,7 +60,7 @@ const DEFAULTS := {
 		"pad_cursor": true, "cursor_speed": 1.0,
 		# Controls Editor pickers (screens/controls_editor): keyboard size preset (full / tkl / compact), pad art style.
 		"ctl_preset": "full", "ctl_pad_style": "auto"},
-	"data": {"dir": ""},
+	"data": {"dir": "", "recent": [], "import_plugins": true},
 	"pilots": {"dir": "", "recent": [], "migrated": false},
 	# The original's Preferences window (NovaPrefs_ResetToDefaults: volume 5, brightness 3, all on
 	# but update checks). Only the flags the Godot build has an equivalent for take effect (see
@@ -383,8 +384,9 @@ static func fullscreen_map() -> bool:
 # --- game data location -------------------------------------------------------
 
 ## Folders searched for EV Nova data, first hit wins: NOVA_DATA_DIR, the folder
-## chosen in the data-setup screen, the repo's git-ignored data/base, the
-## per-user Godot data dir, and the XDG location on Linux / Steam Deck.
+## chosen in the data-setup screen, the repo's git-ignored data/base, the managed
+## folder the importer fills (managed_data_dir), the per-user Godot data dir, and
+## the XDG location on Linux / Steam Deck.
 static func data_candidates() -> PackedStringArray:
 	var out := PackedStringArray()
 	var env := OS.get_environment("NOVA_DATA_DIR")
@@ -394,13 +396,66 @@ static func data_candidates() -> PackedStringArray:
 	if saved != "":
 		out.append(saved)
 	out.append(ProjectSettings.globalize_path("res://") + "../data/base")
+	var managed := managed_data_dir()
+	if managed not in out:
+		out.append(managed)
 	out.append(ProjectSettings.globalize_path("user://data"))
-	var home := OS.get_environment("HOME")
-	if home == "" :
-		home = OS.get_environment("USERPROFILE")
-	if home != "":
+	var home := user_home()
+	if home != "" :
 		out.append(home.path_join(".local/share/NovaSwift/data"))
 	return out
+
+
+static func user_home() -> String:
+	var home := OS.get_environment("HOME")
+	if home == "":
+		home = OS.get_environment("USERPROFILE")
+	return home.replace("\\", "/")
+
+
+## Where the data-setup wizard copies the player's EV Nova data (the "managed" copy, never
+## touched by the updater): Linux / Steam Deck ~/.local/share/NovaSwift/data (XDG_DATA_HOME),
+## Windows %APPDATA%/NovaSwift/data, macOS ~/Library/Application Support/NovaSwift/data.
+## NOVA_DATA_IMPORT_DIR overrides it (tests, dev); falls back to user://data.
+static func managed_data_dir() -> String:
+	var ov := OS.get_environment("NOVA_DATA_IMPORT_DIR")
+	if ov != "":
+		return ov.replace("\\", "/")
+	var home := user_home()
+	match OS.get_name():
+		"Windows":
+			var ad := OS.get_environment("APPDATA").replace("\\", "/")
+			if ad != "":
+				return ad.path_join("NovaSwift/data")
+		"macOS":
+			if home != "":
+				return home.path_join("Library/Application Support/NovaSwift/data")
+		_:
+			var xdg := OS.get_environment("XDG_DATA_HOME")
+			if xdg != "":
+				return xdg.path_join("NovaSwift/data")
+			if home != "":
+				return home.path_join(".local/share/NovaSwift/data")
+	return ProjectSettings.globalize_path("user://data")
+
+
+## Sources the wizard imported from lately (newest first, at most 6).
+static func recent_sources() -> PackedStringArray:
+	var out := PackedStringArray()
+	var v: Variant = get_value("data", "recent")
+	if v is Array:
+		for p in v:
+			out.append(str(p))
+	return out
+
+
+static func add_recent_source(path: String) -> void:
+	var list: Array = []
+	for p in recent_sources():
+		if p != path:
+			list.append(p)
+	list.push_front(path)
+	set_value("data", "recent", list.slice(0, 6))
 
 
 ## First candidate that actually loads on `nova`, or "".

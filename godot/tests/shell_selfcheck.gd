@@ -64,7 +64,7 @@ func _init() -> void:
 	var mm_buttons := []
 	for b in shell.main_menu.find_children("*", "Button", true, false):
 		mm_buttons.append(b.text)
-	_ok(mm_buttons == ["Open Pilot", "New Pilot", "Settings", "Game Data…", "Plug-ins", "About Nova", "Quit"], "menu buttons: %s" % str(mm_buttons))
+	_ok(mm_buttons == ["Open Pilot", "New Pilot", "Settings", "Game Data…", "Plug-ins", "Plugin Editor", "About Nova", "Quit"], "menu buttons: %s" % str(mm_buttons))
 	var tm = shell.main_menu.music
 	_ok(tm != null, "title music node exists (found track: '%s')" % tm.track_path)
 	var track := TitleMusic.locate(shell.data_dir, nova.title_music_name())
@@ -229,19 +229,31 @@ func _init() -> void:
 	_ok(not shell.is_paused() and resumed[0] == 1, "pause closes, resumed emitted")
 
 	# --- data setup ---------------------------------------------------------------------------
+	var had_data: bool = shell.has_data
+	shell.has_data = false   # the no-data gate: the wizard can't be dismissed
 	shell._open_data_setup(false)
 	await process_frame
 	await process_frame
 	_ok(shell.in_menu() and shell.data_setup != null, "data setup opens")
+	_ok(shell.data_setup.gated and shell.data_setup.step == "welcome", "gated wizard starts on the welcome page")
 	fo = root.gui_get_focus_owner()
-	_ok(fo != null and fo.text == "Choose Folder…", "data setup focus on the folder picker")
-	_ok(not shell.data_setup.try_dir("/nonexistent/path"), "bad folder rejected")
-	var found := [""]
-	shell.data_loaded.connect(func(d): found[0] = d)
-	_ok(shell.data_setup.try_dir(shell.data_dir), "good folder accepted")
+	_ok(fo != null, "data setup has a focused control")
+	shell.data_setup.back.emit()
+	_ok(shell.data_setup != null, "...and Esc/back can't dismiss it while gated")
+	shell.data_setup._go("source")
 	await process_frame
-	_ok(found[0] == shell.data_dir and str(Prefs.get_value("data", "dir")) == shell.data_dir, "chosen path persisted in settings")
-	_ok(shell.main_menu != null, "after data found the main menu opens")
+	_ok(not shell.data_setup.try_source("/nonexistent/path"), "bad path rejected")
+	if nova.has_method("data_import_inspect_start"):
+		_ok(shell.data_setup.try_source(shell.data_dir), "good folder accepted for inspection")
+		for _i in 600:
+			if not shell.data_setup.inspection.is_empty():
+				break
+			await process_frame
+			OS.delay_msec(20)
+		_ok(bool(shell.data_setup.inspection.get("valid", false)), "inspection validates the data folder")
+	shell._close_data_setup()
+	shell.has_data = had_data
+	await process_frame
 	_ok(OS.get_environment("HOME") == "" or Prefs.data_candidates().has(OS.get_environment("HOME").path_join(".local/share/NovaSwift/data")), "search includes ~/.local/share/NovaSwift/data")
 	_ok(Prefs.data_candidates().has(ProjectSettings.globalize_path("user://data")), "search includes user://data")
 

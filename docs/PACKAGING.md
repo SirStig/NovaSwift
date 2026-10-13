@@ -11,10 +11,19 @@ Milestone 6. Config lives in `godot/export_presets.cfg` (presets **Linux**,
   the Swift runtime libs, launcher, `.desktop`, icon.
 - Excluded by `exclude_filter`: `tests/`, `bridge/` (Swift sources), `.build/`,
   `export/`, `bin/` (libs travel via the gdextension, not the .pck), `data/`, `*.md`.
-- **No EV Nova data, ever** (BYO-data). The game finds it at runtime — search
-  order in `godot/Prefs.gd`: `$NOVA_DATA_DIR`, the folder saved from the in-game
-  "Game Data" screen, `<project>/../data/base`, `user://data`,
-  `~/.local/share/NovaSwift/data`.
+- **No EV Nova data, ever** (BYO-data). The player imports it with the in-game Data Setup wizard, which
+  copies it into the **managed data folder** (outside the install dir, so updates and re-installs never touch it):
+
+  | Platform | Managed folder |
+  |---|---|
+  | Linux / Steam Deck | `$XDG_DATA_HOME/NovaSwift/data`, i.e. `~/.local/share/NovaSwift/data` |
+  | Windows | `%APPDATA%\NovaSwift\data` |
+  | macOS | `~/Library/Application Support/NovaSwift/data` |
+
+  (`Prefs.managed_data_dir()`; `NOVA_DATA_IMPORT_DIR` overrides it for tests.) Plug-ins found alongside the game are kept in
+  `<managed>/Nova Plug-ins/`. Search order at startup (`godot/Prefs.gd`): `$NOVA_DATA_DIR`, the folder saved by the wizard,
+  `<project>/../data/base` (dev), the managed folder, `user://data`, `~/.local/share/NovaSwift/data`. With nothing found the
+  app shows only the wizard. The updater never touches any of these (docs/UPDATER.md).
 
 ## Linux runtime strategy: dynamic Swift runtime, `$ORIGIN` rpath
 
@@ -101,9 +110,10 @@ exported in the `.pck`. After building, sign and publish the manifest with
 
 1. Desktop Mode: extract `NovaSwift-linux-x86_64.tar.gz` somewhere writable,
    e.g. `~/Games/NovaSwift/`.
-2. Put your own EV Nova data (the `Nova Files` / `Nova Plug-ins` folders, or
-   whatever the game's "Game Data" screen accepts) in
-   `~/.local/share/NovaSwift/data` — or pick the folder from the in-game picker.
+2. Launch it. With no data yet the game shows the **Data Setup** wizard (controller friendly: A open, B up,
+   Y use this folder). Copy your EV Nova folder or the Windows `.zip` onto the Deck first (USB/SD card under
+   `/run/media/...`, or download to `~/Downloads`), then pick it in the wizard's *Browse…*; it is copied to
+   `~/.local/share/NovaSwift/data` for you.
 3. Steam -> Games -> **Add a Non-Steam Game** -> Browse -> select
    `NovaSwift.sh` (or `NovaSwift.x86_64`). No `steam_appid.txt` and no Steam
    API are needed; it runs fine outside Steam too.

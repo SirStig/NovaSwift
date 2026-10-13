@@ -261,8 +261,9 @@ func _build_world() -> void:
 
 func _build_hd() -> void:
 	var body := _section("HD / 3D")
-	DevUI.wrap_label(body, "HD graphics packs, the bake cache and the turntable viewer are Apple-only (NovaSwiftHD) and not part of the Godot build.", 10)
+	DevUI.wrap_label(body, "Classic sprite turntable. NovaSwiftHD packs and live 3D hulls are not linked in this build, so the HD side stays empty.", 10)
 	var r := DevUI.hbox(body, 6)
+	DevUI.button(r, "Open Viewer", func(): _tools.open_hd_viewer(), DevUI.GREEN)
 	_chip(r, "Status", "hd status")
 
 

@@ -113,9 +113,6 @@ A thin, allocation-light wrapper around the engine's `World`. GDScript calls it
 every frame. Its surface (see `godot/bridge/Sources/NovaSwiftGodot/NovaWorld.swift`):
 
 - **World setup**
-  - `make_demo_world()` — builds a bare physics `World` with a synthetic player
-    ship and a few drifting NPCs. **Runs with no EV Nova data**, so the slice is
-    playable out of the box and the bridge is provable end-to-end.
   - `load_game(base_dir) -> bool` — discovers + merges the player's own EV Nova
     data via `GameLibrary` (BYO-data, same as the Apple app).
   - `make_world(system_id) -> bool` — after `load_game`, populates a real system
@@ -168,7 +165,7 @@ every frame. Its surface (see `godot/bridge/Sources/NovaSwiftGodot/NovaWorld.swi
     an event happened at — the name-only drain never could.
   - `system_background_color() -> PackedFloat32Array` — the system's authored
     `sÿst.BkgndColor` as `[r, g, b]`, so nebula systems don't clear to black.
-- **Real-data render queries** (empty/sentinel in the demo world, so the frontend
+- **Real-data render queries** (empty/sentinel until data is loaded, so the frontend
   calls them unconditionally)
   - `has_game() -> bool`, `player_ship_type() -> int`,
     `ship_type_name(ship_type) -> String`.
@@ -203,16 +200,15 @@ the Apple app gets it too.
 
 `godot/` is a minimal but real Godot project. `Main.tscn` / `Main.gd`
 instantiates a `NovaWorld`, feeds keyboard input into `set_intent` each frame,
-calls `step(delta)`, and renders the result. It picks one of two modes at
-startup:
+calls `step(delta)`, and renders the result. There is no data-free mode (the old
+demo world was removed): without EV Nova data the shell shows only the Data
+Setup wizard, see "Game data import" below.
 
-- **Real data** — if EV Nova data is found (`NOVA_DATA_DIR` env var, else the
-  repo's git-ignored `data/base/`), it `load_game` + `make_world(-1)`s a real
+- **Real data** — once EV Nova data is found (`NOVA_DATA_DIR` env var, the repo's
+  git-ignored `data/base/`, or the managed folder the importer fills), it `load_game` + `make_world(-1)`s a real
   system and draws **actual hull, planet, shot, rock and explosion sprites**
   decoded by `NovaSwiftKit`, plus the jump-radius ring. Sprites are the engine's
   own RGBA decode uploaded as Godot textures (cached per `(kind, id)`).
-- **Demo** — otherwise a data-free physics world: a ship you fly plus drifting
-  hulls, drawn as primitives. Always runs, no data required.
 
 Either way, the arrow keys fly the ship with the engine's real Newtonian
 momentum — you swing the nose and keep drifting, exactly like the Apple build,
@@ -272,6 +268,16 @@ Mirrors the Apple app's stick cursor (`ControllerCursor.swift`, docs/CONTROLS.md
 and docked screen is reachable from a pad with no per-screen code. It draws a pointer on a high `CanvasLayer` (400, above
 PadKeyboard) and **synthesises mouse events** (`Input.parse_input_event`), so hover styles, sliders, `ItemList`s and custom
 `_gui_input` all respond.
+
+**Focus follows the pointer.** As the pointer moves onto a focusable control it takes keyboard/pad focus (so the Classic
+and NovaSwift focus highlights always mark what is under the pointer, and A can never press a control the pointer has
+left). Over empty space focus is lifted and parked; the next d-pad press resumes from it. Regression check:
+`tests/pad_cursor_grid_selfcheck.gd` (run it windowed as well; a Retina window has a 2x final transform).
+
+**Clicks are deferred.** Pad A's synthetic mouse press/release is sent with `call_deferred`, not from inside the
+joypad event's own dispatch: in a real window a mouse event parsed and flushed mid-dispatch is dropped (headless
+delivers it, so headless tests can't catch this). `tests/pad_cursor_real_a_selfcheck.gd` drives a real joypad A through
+`Input.parse_input_event`; run it windowed.
 
 - **Left stick** moves the pointer (radial dead zone from `Controls.stick_deadzone`, squared response, ~1.1 viewport heights/s
   at full tilt x the speed setting, slowed to 45% over anything clickable). While the cursor is *available* the left stick is
@@ -505,15 +511,15 @@ and not yet tested end to end.
 
 `godot/screens/Shell.gd` owns the screens around the game and the flow between
 them; `Main.gd` only asks `in_menu()` / `is_paused()` and reacts to
-`pilot_chosen` / `demo_chosen`. Flow: **no data** -> `DataSetup` (folder picker via
-Godot's non-native `FileDialog`, rescan, *Run Demo*) -> **main menu** -> `PilotMenu`
+`pilot_chosen`. Flow: **no data** -> `DataSetup` wizard (the only screen; Quit + Settings; see
+"Game data import" below) -> **main menu** -> `PilotMenu`
 (New / Open, Back returns to the menu). **Pause** (`pause_menu` action: Esc / pad
 Start, polled by Main only in plain flight, so the map, dialogs and docked UI keep
 Esc/B) offers Resume, Settings, Save & Quit to Menu (`pilot_save_now`) and Quit
 (`pilot_autosave`). Original fidelity: no hover sounds; confirm beep snd 150 only.
 
 - **Settings** persist in `user://settings.cfg` via `Prefs.gd` (`[audio]`,
-  `[video]`, `[input] deadzone`, `[data] dir`, `[pilots]`, `[classic]`, `[keys]` rebinds). Volumes go into
+  `[video]`, `[input] deadzone`, `[data] dir/recent/import_plugins`, `[pilots]`, `[classic]`, `[keys]` rebinds). Volumes go into
   `GameAudio`'s existing `master/sfx/ui/muted`; `Controls.stick_deadzone` is the
   runtime dead zone; rebinds live in `Controls.overrides`, which `Controls.register()`
   layers over `BINDINGS` (so startup is `Prefs.load_all()` then `register()`).
@@ -1219,3 +1225,47 @@ Classic presentation too; the decomp rect above would move it ~17 px up and 9 px
 Test: `godot/tests/status_line_selfcheck.gd` (rect geometry at three window sizes, arrival/launch/HailQuote text rebuilt from STR# 2002/1000/7101,
 lengths, Return/pause clock, icons, IFF colours, FL-23 clear). Its `debug_arm_hail_quote`, `debug_red_alert_blink`, `debug_give_iff` bridge
 methods are test seams.
+
+
+## Game data import (Data Setup wizard)
+
+Port of the Apple `DataSetupWizard` + `DataImporter`: bring-your-own-data, copied into a **managed folder** and played from there.
+
+* **Gate.** With no valid game data (nothing in `Prefs.data_candidates()` loads) the shell opens `screens/DataSetup.gd` and *nothing
+  else*: no main menu, pilots, Plug-ins, Story Map or Plug-in Editor. Allowed: the wizard, **Quit**, and **Settings** (display / controls /
+  audio; its Support page has the Re-import button too). It cannot be dismissed (Esc/B do nothing on the first page). After a successful
+  import `Shell._on_data_found` loads the folder behind the loading screen and goes straight to the main menu; a failed load sends the wizard to
+  its failure page. Re-import: **Settings > Data & Advanced > Re-import / Change Game Data…** (opens on the source page, dismissable;
+  *Preview Setup Wizard* replays the whole guide).
+* **Flow.** welcome (legal framing: NOVA Swift never ships or downloads EV Nova's data) -> ownership -> (not yet: Getting EV Nova /
+  Register your copy / Get it running, Decoder Ring + community Windows .zip links) -> "Where is my EV Nova?" platform guide (Windows CE
+  install, Mac, **Steam Deck**: SD card `/run/media/...`, `~/Downloads`, Desktop-Mode copy; Linux/Wine) -> source -> inspect results ->
+  import progress (cancel) -> success. "I already have my files" skips to the source page.
+* **Source page.** *Browse…* is the in-app browser `ui/novaswift/DataFileBrowser.gd` (pad: d-pad/stick move, **A** open, **B** up,
+  **Y** use this folder, **X** cancel; shortcut chips for Home / Downloads / Documents / Desktop / SD card & drives / scanner finds); *System
+  Dialog…* (native `FileDialog`, desktops only, hidden on Steam Deck); a typed path; **Recent** sources (`[data] recent`); and installs the
+  time-sliced `DataScanner.gd` found in Downloads/Documents/Desktop/Games/Wine/Program Files/removable media.
+* **Importer (Swift, shared).** `Sources/NovaSwiftPluginStore/GameDataImport.swift` (NovaSwiftPluginStore, not Kit, because zip support
+  lives there; the discovery helpers it shares with the Apple `DataImporter` are `Sources/NovaSwiftKit/GameFileDiscovery.swift`, which
+  Apple now calls too: `importableFiles`, `missingEssentials`, audio/font/video extensions, with no behaviour change). Accepts a game
+  folder (Windows/CE install with `EV Nova.exe`, Mac install with the `.app`, or just `Nova Files`), single `.rez`/`.ndat`/music/font/movie
+  files and `.zip`s (looks through a wrapper folder). Copies resource containers, `Nova Music.mp3`, `Charcoal/Geneva.ttf`, `Race n.mov`,
+  `EVNova.ini` flat into the managed folder, and **plug-in folders found alongside** (`Nova Plug-ins`, `Plug-Ins`...) into
+  `<managed>/Nova Plug-ins/` where the plug-in runtime already looks (they are kept out of the base data). Inspection reports layout, version
+  (`vers` resource text, else format/edition markers), file groups, missing Nova Data/Graphics/Ships/Sounds/Titles groups, classic
+  resource-fork-only files (rejected with a hint to use the Windows zip), unreadable containers (BRGR/classic parse), missing essentials (same rule as
+  Apple: ships/systems/planets/outfits/weapons + rlëD 8050 menu art). The import: disk-space check (size + 5 %/64 MB), copy into a hidden
+  sibling temp dir with progress, **cancel**, validate the *copy*, then atomic rename (old data moved aside and restored on failure). A
+  refused/failed/cancelled import leaves any previous data untouched.
+* **Bridge** (`bridge/.../DataImport.swift` + `// MARK: Game data import` in NovaWorld.swift; JSON is snake_case):
+  `data_import_inspect(path, deep) -> String`, `data_import_inspect_start(path) -> bool`, `data_import_inspect_status() -> String`
+  (`{running, done, result}`), `data_import_inspect_cancel()`, `data_import_start(path, destination, include_plugins) -> bool`,
+  `data_import_status() -> String` (`{running, done, ok, cancelled, phase, fraction, files_done/total, bytes_done/total, error, failed[],
+  warnings[], resource_count, version}`), `data_import_cancel()`, `data_import_discard()`. `make_demo_world` and every GDScript demo path
+  (`NOVA_DEMO`, *Run Demo*, `demo_chosen`) are gone; `NOVA_SKIP_PILOT_MENU=1` now needs data too.
+* **Locations.** `Prefs.managed_data_dir()`: Linux/Steam Deck `$XDG_DATA_HOME` or `~/.local/share/NovaSwift/data`, Windows
+  `%APPDATA%/NovaSwift/data`, macOS `~/Library/Application Support/NovaSwift/data`, fallback `user://data`. `NOVA_DATA_IMPORT_DIR`
+  overrides the destination (tests); `NOVA_DATA_DIR` still wins the *search*. The updater never touches it (docs/UPDATER.md).
+* **Check.** `NOVA_DATA_DIR=$PWD/data/base godot --headless --path godot -s res://tests/data_import_selfcheck.gd` (fake Windows-CE install made
+  of symlinks to data/base in a scratch dir: scanner, inspect, deep inspect, import, refused re-import keeps old data, cancel, the no-data gate);
+  `tests/shell_selfcheck.gd` covers the wizard from the shell. The bridge parts SKIP until the bridge is rebuilt.

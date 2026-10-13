@@ -59,6 +59,10 @@ var _scroll_acc := Vector2.ZERO
 var _last_synth_ms := -10000
 var _last_click_frame := -10
 var _over_clickable := false
+var _hover_anim := 0.0                 # 0..1 swell while over something clickable
+var _hid_os_mouse := false             # we hid the OS pointer (restored when the pad cursor goes away)
+var _focus_from_pointer := false       # set while WE move focus, so _on_focus_changed doesn't glide
+var _parked_focus: Control = null      # focus lifted off when the pointer left every control (d-pad resumes it)
 var _stripped: Array = []              # [[action, InputEvent]] left-stick events removed from ui_*
 var _pointer: Control
 
@@ -95,6 +99,7 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	_restore_stick_nav()
+	_sync_os_mouse(false)
 
 
 func _read_prefs() -> void:
@@ -173,6 +178,15 @@ func handle_event(event: InputEvent) -> bool:
 			_pad_left()
 	elif event is InputEventJoypadButton and (event as InputEventJoypadButton).pressed:
 		last_was_pad = true
+		var bi: int = (event as InputEventJoypadButton).button_index
+		if bi in [JOY_BUTTON_DPAD_UP, JOY_BUTTON_DPAD_DOWN, JOY_BUTTON_DPAD_LEFT, JOY_BUTTON_DPAD_RIGHT] \
+				and get_viewport().gui_get_focus_owner() == null and _parked_focus != null \
+				and is_instance_valid(_parked_focus) and _parked_focus.is_visible_in_tree():
+			# Focus was lifted when the pointer left it: this press brings it back (and the pointer glides there).
+			var resume: Control = _parked_focus
+			_parked_focus = null
+			resume.grab_focus()
+			return true
 	if not (event is InputEventJoypadButton):
 		return false
 	var jb := event as InputEventJoypadButton
@@ -185,11 +199,13 @@ func handle_event(event: InputEvent) -> bool:
 		if target == null:
 			return false
 		_a_held = true
-		_send_button(MOUSE_BUTTON_LEFT, true)
+		# Deferred: a mouse event parsed + flushed from inside this joypad event's dispatch is dropped in a real
+		# window (headless delivers it, which is why the selfchecks passed while A did nothing in game).
+		_send_button.call_deferred(MOUSE_BUTTON_LEFT, true)
 		return true
 	if _a_held:
 		_a_held = false
-		_send_button(MOUSE_BUTTON_LEFT, false)
+		_send_button.call_deferred(MOUSE_BUTTON_LEFT, false)
 		return true
 	return false
 
@@ -218,6 +234,7 @@ func _process(delta: float) -> void:
 	var active: bool = avail and last_was_pad
 	if active and not _have_pos:
 		_seed_position()
+	_sync_os_mouse(active)
 	var target_alpha := 1.0 if active else 0.0
 	_alpha = move_toward(_alpha, target_alpha, delta * 8.0)
 	if not active:
@@ -276,9 +293,22 @@ func _process(delta: float) -> void:
 		_scroll_acc = Vector2.ZERO
 
 	_press = move_toward(_press, 1.0 if _a_held else 0.0, delta * (14.0 if _a_held else 7.0))
+	_hover_anim = move_toward(_hover_anim, 1.0 if _over_clickable else 0.0, delta * 9.0)
 	_pointer.visible = true
 	_pointer.position = _pos
 	_pointer.queue_redraw()
+
+
+## Only one pointer on screen: the OS mouse pointer is hidden while the pad cursor is up, and shown again the
+## moment the real mouse (or a key) takes over. Never touches a captured / confined mode someone else set.
+func _sync_os_mouse(active: bool) -> void:
+	if active and not _hid_os_mouse and Input.mouse_mode == Input.MOUSE_MODE_VISIBLE:
+		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+		_hid_os_mouse = true
+	elif not active and _hid_os_mouse:
+		if Input.mouse_mode == Input.MOUSE_MODE_HIDDEN:
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		_hid_os_mouse = false
 
 
 func _stick(ax: int, ay: int) -> Vector2:
@@ -312,6 +342,8 @@ func _control_center(c: Control) -> Vector2:
 
 
 func _on_focus_changed(c: Control) -> void:
+	if _focus_from_pointer:
+		return   # the pointer moved focus onto what it is over: no glide
 	if c == null or not is_active() or not _have_pos:
 		return
 	if Engine.get_process_frames() - _last_click_frame <= 1:
@@ -366,7 +398,26 @@ func _send_wheel(button: int) -> void:
 func _update_hover(moved: bool) -> void:
 	if not moved and Engine.get_process_frames() % 20 == 0:
 		_send_motion(Vector2.ZERO)
-	_over_clickable = _clickable_at() != null
+	var target: Control = _clickable_at()
+	_over_clickable = target != null
+	if moved:
+		_focus_follow(target)
+
+
+## Keyboard / pad focus follows the pointer, so the "selected" highlight is always what is under it and pad A
+## (ui_accept) can never press a control the pointer has left. Over empty space focus is lifted (parked) and the
+## next d-pad press resumes from it.
+func _focus_follow(target: Control) -> void:
+	var fo: Control = get_viewport().gui_get_focus_owner()
+	if target != null and target != _pointer and target.focus_mode != Control.FOCUS_NONE:
+		if fo != target:
+			_focus_from_pointer = true
+			target.grab_focus()
+			_focus_from_pointer = false
+		_parked_focus = null
+	elif target == null and fo != null and not (fo is LineEdit and (fo as LineEdit).editable):
+		_parked_focus = fo
+		fo.release_focus()
 
 
 # --- hit testing -----------------------------------------------------------------------------------------
@@ -435,31 +486,24 @@ func _restore_stick_nav() -> void:
 
 # --- drawing ---------------------------------------------------------------------------------------------
 
-const _ARROW := [Vector2(0, 0), Vector2(0, 17), Vector2(4.4, 13.1), Vector2(7.2, 19.6),
-	Vector2(10.0, 18.4), Vector2(7.3, 12.2), Vector2(12.8, 12.2)]
 
 
 func draw_pointer(ci: CanvasItem) -> void:
+	# The Apple cursor's look (ControllerCursor.swift `cursorShape`): a 30-pt amber ring with a soft fill and a
+	# centre dot, drop shadow; it swells over something clickable and squeezes on A. No arrow -- the centre is
+	# the hit point. Viewport units are points (WindowScale), so 30 here is 30 pt like the Apple app.
 	if _alpha <= 0.01:
 		return
-	var s: float = clampf(get_viewport().get_visible_rect().size.y / 720.0, 1.0, 2.6)
-	s *= lerpf(1.0, 0.88, _press)
 	var a := _alpha
-	# Soft glow around the tip, contracting when pressed.
-	var cen := Vector2(1.5, 2.5) * s
-	var ring := lerpf(15.0, 10.0, _press) * s
-	for i in 4:
-		var r := ring + (3 - i) * 2.4 * s
-		ci.draw_circle(cen, r, Color(AMBER.r, AMBER.g, AMBER.b, a * (0.035 + 0.02 * i)))
-	ci.draw_arc(cen, ring, 0.0, TAU, 40, Color(AMBER.r, AMBER.g, AMBER.b, a * (0.55 + 0.35 * _press)), 1.6 * s, true)
-	# Arrow: dark outline, cream fill.
-	var pts := PackedVector2Array()
-	for p in _ARROW:
-		pts.append((p as Vector2) * s)
-	var closed: PackedVector2Array = pts.duplicate()
-	closed.append(pts[0])
-	ci.draw_colored_polygon(pts, Color(1.0, 0.96, 0.86, a))
-	ci.draw_polyline(closed, Color(0.04, 0.04, 0.07, a), 2.6 * s, true)
+	var k: float = lerpf(1.0, 1.15, _hover_anim) * lerpf(1.0, 0.72, _press)
+	var r: float = 15.0 * k
+	var line: float = 2.5 * k
+	# Shadow: a few soft dark discs (SwiftUI .shadow(radius: 3) at 0.6 black).
+	for i in 3:
+		ci.draw_circle(Vector2(0, 1), r + 3.0 - i, Color(0, 0, 0, a * 0.12))
+	ci.draw_circle(Vector2.ZERO, r, Color(AMBER.r, AMBER.g, AMBER.b, a * lerpf(0.15, 0.3, _hover_anim)))
+	ci.draw_arc(Vector2.ZERO, r - line * 0.5, 0.0, TAU, 48, Color(AMBER.r, AMBER.g, AMBER.b, a), line, true)
+	ci.draw_circle(Vector2.ZERO, 2.5, Color(AMBER.r, AMBER.g, AMBER.b, a))
 
 
 # --- testing hooks ---------------------------------------------------------------------------------------
@@ -474,7 +518,9 @@ func debug_move_to(p: Vector2) -> void:
 	_pos = p
 	_glide_t = -1.0
 	_send_motion(rel)
-	_over_clickable = _clickable_at() != null
+	var target: Control = _clickable_at()
+	_over_clickable = target != null
+	_focus_follow(target)
 
 
 ## Press / release pad A through the real handler; returns whether the event would be consumed.

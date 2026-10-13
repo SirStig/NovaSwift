@@ -60,6 +60,7 @@ signal training_requested
 ## "Import Data" / "Preview Setup Wizard" (Apple Settings > Data & Advanced): the host closes
 ## Settings and opens the data-setup screen.
 signal data_setup_requested
+signal data_setup_preview_requested
 
 ## Page keys in sidebar order (Apple SettingsView category order), and what the sidebar calls them.
 const PAGES := ["Presentation", "Gameplay", "Enhancements", "Controls", "Video", "Audio", "Accessibility", "Support"]
@@ -657,7 +658,7 @@ func _build_support() -> void:
 			PilotFiles.set_dir("")
 			_mark_changed()
 			show_page("Support"))
-	_button("Import Data", func(): data_setup_requested.emit(), "square.and.arrow.down")
+	_button("Re-import / Change Game Data…", func(): data_setup_requested.emit(), "square.and.arrow.down")
 	_build_updates()
 	_section("Support", "Builds a report you can share: your description plus the pilot save, the recent game log and a self-test — the state that's hard to describe in a message. None of your imported EV Nova data is included.", "lifepreserver")
 	_button("Report a Bug", func(): get_tree().call_group("nova_devtools", "open_tab", "report"), "ladybug")
@@ -670,7 +671,7 @@ func _build_support() -> void:
 	_note_first(dev)
 	if dev.button_pressed:
 		_button("Open Debug Suite", func(): get_tree().call_group("nova_devtools", "open_tab", "console"), "ladybug")
-		_button("Preview Setup Wizard", func(): data_setup_requested.emit(), "sparkles")
+		_button("Preview Setup Wizard", func(): data_setup_preview_requested.emit(), "sparkles")
 
 
 ## Auto-updater switches (godot/updater/, docs/UPDATER.md). Keys: updates/check, updates/beta.

@@ -2,7 +2,7 @@
 # menu, pilot menu, settings, pause menu) and the flow between them, so Main.gd
 # only has to ask `in_menu()` / `is_paused()` and react to three signals.
 #
-#   start() ── no data ──► DataSetup ──► main menu     (or "Run demo")
+#   start() ── no data ──► DataSetup (the ONLY screen; Quit + Settings) ──► main menu
 #           └─ data ─────► MainMenu ──► PilotMenu ──► pilot_chosen
 #                              └─ Settings · Game Data… · Quit
 #   pause() (Esc / Start in flight) ──► Resume · Settings · Save & Quit to menu · Quit
@@ -22,6 +22,8 @@ const MainMenu = preload("res://screens/MainMenu.gd")
 const PauseMenu = preload("res://screens/PauseMenu.gd")
 const Settings = preload("res://screens/Settings.gd")
 const PluginsScreen = preload("res://screens/Plugins.gd")
+const PluginEditor = preload("res://editor/PluginEditor.gd")
+const EditorTheme = preload("res://editor/EditorTheme.gd")
 const StoryGuide = preload("res://screens/StoryGuide.gd")
 const DataSetup = preload("res://screens/DataSetup.gd")
 const PilotFiles = preload("res://screens/PilotFiles.gd")
@@ -41,8 +43,6 @@ const LOADING_MIN_SHOW := 0.5
 signal data_loaded(dir: String)
 ## A pilot was created / loaded on the bridge: Main builds the world.
 signal pilot_chosen
-## "Run demo" from the data-setup screen.
-signal demo_chosen
 ## The pause menu closed and play continues.
 signal resumed
 ## The pause menu's Player Info button (Main opens the window after the menu closes).
@@ -54,6 +54,10 @@ var data_dir := ""
 var has_data := false
 
 var main_menu: Node
+var plugin_editor: Node
+## True while a plug-in test run has replaced the loaded pilot. The editor node stays alive.
+var editor_testing := false
+var _test_bar: CanvasLayer
 var pilot_menu: Node
 var data_setup: Node
 var settings: Node
@@ -90,8 +94,12 @@ func setup(world: Object, game_audio: Node) -> void:
 
 ## Any full-screen shell screen is up (the world is not shown / stepped).
 func in_menu() -> bool:
+	# A test run keeps the menu node (hidden) and the editor node (hidden). Flight has to run.
+	if editor_testing:
+		return pilot_menu != null or data_setup != null or _booting or intro != null or offer != null
+	var editing := plugin_editor != null and is_instance_valid(plugin_editor)
 	return main_menu != null or pilot_menu != null or data_setup != null or _booting \
-			or intro != null or offer != null
+			or intro != null or offer != null or editing
 
 
 func is_paused() -> bool:
@@ -229,6 +237,7 @@ func _open_main_menu() -> void:
 	main_menu.settings.connect(_open_settings.bind(main_menu))
 	main_menu.game_data.connect(func(): _open_data_setup(true))
 	main_menu.plugins.connect(_open_plugins.bind(main_menu))
+	main_menu.plugin_editor.connect(_open_plugin_editor)
 	main_menu.quit.connect(quit_game)
 	main_menu.enter_ship.connect(_enter_ship)
 	if updater != null:
@@ -361,21 +370,18 @@ func _on_pilot_chosen() -> void:
 
 # --- data setup -------------------------------------------------------------------
 
-func _open_data_setup(from_menu: bool) -> void:
+func _open_data_setup(from_menu: bool, from_top := false) -> void:
 	_data_from_menu = from_menu
 	var tok := _overlay_push(main_menu) if from_menu and main_menu != null else {}
 	data_setup = DataSetup.new()
 	add_child(data_setup)
-	data_setup.setup(nova)
+	# Gated = no valid data: the wizard can't be dismissed, only Quit / Settings (display, controls, audio).
+	data_setup.setup(nova, {"gated": not has_data and not from_menu, "start_at_source": from_menu and not from_top})
 	data_setup.data_found.connect(_on_data_found)
-	data_setup.run_demo.connect(func():
-		_close_data_setup()
-		if main_menu != null:
-			main_menu.queue_free()
-			main_menu = null
-		has_data = false
-		demo_chosen.emit())
 	data_setup.quit.connect(quit_game)
+	data_setup.settings_requested.connect(func():
+		if settings == null:
+			_open_settings(data_setup))
 	data_setup.back.connect(func():
 		if _data_from_menu:
 			_close_data_setup()
@@ -389,7 +395,15 @@ func _close_data_setup() -> void:
 		data_setup = null
 
 
+## The wizard imported into the managed folder: load it behind the loading screen, then the main menu.
+## A load that fails sends the wizard to its failure page (the previous data, if any, stays loaded).
 func _on_data_found(dir: String) -> void:
+	var ws := data_setup
+	var ok := await load_data_async(dir, "Loading game data")
+	if not ok:
+		if ws != null and is_instance_valid(ws):
+			ws.show_load_failure("The imported data couldn't be loaded. Pick the whole game folder (or its Nova Files folder) and try again.")
+		return
 	data_dir = dir
 	has_data = true
 	_close_data_setup()
@@ -414,11 +428,85 @@ func _open_settings(underneath: Node) -> void:
 		settings.close()
 		if underneath == main_menu and main_menu != null:
 			_open_data_setup(true))
+	settings.data_setup_preview_requested.connect(func():
+		settings.close()
+		if underneath == main_menu and main_menu != null:
+			_open_data_setup(true, true))
 	settings.setup(nova)
 	settings.changed.connect(apply_prefs)
 	settings.closed.connect(func():
 		settings = null
 		_overlay_pop(tok, underneath))
+
+
+## Full-screen plug-in editor (Apple PluginEditorView). The menu stays in the tree, hidden,
+## and comes back when the editor closes. A test run hides the editor without freeing it.
+func _open_plugin_editor() -> void:
+	if plugin_editor != null or main_menu == null:
+		return
+	main_menu.visible = false
+	if main_menu.music != null and is_instance_valid(main_menu.music) and main_menu.music.playing:
+		main_menu.music.fade_out()
+	plugin_editor = PluginEditor.new()
+	add_child(plugin_editor)
+	plugin_editor.setup(nova, data_dir)
+	plugin_editor.closed.connect(_close_plugin_editor)
+	plugin_editor.test_requested.connect(_begin_editor_test)
+
+
+func _close_plugin_editor() -> void:
+	if editor_testing:
+		_end_editor_test()
+	if plugin_editor != null and is_instance_valid(plugin_editor):
+		plugin_editor.queue_free()
+	plugin_editor = null
+	if main_menu != null and is_instance_valid(main_menu):
+		main_menu.visible = true
+		if main_menu.music != null and is_instance_valid(main_menu.music):
+			main_menu.music.start(nova, data_dir)
+		main_menu.refocus()
+
+
+func _begin_editor_test() -> void:
+	editor_testing = true
+	if plugin_editor != null and is_instance_valid(plugin_editor):
+		plugin_editor.visible = false
+	_show_test_bar(true)
+	pilot_chosen.emit()
+
+
+func _end_editor_test() -> void:
+	if not editor_testing:
+		return
+	if nova != null and nova.has_method("editor_end_test"):
+		nova.editor_end_test()
+	editor_testing = false
+	_show_test_bar(false)
+	if pause_menu != null:
+		pause_menu.queue_free()
+		pause_menu = null
+	if plugin_editor != null and is_instance_valid(plugin_editor):
+		plugin_editor.visible = true
+
+
+func _show_test_bar(on: bool) -> void:
+	if _test_bar == null:
+		_test_bar = CanvasLayer.new()
+		_test_bar.layer = 80
+		add_child(_test_bar)
+		var bar := PanelContainer.new()
+		bar.set_anchors_preset(Control.PRESET_CENTER_TOP)
+		bar.position = Vector2(-160, 8)
+		bar.custom_minimum_size = Vector2(320, 36)
+		bar.add_theme_stylebox_override("panel", EditorTheme.fill(EditorTheme.BAR))
+		bar.mouse_filter = Control.MOUSE_FILTER_STOP
+		_test_bar.add_child(bar)
+		var h := HBoxContainer.new()
+		h.alignment = BoxContainer.ALIGNMENT_CENTER
+		bar.add_child(h)
+		h.add_child(EditorTheme.label("Test run", 13, EditorTheme.AMBER))
+		h.add_child(EditorTheme.button("End Test Run", _end_editor_test, true))
+	_test_bar.visible = on
 
 
 ## The Plug-ins manager (main menu / Settings); reloads the game data through the loading screen.
@@ -502,6 +590,9 @@ func close_pause() -> void:
 
 
 func _save_and_menu() -> void:
+	if editor_testing:
+		_end_editor_test()
+		return
 	if coach != null:
 		end_training()   # the training flight saves nothing
 		return
@@ -515,6 +606,12 @@ func _save_and_menu() -> void:
 ## The pilot was lost (the death sequence ran out with no eject): back to the main menu
 ## without saving — the pilot resumes from its last launch, as in the original.
 func return_to_menu() -> void:
+	if editor_testing:
+		if pause_menu != null:
+			pause_menu.queue_free()
+			pause_menu = null
+		_end_editor_test()
+		return
 	if in_menu():
 		return
 	if coach != null:
@@ -533,6 +630,9 @@ func return_to_menu() -> void:
 ## deletes the pilot (every slot and backup), otherwise it is marked killed -- the menu reads
 ## "<name> has been killed" and Enter Ship only beeps until a pilot is opened.
 func on_player_killed() -> void:
+	if editor_testing:
+		return_to_menu()
+		return
 	var r = JSON.parse_string(nova.pilot_killed())
 	if r is Dictionary and str(r.get("result", "")) == "killed":
 		killed_id = str(r.get("id", ""))
@@ -543,6 +643,8 @@ func on_player_killed() -> void:
 
 ## Quit, saving the live pilot first when there is one.
 func quit_game() -> void:
+	if editor_testing:
+		_end_editor_test()
 	if has_data and pilot_menu == null and main_menu == null and data_setup == null and nova != null:
 		nova.pilot_autosave("backgroundLanded" if nova.is_landed() else "background")
 	Prefs.save()

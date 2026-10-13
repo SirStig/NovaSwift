@@ -167,7 +167,7 @@ class NovaEditor: RefCounted {
         }
     }
 
-    @Callable(autoSnakeCase: true) func setMeta(name: String, author: String, version: String, notes: String) -> String {
+    @Callable(autoSnakeCase: true) func setPluginInfo(name: String, author: String, version: String, notes: String) -> String {
         if doc.name != name { doc.name = name }
         if doc.author != author { doc.author = author }
         if doc.version != version { doc.version = version }
@@ -188,7 +188,7 @@ class NovaEditor: RefCounted {
 
     @Callable(autoSnakeCase: true) func types() -> String {
         var rows: [[String: Any]] = []
-        var seen = Set<FourCharCode>()
+        var seen = Set<NovaSwiftKit.FourCharCode>()
         for t in ResourceSchemas.knownTypes {
             guard seen.insert(t).inserted else { continue }
             rows.append(typeRow(t))
@@ -357,7 +357,7 @@ class NovaEditor: RefCounted {
         if t == NovaType.strList {
             let strings = (obj["strings"] as? [String]) ?? []
             data = TextResourceCodec.encodeStringList(strings.map { TextResourceCodec.stored($0) })
-        } else if t == FourCharCode("STR ") {
+        } else if t == NovaSwiftKit.FourCharCode("STR ") {
             data = TextResourceCodec.encodeString(TextResourceCodec.stored(obj["text"] as? String ?? ""))
         } else if t == NovaType.desc || ResourceSchemas.editorKind(for: t) == .text && ResourceSchemas.schema(for: t)?.type == NovaType.desc {
             var rec = DescRecord(r.data)
@@ -366,7 +366,7 @@ class NovaEditor: RefCounted {
             if let m = obj["movie"] as? String { rec.movieFile = m }
             if let f = intOf(obj["flags"]) { rec.flags = f }
             data = rec.encode()
-        } else if t == FourCharCode("TEXT") {
+        } else if t == NovaSwiftKit.FourCharCode("TEXT") {
             data = Data(FieldCodec.macRoman(TextResourceCodec.stored(obj["text"] as? String ?? "")))
         } else if ResourceSchemas.editorKind(for: t) == .text, let text = obj["text"] as? String {
             data = Data(FieldCodec.macRoman(TextResourceCodec.stored(text)))
@@ -677,7 +677,7 @@ class NovaEditor: RefCounted {
         sheetPNG = nil
     }
 
-    private func typeRow(_ t: FourCharCode) -> [String: Any] {
+    private func typeRow(_ t: NovaSwiftKit.FourCharCode) -> [String: Any] {
         let all = doc.effective.resources(of: t).count
         let changed = doc.layer.resources(of: t).count
         return ["type": t.stringValue, "name": ResourceSchemas.displayName(for: t),
@@ -693,7 +693,7 @@ class NovaEditor: RefCounted {
         return keys
     }
 
-    private func code(_ s: String) -> FourCharCode? { FourCharCode(s) }
+    private func code(_ s: String) -> NovaSwiftKit.FourCharCode? { NovaSwiftKit.FourCharCode(s) }
 
     private func prov(_ p: Provenance?) -> String {
         switch p {
@@ -799,17 +799,17 @@ class NovaEditor: RefCounted {
         }
     }
 
-    private func resolvedRef(_ f: SchemaField, value: FieldValue, values: [String: FieldValue]) -> (FourCharCode, Int)? {
+    private func resolvedRef(_ f: SchemaField, value: FieldValue, values: [String: FieldValue]) -> (NovaSwiftKit.FourCharCode, Int)? {
         guard case let .int(n) = value else { return nil }
         let selector = f.contextual.flatMap { values[$0.selector]?.intValue }
         return f.reference(for: n, selector: selector)
     }
 
-    private func textPayload(_ t: FourCharCode, _ data: Data) -> [String: Any] {
+    private func textPayload(_ t: NovaSwiftKit.FourCharCode, _ data: Data) -> [String: Any] {
         if t == NovaType.strList {
             return ["mode": "list", "strings": TextResourceCodec.decodeStringList(data).map { TextResourceCodec.display($0) }]
         }
-        if t == FourCharCode("STR ") {
+        if t == NovaSwiftKit.FourCharCode("STR ") {
             return ["mode": "string", "text": TextResourceCodec.display(TextResourceCodec.decodeString(data))]
         }
         if t == NovaType.desc {
@@ -821,7 +821,7 @@ class NovaEditor: RefCounted {
         return ["mode": "plain", "text": TextResourceCodec.display(text)]
     }
 
-    private func loadSheet(_ t: FourCharCode, _ id: Int, _ data: Data) {
+    private func loadSheet(_ t: NovaSwiftKit.FourCharCode, _ id: Int, _ data: Data) {
         let key = "\(t.rawValue)/\(id)/\(doc.changeCount)"
         if key == sheetKey { return }
         sheetKey = key
@@ -831,13 +831,13 @@ class NovaEditor: RefCounted {
         sheet = Self.decodeGraphic(t, data)
     }
 
-    private static func decodeGraphic(_ t: FourCharCode, _ data: Data) -> SpriteSheet? {
+    private static func decodeGraphic(_ t: NovaSwiftKit.FourCharCode, _ data: Data) -> SpriteSheet? {
         if t == NovaType.rleD { return try? RLED.decode(data) }
         if t == NovaType.rle8 { return try? RLE8.decode(data) }
         if t == NovaType.pict { return try? PICT.decode(data) }
         if t == NovaType.cicn { return try? CICN.decode(data) }
         if t == NovaType.ppat || t == NovaType.ppatAlt { return try? PixPat.decode(data) }
-        return try? ClassicIcons.decode(type: t, data: data)
+        return try? ClassicIcon.decode(type: t, data: data)
     }
 
     private func hex(_ data: Data, limit: Int) -> String {

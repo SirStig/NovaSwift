@@ -74,3 +74,21 @@ Nova resource forks you can parse immediately.
 **Redistribution caveat:** you may freely *download and play* these; *bundling*
 one inside a shipped app is a per-author permission question — check each mod's
 readme.
+
+## 5. Godot frontend (Linux, Windows, Steam Deck): the Data Setup wizard
+
+The Godot build has no demo mode: until your data is imported, the **Data Setup** wizard is the only thing it shows (plus Quit
+and Settings). It works like the Apple app's wizard and copies your files into NOVA Swift's own data folder
+(Linux/Steam Deck `~/.local/share/NovaSwift/data`, Windows `%APPDATA%\NovaSwift\data`, macOS
+`~/Library/Application Support/NovaSwift/data`), so your original files are never modified and updates never touch them.
+
+What you can pick: the game folder (Windows/Community Edition install with `EV Nova.exe`, or a Mac install), its `Nova Files`
+folder, single `.rez`/`.ndat` files, or the Windows build's `.zip` as it is (no unzipping needed). Music (`Nova Music.mp3`),
+the original fonts, race movies and `EVNova.ini` come along, and a `Nova Plug-ins` folder next to the game is imported as
+plug-ins. The wizard checks the data (readable containers, the ships/systems/planets/outfits/weapons tables, menu art),
+shows the detected version, checks free disk space, and only replaces your previous data once the new copy validates.
+
+**Steam Deck:** in Desktop Mode put the `.zip` or the game folder on the Deck (USB stick or SD card appear under
+`/run/media/...`; a browser download lands in `~/Downloads`), return to Game Mode and choose *Browse…*: the in-app browser has
+shortcuts for Home, Downloads and the SD card and is fully pad driven (A open, B up, Y use this folder, X cancel). Installs it
+spots by itself are listed on the page. Change the data later in *Settings > Data & Advanced > Re-import / Change Game Data…*.

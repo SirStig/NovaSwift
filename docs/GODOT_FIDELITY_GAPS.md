@@ -119,7 +119,7 @@ no-FX path). Do not touch HUD files.
 
 ## Deferred: ENHANCEMENT gaps (NovaSwift-only; not original)
 
-* Debug Suite parts not ported: HD/3D viewer, context-menu on ships (the rest is ported).
+* Debug Suite: the ship/planet context menu and the HD viewer are ported. The viewer is the classic-sprite turntable (NovaSwiftHD packs and live 3D hulls are not linked).
 * HD graphics packs (NSgx/NSbl, `.nsx`), live 3D hulls, chase-camera 3D tilt, `hdGraphics`/`hdDetail`/`modelDetail`/`liveLighting` settings.
 * Camera views key (Look ahead / Ship up / Chase cycle key `O`, zoom `[` `]`): renderer supports them, no keybinding or HUD toast.
 * Autopilot key `A`, `cycleHyperspaceLink` as an enhancement, evasive escort order, `quickHyperjump`, forgiving landing UI toggle,
@@ -128,7 +128,7 @@ no-FX path). Do not touch HUD files.
   Story Guide badge placement on BBS/offer/Mission Info rows, FPS counter UI polish.
 * Accessibility: larger HUD, high-contrast HUD, reduce flashing, no-hyperspace-effects, colorblind filter UI for the Classic `ïntf` bar.
 * NovaSwift's own tutorial cards beyond what `Tutorial.gd` and `Hints.gd` already do; loading tips. (The original's travel hint chain, STR# 2002 #22-31, is ported: written, not built.)
-* Plug-in editor port, multiplayer co-op (ENet/Steam), Game Center/iCloud equivalents, Steam Deck pad keyboard polish.
+* Plug-in editor is ported (eight tools, schema inspector, previews, galaxy, story, validation, export, test run). Multiplayer co-op (ENet/Steam), Game Center/iCloud equivalents, Steam Deck pad keyboard polish.
 * Data setup wizard (guided import), managed data dir copy, web import server.
 
 
@@ -151,7 +151,7 @@ Every Apple file was mapped to a Godot equivalent. Frontend wiring that is still
 | `Audio/*` | `audio/GameAudio.gd`, `TitleMusic.gd` | DONE (see "Sound sites") |
 | `Input/*` | `Controls.gd` | DONE; touch/tilt/haptics N/A; being edited by the controls agent |
 | `UI/*` (DITL dialogs, desc dialog, fonts, palettes) | `ui/classic/*` | DONE |
-| `Tutorial/*`, `Debug/*`, `Editor/*`, `Multiplayer/*`, `Plugins/*`, `Data/HDGraphics` | `Tutorial.gd`, `Hints.gd`, `debug/*`, `Plugins.gd` | ENHANCEMENT (ported or deferred) |
+| `Tutorial/*`, `Debug/*`, `Editor/*`, `Multiplayer/*`, `Plugins/*`, `Data/HDGraphics` | `Tutorial.gd`, `Hints.gd`, `debug/*`, `editor/PluginEditor.gd`, `Plugins.gd` | Debug suite and plug-in editor ported. HD packs, multiplayer, and the data wizard stay deferred. |
 
 ## Engine gaps are not listed here
 

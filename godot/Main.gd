@@ -7,8 +7,8 @@
 #     data/base/), it loads it, builds a real system via GameSession.makeWorld,
 #     and renders actual hull, planet, shot, rock and explosion SPRITES decoded
 #     by NovaSwiftKit.
-#   • Demo — otherwise a data-free physics world: a ship you fly plus drifting
-#     hulls, drawn as primitives. Runs with no data so the slice always works.
+#   • No data — the shell shows only the Data Setup wizard (screens/DataSetup.gd) until the player's
+#     own EV Nova data is imported; there is no data-free mode.
 #
 # Either way the loop is the same and it's the real engine:
 #   Godot input -> Swift ControlIntent -> World.step -> Swift readback -> render.
@@ -180,7 +180,6 @@ func _ready() -> void:
 	_shell.setup(nova, _audio)
 	_shell.data_loaded.connect(func(_dir): _has_data = true)
 	_shell.pilot_chosen.connect(_on_pilot_chosen)
-	_shell.demo_chosen.connect(_on_demo_chosen)
 	_shell.resumed.connect(_suppress_held)
 	_shell.player_info_requested.connect(func(): _story.open_info("general"))
 
@@ -214,35 +213,27 @@ func _sync_story_view() -> void:
 
 
 func _start_world() -> void:
-	# Dev/CI shortcuts skip the shell: throwaway pilot (never saved) or the demo.
-	if OS.get_environment("NOVA_SKIP_PILOT_MENU") != "" or OS.get_environment("NOVA_DEMO") != "":
+	# Dev/CI shortcut skips the shell: a throwaway pilot (never saved). Needs data; with none it falls
+	# through to the shell's Data Setup wizard like a normal start.
+	if OS.get_environment("NOVA_SKIP_PILOT_MENU") != "":
 		var data_dir: String = Prefs.find_data(nova)
 		if data_dir != "":
 			_has_data = true
 			print("NOVA Swift: loaded data from ", data_dir)
 			nova.make_world(-1)
-		else:
-			nova.make_demo_world()
-			_has_data = false
-			print("NOVA Swift: no data found — running demo world")
-		_refresh_flight()
-		return
+			_refresh_flight()
+			return
+		print("NOVA Swift: no data found — showing data setup")
 	# Otherwise the shell shows the main menu (or the data-setup screen first);
-	# the world isn't built until a pilot is chosen or the demo is picked.
+	# the world isn't built until a pilot is chosen.
 	_shell.start_async()   # the data loads on a worker thread behind the loading screen
 
 
 func _on_pilot_chosen() -> void:
 	if not nova.make_world(-1):
-		nova.make_demo_world()
-		_has_data = false
-	_suppress_held()
-	_refresh_flight()
-
-
-func _on_demo_chosen() -> void:
-	nova.make_demo_world()
-	_has_data = false
+		push_error("NOVA Swift: could not build a world from the loaded data")
+		_shell.call("_open_main_menu")   # back to the menu rather than flying an empty world
+		return
 	_suppress_held()
 	_refresh_flight()
 
@@ -256,13 +247,54 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("pause_menu") and _can_pause():
 		get_viewport().set_input_as_handled()
 		_shell.open_pause()
-	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT \
-			and _can_pause():
-		# Click to select (GameScene.selectAt): a ship under the pointer locks as the target,
-		# a stellar takes the travel selection, your own ship clears the target, empty
-		# space clears the stellar. Screen -> world is FlightRenderer.screen_to_world.
+	elif event is InputEventMouseButton and _can_pause() and (_dev == null or not _dev.captures_input()):
+		# Click to select (GameScene.selectAt). With debug mode on, a short left click
+		# still selects on release, and a right-click or a 0.45s hold opens the
+		# Destroy/Disable/Capture/Conquer menu without also selecting.
 		var world_pos: Vector2 = _flight.screen_to_world(event.position)
-		nova.click_select(world_pos.x, world_pos.y)
+		if event.button_index == MOUSE_BUTTON_RIGHT and event.pressed and _dev_wants_pointer():
+			get_viewport().set_input_as_handled()
+			var pick := _dbg_pick(world_pos)
+			_dev.show_context(pick, event.position)
+		elif event.button_index == MOUSE_BUTTON_LEFT and event.pressed and _dev_wants_pointer():
+			get_viewport().set_input_as_handled()
+			_pressing = true
+			_press_at = Time.get_ticks_msec()
+			_press_screen = event.position
+			_press_world = world_pos
+			_press_menu = false
+		elif event.button_index == MOUSE_BUTTON_LEFT and not event.pressed and _pressing:
+			get_viewport().set_input_as_handled()
+			var menu := _press_menu
+			_pressing = false
+			if not menu:
+				nova.click_select(_press_world.x, _press_world.y)
+		elif event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			nova.click_select(world_pos.x, world_pos.y)
+
+
+func _dev_wants_pointer() -> bool:
+	return _dev != null and _dev.debug_enabled() and nova.has_method("dbg_pick") and not _dev.captures_input()
+
+
+func _dbg_pick(world_pos: Vector2) -> Dictionary:
+	var parsed = JSON.parse_string(nova.dbg_pick(world_pos.x, world_pos.y))
+	return parsed if parsed is Dictionary else {}
+
+
+func _dev_hold() -> void:
+	if not _pressing:
+		return
+	if not _can_pause() or not _dev_wants_pointer():
+		_pressing = false
+		return
+	if _press_menu or Time.get_ticks_msec() - _press_at < LONG_PRESS_MS:
+		return
+	var pick := _dbg_pick(_press_world)
+	var kind := str(pick.get("kind", ""))
+	if kind == "ship" or kind == "stellar":
+		_press_menu = true
+		_dev.show_context(pick, _press_screen)
 
 
 func _can_pause() -> bool:
@@ -298,6 +330,12 @@ func _flight_frame(delta: float, sim_ran: bool) -> void:
 
 
 var _wheel: Node = null   # ui/ActionWheel.gd
+var _pressing := false
+var _press_at := 0
+var _press_screen := Vector2.ZERO
+var _press_world := Vector2.ZERO
+var _press_menu := false
+const LONG_PRESS_MS := 450
 
 func _process(delta: float) -> void:
 	if nova == null:
@@ -305,6 +343,7 @@ func _process(delta: float) -> void:
 	if _wheel != null:
 		_wheel.live = false   # re-asserted below only in plain flight
 	_cursor_state(false)   # menus / docked / pause / dialogs / map: the pad cursor may run (flight re-suppresses it below)
+	_dev_hold()
 	if _shell.in_menu():
 		$HUD.visible = false
 		_flight.set_active(false)
@@ -400,7 +439,7 @@ func _on_launch() -> void:
 
 func _update_top_label() -> void:
 	var hud: Label = $HUD
-	var mode := "real data" if _has_data else "demo world (no data)"
+	var mode := "real data" if _has_data else "no data"
 	var ship_name := ""
 	if _has_data:
 		ship_name = nova.ship_type_name(nova.player_ship_type())

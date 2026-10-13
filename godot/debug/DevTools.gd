@@ -26,6 +26,7 @@ const BrowserPane = preload("res://debug/BrowserPane.gd")
 const ChecksPane = preload("res://debug/ChecksPane.gd")
 const ReportPane = preload("res://debug/ReportPane.gd")
 const Overlay = preload("res://debug/DevOverlay.gd")
+const HDViewer = preload("res://debug/HDViewer.gd")
 
 signal opened
 signal closed
@@ -55,6 +56,8 @@ var _panes := {}
 var _overlay: Control
 var _chip: Control
 var _chip_label: Button
+var _ctx: Control
+var _hd: Node
 var _released_frame := -100
 var _win_time := 0.0
 var _win_frames := 0
@@ -101,7 +104,8 @@ func debug_enabled() -> bool:
 ## True while flight input must not be read: the suite is open (or closed this very frame, so
 ## the key that closed it is not also read as a flight command).
 func captures_input() -> bool:
-	return is_open or Engine.get_process_frames() <= _released_frame
+	var viewer := _hd != null and is_instance_valid(_hd)
+	return is_open or viewer or _ctx != null or Engine.get_process_frames() <= _released_frame
 
 
 ## Run a console line; returns [{kind, text}] (the pane shows them via the shared log).
@@ -112,6 +116,103 @@ func run(line: String) -> Array:
 	if _panes.has("console"):
 		_panes["console"].on_command(line)
 	return out if out is Array else []
+
+
+## Right-click / long-press menu (Apple DevContextMenu). `pick` is nova.dbg_pick JSON.
+func show_context(pick: Dictionary, at: Vector2) -> void:
+	dismiss_context()
+	if not debug_enabled() or dbg == null:
+		return
+	var kind := str(pick.get("kind", ""))
+	if kind != "ship" and kind != "stellar":
+		return
+	var id := int(pick.get("id", -1))
+	var title := str(pick.get("name", ""))
+	if title == "":
+		title = "#%d" % id
+	var catcher := Control.new()
+	catcher.set_anchors_preset(Control.PRESET_FULL_RECT)
+	catcher.mouse_filter = Control.MOUSE_FILTER_STOP
+	catcher.gui_input.connect(func(ev: InputEvent) -> void:
+		if ev is InputEventMouseButton and ev.pressed:
+			get_viewport().set_input_as_handled()
+			dismiss_context())
+	add_child(catcher)
+	_ctx = catcher
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(150, 0)
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0, 0, 0, 0.95)
+	sb.border_color = Color(DevUI.GREEN.r, DevUI.GREEN.g, DevUI.GREEN.b, 0.5)
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(10)
+	sb.content_margin_left = 10
+	sb.content_margin_right = 10
+	sb.content_margin_top = 10
+	sb.content_margin_bottom = 10
+	sb.shadow_color = Color(0, 0, 0, 0.5)
+	sb.shadow_size = 8
+	panel.add_theme_stylebox_override("panel", sb)
+	catcher.add_child(panel)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 5)
+	panel.add_child(box)
+	var head := DevUI.label(box, title, 11, DevUI.GREEN)
+	head.add_theme_font_override("font", DevUI.mono())
+	head.clip_text = true
+	var actions: Array = []
+	if kind == "ship":
+		actions = [
+			["Select", "select ship %d" % id, false],
+			["Disable", "disable %d" % id, false],
+			["Capture", "capture %d" % id, false],
+			["Destroy", "destroy %d" % id, true],
+		]
+	else:
+		actions = [
+			["Select", "select spob %d" % id, false],
+			["Conquer", "conquer %d" % id, false],
+		]
+	for action in actions:
+		var b := Button.new()
+		b.text = action[0]
+		b.flat = true
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.focus_mode = Control.FOCUS_ALL
+		b.add_theme_font_override("font", DevUI.mono())
+		b.add_theme_font_size_override("font_size", 11)
+		b.add_theme_color_override("font_color", DevUI.RED if action[2] else Color(1, 1, 1))
+		b.pressed.connect(_ctx_run.bind(str(action[1])))
+		box.add_child(b)
+	panel.reset_size()
+	var vp := get_viewport().get_visible_rect().size
+	var sz := panel.get_combined_minimum_size()
+	panel.position = Vector2(clampf(at.x, 8, maxf(8, vp.x - sz.x - 8)), clampf(at.y, 8, maxf(8, vp.y - sz.y - 8)))
+	if box.get_child_count() > 1 and box.get_child(1) is Control:
+		box.get_child(1).grab_focus()
+
+
+func dismiss_context() -> void:
+	if _ctx != null and is_instance_valid(_ctx):
+		_ctx.queue_free()
+	_ctx = null
+
+
+func _ctx_run(command: String) -> void:
+	run(command)
+	dismiss_context()
+
+
+func open_hd_viewer() -> void:
+	if dbg == null or not debug_enabled():
+		return
+	if _hd != null and is_instance_valid(_hd):
+		return
+	_hd = HDViewer.new()
+	add_child(_hd)
+	_hd.setup(self)
+	_hd.closed.connect(func() -> void: _hd = null)
 
 
 # --- open / close ----------------------------------------------------------------
@@ -136,6 +237,10 @@ func toggle_console() -> void:
 
 
 func close() -> void:
+	dismiss_context()
+	if _hd != null and is_instance_valid(_hd):
+		_hd.queue_free()
+		_hd = null
 	if not is_open:
 		return
 	is_open = false
@@ -162,6 +267,10 @@ func _input(event: InputEvent) -> void:
 		if toggle and debug_enabled() and dbg != null:
 			get_viewport().set_input_as_handled()
 			toggle_console()
+			return
+		if event.keycode == KEY_ESCAPE and _ctx != null:
+			get_viewport().set_input_as_handled()
+			dismiss_context()
 			return
 		if is_open and event.keycode == KEY_ESCAPE:
 			get_viewport().set_input_as_handled()

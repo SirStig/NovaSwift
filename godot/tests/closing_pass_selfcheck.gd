@@ -4,7 +4,7 @@
 #   B. when the bridge has the new methods, the real maneuver: with Prefs gameplay/quick_hyperjump on, an armed
 #      route and a begin_hyperjump, the shared QuickHyperjump flies align -> accelerate -> flash, the charge loop
 #      sound is 128 until the commit and -1 after, and the arrival reports a 0.35 s fade. Skipped (not failed)
-#      when the build predates the methods or no jump can be armed in the demo world.
+#      when the build predates the methods or no jump can be armed without a pilot.
 #   NOVA_DATA_DIR=$PWD/data/base godot --headless --path godot -s res://tests/closing_pass_selfcheck.gd
 extends SceneTree
 
@@ -162,7 +162,7 @@ func _part_b() -> void:
 	if data == "":
 		data = ProjectSettings.globalize_path("res://") + "../data/base"
 	if not bool(nova.load_game(data)) or not bool(nova.make_world(-1)):
-		print("  SKIP no data / demo world")
+		print("  SKIP no data")
 		nova.queue_free()
 		return
 	var plumb: Node = root.get_node_or_null("SettingsPlumbing")
@@ -184,7 +184,7 @@ func _part_b() -> void:
 			first = links[i]
 			break
 	if first == -1 or not bool(nova.nav_click(first)):
-		print("  SKIP could not arm a route in the demo world (no pilot)")
+		print("  SKIP could not arm a route (no pilot)")
 		nova.queue_free()
 		return
 	# Thrust clear of the no-jump zone and engage.

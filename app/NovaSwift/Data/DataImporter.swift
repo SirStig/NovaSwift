@@ -61,13 +61,7 @@ enum DataImporter {
             // comes out partial (classically: the "Nova Data" files land and
             // the art doesn't). Ask iCloud for them first and give it a moment.
             outcome.pendingDownload = materialiseICloudPlaceholders(in: src)
-            sources = GameLibrary.discoverResourceFiles(in: src)
-                + GameDataController.discoverAudioFiles(in: src)
-                + GameDataController.discoverFontFiles(in: src)
-                + GameDataController.discoverVideoFiles(in: src)
-                + ((try? fm.contentsOfDirectory(at: src, includingPropertiesForKeys: nil)) ?? []).filter {
-                    $0.lastPathComponent.caseInsensitiveCompare("EVNova.ini") == .orderedSame
-                }
+            sources = GameFileDiscovery.importableFiles(in: src)
         } else {
             sources = [src]
         }

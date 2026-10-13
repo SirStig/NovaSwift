@@ -3,7 +3,7 @@
 # The document lives in NovaEditor (the bridge). This file only draws and forwards edits.
 extends CanvasLayer
 
-const Theme = preload("res://editor/EditorTheme.gd")
+const EdTheme = preload("res://editor/EditorTheme.gd")
 const PilotFiles = preload("res://screens/PilotFiles.gd")
 const RECENTS_PATH := "user://editor_recents.json"
 
@@ -42,6 +42,7 @@ var _type_search: LineEdit
 var _tool_host: Control
 var _tool_buttons := {}
 var _file_menu: PopupMenu
+var _file_btn: Button
 var _installed_menu: PopupMenu
 var _dirty_dialog: ConfirmationDialog
 var _pending_close := false
@@ -65,9 +66,10 @@ func _build() -> void:
 	var root := Control.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_STOP
+	EdTheme.install(root)
 	add_child(root)
 	var bg := ColorRect.new()
-	bg.color = Theme.BG
+	bg.color = EdTheme.BG
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.add_child(bg)
 
@@ -87,9 +89,9 @@ func _build() -> void:
 	split.add_child(_tool_host)
 
 	var bar := PanelContainer.new()
-	bar.add_theme_stylebox_override("panel", Theme.fill(Theme.BAR))
+	bar.add_theme_stylebox_override("panel", EdTheme.fill(EdTheme.BAR))
 	bar.custom_minimum_size = Vector2(0, 24)
-	_status = Theme.label("", 11, Theme.SECONDARY)
+	_status = EdTheme.label("", 11, EdTheme.SECONDARY)
 	_status.offset_left = 12
 	bar.add_child(_status)
 	col.add_child(bar)
@@ -117,7 +119,7 @@ func _build() -> void:
 
 func _top_bar() -> Control:
 	var bar := PanelContainer.new()
-	bar.add_theme_stylebox_override("panel", Theme.fill(Theme.BAR))
+	bar.add_theme_stylebox_override("panel", EdTheme.fill(EdTheme.BAR))
 	bar.custom_minimum_size = Vector2(0, 44)
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", 8)
@@ -132,20 +134,21 @@ func _top_bar() -> Control:
 	bar.remove_child(h)
 	bar.add_child(margin)
 
-	h.add_child(Theme.button("Close", _request_close))
-	h.add_child(Theme.button("File", _open_file_menu))
-	h.add_child(Theme.button("Save", func(): _save(false)))
-	_undo = Theme.button("Undo", _do_undo)
-	_redo = Theme.button("Redo", _do_redo)
+	h.add_child(EdTheme.button("Close", _request_close))
+	_file_btn = EdTheme.button("File", _open_file_menu)
+	h.add_child(_file_btn)
+	h.add_child(EdTheme.button("Save", func(): _save(false)))
+	_undo = EdTheme.button("Undo", _do_undo)
+	_redo = EdTheme.button("Redo", _do_redo)
 	h.add_child(_undo)
 	h.add_child(_redo)
-	_title = Theme.label("Untitled Plug-in", 14)
+	_title = EdTheme.label("Untitled Plug-in", 14)
 	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	h.add_child(_title)
-	_badge = Theme.button("Validate", func(): _show_tool("lint"))
+	_badge = EdTheme.button("Validate", func(): _show_tool("lint"))
 	h.add_child(_badge)
-	h.add_child(Theme.button("Test Run", _test_run, true))
+	h.add_child(EdTheme.button("Test Run", _test_run, true))
 	return bar
 
 
@@ -153,7 +156,7 @@ func _sidebar() -> Control:
 	var side := PanelContainer.new()
 	side.custom_minimum_size = Vector2(220, 0)
 	side.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	side.add_theme_stylebox_override("panel", Theme.fill(Theme.SIDE))
+	side.add_theme_stylebox_override("panel", EdTheme.fill(EdTheme.SIDE))
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 2)
 	side.add_child(v)
@@ -165,14 +168,14 @@ func _sidebar() -> Control:
 	pad.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	pad.add_child(v)
 	side.add_child(pad)
-	v.add_child(Theme.label("TOOLS", 10, Theme.TERTIARY))
+	v.add_child(EdTheme.label("TOOLS", 10, EdTheme.TERTIARY))
 	for pair in TOOLS:
-		var b := Theme.button(pair[1], _show_tool.bind(pair[0]))
+		var b := EdTheme.button(pair[1], _show_tool.bind(pair[0]))
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		_tool_buttons[pair[0]] = b
 		v.add_child(b)
 	v.add_child(HSeparator.new())
-	_type_search = Theme.field("Filter types")
+	_type_search = EdTheme.field("Filter types")
 	_type_search.text_changed.connect(func(_t): _fill_types())
 	v.add_child(_type_search)
 	_type_list = ItemList.new()
@@ -202,10 +205,10 @@ func _pull() -> void:
 	if path == "":
 		path = str(_st.get("folder", ""))
 	_status.text = err if err != "" else (path if path != "" else "Unsaved plug-in  ·  layered on the loaded game")
-	_status.add_theme_color_override("font_color", Theme.BAD if err != "" else Theme.SECONDARY)
+	_status.add_theme_color_override("font_color", EdTheme.BAD if err != "" else EdTheme.SECONDARY)
 	for id in _tool_buttons:
 		var b: Button = _tool_buttons[id]
-		b.add_theme_color_override("font_color", Theme.AMBER if id == tool else Theme.TEXT)
+		b.add_theme_color_override("font_color", EdTheme.AMBER if id == tool else EdTheme.TEXT)
 
 
 func _load_types() -> void:
@@ -234,7 +237,7 @@ func _fill_types() -> void:
 		var i := _type_list.add_item(label)
 		_type_list.set_item_metadata(i, str(row.get("type", "")))
 		if changed > 0:
-			_type_list.set_item_custom_fg_color(i, Theme.AMBER)
+			_type_list.set_item_custom_fg_color(i, EdTheme.AMBER)
 		if str(row.get("type", "")) == type_code:
 			pick = i
 	if _type_list.item_count > 0:
@@ -256,7 +259,7 @@ func _show_tool(which: String, _rebuild := true) -> void:
 	for c in _tool_host.get_children():
 		c.queue_free()
 	if ed == null:
-		_tool_host.add_child(Theme.label("NovaEditor is missing from the Godot bridge.", 14, Theme.BAD))
+		_tool_host.add_child(EdTheme.label("NovaEditor is missing from the Godot bridge.", 14, EdTheme.BAD))
 		return
 	match which:
 		"changes": _tool_changes()
@@ -285,13 +288,13 @@ func _tool_changes() -> void:
 	var sc := _scroll(_tool_host)
 	sc.add_child(box)
 	if not rows is Array or rows.is_empty():
-		box.add_child(Theme.label("No changes yet. Pick a type and create or edit a resource.", 13, Theme.SECONDARY))
+		box.add_child(EdTheme.label("No changes yet. Pick a type and create or edit a resource.", 13, EdTheme.SECONDARY))
 		return
 	for row in rows:
 		var b := Button.new()
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		b.text = "%s #%d  %s    %s" % [row.get("typeName", ""), int(row.get("id", 0)), row.get("name", ""), row.get("summary", "")]
-		b.add_theme_color_override("font_color", Theme.NEW_C if str(row.get("prov", "")) == "new" else Theme.AMBER)
+		b.add_theme_color_override("font_color", EdTheme.NEW_C if str(row.get("prov", "")) == "new" else EdTheme.AMBER)
 		var ty := str(row.get("type", ""))
 		var id := int(row.get("id", -1))
 		b.pressed.connect(func():
@@ -312,14 +315,14 @@ func _tool_resources() -> void:
 	left.custom_minimum_size = Vector2(280, 0)
 	left.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	split.add_child(left)
-	var search := Theme.field("Filter resources")
+	var search := EdTheme.field("Filter resources")
 	left.add_child(search)
 	var actions := HBoxContainer.new()
 	actions.add_theme_constant_override("separation", 6)
 	left.add_child(actions)
-	actions.add_child(Theme.button("New", _create_current))
-	actions.add_child(Theme.button("Duplicate", _duplicate_current))
-	actions.add_child(Theme.button("Revert", _revert_current))
+	actions.add_child(EdTheme.button("New", _create_current))
+	actions.add_child(EdTheme.button("Duplicate", _duplicate_current))
+	actions.add_child(EdTheme.button("Revert", _revert_current))
 	var list := ItemList.new()
 	list.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	left.add_child(list)
@@ -342,9 +345,9 @@ func _tool_resources() -> void:
 			list.set_item_metadata(i, id)
 			var prov := str(row.get("prov", ""))
 			if prov == "new":
-				list.set_item_custom_fg_color(i, Theme.NEW_C)
+				list.set_item_custom_fg_color(i, EdTheme.NEW_C)
 			elif prov == "override":
-				list.set_item_custom_fg_color(i, Theme.AMBER)
+				list.set_item_custom_fg_color(i, EdTheme.AMBER)
 			if id == selected_id:
 				pick = i
 		if pick >= 0:
@@ -364,11 +367,11 @@ func _fill_inspector(host: Control) -> void:
 	for c in host.get_children():
 		c.queue_free()
 	if type_code == "" or selected_id < 0:
-		host.add_child(Theme.label("Select a resource.", 13, Theme.SECONDARY))
+		host.add_child(EdTheme.label("Select a resource.", 13, EdTheme.SECONDARY))
 		return
 	var info = JSON.parse_string(ed.inspect(type_code, selected_id))
 	if not info is Dictionary or info.is_empty():
-		host.add_child(Theme.label("That resource isn't in the merged game.", 13, Theme.SECONDARY))
+		host.add_child(EdTheme.label("That resource isn't in the merged game.", 13, EdTheme.SECONDARY))
 		return
 	var sc := _scroll(host)
 	var box := VBoxContainer.new()
@@ -378,7 +381,7 @@ func _fill_inspector(host: Control) -> void:
 	var head := HBoxContainer.new()
 	head.add_theme_constant_override("separation", 8)
 	box.add_child(head)
-	var name := Theme.field("Name")
+	var name := EdTheme.field("Name")
 	name.text = str(info.get("name", ""))
 	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name.text_submitted.connect(func(t):
@@ -387,14 +390,14 @@ func _fill_inspector(host: Control) -> void:
 		_load_types())
 	head.add_child(name)
 	var prov := str(info.get("prov", ""))
-	var badge := Theme.label("%s  #%d  %s" % [info.get("typeName", ""), int(info.get("id", 0)), prov], 12, Theme.AMBER if prov == "override" else Theme.SECONDARY)
+	var badge := EdTheme.label("%s  #%d  %s" % [info.get("typeName", ""), int(info.get("id", 0)), prov], 12, EdTheme.AMBER if prov == "override" else EdTheme.SECONDARY)
 	head.add_child(badge)
 	if str(info.get("diffSummary", "")) != "":
-		box.add_child(Theme.label(str(info.get("diffSummary", "")), 12, Theme.SECONDARY))
+		box.add_child(EdTheme.label(str(info.get("diffSummary", "")), 12, EdTheme.SECONDARY))
 	var kind := str(info.get("kind", "form"))
 	if kind == "form":
 		_form(box, info)
-		box.add_child(Theme.button("Show references", _show_refs.bind(box)))
+		box.add_child(EdTheme.button("Show references", _show_refs.bind(box)))
 	elif kind == "text":
 		_text_editor(box, info)
 	elif kind == "graphic":
@@ -404,7 +407,7 @@ func _fill_inspector(host: Control) -> void:
 	else:
 		_hex_editor(box, info)
 	if kind == "form" and bool(info.get("hexEditable", false)):
-		box.add_child(Theme.label("BYTES", 10, Theme.TERTIARY))
+		box.add_child(EdTheme.label("BYTES", 10, EdTheme.TERTIARY))
 		_hex_editor(box, info)
 
 
@@ -417,11 +420,11 @@ func _form(box: VBoxContainer, info: Dictionary) -> void:
 	for f in fields:
 		if str(f.get("group", "")) != group:
 			group = str(f.get("group", ""))
-			box.add_child(Theme.label(group.to_upper(), 10, Theme.TERTIARY))
+			box.add_child(EdTheme.label(group.to_upper(), 10, EdTheme.TERTIARY))
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 8)
 		box.add_child(row)
-		var lab := Theme.label(str(f.get("label", f.get("key", ""))), 12, Theme.SECONDARY)
+		var lab := EdTheme.label(str(f.get("label", f.get("key", ""))), 12, EdTheme.SECONDARY)
 		lab.custom_minimum_size = Vector2(180, 0)
 		lab.tooltip_text = str(f.get("help", ""))
 		row.add_child(lab)
@@ -440,7 +443,7 @@ func _form(box: VBoxContainer, info: Dictionary) -> void:
 		elif kind == "color":
 			_color_editor(row, f, value)
 		elif kind in ["cstring", "pstring", "ncb", "str"]:
-			var e := Theme.field("")
+			var e := EdTheme.field("")
 			e.text = str(value.get("v", "")) if value is Dictionary else ""
 			e.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			e.text_submitted.connect(func(t, k = key): _set_field(k, {"t": "str", "v": t}))
@@ -452,15 +455,15 @@ func _form(box: VBoxContainer, info: Dictionary) -> void:
 			for part in ["top", "left", "bottom", "right"]:
 				row.add_child(_rect_spin(part, int(value.get(part, 0)), key, value))
 		elif kind == "mask64":
-			var e := Theme.field("0x")
+			var e := EdTheme.field("0x")
 			e.text = str(value.get("v", "0x0")) if value is Dictionary else "0x0"
 			e.text_submitted.connect(func(t, k = key): _set_field(k, {"t": "u64", "v": t}))
 			row.add_child(e)
 		elif kind == "blob":
-			row.add_child(Theme.label(str(value.get("hex", "")) if value is Dictionary else "", 11, Theme.TERTIARY))
+			row.add_child(EdTheme.label(str(value.get("hex", "")) if value is Dictionary else "", 11, EdTheme.TERTIARY))
 		else:
 			var n := int(value.get("v", 0)) if value is Dictionary else 0
-			var s := Theme.spin(n, int(f.get("min", -32768)), int(f.get("max", 32767)))
+			var s := EdTheme.spin(n, int(f.get("min", -32768)), int(f.get("max", 32767)))
 			s.value_changed.connect(func(v, k = key):
 				if _filling:
 					return
@@ -470,7 +473,7 @@ func _form(box: VBoxContainer, info: Dictionary) -> void:
 
 
 func _coord_spin(axis: String, n: int, key: String, value: Dictionary) -> SpinBox:
-	var s := Theme.spin(n)
+	var s := EdTheme.spin(n)
 	s.value_changed.connect(func(v):
 		if _filling:
 			return
@@ -481,7 +484,7 @@ func _coord_spin(axis: String, n: int, key: String, value: Dictionary) -> SpinBo
 
 
 func _rect_spin(part: String, n: int, key: String, value: Dictionary) -> SpinBox:
-	var s := Theme.spin(n)
+	var s := EdTheme.spin(n)
 	s.prefix = part.substr(0, 1)
 	s.value_changed.connect(func(v):
 		if _filling:
@@ -502,7 +505,7 @@ func _array_editor(row: HBoxContainer, f: Dictionary, value: Dictionary) -> void
 	for i in shown:
 		var cell = items[i]
 		var n := int(cell.get("v", -1)) if cell is Dictionary else -1
-		var s := Theme.spin(n)
+		var s := EdTheme.spin(n)
 		s.custom_minimum_size = Vector2(72, 0)
 		s.tooltip_text = "#%d" % (i + 1)
 		s.value_changed.connect(func(v, idx = i):
@@ -512,7 +515,7 @@ func _array_editor(row: HBoxContainer, f: Dictionary, value: Dictionary) -> void
 			_pull())
 		wrap.add_child(s)
 	if items.size() > shown:
-		wrap.add_child(Theme.label("+%d" % (items.size() - shown), 11, Theme.TERTIARY))
+		wrap.add_child(EdTheme.label("+%d" % (items.size() - shown), 11, EdTheme.TERTIARY))
 
 
 func _flags(box: VBoxContainer, f: Dictionary, value: Dictionary) -> void:
@@ -524,7 +527,7 @@ func _flags(box: VBoxContainer, f: Dictionary, value: Dictionary) -> void:
 		var c := CheckBox.new()
 		c.text = str(flag.get("label", ""))
 		c.button_pressed = (bits & int(flag.get("mask", 0))) != 0
-		c.add_theme_color_override("font_color", Theme.TEXT)
+		c.add_theme_color_override("font_color", EdTheme.TEXT)
 		c.toggled.connect(func(on, mask = int(flag.get("mask", 0)), key = str(f.get("key", ""))):
 			if _filling:
 				return
@@ -560,17 +563,17 @@ func _enum_menu(row: HBoxContainer, f: Dictionary, value: Dictionary) -> void:
 
 func _ref_editor(row: HBoxContainer, f: Dictionary, value: Dictionary, ref_name: String) -> void:
 	var n := int(value.get("v", -1)) if value is Dictionary else -1
-	var s := Theme.spin(n)
+	var s := EdTheme.spin(n)
 	s.value_changed.connect(func(v, key = str(f.get("key", ""))):
 		if _filling:
 			return
 		_set_field(key, {"t": "int", "v": int(v)}))
 	row.add_child(s)
 	var shown := ref_name if ref_name != "" else "—"
-	row.add_child(Theme.label(shown, 12, Theme.SECONDARY))
+	row.add_child(EdTheme.label(shown, 12, EdTheme.SECONDARY))
 	var target := str(f.get("ref", ""))
 	if target != "":
-		row.add_child(Theme.button("Jump", func():
+		row.add_child(EdTheme.button("Jump", func():
 			var base := int(f.get("refBase", 0))
 			type_code = target
 			selected_id = n + base if base != 0 else n
@@ -610,8 +613,8 @@ func _text_editor(box: VBoxContainer, info: Dictionary) -> void:
 			lines.append(str(s).replace("\n", "\\n"))
 		edit.text = "\n".join(lines)
 		box.add_child(edit)
-		box.add_child(Theme.label("One string per line. A real line break inside a string is \\n.", 11, Theme.TERTIARY))
-		box.add_child(Theme.button("Apply text", func():
+		box.add_child(EdTheme.label("One string per line. A real line break inside a string is \\n.", 11, EdTheme.TERTIARY))
+		box.add_child(EdTheme.button("Apply text", func():
 			var out: Array = []
 			for line in edit.text.split("\n"):
 				out.append(line.replace("\\n", "\n"))
@@ -624,8 +627,8 @@ func _text_editor(box: VBoxContainer, info: Dictionary) -> void:
 	edit.text = str(text.get("text", ""))
 	box.add_child(edit)
 	if mode == "desc":
-		var pict := Theme.spin(int(text.get("picture", 0)), -1, 32767)
-		var movie := Theme.field("Movie file")
+		var pict := EdTheme.spin(int(text.get("picture", 0)), -1, 32767)
+		var movie := EdTheme.field("Movie file")
 		movie.text = str(text.get("movie", ""))
 		box.add_child(pict)
 		box.add_child(movie)
@@ -642,7 +645,7 @@ func _text_editor(box: VBoxContainer, info: Dictionary) -> void:
 		box.add_child(after)
 		box.add_child(big)
 		box.add_child(cine)
-		box.add_child(Theme.button("Apply description", func():
+		box.add_child(EdTheme.button("Apply description", func():
 			var f := 0
 			if after.button_pressed:
 				f |= 1
@@ -654,7 +657,7 @@ func _text_editor(box: VBoxContainer, info: Dictionary) -> void:
 				"text": edit.text, "picture": int(pict.value), "movie": movie.text, "flags": f}))
 			_pull()))
 	else:
-		box.add_child(Theme.button("Apply text", func():
+		box.add_child(EdTheme.button("Apply text", func():
 			ed.set_text(type_code, selected_id, JSON.stringify({"text": edit.text}))
 			_pull()))
 
@@ -690,9 +693,9 @@ func _graphic(box: VBoxContainer, info: Dictionary) -> void:
 			frame = int(v)
 			apply.call())
 		box.add_child(slider)
-		box.add_child(Theme.label("%d frames" % frames, 11, Theme.TERTIARY))
+		box.add_child(EdTheme.label("%d frames" % frames, 11, EdTheme.TERTIARY))
 	elif str(meta.get("error", "")) != "":
-		box.add_child(Theme.label(str(meta.get("error", "")), 12, Theme.BAD))
+		box.add_child(EdTheme.label(str(meta.get("error", "")), 12, EdTheme.BAD))
 
 
 func _sound(box: VBoxContainer, info: Dictionary) -> void:
@@ -700,12 +703,12 @@ func _sound(box: VBoxContainer, info: Dictionary) -> void:
 	if not meta is Dictionary:
 		return
 	if str(meta.get("error", "")) != "":
-		box.add_child(Theme.label(str(meta.get("error", "")), 12, Theme.BAD))
+		box.add_child(EdTheme.label(str(meta.get("error", "")), 12, EdTheme.BAD))
 		return
-	box.add_child(Theme.label("%.2f s   ·   %d Hz   ·   %d frames" % [float(meta.get("seconds", 0)), int(meta.get("rate", 0)), int(meta.get("frames", 0))], 13))
+	box.add_child(EdTheme.label("%.2f s   ·   %d Hz   ·   %d frames" % [float(meta.get("seconds", 0)), int(meta.get("rate", 0)), int(meta.get("frames", 0))], 13))
 	var player := AudioStreamPlayer.new()
 	box.add_child(player)
-	box.add_child(Theme.button("Play", func():
+	box.add_child(EdTheme.button("Play", func():
 		var pcm: PackedByteArray = ed.sound_pcm(type_code, selected_id)
 		if pcm.is_empty():
 			return
@@ -729,12 +732,12 @@ func _hex_editor(box: VBoxContainer, info: Dictionary) -> void:
 	edit.add_theme_font_override("font", font)
 	box.add_child(edit)
 	if bool(info.get("hexEditable", false)):
-		box.add_child(Theme.button("Apply hex", func():
+		box.add_child(EdTheme.button("Apply hex", func():
 			ed.set_hex(type_code, selected_id, edit.text)
 			_pull()
 			_show_tool("resources")))
 	else:
-		box.add_child(Theme.label("%d bytes — too large to edit as hex here." % int(info.get("bytes", 0)), 11, Theme.TERTIARY))
+		box.add_child(EdTheme.label("%d bytes — too large to edit as hex here." % int(info.get("bytes", 0)), 11, EdTheme.TERTIARY))
 
 
 func _show_refs(box: VBoxContainer) -> void:
@@ -742,12 +745,12 @@ func _show_refs(box: VBoxContainer) -> void:
 	if not parsed is Dictionary:
 		return
 	for heading in [["Uses", "uses"], ["Used by", "usedBy"]]:
-		box.add_child(Theme.label(heading[0].to_upper(), 10, Theme.TERTIARY))
+		box.add_child(EdTheme.label(heading[0].to_upper(), 10, EdTheme.TERTIARY))
 		var rows: Array = parsed.get(heading[1], [])
 		if rows.is_empty():
-			box.add_child(Theme.label("None", 12, Theme.TERTIARY))
+			box.add_child(EdTheme.label("None", 12, EdTheme.TERTIARY))
 		for row in rows:
-			var b := Theme.button("%s #%d  %s  ·  %s" % [row.get("type", ""), int(row.get("id", 0)), row.get("name", ""), row.get("field", "")], func():
+			var b := EdTheme.button("%s #%d  %s  ·  %s" % [row.get("type", ""), int(row.get("id", 0)), row.get("name", ""), row.get("field", "")], func():
 				type_code = str(row.get("type", ""))
 				selected_id = int(row.get("id", -1))
 				_fill_types()
@@ -760,8 +763,8 @@ func _tool_galaxy() -> void:
 	var parsed = JSON.parse_string(ed.galaxy())
 	var map := GalaxyMap.new()
 	map.set_anchors_preset(Control.PRESET_FULL_RECT)
-	map.grow_horizontal = Control.SIZE_EXPAND_FILL
-	map.grow_vertical = Control.SIZE_EXPAND_FILL
+	map.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	map.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	map.data = parsed if parsed is Dictionary else {}
 	map.moved.connect(func(id, x, y):
 		ed.galaxy_move(id, x, y)
@@ -790,24 +793,38 @@ func _tool_system() -> void:
 	left.custom_minimum_size = Vector2(280, 0)
 	split.add_child(left)
 	if not info is Dictionary or info.is_empty():
-		left.add_child(Theme.label("No system selected. Open the galaxy map and click one.", 13, Theme.SECONDARY))
+		left.add_child(EdTheme.label("No system selected. Open the galaxy map and click one.", 13, EdTheme.SECONDARY))
 		return
-	left.add_child(Theme.label("%s  #%d" % [info.get("name", ""), int(info.get("id", 0))], 16))
-	left.add_child(Theme.label(str(info.get("govtName", "")), 12, Theme.SECONDARY))
-	left.add_child(Theme.label("LINKS", 10, Theme.TERTIARY))
+	left.add_child(EdTheme.label("%s  #%d" % [info.get("name", ""), int(info.get("id", 0))], 16))
+	left.add_child(EdTheme.label(str(info.get("govtName", "")), 12, EdTheme.SECONDARY))
+	left.add_child(EdTheme.label("LINKS", 10, EdTheme.TERTIARY))
 	for link in info.get("links", []):
 		var id := int(link.get("id", 0))
-		var b := Theme.button("#%d  %s" % [id, link.get("name", "")], func():
+		var b := EdTheme.button("#%d  %s" % [id, link.get("name", "")], func():
 			_system_id = id
 			_show_tool("system"))
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		left.add_child(b)
-		left.add_child(Theme.button("Unlink", func():
+		left.add_child(EdTheme.button("Unlink", func():
 			ed.galaxy_link(_system_id, id, false)
 			_show_tool("system")))
-	left.add_child(Theme.label("STELLARS", 10, Theme.TERTIARY))
+	left.add_child(EdTheme.label("STELLARS", 10, EdTheme.TERTIARY))
 	for sp in info.get("stellars", []):
-		left.add_child(Theme.label("#%d  %s   (%d, %d)" % [int(sp.get("id", 0)), sp.get("name", ""), int(sp.get("x", 0)), int(sp.get("y", 0))], 12))
+		var sid := int(sp.get("id", 0))
+		var row := HBoxContainer.new()
+		left.add_child(row)
+		var lab := EdTheme.label("#%d  %s   (%d, %d)" % [sid, sp.get("name", ""), int(sp.get("x", 0)), int(sp.get("y", 0))], 12)
+		lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(lab)
+		row.add_child(EdTheme.button("Remove", _remove_stellar.bind(sid)))
+	var add := HBoxContainer.new()
+	left.add_child(add)
+	var spob_id := EdTheme.spin(-1, -1, 32767)
+	spob_id.custom_minimum_size = Vector2(90, 0)
+	add.add_child(spob_id)
+	add.add_child(EdTheme.button("Add stellar", func():
+		ed.system_add_stellar(_system_id, int(spob_id.value))
+		_show_tool("system")))
 	var map := SystemMap.new()
 	map.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	map.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -816,6 +833,11 @@ func _tool_system() -> void:
 		ed.stellar_move(id, x, y)
 		_pull())
 	split.add_child(map)
+
+
+func _remove_stellar(sid: int) -> void:
+	ed.system_remove_stellar(_system_id, sid)
+	_show_tool("system")
 
 
 func _tool_story() -> void:
@@ -842,10 +864,10 @@ func _tool_lint() -> void:
 	var errors := int(parsed.get("errors", 0))
 	var warnings := int(parsed.get("warnings", 0))
 	_badge.text = "Validate" if errors + warnings == 0 else "%d issue%s" % [errors + warnings, "" if errors + warnings == 1 else "s"]
-	box.add_child(Theme.label("%d errors, %d warnings" % [errors, warnings], 14, Theme.BAD if errors else Theme.AMBER if warnings else Theme.NEW_C))
+	box.add_child(EdTheme.label("%d errors, %d warnings" % [errors, warnings], 14, EdTheme.BAD if errors else EdTheme.AMBER if warnings else EdTheme.NEW_C))
 	for row in parsed.get("issues", []):
 		var sev := str(row.get("severity", ""))
-		var color := Theme.BAD if sev == "error" else Theme.AMBER if sev == "warning" else Theme.SECONDARY
+		var color := EdTheme.BAD if sev == "error" else EdTheme.AMBER if sev == "warning" else EdTheme.SECONDARY
 		var b := Button.new()
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		b.text = "%s  %s #%d  %s" % [sev, row.get("type", ""), int(row.get("id", 0)), row.get("message", "")]
@@ -869,11 +891,11 @@ func _tool_project() -> void:
 	pad.add_theme_constant_override("margin_right", 16)
 	sc.add_child(pad)
 	pad.add_child(box)
-	var name := Theme.field("Name")
+	var name := EdTheme.field("Name")
 	name.text = str(_st.get("name", ""))
-	var author := Theme.field("Author")
+	var author := EdTheme.field("Author")
 	author.text = str(_st.get("author", ""))
-	var version := Theme.field("Version")
+	var version := EdTheme.field("Version")
 	version.text = str(_st.get("version", ""))
 	var notes := TextEdit.new()
 	notes.custom_minimum_size = Vector2(0, 120)
@@ -882,22 +904,22 @@ func _tool_project() -> void:
 	for w in [name, author, version, notes]:
 		w.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		box.add_child(w)
-	box.add_child(Theme.button("Apply project info", func():
-		ed.set_meta(name.text, author.text, version.text, notes.text)
+	box.add_child(EdTheme.button("Apply project info", func():
+		ed.set_plugin_info(name.text, author.text, version.text, notes.text)
 		_pull()))
-	box.add_child(Theme.label("EXPORT", 10, Theme.TERTIARY))
-	box.add_child(Theme.button("Export copy…", func(): _save_dialog(true)))
-	box.add_child(Theme.button("Install into Plug-ins", func():
+	box.add_child(EdTheme.label("EXPORT", 10, EdTheme.TERTIARY))
+	box.add_child(EdTheme.button("Export copy…", func(): _save_dialog(true)))
+	box.add_child(EdTheme.button("Install into Plug-ins", func():
 		ed.install()
 		_pull()
 		_status.text = "Installed a copy into the user Plug-ins folder. Reload the game data to play it."))
 	var conflicts = JSON.parse_string(ed.conflicts())
-	box.add_child(Theme.label("CONFLICTS", 10, Theme.TERTIARY))
+	box.add_child(EdTheme.label("CONFLICTS", 10, EdTheme.TERTIARY))
 	if conflicts is Array and not conflicts.is_empty():
 		for row in conflicts:
-			box.add_child(Theme.label("%s #%d overlaps %s" % [row.get("type", ""), int(row.get("id", 0)), row.get("plugin", "")], 12, Theme.AMBER))
+			box.add_child(EdTheme.label("%s #%d overlaps %s" % [row.get("type", ""), int(row.get("id", 0)), row.get("plugin", "")], 12, EdTheme.AMBER))
 	else:
-		box.add_child(Theme.label("No other enabled plug-in owns a record this one replaces.", 12, Theme.SECONDARY))
+		box.add_child(EdTheme.label("No other enabled plug-in owns a record this one replaces.", 12, EdTheme.SECONDARY))
 
 
 func _tool_bundle() -> void:
@@ -907,13 +929,13 @@ func _tool_bundle() -> void:
 	sc.add_child(box)
 	if not parsed is Dictionary:
 		return
-	box.add_child(Theme.label("Format %s" % str(parsed.get("format", "rez")), 13))
-	box.add_child(Theme.label(str(parsed.get("path", "Not saved yet")), 12, Theme.SECONDARY))
+	box.add_child(EdTheme.label("Format %s" % str(parsed.get("format", "rez")), 13))
+	box.add_child(EdTheme.label(str(parsed.get("path", "Not saved yet")), 12, EdTheme.SECONDARY))
 	for f in parsed.get("files", []):
 		var tag := "pack" if bool(f.get("pack", false)) else "data"
-		box.add_child(Theme.label("%s    %s" % [tag, f.get("name", "")], 12))
+		box.add_child(EdTheme.label("%s    %s" % [tag, f.get("name", "")], 12))
 	if (parsed.get("files", []) as Array).is_empty():
-		box.add_child(Theme.label("A new plug-in is one file until you Save As.", 12, Theme.SECONDARY))
+		box.add_child(EdTheme.label("A new plug-in is one file until you Save As.", 12, EdTheme.SECONDARY))
 
 
 # --- commands -----------------------------------------------------------------
@@ -1047,10 +1069,10 @@ func _open_file_menu() -> void:
 	_file_menu.add_item("Save As…", 101)
 	_file_menu.add_item("Export Copy…", 102)
 	_file_menu.add_item("Install into Plug-ins", 103)
-	var button: Button = _file_menu.get_parent().find_child("", "Button", true, false)
-	_file_menu.position = Vector2i(80, 70)
+	if _file_btn != null:
+		var origin := _file_btn.global_position + Vector2(0, _file_btn.size.y)
+		_file_menu.position = Vector2i(origin)
 	_file_menu.popup()
-	button = button
 
 
 func _on_file(id: int) -> void:
@@ -1183,7 +1205,7 @@ func _first_system() -> int:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if ed == null or not event is InputEventKey or not event.pressed or event.echo:
+	if not visible or ed == null or not event is InputEventKey or not event.pressed or event.echo:
 		return
 	var key := event as InputEventKey
 	if key.keycode == KEY_ESCAPE:
@@ -1295,8 +1317,8 @@ class GalaxyMap extends Control:
 			var radius := 4.5 if str(s.get("prov", "")) == "base" else 6.5
 			draw_circle(p, radius, c)
 			if str(s.get("prov", "")) != "base":
-				draw_arc(p, radius + 3, 0, TAU, 16, Theme.AMBER, 1.5)
-		draw_string(ThemeDB.fallback_font, Vector2(12, 22), "Drag a system. Shift-click two systems to link them. Right-click opens the system.", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Theme.SECONDARY)
+				draw_arc(p, radius + 3, 0, TAU, 16, EdTheme.AMBER, 1.5)
+		draw_string(ThemeDB.fallback_font, Vector2(12, 22), "Drag a system. Shift-click two systems to link them. Right-click opens the system.", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, EdTheme.SECONDARY)
 
 	func _bounds(systems: Array) -> Rect2:
 		if systems.is_empty():
@@ -1370,11 +1392,11 @@ class SystemMap extends Control:
 
 	func _draw() -> void:
 		draw_rect(Rect2(Vector2.ZERO, size), Color(int(info.get("r", 0)) / 255.0, int(info.get("g", 0)) / 255.0, int(info.get("b", 0)) / 255.0, 0.35), true)
-		draw_circle(size * 0.5, 3, Theme.AMBER)
+		draw_circle(size * 0.5, 3, EdTheme.AMBER)
 		for sp in info.get("stellars", []):
 			var p := _to(float(sp.get("x", 0)), float(sp.get("y", 0)))
-			draw_circle(p, 7, Theme.TEXT)
-			draw_string(ThemeDB.fallback_font, p + Vector2(10, 4), str(sp.get("name", "")), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Theme.TEXT)
+			draw_circle(p, 7, EdTheme.TEXT)
+			draw_string(ThemeDB.fallback_font, p + Vector2(10, 4), str(sp.get("name", "")), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, EdTheme.TEXT)
 
 	func _to(x: float, y: float) -> Vector2:
 		return size * 0.5 + Vector2(x, y) * 0.35
@@ -1424,15 +1446,15 @@ class StoryMap extends Control:
 			var b: Dictionary = by[int(e.get("to", -1))]
 			var p := Vector2(float(a.get("x", 0)), float(a.get("y", 0))) * scale + Vector2(16, 16)
 			var q := Vector2(float(b.get("x", 0)), float(b.get("y", 0))) * scale + Vector2(16, 16)
-			var col := Theme.AMBER if str(e.get("kind", "")) == "starts" else Color(1, 1, 1, 0.2)
+			var col := EdTheme.AMBER if str(e.get("kind", "")) == "starts" else Color(1, 1, 1, 0.2)
 			draw_line(p, q, col, 1.0)
 		for n in nodes:
 			var p := Vector2(float(n.get("x", 0)), float(n.get("y", 0))) * scale + Vector2(16, 16)
-			var c := Theme.AMBER if bool(n.get("touched", false)) else (Color(0.55, 0.7, 0.95) if bool(n.get("cron", false)) else Theme.TEXT)
+			var c := EdTheme.AMBER if bool(n.get("touched", false)) else (Color(0.55, 0.7, 0.95) if bool(n.get("cron", false)) else EdTheme.TEXT)
 			if bool(n.get("unreachable", false)):
-				c = Theme.BAD
+				c = EdTheme.BAD
 			draw_rect(Rect2(p - Vector2(6, 6), Vector2(12, 12)), c, true)
-		draw_string(ThemeDB.fallback_font, Vector2(12, size.y - 16), "%d missions and crons  ·  click a node to edit it" % nodes.size(), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Theme.SECONDARY)
+		draw_string(ThemeDB.fallback_font, Vector2(12, size.y - 16), "%d missions and crons  ·  click a node to edit it" % nodes.size(), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, EdTheme.SECONDARY)
 
 	func _scale() -> float:
 		var w := float(data.get("width", 1))

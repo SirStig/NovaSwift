@@ -19,7 +19,7 @@ godot/
   screens/MainMenu.gd    New Pilot / Open Pilot / Settings / Game Data / Quit (+ title music)
   screens/Settings.gd    Audio / Video / Controls (full key + pad rebinding)
   screens/PauseMenu.gd   Esc / Start in flight: Resume / Settings / Save & Quit to Menu / Quit
-  screens/DataSetup.gd   "where is your EV Nova data?" + folder picker + Run Demo
+  screens/DataSetup.gd   Data Setup wizard (import your EV Nova data); DataImporter.gd / DataScanner.gd / ui/novaswift/DataFileBrowser.gd
   screens/ShellUI.gd     shared theme (visible focus ring) + builders
   screens/PilotMenu.gd   pilot screen (list / new / load / delete)
   screens/Spaceport.gd   docked UI: landing, Bar, Mission BBS, Trade Center, Outfitter, Shipyard, Recharge
@@ -56,18 +56,19 @@ godot --path godot
 ### App shell
 
 Startup shows the **main menu** (Open Pilot / New Pilot / Settings / Game Data… /
-Quit) when data is found, else a **data-setup** screen with a folder picker, a
-rescan and *Run Demo*. Data is searched in: `NOVA_DATA_DIR`, the folder saved in
-settings, the repo's `data/base`, `user://data`, and `~/.local/share/NovaSwift/data`
-(Linux / Steam Deck). **Esc** / pad **Start** in flight opens the pause menu
+Quit) when data is found, else ONLY the **Data Setup wizard** (welcome, platform guide,
+controller-friendly file browser, inspect, import with progress). The wizard copies your
+data into a managed folder. Data is searched in: `NOVA_DATA_DIR`, the folder saved in
+settings, the repo's `data/base`, the managed folder (`Prefs.managed_data_dir`), `user://data`,
+and `~/.local/share/NovaSwift/data` (Linux / Steam Deck). **Esc** / pad **Start** in flight opens the pause menu
 (Resume · Settings · Save & Quit to Menu · Quit). Settings
 (`user://settings.cfg`) cover volumes + mute, fullscreen / vsync / window scale,
 stick dead zone, and rebinding of every action's key and pad button (conflicts
 swap; Defaults resets). Everything is focus-navigable (d-pad / A / B). Headless
 check: `godot --headless --path godot -s res://tests/shell_selfcheck.gd`.
-`NOVA_SKIP_PILOT_MENU=1` / `NOVA_DEMO=1` bypass the shell.
+`NOVA_SKIP_PILOT_MENU=1` bypasses the shell (needs data).
 
-### Two modes (chosen automatically)
+### Data
 
 - **Real data** — point it at your own EV Nova data and it renders **actual hull
   and planet sprites** in a real system:
@@ -75,8 +76,8 @@ check: `godot --headless --path godot -s res://tests/shell_selfcheck.gd`.
   NOVA_DATA_DIR=/path/to/your/EVNova/data godot --path godot
   ```
   If `NOVA_DATA_DIR` is unset it also checks the repo's git-ignored `data/base/`.
-- **Demo** — with no data found, it builds a **data-free demo world** (a ship you
-  fly plus a ring of drifting hulls, drawn as primitives). Always runs.
+- **No data** — only the Data Setup wizard is shown until your data is imported
+  (there is no demo mode).
 
 With real data a **pilot screen** comes first (up/down or d-pad to move, Enter /
 A to select, Esc / B to go back): pick a pilot to Play or Delete, or create a

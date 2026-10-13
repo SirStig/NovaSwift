@@ -68,6 +68,20 @@ func _init() -> void:
 	tools.run("killhostiles")
 	tools.run("heal")
 
+	# Classic HD viewer catalog + non-mutating pick (the context menu's query).
+	var cat = JSON.parse_string(dbg.hd_catalog())
+	_check("hd catalog is classic-only", cat is Dictionary and cat.hd == false and cat.entries is Array)
+	var pick = JSON.parse_string(nova.dbg_pick(0.0, 0.0))
+	_check("dbg_pick returns a kind", pick is Dictionary and ["ship", "stellar", "player", "none"].has(str(pick.kind)))
+	tools.show_context({"kind": "ship", "id": 1, "name": "Probe"}, Vector2(12, 12))
+	_check("context menu opens for a ship", tools._ctx != null)
+	var labels := []
+	for b in tools._ctx.find_children("*", "Button", true, false):
+		labels.append(b.text)
+	_check("context menu actions", labels == ["Select", "Disable", "Capture", "Destroy"])
+	tools.dismiss_context()
+	_check("context menu dismisses", tools._ctx == null)
+
 	# Log capture: engine/console lines plus Godot's own log.
 	print("selfcheck marker line")
 	push_warning("selfcheck warning")

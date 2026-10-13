@@ -8,7 +8,7 @@
 //
 // Method names below are camelCase in Swift; every `@Callable` is declared
 // `autoSnakeCase: true` so SwiftGodot exposes it to GDScript in snake_case
-// (`makeDemoWorld` → `make_demo_world`), matching what godot/Main.gd calls.
+// (`loadGame` → `load_game`), matching what godot/Main.gd calls.
 // Confirmed on-toolchain: SwiftGodot's default (no `autoSnakeCase`) registers
 // the literal camelCase Swift name instead — GDScript does not snake_case
 // GDExtension methods for you, unlike its own built-in classes.
@@ -86,6 +86,8 @@ class NovaWorld: Node2D {
     private var pendingImport: EVNovaPilotImportResult?
     /// Progress / result of `loadGameAsync` (see PilotFiles.swift).
     private let asyncLoad = AsyncLoadState()
+    /// The game-data importer's job / inspection state (DataImport.swift).
+    private let dataImport = DataImportBridge()
     /// Settings > Saved Games > Frequent autosave (Apple `GameplayEnhancements.frequentAutosave`):
     /// save on landing, jumping and a 180 s in-flight heartbeat, and keep the in-flight position.
     private var frequentAutosave = false
@@ -183,43 +185,6 @@ class NovaWorld: Node2D {
     }
 
     // MARK: World setup
-
-    /// Build a bare physics world with a synthetic player ship and a few drifting
-    /// NPCs. Runs with **no EV Nova data**, so the slice is playable immediately
-    /// and proves the whole bridge end-to-end.
-    @Callable(autoSnakeCase: true)
-    func makeDemoWorld() {
-        let player = Ship(
-            name: "Player",
-            stats: ShipStats(speed: 300, acceleration: 300, turnRate: 100),
-            position: Vec2(0, 0)
-        )
-        let w = World(player: player)
-
-        // A ring of drifting hulls so there's something to fly around. They have
-        // no AI brain (no data-driven behaviour off real `düde` tables), so they
-        // simply coast — enough to prove multi-entity readback + rendering.
-        let count = 6
-        for i in 0..<count {
-            let angle = (Double(i) / Double(count)) * 2.0 * Double.pi
-            let radius = 420.0
-            let npc = Ship(
-                name: "Drifter \(i + 1)",
-                stats: ShipStats(speed: 220, acceleration: 160, turnRate: 70),
-                position: Vec2(sin(angle) * radius, cos(angle) * radius),
-                angle: angle
-            )
-            // Give each a gentle tangential drift so the scene isn't static.
-            npc.velocity = Vec2(cos(angle) * 30.0, -sin(angle) * 30.0)
-            _ = w.addNPC(npc)
-        }
-
-        self.world = w
-        self.galaxy = nil
-        self.game = nil
-        self.intent = ControlIntent()
-        resetFrameState()
-    }
 
     /// Discover + merge the player's own EV Nova data (BYO-data, same as the
     /// Apple app). Returns false if the directory holds no readable game data.
@@ -1828,13 +1793,13 @@ class NovaWorld: Node2D {
 
     // MARK: Real-data render queries
     //
-    // All nil-safe: they return empty/sentinel values in the data-free demo world,
+    // All nil-safe: they return empty/sentinel values until game data is loaded,
     // so the frontend can call them unconditionally and fall back to primitives.
 
-    /// True once real EV Nova data is loaded (vs the data-free demo world).
+    /// True once real EV Nova data is loaded (loaded).
     @Callable(autoSnakeCase: true) func hasGame() -> Bool { game != nil }
 
-    /// The player hull's `shïp` id, or -1 (demo ship has no sprite).
+    /// The player hull's `shïp` id, or -1.
     @Callable(autoSnakeCase: true) func playerShipType() -> Int { world?.player.shipTypeID ?? -1 }
 
     /// A hull's display name, or "" if unknown / no data.
@@ -1844,7 +1809,7 @@ class NovaWorld: Node2D {
 
     /// Per live ship: `[shipType, spriteFrame]`, player first — SAME order and
     /// count as `shipTransforms()`, so the frontend zips the two. `shipType` is
-    /// -1 for the synthetic demo ship (draw a primitive instead of a sprite).
+    /// -1 when there is no sprite (draw a primitive instead).
     @Callable(autoSnakeCase: true) func shipSpriteFrames() -> PackedInt32Array {
         guard let world = self.world else { return PackedInt32Array() }
         var flat: [Int32] = [Int32(world.player.shipTypeID), Int32(world.player.spriteFrame)]
@@ -1856,7 +1821,7 @@ class NovaWorld: Node2D {
 
     // MARK: System geometry (stellar bodies)
 
-    /// The system's hyperspace-jump radius (0 in the demo world).
+    /// The system's hyperspace-jump radius (0 before data is loaded).
     @Callable(autoSnakeCase: true) func jumpRadius() -> Double { world?.systemContext.jumpRadius ?? 0 }
 
     /// Per stellar body: `[x, y, radius, kind]`. `kind`: 0 landable planet,
@@ -2359,6 +2324,30 @@ class NovaWorld: Node2D {
         adoptPilot(state, saveID: written.id)
         return written.id.uuidString
     }
+
+    // MARK: Game data import
+    //
+    // The Godot frontend's Data Setup wizard (godot/screens/DataSetup.gd): inspect what the player
+    // picked, copy it into the managed data folder (progress / cancel / disk check / atomic swap).
+    // All logic is NovaSwiftPluginStore.GameDataImport; these only plumb. JSON keys are snake_case.
+
+    /// Inspect `path` (folder, Nova Files, .rez/.ndat file or .zip) without parsing: layout, file groups, plug-in
+    /// folders, size. Synchronous; a zip is extracted first. `deep` also parses every container.
+    @Callable(autoSnakeCase: true) func dataImportInspect(path: String, deep: Bool) -> String { dataImport.inspect(path: path, deep: deep) }
+    /// Deep inspection on a worker thread (version, resource counts, missing essentials); poll `data_import_inspect_status`.
+    @Callable(autoSnakeCase: true) func dataImportInspectStart(path: String) -> Bool { dataImport.inspectStart(path: path) }
+    /// JSON `{running, done, result}`.
+    @Callable(autoSnakeCase: true) func dataImportInspectStatus() -> String { dataImport.inspectStatus() }
+    @Callable(autoSnakeCase: true) func dataImportInspectCancel() { dataImport.inspectCancelNow() }
+    /// Copy `path` into `destination` on a worker thread (atomic: temp sibling, validated, renamed). False if one is running.
+    @Callable(autoSnakeCase: true) func dataImportStart(path: String, destination: String, includePlugins: Bool) -> Bool {
+        dataImport.start(path: path, destination: destination, includePlugins: includePlugins)
+    }
+    /// JSON `{running, done, ok, cancelled, phase, fraction, files_done, files_total, bytes_done, bytes_total, error, failed, warnings, ...}`.
+    @Callable(autoSnakeCase: true) func dataImportStatus() -> String { dataImport.status() }
+    @Callable(autoSnakeCase: true) func dataImportCancel() { dataImport.cancel() }
+    /// Drop temporary zip extractions (call when leaving the wizard).
+    @Callable(autoSnakeCase: true) func dataImportDiscard() { dataImport.discard() }
 
     // MARK: Async data load
     //
@@ -6052,7 +6041,7 @@ extension NovaWorld {
     }
 
     /// Autosave-style write of the live pilot (the Apple console's `pilot.save()`); false when
-    /// no roster pilot is bound (throwaway pilot / demo).
+    /// no roster pilot is bound (throwaway pilot).
     @discardableResult
     func dbgPersistPilot() -> Bool { writePilot(backup: false) }
 
