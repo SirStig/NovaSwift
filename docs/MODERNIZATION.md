@@ -13,7 +13,7 @@ of a faithful base**.
 
 See also [MOBILE_AND_PLUGINS.md](MOBILE_AND_PLUGINS.md) (override chain and
 toggles), [AI.md](AI.md), and
-[EDITOR_AND_PLUGINS_SCOPE.md](EDITOR_AND_PLUGINS_SCOPE.md).
+[PLUGIN_EDITOR.md](PLUGIN_EDITOR.md) and [PLUGIN_TOOLKIT.md](PLUGIN_TOOLKIT.md).
 
 ## 0. Principles (the guardrails)
 

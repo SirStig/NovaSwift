@@ -36,14 +36,13 @@ These docs describe the original game, not NovaSwift's progress. For that, see
 
 | Doc | Covers |
 |---|---|
-| [FIDELITY_PLAN.md](FIDELITY_PLAN.md) | Every difference found between NovaSwift and the original executable, as 177 items with addresses, fixes and tests. Also lists the optional Enhancements and remaining open questions. |
+| [FIDELITY_PLAN.md](FIDELITY_PLAN.md) | Every difference found between NovaSwift and the original executable, as 179 items with addresses and tests. Some were reopened after a later read of the executable. Also lists the optional Enhancements and remaining open questions. |
 | [NCB_BINARY.md](NCB_BINARY.md) | NCB test expressions, run against the original executable: cursor, counted sets, operators, negation. |
 | [PERSON_DEFENSE_BINARY.md](PERSON_DEFENSE_BINARY.md) | `përs` ShieldMod scales armor as well as shields, checked against the executable. |
 | [AI_GROUND_TRUTH.md](AI_GROUND_TRUTH.md) | AI dispositions and combat behaviour from the Bible (`düde`, `gövt`, `shïp`). |
 | [GOVERNMENT.md](GOVERNMENT.md) | Government relations, legal status, combat rating, ranks (`gövt`, `ränk`). |
 | [FLEETS.md](FLEETS.md) | Fleet composition, `LinkSyst`, background traffic and reinforcements (`flët`, `sÿst`). |
 | [ECONOMY.md](ECONOMY.md) | Commodity prices, junk cargo, price disasters (`spöb`, `jünk`, `öops`). |
-| [JUNK_OOPS_DESIGN.md](JUNK_OOPS_DESIGN.md) | The original design notes for junk trading and price disasters. |
 | [DOMINATION.md](DOMINATION.md) | Demand Tribute, defence waves, daily tribute. |
 | [OUTFITTERS.md](OUTFITTERS.md) | Outfit slots, mass, availability, pricing, ammo (`oütf`). |
 | [EVENTS.md](EVENTS.md) | `crön` events and galaxy news. |

@@ -1,6 +1,6 @@
 # NOVA Swift — the Debug Suite host (port of app/NovaSwift/Debug/: DevConsoleView, DevToolsPane,
 # DebugController, DebugMetricsChip, FrameProfiler/PerfMonitor feeds). See docs/GODOT_LAYER.md
-# "Debug suite" and docs/GODOT_PARITY.md section 12.
+# "Debug suite".
 #
 # One CanvasLayer owned by Main.gd (and queried by Settings / the pause menu through the
 # "nova_devtools" group). It always captures the log (engine `Logging` output via the Swift ring

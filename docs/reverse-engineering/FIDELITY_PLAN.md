@@ -2378,7 +2378,7 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
   The `default` arm returns true, so a value outside every band does enforce the bits. A negative
   RequireGovt, including −1, also enforces. `lockState` returns `.available` as soon as
   `pilot.hasOutfit` is true. `SpaceportShops.canBuyOutfit` treats that as permission to buy.
-  The comment on `requireGovtApplies` says that outside the band the original refuses outright. That comment describes the bug.
+  The comment on `requireGovtApplies` states this rule. The function still returns the inverted result.
 - **Class.** FIX. **Impact** medium for a waive band, and for an enforce band at a port outside
   its scope. **Confidence** high.
 - **Test.** RequireGovt in 2128–2383 is buyable at that government without the Require bits, and

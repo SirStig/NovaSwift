@@ -42,9 +42,11 @@ extension NovaGame {
     /// Whether `outfit` may be bought *at this spöb* per its `RequireGovt`
     /// band (Bible: -1 everywhere; 128-383 this govt/allies only; 1128-1383 +
     /// independent; 2128-2383 all-but; 3128-3383 all-but + independent).
-    /// Outside the band the original refuses the purchase outright, and the
-    /// Require bits are checked everywhere (`NovaLanded_CanBuyOutfit`
-    /// 0x00491950, EC-12).
+    /// In 0x00491950 a value inside one of the four bands skips the bit test
+    /// when the port is outside that band, and the buy is allowed. A value
+    /// outside every band, and any value while not docked, is always enforced.
+    /// A false result here is ANDed into a failed require, so a skip becomes
+    /// a lock (EC-12).
     private func requireGovtApplies(_ requireGovt: Int, at spob: SpobRes, diplomacy: Diplomacy) -> Bool {
         guard requireGovt >= 0 else { return true }
         let scopeGovt = requireGovt % 1000

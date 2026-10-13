@@ -141,8 +141,9 @@ extension StoryEngine {
                               deadline: m.timeLimit > 0 ? player.date.adding(days: m.timeLimit) : nil)
     }
 
-    /// 0x0043d4c0: a count of N ≥ 0 is N; -1 is 0; -N is `ceil(N/2) + rand(N)`
-    /// (MS-19).
+    /// 0x0043d4c0: N >= 0 stays N; -1 is 0; n <= -2 is floor(n/2) +
+    /// NovaRandom_Range(n), with n = abs(encoded). This still uses (n + 1) / 2,
+    /// which disagrees on odd n (MS-19).
     func specialCount(_ encoded: Int) -> Int {
         if encoded >= 0 { return encoded }
         if encoded == -1 { return 0 }

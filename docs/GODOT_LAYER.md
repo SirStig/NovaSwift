@@ -271,18 +271,9 @@ NovaWorld's `// MARK: Flight travel` (state in `Flight.swift`) mirrors what the 
 - **Selected stellar**: 1–4 (`select_nav_stellar`), N clears, a new selection disarms the
   armed jump and H re-arms it (`StarMapRoute.selectHyperspace`), the Nav panel readout
   (`nav_readout`: STR# 2002 #342–346), a bracket on the selected body. Hail-stellar and Land
-  use it (Land falls back to the nearest approachable stellar when none is selected).
-- **Landing** (`press_land`, UI-08): first press requests — `LandedServices.landingClearance`
-  / `refusalMessage` (MinStatus, `Require`, ranks, landing fee, domination, **bribes** from
-  `FlightComm.bribedStellars`), "No response." for uninhabited, the request line, then the
-  clearance line on reaching ±250 px; second press lands inside the square envelope
-  (`PlayerLanding`) or says too far / too fast / cloaked. The fee is charged on touchdown.
-  The old `attempt_land` / `can_land_now` stay as the forgiving test seam.
-- **Gates** (`press_land` on a gate): a wormhole transports at once (`wormholeExitCandidates`);
-  a hypergate the pilot may use (`SpobRes.playerMayUseGate`, stock gates need positive
-  standing with the "Hypergate" govt) opens the map in gate mode (`gate_picker_state`,
-  `gate_picker_choose`) — no fuel, no days, the far gate emits the ship on its emergence
-  angle (`World.placePlayerEmergingFromGate`) with the wing coming out of it.
+  use it. When nothing is selected, Land falls back to the nearest body the Swift helper treats as approachable. That pick is UI-06 and is wider than the original.
+- **Landing** (`press_land`, UI-08): the Godot path calls the same helpers as the Apple app. First press requests through `LandedServices.landingClearance` / `refusalMessage`, then the clearance line on reaching ±250 px; second press lands inside the square envelope (`PlayerLanding`). The fee is charged on touchdown. Those helpers still diverge from the executable: the clearance ladder and the fee also cover hypergates and wormholes (EC-04, EC-05), and a paid bribe is one approach, not a lasting permit (EC-25). `FlightComm.bribedStellars` is the Swift set the helper reads.
+- **Gates** (`press_land` on a gate): a wormhole calls `wormholeExitCandidates` and leaves when that list is non-empty; a hypergate calls `SpobRes.playerMayUseGate` and then opens the map in gate mode. Both helpers diverge (OS-06 for the exit draw, EC-04 and EC-05 for permission and the fee). Arrival routing after a hypergate the pilot is allowed to use still follows the shared gate path: no fuel, no days, the far gate emits the ship on its emergence angle (`World.placePlayerEmergingFromGate`) with the wing coming out of it.
 - **Map**: nebula art (`nav_nebulae` + `pict_rgba`, active explored ones, additive), Find
   (`nav_find` = `StarMapFind`), gate spokes (opt-in), `nav_map_closed` re-syncs the route.
 - **Escorts across jumps**: `FlightEscorts.carryThroughJump` / `respawn` — disabled escorts
@@ -393,8 +384,7 @@ CI `package-*` jobs, Steam Deck setup).
    auto-refueller — moved into shared `SpaceportShops`/`ItemLocking`
    (`NovaSwiftStory`) and the Apple views now call them. Fuel is now the pilot's
    real tank across land/launch (refuelling is paid), and a visit's days
-   (+1 launch, +1 outfitter trade, +4 ship purchase) tick on launch. Bar, Mission
-   BBS and escort hiring are still to build. **Galaxy map + hyperjump work** (`NovaWorld`'s
+   (+1 launch, +1 outfitter trade, +4 ship purchase) tick on launch. Bar, Mission BBS and escort hiring are in the story runtime below. **Galaxy map + hyperjump work** (`NovaWorld`'s
    "Navigation & hyperjump" section, `godot/screens/GalaxyMap.gd`,
    `HyperjumpFx.gd`, `NavScreens.gd`): fog-of-war systems coloured by
    government, links, the original's click/Shift+click route rules (plus the
@@ -441,9 +431,7 @@ CI `package-*` jobs, Steam Deck setup).
    the Apple app now calls; `HyperjumpCommit.apply` takes optional services.
    Headless checks: `tests/story_selfcheck.gd` (accept a BBS delivery, jump, land,
    pay + text, calendar advance) and `tests/story_menu_check.gd` (offer modal
-   owns input, BBS/bar/info focus). Not yet: Gambling, Hire Escort, the jettison
-   pods, in-flight `pêrs` mission offers (use `storyState.services` from the hail
-   code), the storyline-tag badge / map destination shortcut, `dësc` movies.
+   owns input, BBS/bar/info focus). Gambling, hire escort, jettison and in-flight `pêrs` offers are wired through the same helpers as the Apple app. The gambling reset still diverges (EC-26). Still to wire as frontend work: mission-offer `dësc` movies.
 6. **Packaging** — Godot export presets + CD for Linux/Windows artifacts.
 
 ## Non-goals

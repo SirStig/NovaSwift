@@ -37,7 +37,7 @@ with function addresses in [docs/reverse-engineering/](docs/reverse-engineering/
 One block is roughly 5% of that part of the original code: compared and
 matching, fixed to match, or (teal) handled differently on purpose, such as the
 save format and controls. This tracks how much has been checked, not how
-finished the game is. NovaSwift is in beta and has bugs. If something plays
+finished the game is. The picture was drawn when every plan item was marked done. A later re-read reopened items listed in [docs/STATUS.md](docs/STATUS.md), and the squares have not been redrawn. NovaSwift is in beta and has bugs. If something plays
 differently from the original, please
 [open a fidelity issue](https://github.com/SirStig/NovaSwift/issues/new/choose).
 The function-by-function view is in [docs/STATUS.md](docs/STATUS.md) and on the

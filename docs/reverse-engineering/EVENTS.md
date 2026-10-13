@@ -216,67 +216,6 @@ expression. Where a cron can do anything a control-bit SET expression can do,
 an `öops` can only ever move a price. Full economic-model detail (trade
 pricing, commodity list, how `öops` composes with base supply/demand) belongs
 in the economy doc, not here — see
-[ECONOMY.md](ECONOMY.md) once it exists; this doc only notes the boundary
+[ECONOMY.md](ECONOMY.md); this doc only notes the boundary
 between the two timed-event resources so cron work doesn't accidentally
 reinvent disaster pricing.
-
-No `öops` decoder exists anywhere in `NovaSwiftKit` today (confirmed by search —
-no `OopsRes` type, no references to the `öops` four-char code); it is wholly
-unimplemented, tracked separately from the cron work in this doc.
-
-## 5. What's implemented vs. what's missing
-
-`StoryEngine.swift` implements the core cron state machine faithfully for the
-common case, but several Bible-documented fields/behaviors are either
-unparsed, parsed-but-unused, or diverge subtly from spec. Verified against the
-real game data (`novaswift-extract raw "data/EV Nova" "crön" <id>`, swept across
-all 125 real crons, IDs matching MISSIONS.md's count):
-
-| Bible behavior | Status | Evidence |
-|---|---|---|
-| Date-window activation, `PreHoldoff`/`PostHoldoff`, `Duration` (incl. same-day start/end at 0), `EnableOn` test, `Random` per-day roll, `OnStart`/`OnEnd` | ✅ Implemented | `StoryEngine.evaluateCrons` / `dateInWindow`, `StoryEngine.swift` |
-| `0` **and** `-1` both wildcard a date field | ⚠️ Partial | `dateInWindow` (`StoryEngine.swift`) only special-cases `c.firstYear != 0` / `c.lastYear != 0`, and `firstDay/lastDay/firstMonth/lastMonth == 0` for their own defaults — a field set to `-1` is taken as a literal date component instead of a wildcard. Empirically **inert against the base game**: a sweep of all 125 real crons' header fields found zero uses of `-1` (only `0` is used as the wildcard sentinel in practice) — but a plugin author following the Bible's documented "0 or -1" convention literally (e.g. `LastYear = -1` for "never expires") would have that cron permanently fail its window check once the campaign clock passes year ~-1's Julian Day equivalent, i.e. from the very first day — the opposite of the intended "no upper bound." |
-| Flags `0x0001`/`0x0002` (continuous iterative OnStart/OnEnd re-evaluation while `EnableOn`/`Require` hold) | ❌ Not implemented | `CronRes.flags`/`loopStartUntilFalse`/`loopEndUntilFalse` are decoded (`MissionModels.swift`) but never read in `StoryEngine` — `evaluateCrons` always treats `OnStart`/`OnEnd` as a one-shot call regardless of these bits. |
-| `Contribute`/`Require` cross-resource gating (cron feeds `oütf.Require`/`mïsn.Require` while active; cron's own `Require` can gate its activation on ship/outfit `Contribute`) | ✅ Implemented and wired, both halves player-visible | `CronRes.contribute`/`.require` (`MissionModels.swift`) and `MissionRes.require` (`MissionModels.swift` — no longer read-and-discarded) are decoded. `StoryEngine.activeContributeBits()` (`StoryEngine.swift`) pools ship/outfit/rank/active-cron `Contribute` bits; `isEligible` gates on `mission.require` (`StoryEngine.swift`); `evaluateCrons()` gates on `c.require` (`StoryEngine.swift`). The **mission** half is player-visible via `MissionBoardView.buildEngine()` (`app/NovaSwift/Story/MissionBoardView.swift`), which drives the real `StoryEngine.missionsOffered`. The **cron** half is now also player-visible: `GameContainerView.advanceGameDay()` (`app/NovaSwift/Game/GameContainerView.swift`) calls a real `StoryEngine.advanceOneDay()` on landing, gate travel, and every hyperjump (three call sites, `GameContainerView.swift`), which runs `evaluateCrons()` for real — so a cron's own `Require` gate and its `Contribute` bits while active are exercised in live play, not just in `NovaSwiftStoryTests`/`novaswift-extract story`. |
-| `NewsGovt1-4`/`GovtNewsStr1-4` (per-government local news) | ✅ Implemented, wired, and player-visible | Byte layout bug fixed and fields decoded (`CronRes.newsGovts`/`.govtNewsStrs`, `MissionModels.swift`) — the `crön` TMPL (`third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc`, TMPL #503) types the three NCB strings `n0FF`/`n0FF`/`n100` = 255/255/**256** bytes, not 255 each; the old 789-byte, all-255 assumption undercounted `OnEnd` by one byte. Full layout: 24-byte header, `enableOn@24`(255B), `onStart@279`(255B), `onEnd@534`(**256B**) → 790, `contribute@790`(8B), `require@798`(8B) → 806, `newsGovt1-4@806`(4×2B), `govtNewsStr1-4@814`(4×2B) → 822 total. Confirmed against real data (`novaswift-extract raw "data/EV Nova" crön 128`): cron #128 "Wraith Change" is exactly 822 bytes, `newsGovts[0] == 130` (real govt id) and `govtNewsStrs[0] == 15000` (real `STR#` id) at the predicted offsets — the fix is correct. `GameServices` gained `showNews(text:govt:)` (`GameServices.swift`), and `StoryEngine.evaluateCrons()` calls `announceNews(for:)` (`StoryEngine.swift`) exactly when a cron starts, resolving local news per `newsGovts`/`govtNewsStrs` slot with an `independentNewsStrID` fallback (`StoryEngine.swift`). Crons activate during live play, so `announceNews` fires for real. `AppGameServices.showNews` (`app/NovaSwift/Story/AppGameServices.swift`) is still just a logging stub, but that push path is no longer the only way the player sees this news: `HolovidView` (`app/NovaSwift/Spaceport/SpaceportScreens.swift`) independently **pulls** the same data via `StoryEngine.stationNews(forGovt:)`, scanning `player.cronRuntime` for currently-active crons and resolving their `NewsGovt`/`GovtNewsStr` slots fresh whenever the player opens the bar's Holovid screen. |
-| `IndNewsStr` (independent/fallback news) | ✅ Implemented, wired, and player-visible | `CronRes.independentNewsStrID` is consumed both ways: `announceNews(for:)` calls `services?.showNews(text:govt: nil)` when `c.independentNewsStrID > 0` (`StoryEngine.swift`, push, logged only), and `stationNews(forGovt:)` (`StoryEngine.swift`) falls back to the independent pool when a station's government has no applicable local news (pull, player-visible via `HolovidView`). The Bible's local-beats-independent *precedence* (§2) is applied at the pull layer, at render time, by the one place that actually knows which station's news the player is reading — exactly the design the engine's doc comment anticipates (`StoryEngine.swift`). |
-| Player ever seeing any cron effect | ✅ Implemented and player-visible (corrected from this doc's original "still no") | A live `GameServices` conformer exists (`AppGameServices`) and the app instantiates a real `StoryEngine` both for missions (`MissionBoardView.swift`) and for the day-clock (`GameContainerView.advanceGameDay()`, `GameContainerView.swift`). Cron evaluation happens inside `StoryEngine.advanceDays`/`.advanceOneDay` (`StoryEngine.swift`), and `GameContainerView.swift` calls it from three real call sites — landing→depart, hypergate travel, and every hyperjump — each advancing the calendar by one day. So: bit flips via cron `OnStart`/`OnEnd`, cron-gated mission/outfit/rank availability, and cron news (via `HolovidView`'s pull-based `stationNews`) all now run and are observable for a real player, not just in `NovaSwiftStoryTests`/`novaswift-extract story`. What remains unimplemented is narrower than "no background events whatsoever": the `-1`-wildcard date bug and the `0x0001`/`0x0002` continuous-iteration flags above are still open, and `AppGameServices.showNews`'s push path is still an inert stub (harmless, since `HolovidView` doesn't need it). |
-
-### Open questions not resolvable from the Bible text alone
-
-- ~~The exact byte layout of the 33-byte tail~~ — **resolved**, see the table
-  above. The tail is 32 bytes of `Contribute`/`Require`/`NewsGovt`/
-  `GovtNewsStr`, not 33 — the extra byte in `822 − 789 = 33` came from the
-  decoder's own `OnEnd` sizing bug (255 assumed vs. real 256), not a pad
-  byte. Method used, reusable for the other five docs' remaining gaps: decode
-  the resource's real TMPL from `third_party/ResForge/Plugins/Sources/
-  NovaTools/Templates.rsrc` via `novaswift-extract tmpl <path> <id>` (see the
-  ID table in this repo's TMPL #500-522 listing), hand-sum field sizes using
-  ResForge's own type-size rules (`third_party/ResForge/Plugins/Sources/
-  TemplateEditor/TemplateParser.swift` and `Elements/*.swift` — notably: `R`
-  + 3 hex digits repeats the *next* field that many times; `Cnnn`/`Pnnn`/
-  lowercase-`n`+hex fixed-size strings take the hex value as total bytes;
-  `QB64`/`WORV`/`RSID` etc. are fixed-size registry entries, not `Xnnn`
-  patterns), then confirm against `novaswift-extract raw <baseDir> <TYPE> <id>`
-  on a real resource — a correct layout's field values should read as sane
-  numbers (odds ratios, percentages, ASCII names) at the predicted offsets,
-  and the record's total byte count should match the TMPL sum exactly. Note
-  the novaswift-extract `tmpl` command's own offset column is unreliable as
-  printed (it doesn't multiply `Rnnn` repeats or size several field types) —
-  treat it as a field *list*, not a field *offset table*, until it's fixed.
-- Whether flags `0x0001`/`0x0002`'s "keep evaluating... until no longer true"
-  really means *within one day's tick* (synchronous loop, per the Bible's own
-  "can create infinite loops" warning) or *once per subsequent day* (an
-  implicit repeat-without-holdoff) — the Bible text doesn't disambiguate
-  timing precisely enough to be certain which the original engine did; the
-  "infinite loop" warning reads more consistently with same-tick looping, but
-  this is inference, not a direct quote. **Still open** — this update didn't
-  touch the flags handling at all (confirmed by grep: `loopStartUntilFalse`/
-  `loopEndUntilFalse` are still decoded-but-unread).
-- **`Contribute`/`Require` and cron-sourced news are both player-visible.**
-  `GameContainerView.advanceGameDay()`
-  (`app/NovaSwift/Game/GameContainerView.swift`) now calls a real
-  `StoryEngine.advanceOneDay()` from three call sites (landing, gate travel,
-  hyperjump), so `evaluateCrons()` runs in live play, and `HolovidView`
-  (`app/NovaSwift/Spaceport/SpaceportScreens.swift`) gives the player
-  a real dialog to read the resulting news from. See §5's last three rows.

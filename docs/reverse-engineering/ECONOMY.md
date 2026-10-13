@@ -203,24 +203,9 @@ showing exact name↔commodity semantic matches, this is as close to a
 confirmed "no" as the reverse-engineering method can produce without engine
 source. Treat `öops` as standard-commodity-only.
 
-## 5. Implementation status
+## 5. Field layouts
 
-| Bible spec | Status | Where |
-|---|---|---|
-| `spöb` flag word → per-stellar Low/Med/High/not-traded tier per commodity | ✅ Implemented | `SpobRes.priceLevel(_:)`, `NovaEconomy.swift` |
-| Numeric credit values for Low/Medium/High | ✅ Wired, with a `STR ` override path (§5.1) | `NovaGame.commodityBasePrice(_:)`/`commodityPrices(_:)`/`overrideString(_:)`, `NovaEconomy.swift` → `SpaceportScreens.swift` |
-| Tech level does *not* gate commodity trading | ✅ Correctly not implemented as a gate | — |
-| Buy/sell spread | N/A per Bible (none specified) | Matches: `TradeCenterView.buy()`/`sell()`, `PilotStore` |
-| `jünk` resource (salvage/specialty cargo) | ✅ Wired — trading, cargo, Tribbles/Perishable, contraband (§5.2) | `JunkModels.swift`, `SpaceportScreens.swift`, `PilotStore.swift`, `Contraband.swift`, `ContrabandScan.swift` |
-| `öops` disaster price events | ✅ Wired — daily roll, expiry, price delta (§5.3) | `OopsModels.swift`, `StoryEngine.swift`, `SpaceportScreens.swift` |
-| `oütf.BuyRandom` / `shïp.BuyRandom` (per-day stock) | ✅ Implemented — deterministic FNV-1a hash of `(day, spobID, itemID)` vs. the percent chance, so stock is stable within a day and re-rolls only when the day advances. Correctly encodes the Bible's per-type zero asymmetry (outfits: `BuyRandom <= 0` → always available; ships: `BuyRandom == 0` → never available) | `NovaEconomy.swift`; decoded at `ShipRes.buyRandom` `@904` (`NovaModels.swift`) and `OutfRes.buyRandom` `@1008` (`NovaAIModels.swift`) |
-| Cargo-hold interaction (capacity, load/unload) | ✅ Implemented for standard commodities **and** junk — junk shares the pilot's cargo dictionary, with Tribbles multiplication and Perishable decay applied by `tickJunkCargo` | `ShipLoadout.cargoCapacity`, `PilotStore.cargoFree`/`cargoUsed`/`held`/`buyCommodity`/`sellCommodity`/`tickJunkCargo` |
-| `jünk`/`öops` daily-availability roll | N/A — the Bible documents no `BuyRandom`-style field for junk. Availability is the fixed `SoldAt`/`BoughtAt` lists plus the boolean `BuyOn`/`SellOn` gates; confirmed absent from the byte layout above (no percent-chance field between `ScanMask@36` and the two NCB test strings) | — |
-| Tribute payout when dominated | ❌ Not implemented — `spöb.Tribute` and the domination flag (`spöb` Flags2 `0x0020`, "always dominated") aren't wired to any credits-per-day mechanic in `PilotStore` or `World` | — |
-
-[JUNK_OOPS_DESIGN.md](JUNK_OOPS_DESIGN.md) is the design doc that guided the
-`jünk`/`öops` implementation, and records where the shipped code diverges from
-that plan.
+The tables below are byte layouts. Where a price or stocking rule disagrees with NovaSwift, [FIDELITY_PLAN.md](FIDELITY_PLAN.md) wins: EC-03 for which disaster applies, EC-11 for `BuyRandom`, EC-24 for in-flight junk, EC-27 for a hold that is over capacity.
 
 ### 5.1 Commodity base prices and the `STR ` override
 
@@ -248,8 +233,7 @@ populates.
 ambiguity) via `NovaGame.junk(_:)`/`junks()`. `TradeCenterView.market` builds
 junk buy/sell rows straight from `game.junks()`, gated by the `BuyOn`/`SellOn`
 NCB tests and the `SoldAt`/`BoughtAt` stellar lists (`TradeRow.Origin.junk`).
-Junk shares the pilot's standard-commodity cargo dictionary, including the
-Tribbles (multiply) and Perishable (decay) side effects (`tickJunkCargo`).
+Junk shares the pilot's cargo. Tribbles and perishables advance in flight, once every 250 raw frames (EC-24), not as a daily percent.
 `ScanMask` contraband is wired through `Contraband.isCargoContraband`, consumed
 by `ContrabandScan.swift`.
 
@@ -280,19 +264,7 @@ ambiguity) via `NovaGame.oops(_:)`/`oopses()`, with
 `Freq` roll and expiry run in `StoryEngine.evaluateDisasters`, called every day
 from `advanceDays`, tracking active disasters in `player.activeDisasters`
 (stellar/commodity/expiry, keyed by öops id).
-`disasterPriceDelta(spobID:commodity:activeOops:)` sums the additive
-`PriceDelta` for every active disaster matching a stellar and commodity, and is
-consumed by `TradeCenterView.market` on top of the Low/Med/High price.
-
-Two known divergences from [JUNK_OOPS_DESIGN.md](JUNK_OOPS_DESIGN.md):
-
-- The daily roll uses the shared, stateful `StoryRNG` (`rng.chance(percent:)`)
-  rather than a pure deterministic hash of `(day, oopsID)`, so it does **not**
-  reproduce identically across relaunches the way the `BuyRandom` stocking hash
-  does (§B.3 of that doc).
-- No UI shows the active disaster's name as a banner in the trade dialog —
-  `activeDisasterNames` has no callers, so only the price effect is applied
-  (§B.5).
+When more than one disaster matches a stellar and a commodity, the highest-id match wins (EC-03). The price effect is that one `PriceDelta`, not a sum.
 
 Layout confirmed via `novaswift-extract tmpl ".../Templates.rsrc" 512`,
 cross-checked against all 19 real records in `Nova Data 2.rez` (ids 128-146):
@@ -312,13 +284,3 @@ id), `Commodity`=0 (food — matching the disaster's own name), `PriceDelta`=-15
 name: #143 "discovery of a new ore deposit" → 4/metal, #144 "discovery of a new
 drug" → 2/medical, #134 "spate of break-downs" → 5/equipment. See §4 for the
 resolved `Commodity`-range question.
-
-### Third-party reference check
-
-`third_party/NovaJS` (partial TypeScript reimplementation) has no commodity/
-trade/economy logic — its "commodity"/"price"/"trade" hits are all in the
-*outfitter* parser/UI (`OutfitParse.ts`, `outfitter.ts`, `OutiftData.ts`),
-which is about outfit items, not the six standard trade goods or `jünk`/
-`öops`. It offered nothing usable for this doc beyond confirming the
-outfitter item-grid metrics already cited in `docs/SHIP_SYSTEM.md`'s sibling
-UI work (`SpaceportScreens.swift`).

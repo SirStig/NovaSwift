@@ -1,29 +1,10 @@
-# Godot fidelity gaps: what the ORIGINAL EV Nova has that `godot/` still lacks
+# Godot wiring gaps
 
-Audit date 2026-10-13, read-only, against the live tree (commit `18404c6` plus uncommitted work; another agent is currently adding
-`godot/Movies.gd`, `godot/ui/MoviePlayer.gd`, `godot/tests/movies_selfcheck.gd`). This supersedes the status columns of
-`docs/GODOT_PARITY.md`, which is stale (Story Map, Debug Suite, plug-ins, settings plumbing, flight visuals, new-pilot flow, About,
-Pers LinkMission offers, gambling, hire escort and jettison pods are all done now).
+This file lists behaviour the original game has that the Godot frontend does not yet call. Engine-rule gaps live in [reverse-engineering/FIDELITY_PLAN.md](reverse-engineering/FIDELITY_PLAN.md) and [STATUS.md](STATUS.md). A DONE row here means the Godot path is wired to the shared Swift helper. It does not mean that helper matches the executable.
 
-Goal: play the original game start to finish, looking and behaving like it. Only things the original game has are listed in the
-packages. NovaSwift-only extras are in the deferred list at the bottom.
+The shared helpers still diverge on EC-04 and EC-05 (gate and wormhole clearance and the fee), EC-25 (a bribe is one approach), OS-06 (wormhole exit draw), EC-26 (the bar's previous winner resets when the bar opens), OS-08 (bomb fuse reseed) and UI-06 (which body Land picks). Godot follows those helpers.
 
-How it was checked: the Apple app (`app/NovaSwift/Game/GameScene.swift`, `GameContainerView.swift`, the 56 `scene.on...` / `...Provider`
-hooks the container wires, every `WorldEvent` case the scene handles) and `docs/reverse-engineering/FIDELITY_PLAN.md` items were
-walked and each behaviour was grepped in `godot/**/*.gd` and `godot/bridge/Sources/NovaSwiftGodot/*.swift`. Most original rules live in
-shared Swift (`Sources/`) and are already reached by the bridge. The remaining gaps are mostly places where the Apple container/scene
-wires a shared rule to the live world and the bridge never does, so the rule never runs. Status vocabulary: DONE / PARTIAL / MISSING.
-Effort: S under a day, M 1-3 days.
-
-Verified DONE (no work needed): ship flight/AI/weapons through the shared engine; ïntf status bar (bars, radar, target, secondary,
-nav, cargo, credits); STR# 2002 message sources and one-line placement; landing two-press + clearance + fee + bribes; gates and
-wormholes; hyperjump (align/accelerate/flash/arrive, fuel, multi-jump, no-jump refusal #42/#10/#29); hail/bribe/beg/assist/tribute;
-board/plunder/capture/panic self-destruct; escorts window + orders + upgrade/sell + payroll; Trade Center incl. öops disasters and
-junk rows; outfitter/shipyard/ship info; Bar, Hire Escort, Galaxy Racing gambling (no clip, see C), Mission BBS, mission offers incl. pêrs
-LinkMission; mission ships/crons/NCB/story texts; Player Info / Mission Info (shared `PlayerInfoPages`); jettison + pods; scans and
-contraband fines; tribbles/perishables; eject/escape pod/respawn; self-destruct; death + Strict Play permadeath; pilots/saves/import;
-intro slideshow; main menu incl. About (dësc 32767); DLOG 4003 preferences window (visual prefs applied); flight visuals (shän layers,
-bank, shield flare, booms, smoke, trails, lightning, death bursts, camera Classic).
+Packages A and B are wired. Frontend work that is still open is in packages C, E and F: the Key Settings dialog, a few stored preferences, mission-offer movies, murk, and on-device shader checks.
 
 ---
 
@@ -47,7 +28,7 @@ already flow through `drain_*_messages`). Tests: extend `godot/tests/gameplay_ga
 | A3 | Pêrs / ship spawn gating and persistence (UI-17, AI-11): pêrs `ActiveOn` NCB, never respawn once defeated, grudges persist; `shïp.AppearOn` gates düde hulls | DONE (2026-10-13, `WorldPilotLink`; see GODOT_LAYER.md "Live-world wiring") | bridge never sets `world.persSpawnEligible`, `world.shipSpawnEligible`, `world.playerPersGrudges`, and ignores `.personGrudge` / `.personDefeated` (Apple `GameContainerView.swift:339-363, 388-393`). Result: defeated named pilots respawn, story-gated pêrs and hulls appear at the wrong time. `debug_pers_defeated` exists but nothing records |
 | A4 | Pirates board YOU and take cargo/credits (AI-29) | DONE (2026-10-13, `WorldPilotLink`; see GODOT_LAYER.md "Live-world wiring") | `.playerBoarded(byShipID:ratio:)` is not handled; need `World.resolvePlayerBoarding` + credit/cargo deduction + beep + mission `Flags 0x8000` fail (Apple `GameContainerView.swift:1976-2002`) |
 | A5 | Stellar defence/garrison and reinforcement state persists across jumps (AI-15/16, EC-16) | DONE (2026-10-13, `WorldPilotLink`; see GODOT_LAYER.md "Live-world wiring") | no `defenseStateProvider` equivalent: `applyDefenseState` (garrisons, `holdReinforcements`, escort category orders restore, `w.pilotName`, `w.missionCargoScanMask`) is never run; `.reinforcementsCalled` not stored; damaged destroyable stellars forget their armor (`stellarStrengthLeft`, `destroyedStellarIDs`). `stellarDestroyed` / `stellarDominated` persistence already works via `FlightComm.apply` |
-| A6 | Bombs (OS-08, ModType 47/50) detonate after a fuse | DONE (2026-10-13, `WorldPilotLink`; see GODOT_LAYER.md "Live-world wiring") | Apple `checkHazardOutfits` (`GameContainerView.swift:2954`) is called from `onPlayerTick`; nothing equivalent in the bridge |
+| A6 | Bombs (OS-08, ModType 47/50) detonate after a fuse | DONE as wiring (the fuse still diverges: OS-08; see GODOT_LAYER.md "Live-world wiring") | Both frontends call `HazardOutfits`. The fuse is seeded once and kept; the original reseeds it on every recompute (OS-08) |
 | A7 | Strict Play pilot: exact speeds instead of the 1.5x/2/3 non-strict scale (FL-03); per-day world seed | DONE (2026-10-13, `WorldPilotLink`; see GODOT_LAYER.md "Live-world wiring") | bridge leaves `world.strictPlay` false for every pilot and `GameSession.makeWorld` always uses the fixed seed `0x5EED_1234` (Apple passes `currentWorldSeed(systemID:)` from day) so ambient traffic is identical every visit |
 | A8 | Landing/departure bookkeeping the Apple container does at `depart()`: `onMissionAuxShipsArrived` budget decrement, `recordMunitions` on launch, `warnStrandedFighters` | DONE (2026-10-13, `WorldPilotLink`; see GODOT_LAYER.md "Live-world wiring") | `Munitions.record` is called on save only (`NovaWorld.swift:2274`); verify aux-ship budget decrement and the "N fighters abandoned" accounting |
 
@@ -114,33 +95,18 @@ no-FX path). Do not touch HUD files.
 
 | # | Original behaviour | Status | Concrete gap |
 |---|---|---|---|
-| F1 | Murk (sÿst.Murk) fog: far objects fade to the murk colour, per-sprite darkening | PARTIAL | `GODOT_PARITY.md` package 4 status: star tint only, no per-sprite murk |
+| F1 | Murk (sÿst.Murk) fog: far objects fade to the murk colour, per-sprite darkening | PARTIAL | star tint only, no per-sprite murk |
 | F2 | Hyperjump NPC warp-out/warp-in nodes (ships popping in/out of hyperspace) | PARTIAL | verify `shipArrived/shipDeparted` effects in `EffectsDrawer.gd` |
 | F3 | Visual verification of the additive/fill shaders on a real GPU (gl_compatibility) | UNVERIFIED | all flight visuals have only headless/composed-PNG checks (`flight_visuals_selfcheck.gd`) |
 
 ---
 
-> Concurrency note: a controls/targeting/weapons agent is editing `Controls.gd`, `Main.gd` and the targeting/weapons parts of `NovaWorld.swift`
-> right now. Package B items B4/B5 (Return-dismiss, `\` cycle, key table) and anything in the Targeting/Weapons/Input regions belong to that
-> agent: re-check them before assigning, and keep B to messages/HUD icons until it lands.
+## Still open as frontend wiring
 
-## Top 10 most impactful gaps (play-through order)
-
-1. A1 combat rating / legal record / rank revocation never sync (`FlightComm.syncStanding` unused): rating-gated missions and ranks never unlock.
-2. A3 pêrs and `shïp.AppearOn` gating and defeated/grudge persistence unwired: named pilots respawn, story-gated ones misappear.
-3. A2 scooping and mining lose all cargo (`.asteroidMined` ignored, hold-room hook defaults true).
-4. A4 pirates cannot board and plunder the player.
-5. B1/B2 arrival, launch and sÿst buoy status lines missing (every jump and every launch).
-6. A5 garrison/reinforcement/stellar-armor persistence across jumps.
-7. B3 HailQuote broadcasts (ambient NPC chatter and taunts) missing.
-8. C1 Key Settings dialog (DITL 4002) not ported.
-9. E2 mission `dësc` movies (and E1 verification of race clips).
-10. D1/D2 map: borders overlay and mission-target markers.
-
-Also small but visible: C2 brightness and C3 spaceport ambient loop (preferences that do nothing), B4 Return-dismiss, B6 red-alert blink,
-A6 bombs, A7 Strict Play flag and per-day seed.
-
----
+- C1 Key Settings dialog (DLOG 4002) is not drawn.
+- C4 and C5: a few stored preferences, and title music from a `.mov`, are partial.
+- E2 mission-offer `dësc` movies are not hooked up. E3 `playMovies` is read from the bar only.
+- F1 murk is a star tint only. F2 hyperjump NPC warp nodes are partial. F3 shader output is not checked on a real GPU.
 
 ## Deferred: ENHANCEMENT gaps (NovaSwift-only; not original)
 
@@ -161,7 +127,7 @@ A6 bombs, A7 Strict Play flag and per-day seed.
 
 ## Full walk of `app/NovaSwift/` vs Godot (beyond the parity rows)
 
-Every Apple file was mapped to a Godot equivalent. Result: nothing original is absent that is not already listed in packages A-F.
+Every Apple file was mapped to a Godot equivalent. Frontend wiring that is still open is in packages C, E and F. Engine differences are the open items in the fidelity plan.
 
 | Apple area | Godot equivalent | Verdict |
 |---|---|---|
@@ -178,37 +144,9 @@ Every Apple file was mapped to a Godot equivalent. Result: nothing original is a
 | `UI/*` (DITL dialogs, desc dialog, fonts, palettes) | `ui/classic/*` | DONE |
 | `Tutorial/*`, `Debug/*`, `Editor/*`, `Multiplayer/*`, `Plugins/*`, `Data/HDGraphics` | `Tutorial.gd`, `Hints.gd`, `debug/*`, `Plugins.gd` | ENHANCEMENT (ported or deferred) |
 
-## MISSING in both Apple and Godot (original behaviour per the decomp / reverse-engineering docs)
+## Engine gaps are not listed here
 
-Source: `docs/reverse-engineering/FIDELITY_PLAN.md` "Deferred / not modelled" notes, `~/Projects/evnova-re/audit/{coverage,quirks,ui_rules}.md` and
-`audit/unverified/*.tsv` (rows still `named-only` / `unexplored` in gameplay subsystems). Ordered by player-visible impact. Each is an
-additional shared-engine or UI task; do it in Swift (`Sources/`) first so both frontends gain it.
-
-| # | Original behaviour (address) | Evidence | Note |
-|---|---|---|---|
-| X1 | Map Tab / `\` adjacent-system cycle (0x004a74f0 / 0x004a7710) and in-flight `\` destination cycle | FIDELITY UI-15 "Deferred", ui_rules_partA row `MISSING` | Apple has `cycleHyperspaceLink` bound to `\` but the plan lists it deferred; verify before assigning |
-| X2 | New-pilot travel hint chain STR# 2002 #22-31 (and the "hyperspace hint on every launch until reload" quirk) | UI-11 "Deferred" | overlaps `tutorialHints`; original text/trigger not reproduced |
-| X3 | Original wording for remaining invented status lines: plunder credits/fuel/ammo ("Took N credits", "Siphoned...", "Transferred N rounds"), contraband fine/warning lines, domination ("submits to your rule"), stellar "scrambles N defenders", "destroyed"/"restored", escort "was destroyed" | UI-11 "Deferred: rewording the remaining invented hud.post sites" | grep `hud.post("` in `GameContainerView.swift` (about 20 sites) and bridge `post("` |
-| X4 | HailQuote broadcast gates: pêrs flags 0x0400 / 0x0800 / player-class gates and the ambush trigger | UI-11 | even after Godot B3 lands the Apple port, these gates are unmodelled |
-| X5 | Player Info: Tab / Shift-Tab page cycling and cargo junk count words | UI-13 "Deferred" | window must take keyboard focus from flight controls |
-| X6 | Self-destruct cue sounds; hulls docked to the player die with it | UI-15 | |
-| X7 | Folding hulls: `shän` Flags 0x0002 unfold on hyperspace/landing | FIDELITY Q8 (open) | `HullAnim.baseSet` never reads it |
-| X8 | Tractor beam: shooter pulled by a heavier target arm | WP note, FIDELITY :1389 | |
-| X9 | Released mission escort: cargo hand-back; ShipStart -1 spawn-count nuance; shop in-screen offer timer arms | AI-34, MS-06, MS-05 notes | low |
-| X10 | Pod-debris sound (DAT_00591a80, id unknown); përs-flag debris arm at 0x00433050 l.904; RNG draw-shape parity (#20) | "Not done" list of the AI/spawn sweep | changes only the random stream / one sound |
-| X11 | Target selection details: Q-UI-03 60-frame re-pick; freed target slots being reused | UI-07 | |
-| X12 | Unresolved original quirks (UNCLEAR rows): miners hostile after assistance request (0x0047e470), OnShipDone text suppression on abort (0x00443c60), carrier escort weapon-1 range (Q1), escorts' `chär` Initial Record order | `audit/quirks.md` | needs a decomp trace, not code |
-| X13 | Travel-destination overlay sprites and travel countdown sprite (0x0048e970 `NovaUi_LoadTravelOverlaySprites`, 0x00492c40 `RenderTravelDestinationOverlay`, 0x0042cc30 `Stellar_TickTravelCountdownSprite`, 0x00438fc7 reticle visibility with cloak/scanner/untargetable) | `audit/unverified/starmap_travel.tsv` (`named-only`) | verify against `updateSelectionBrackets` before treating as a gap |
-| X14 | Frame/session cadence fragments never reconstructed: alt-tab dt reset and pause (0x00497cf0/0x00497d50, Apple `pauseOnFocusLoss` is an enhancement), viewport flash/particle present passes (0x00439a10-0x00439d40), transition-frame latch (0x00467de0) | `coverage.md` cluster 3 | mostly presentation timing |
-| X15 | Resource-loader record zero-padding to fixed minimum sizes for every type (0x004bd3c0) | `coverage.md` cluster 4; LD-02 marked DONE | confirm per-type widths against `audit/raw/resource_field_layouts.tsv` |
-| X16 | Licensing / shareware enforcer (përs slot 0x3ff, 0x0046ac50) and License.lcs | `coverage.md` cluster 8 | out of scope for BYO-data; listed for completeness |
-| X17 | Debug HUD mnemonics `NovaUi_DrawAiStateMnemonic` / `DrawAiControlModeMnemonic`, CE cheat/NCB console (0x00872040) | `unverified/ai.tsv` | developer tools; Apple's AI overlay and debug console cover the intent |
-
-### New Godot gaps found by this pass (already folded into the packages above)
-A8 (aux-ship budget decrement, stranded-fighter accounting), B8 (cannot-jump overlay auto-clear), C4/C5 (stored-but-inert prefs, `.mov` title music),
-D5 (exploration-level panels), F2 (NPC warp effects). No further Godot-only gaps were found in the Apple file walk.
-
----
+Differences from the executable are the open items in the fidelity plan and in STATUS.md. This file does not keep a second list.
 
 ## Plug-in loading gaps (2026-10-13, from `scripts/plugins-check.sh`; details in `docs/GODOT_LAYER.md` "Real plug-in verification")
 

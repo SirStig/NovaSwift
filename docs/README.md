@@ -53,9 +53,8 @@ Plans
 - [MODERNIZATION.md](MODERNIZATION.md): optional extras over the original.
 - [MOBILE_AND_PLUGINS.md](MOBILE_AND_PLUGINS.md): launcher and plug-in
   management.
-- [PLUGIN_TOOLKIT.md](PLUGIN_TOOLKIT.md): planned plug-in editor and HD extensions.
-- [EDITOR_AND_PLUGINS_SCOPE.md](EDITOR_AND_PLUGINS_SCOPE.md): resource and pilot
-  editing.
+- [PLUGIN_TOOLKIT.md](PLUGIN_TOOLKIT.md): plug-in editor and HD extensions.
+- [PLUGIN_EDITOR.md](PLUGIN_EDITOR.md): the macOS editor. It is built.
 
 Specs of the original game
 

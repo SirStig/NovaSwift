@@ -112,17 +112,9 @@ RequireGovt value | Scope
 `2128-2383` | All stellars **except** this govt/allies
 `3128-3383` | All-but, **+** independent excluded too
 
-Outside its scope, the `Require` gate simply doesn't apply (item is available
-there regardless of what the player owns).
+A value in one of those four bands skips the bit test when the port is outside that band, and the buy is allowed. A value outside every band, and any value while the player is not docked, is always enforced. `RequireGovt` of −1 is outside every band.
 
-Implemented: `Sources/NovaSwiftKit/NovaAIModels.swift` decodes `contribute` (`@30`),
-`require` (`@38`), `requireGovt` (`@1010`) on `OutfRes`. Logic in
-`app/NovaSwift/Spaceport/ItemLocking.swift`:
-- `contributedBits(pilot:)` (lines 29-41) ORs the current ship's `contribute`
-  with every owned outfit's `contribute`.
-- `requireGovtApplies` (lines 48-60) implements the four range cases above.
-- `lockState(for:pilot:at:diplomacy:)` (lines 63-70) combines Availability +
-  Require-if-in-scope into the final available/locked/hidden state.
+NovaSwift's `requireGovtApplies` returns false for a waived or out-of-scope port, and `outfitRequirePasses` ANDs that with the bit test, so a skipped mask becomes a failed require. `lockState` also returns available as soon as the pilot owns one of the outfit. See EC-12 in [FIDELITY_PLAN.md](FIDELITY_PLAN.md). `OutfRes` decodes `contribute` at @30, `require` at @38 and `requireGovt` at @1010 (`Sources/NovaSwiftKit/NovaAIModels.swift`).
 
 ### 3.3a `OnPurchase`/`OnSell` — side-effect control-bit sets
 
@@ -300,7 +292,7 @@ Field | Meaning | Implemented?
 `Flags 0x0004` | "This item stays with you when you trade ships (persistent)" | Not decoded/enforced — `buyShip` in `PilotStore.swift` has a comment "Outfits carry over (EV Nova keeps persistent items)" but that's applied unconditionally to *all* outfits, not gated on this flag.
 `Flags 0x0020` | Persistent specifically across a mission's forced ship-swap (`set` operator), independent of 0x0004 | Not decoded.
 `Flags 0x0008` | "This item can't be sold" | **Implemented and enforced** — `PilotStore.sellOutfit` (`PilotStore.swift`) now guards `o.flags & 0x0008 == 0` and rejects the sale (returns `false`) when the flag is set.
-`Flags 0x0010` | "Remove any items of this type after purchase (useful for permits and other intangible purchases)" | **Implemented and enforced** — `PilotStore.buyOutfit` (`PilotStore.swift`) grants the outfit, then immediately calls `state.removeOutfit(o.id)` when `o.flags & 0x0010 != 0` — a permit-type outfit now nets a charge with nothing left in inventory, matching the Bible's described behavior.
+`Flags 0x0010` | "Remove any items of this type after purchase (useful for permits and other intangible purchases)" | The outfitter keeps the item for the rest of the visit and refuses another chart or clean-record of the same kind once a latch is set. It zeroes Flags 0x0010 counts on exit (EC-28). NovaSwift removes the outfit at the moment of purchase.
 `ItemClass` | "The item's classification, used in the pêrs resource for items that are given out by non-player characters' ships." | **Decoded, not consumed.** `OutfRes.itemClass` (`@1004`, `NovaAIModels.swift`) is now a real field, but no `pêrs`-loot logic reads it anywhere in the codebase yet. Real data: outfits #128/#135/#130/#156 all read 0 here (unclassified), consistent with these being ordinary shop items rather than pêrs loot.
 `ScanMask` (outfit-level) | Marks an outfit as contraband to governments whose own `ScanMask` shares a bit — distinct from the mission `ScanMask` field already decoded in `MissionModels.swift`. | **Decoded, not consumed.** `OutfRes.scanMask` (`@1006`, `NovaAIModels.swift`) is now a real field, but nothing evaluates it against a government's `ScanMask` at scan/boarding time. (`MissionModels.swift` decodes a *different*, mission-level `scanMask` used for boarding/cargo-scan checks — not this one.) Real data: 0 for the four spot-checked outfits (none of them are contraband-flagged).
 
@@ -318,71 +310,13 @@ bought" field in `oütf`.
 > for purchase on a given day, from 1-100. Values less than 1 or greater than
 > 100 are interpreted as 100."
 
-That's the entirety of what the Bible says about outfit restocking: a **daily**
-percent-chance roll, per item, defaulting to "always" when unset/out-of-range
-(since anything `< 1` reads as `100`). It says nothing about re-rolling more
-than once per day, nothing about a running inventory count that depletes as
-the player buys, and nothing about accumulating/decaying stock over multiple
-days — restocking in EV Nova is exactly this one binary per-day roll, not a
-quantity-tracking economy simulation.
-
-The ship resource (`shïp`, Bible lines ~2685-2686, *not* in the `oütf` section)
-has its **own**, textually near-identical `BuyRandom` field with one crucial
-difference in its zero-behavior:
+The ship resource has its own `BuyRandom`:
 
 > "BuyRandom: The percent chance that a ship of this type will be available
 > for purchase on a given day. A BuyRandom of 0 means this ship will never be
 > made available for purchase."
 
-So: outfit `BuyRandom <= 0` → always available (100%); ship `BuyRandom == 0` →
-**never** available. Confirmed by direct byte search of the Bible text — this
-is a real, documented asymmetry between the two resources, not an
-inconsistency introduced by this project.
-
-### What was actually built (commit `ff8fc20`, "Enhance item availability
-mechanics with BuyRandom feature")
-
-- `OutfRes.buyRandom` (`@1008`) and `ShipRes.buyRandom` (`@904`) decoded
-  verbatim from the Bible fields above.
-- `NovaGame.outfitsSold(at:day:)` / `shipsSold(at:day:)`
-  (`Sources/NovaSwiftKit/NovaEconomy.swift`) take an optional `day` (an absolute
-  day count, e.g. `GameDate.julianDay`) and, when supplied, filter through a
-  private `onOfferToday(buyRandom:neverIfZero:spobID:itemID:day:)` helper.
-  `neverIfZero` is `false` for outfits, `true` for ships — implementing the
-  documented zero-behavior asymmetry above correctly.
-- `onOfferToday` is **not a stored/rolled state** — it's a deterministic
-  FNV-1a hash of `(day, spöbID, itemID)` reduced mod 100 and compared against
-  the item's percent chance. This means: (a) it needs no save-file support —
-  nothing is persisted; (b) re-opening the same outfitter twice on the same
-  in-game day shows identical stock (stable within a day, as the Bible's "on a
-  given day" phrasing implies); (c) advancing the day naturally changes the
-  hash and re-rolls every item independently.
-- Wired into the UI: `OutfitterView.stock` / `ShipyardView.stock`
-  (`app/NovaSwift/Spaceport/SpaceportScreens.swift`) now pass
-  `pilot.state.date.julianDay` through, so the visible grid genuinely changes
-  day to day.
-
-**Verdict: this is a faithful, not-invented implementation of a real Bible
-field**, for both resources, including the documented zero-behavior asymmetry
-between them. The one design choice that *is* a team judgment call rather than
-something the Bible specifies: the Bible says nothing about *how* the "percent
-chance... on a given day" is actually rolled (real Nova likely used a
-per-item/per-day RNG state tied to the save, since the original game has no
-equivalent of a pure/stateless hash function as a design concept) — the
-FNV-1a-hash-of-(day, spöb, item) approach is an implementation detail invented
-to get a stable, save-file-free version of the same *observable* behavior the
-Bible describes ("a chance per day, stable if you re-check same-day"). It is
-not a deviation from Bible *semantics*, but the specific determinism mechanism
-is the team's own design, not a documented one (the original engine's actual
-RNG/seeding for this roll is unknown — the Bible only specifies the
-probability contract, not the implementation).
-
-One remaining open question the Bible text doesn't resolve either way: whether
-"on a given day" resets on any day *anywhere in the galaxy* advancing (a
-single global roll-day) or is scoped per-system/per-visit — the shipped
-`day` parameter is a raw absolute day count applied uniformly everywhere,
-which matches the simplest reading but isn't separately confirmed by any
-Bible passage beyond the field's one-sentence description.
+The Bible text says an outfit `BuyRandom` below 1 means always (100), and a ship `BuyRandom` of 0 means never. The executable does not follow the outfit half of that. `0x00466cb0` treats `BuyRandom` below 1 as never for outfits and for ships (LD-01). NovaSwift's `stocked` already does that. The confirmed remaining gap is that `0x00492f30` writes a new roll into that ship's `BuyRandom` even when the confirm dialog is cancelled (EC-11). NovaSwift redraws only after a successful buy.
 
 ## 8. Confirmed on-disk field layout (union question resolved)
 
@@ -459,55 +393,3 @@ the Weapon/Ammo slot is a true union rather than an unverified guess, (2)
 the previously-undecoded `itemClass@1004`/`scanMask@1006`/`outfitterName@811`/
 `lowercaseName@875`/`lowercasePlural@939`/`onPurchase@301`/`onSell@556`
 offsets, none of which existed anywhere in this codebase or doc before.
-
-## 9. What's implemented vs. what's missing
-
-Legend: ✅ Implemented and wired (decoded + actually consulted/enforced at
-runtime) · ⚠️ Implemented but not wired (decoded and/or computed, but the
-consuming call site doesn't use it) · ❌ Not implemented (not decoded, or
-decoded with zero behavior anywhere).
-
-Mechanic | Bible field | Status | Where
----|---|---|---
-Tech-level gating | `TechLevel` + `spöb.SpecialTech` | ✅ Done | `NovaEconomy.swift`
-NCB Availability test | `Availability` | ✅ Done | `OutfRes.availBits` + `ItemLocking.swift`
-Contribute/Require prerequisite | `Contribute`/`Require` | ✅ Done | `ItemLocking.swift`
-RequireGovt scoping | `RequireGovt` | ✅ Done | `ItemLocking.swift`
-Show-greyed vs. fully hide | `Flags 0x0100/0x4000` | ✅ Done | `OutfRes.hidesWhenLocked`
-Sell-anywhere override | `Flags 0x0800` | ✅ Done — overrides Require/Availability **and** the upstream tech-level filter | `OutfRes.ignoresRequirements` + `NovaEconomy.outfitsSold`
-Max-owned cap | `Max` | ✅ Done | `PilotStore.canBuyOutfit`
-Base price + flat refund | `Cost` | ✅ Done | `OutfRes.cost`, `PilotStore.buyOutfit`/`sellOutfit`
-Mass-proportional price | `Flags 0x0200` | ✅ Done — `PilotStore.effectiveCost` calls `Galaxy.effectiveCost`, used by `buyOutfit`/`sellOutfit`/`canBuyOutfit`/`tradeInValue` | `ShipLoadout.swift` + `PilotStore.swift`
-Mass-proportional install mass | `Flags 0x0400` | ✅ Implemented and wired — `OutfRes.massIsShipMassProportional` + `effectiveMass(shipMass:)` consumed in `Galaxy.loadout`'s `usedMass` sum | `ShipLoadout.swift`
-Purchase/sale control-bit side effects | `OnPurchase`/`OnSell` | ✅ Done — decoded on `OutfRes` (`@301`/`@556`) and run via `StoryEngine.apply(set:)` on buy/sell | `NovaAIModels.swift` + `PilotStore.runOutfitScript`
-Weapon/ammo linkage | `ModType 1`/`3` | ✅ Done | `OutfRes.grantedWeapons`/`.ammoFor`, folded in `ShipLoadout.swift`
-Map reveal | `ModType 16` | ✅ Done — scoped one-shot reveal at acquisition (N jumps / all-independent / govt class), recorded in `PlayerState.chartedSystems`; **was** a whole-galaxy reveal bug | `NovaGame.mapRevealedSystems` + `PlayerState.applyOutfitAcquisition`
-Clean legal record | `ModType 21` | ✅ Done — clears standing with the ModVal govt (or all if -1) on acquisition | `PlayerState.applyOutfitAcquisition` / `clearLegalRecord`
-Ammo/other-item cap increase | `ModType 27` | ✅ Done — `NovaGame.effectiveMaxInstallable` (base Max × owned expanders) enforced in `PilotStore.canBuyOutfit`; not a ship-stat modifier, so `ShipLoadout` intentionally skips it | `OutfitConstraints.swift` + `PilotStore.swift`
-Fixed-gun/turret slot flags | `Flags 0x0001/0x0002` | ✅ Done — `PilotStore.canBuyOutfit` rejects a fixed-gun/turret buy when `Loadout.freeGunSlots`/`freeTurretSlots` is 0 | `ShipLoadout.swift` + `PilotStore.swift`
-Can't-sell flag | `Flags 0x0008` | ✅ Implemented and wired — `sellOutfit` rejects the sale when set | `PilotStore.swift`
-Consumed-on-purchase (permits) | `Flags 0x0010` | ✅ Implemented and wired — `buyOutfit` grants then immediately `removeOutfit`s | `PilotStore.swift`
-Persistent-across-ship-trade | `Flags 0x0004`/`0x0020` | ❌ Missing as a distinct rule — outfits currently always carry over regardless of the flag | `PilotStore.buyShip` comment
-DispWeight-tier suppression | `Flags 0x1000` | ❌ Missing | —
-Ranks-section outfit | `Flags 0x2000` | ❌ Missing | —
-Illegal-outfit `ScanMask` | `ScanMask` (outf-level) | ✅ Done — `gövt.ScanMask@50` decoded + `Contraband`/`ContrabandScan` fine the player for scanned contraband (outfit/junk/mission) | `Contraband.swift`, `ContrabandScan.swift`; see docs/reverse-engineering/GOVERNMENT.md
-`ItemClass` (for pêrs loot) | `ItemClass` | ✅ Done — `pêrs` decoded (`PersModels.swift`); `NovaGame.personBoardingGrant` hands over `GrantCount/2…GrantCount` random outfits of `GrantClass` when the player boards a named person's hulk; spawner tags 5% of ships as a `pêrs` | `PersModels.swift`, `World.takePlunderOutfits`, `Spawner.assignPersonIfLucky`
-`Outfitter Name`/`Lowercase Name`/`Lowercase Plural` | (unnamed in Bible field list; display strings) | ❌ Missing — offsets confirmed `@811`/`@875`/`@939` (§8); engine currently displays only the resource-fork `name` metadata, never these in-record strings | —
-Daily restock roll | `BuyRandom` (both resources) | ✅ Done, including the documented zero-behavior asymmetry | `NovaEconomy.swift` `onOfferToday`, §7 above
-
-### NovaJS cross-reference
-
-The vendored partial TypeScript port (`third_party/NovaJS`) does **not**
-implement any of this business logic. `novaparse/src/resource_parsers/OutfResource.ts`
-only exposes raw fields (`displayWeight`, `mass`, `techLevel`, `max`, `cost`,
-`functions` — the same four ModType/ModVal slots, string-labeled instead of
-enum-cased) with no `Availability`/`Require`/`Contribute`/`BuyRandom`/flags
-decoding at all. `novadatainterface/OutiftData.ts` (filename misspelled
-"Outift" in the actual repo) is purely a runtime data-shape interface
-(`weapons`, `physics`, `pict`, `price`, `desc`, `displayWeight`, `max`) with
-default-value scaffolding, again no gating/pricing logic. `nova/src/spaceport/outfitter.ts`
-is UI-only: it renders whatever list it's handed and reads `item.price`/
-`item.max` verbatim — no tech-level filter, no BuyRandom, no Require check
-visible anywhere in that file. In short: NovaJS is not a second source of
-outfitter *rules*, only confirmation of the same raw field layout already
-cross-checked against novaparse elsewhere in this codebase.

@@ -55,11 +55,7 @@ disagree, and the Bible's decimal rule is the authoritative engine behavior
 2. Not an in-system stellar we have data for → `.refused(.notDominatable)`.
 3. `Flags2 0x0020` always-dominated → immediate `.dominated`.
 4. No defense fleet (`DefenseDude < 128` or `DefCount 0`) → `.refused(.noDefenseFleet)`.
-5. **Combat-rating gate** (first demand only): if `playerCombatRating <
-   defenseTotal × tributeRatingPerDefender`, the planet laughs it off →
-   `.refused(.combatRatingTooLow)`. This gate is an **engine addition** — stock
-   EV Nova has no combat-rating threshold; its only gate is defeating the defense
-   fleet. Set `World.tributeRatingPerDefender = 0` to disable it (fully faithful).
+5. **Combat-rating gate** (first demand only): NovaSwift refuses when `playerCombatRating < defenseTotal × tributeRatingPerDefender`. The original's gate is flat: a rating below 12800 (0x3200) is laughed off (EC-16). Where this step disagrees with that, EC-16 wins. `tributeRatingPerDefender` is NovaSwift's own scale.
 6. Otherwise open a contest and scramble the opening group up to the concurrent
    `waveSize` (`.defending(launched:)`). `World.updateStellarDefenses()` (called
    each `step`) then keeps the field **topped up** to `waveSize`: it launches one
@@ -85,38 +81,3 @@ infrastructure.
   `payDailySalaries`; each dominated stellar's `dailyTributeAmount` is added to
   the player's credits **per day** automatically (the authentic behavior — not a
   landing collection).
-
-## Engine inventions (flagged, not silent)
-
-- The **combat-rating gate** and its `tributeRatingPerDefender` scaling — stock
-  Nova has none; added at the user's request as the "laughs at you" gate.
-- Reinforcement is a per-loss trickle that holds the field at `waveSize`; the
-  Bible specifies wave *size* and *total* but not the exact relaunch timing, and
-  the original keeps a set number attacking and replaces losses one at a time.
-- A contest resets when the player leaves the system (the `World` is rebuilt per
-  visit), matching the transient nature of the defense fight.
-
-## Wiring status — DONE (engine + app trigger both live)
-
-Engine flow + events + `spöb` decode + `PlayerState` persistence + daily tribute
-are implemented and covered by unit tests (`DominationTests`,
-`StoryEngineTests`) and a headless proof (`novaswift-extract tribute <baseDir>
-<systemID> [spobID] [rating]`). The story runtime is wired
-(`StoryEngine.advanceDays` runs in the live app, and `payDailyTribute` runs
-inside it), so daily tribute income and `OnDominate`/`OnRelease` NCB effects flow.
-
-**The app-side trigger is wired.** The "Demand Tribute" button
-in the planet hail dialog (`GameContainerView.demandPlanetTribute`) calls the
-real engine through `GameScene.demandTribute(spobID:combatRating:alreadyDominated:)`,
-which syncs the player's live combat rating and already-dominated set into the
-`World` and runs `World.demandTribute`. The returned `TributeOutcome` drives the
-dialog reply (defending / still-defending / dominated / refused-with-reason). The
-`stellarDefendersLaunched` and `stellarDominated` `WorldEvent`s are drained in
-`GameScene` and routed to `GameContainerView` closures: the opening scramble posts
-a HUD line (the silent per-loss trickle does not), and a surrender calls
-`GameContainerView.handleStellarDominated` → `StoryEngine.dominateStellar` (fires
-`OnDominate`, persists to `PlayerState.dominatedStellars`, enrolls the stellar for
-daily tribute) and flips the hail dialog to friendly/landable. The full loop —
-demand → defense waves → clear them → re-demand → surrender → daily tribute —
-is now playable end-to-end. `tributeRefused` is surfaced via the outcome reply
-in the dialog rather than a separate HUD closure.

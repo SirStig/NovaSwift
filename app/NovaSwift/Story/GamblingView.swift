@@ -74,8 +74,9 @@ struct GamblingView: View {
     /// each new bet rather than reusing the previous run.
     @State private var raceID = 0
     @State private var showAmountPrompt = false
-    /// The previous race's winner, kept for the app's lifetime like the
-    /// original's global (it is not saved).
+    /// The previous race's winner. The original resets it every time the
+    /// services window opens (0x0047c8e0). This value stays for the app's
+    /// lifetime (EC-26). It is not saved.
     @MainActor private static var raceBet = LandedServices.RaceBet()
     @State private var payout = 0
 

@@ -31,18 +31,20 @@ generator, thrust and top speed, the control-bit test and set interpreters), the
 original routine was run on its own in an emulator and NovaSwift was tested
 against its output.
 
-The plan has 177 items in eight areas. All 177 are marked done:
+The plan has 179 items in eight areas. 163 are done. 16 are open: a later read of the executable reopened items whose heading said done, and added EC-27 and EC-28.
 
-| Area | Items |
-|---|---:|
-| Flight, hyperjump, travel days (FL) | 23 |
-| Weapons and damage (WP) | 27 |
-| NPC AI, spawning, escorts (AI) | 43 |
-| Economy, legal record, landed services (EC) | 26 |
-| Missions and story (MS) | 24 |
-| Outfit special systems (OS) | 14 |
-| Player-facing rules: map, targeting, HUD, keys, saving (UI) | 18 |
-| Data loading (LD) | 2 |
+| Area | Items | Open |
+|---|---:|---:|
+| Flight, hyperjump, travel days (FL) | 23 | 0 |
+| Weapons and damage (WP) | 27 | 0 |
+| NPC AI, spawning, escorts (AI) | 43 | 1 |
+| Economy, legal record, landed services (EC) | 28 | 11 |
+| Missions and story (MS) | 24 | 1 |
+| Outfit special systems (OS) | 14 | 2 |
+| Player-facing rules: map, targeting, HUD, keys, saving (UI) | 18 | 1 |
+| Data loading (LD) | 2 | 0 |
+
+Open: OS-06, EC-04, EC-05, EC-07, EC-09, EC-10, EC-11, EC-12, EC-25, EC-26, OS-08, AI-44, UI-06, MS-19, EC-27, EC-28. The first paragraph under an open heading is the current gap. An older Done paragraph under the same heading is historical.
 
 A few done items leave a small piece for later:
 
@@ -75,31 +77,13 @@ One square per function in the EV Nova CE executable, grouped by subsystem.
 | Outline | Gameplay code whose role is still unknown. |
 | Dark grey | Nothing to port: C runtime, QuickTime, image and audio libraries, networking, blitters, Windows glue, the shareware nag, plus drawing and debug plumbing found during checking. |
 
-Current counts: 651 green, 33 teal (done differently by design), 0 red, 0 blue,
-2,515 dark grey (3,199 total). Of the 697 gameplay functions, 519 match the
-original (some after a fix), 24 are done differently by design (NovaSwift's own
-save format, input layer, frame loop, and SwiftUI lists and dialogs), and 154
-turned out to be drawing or debug plumbing with nothing to port.
+The counts below are from the last time the grid was drawn, when every plan item was marked done. The later re-read reopened the 16 items above, and the squares have not been redrawn, so green still includes functions whose items are open again. `site/assets/progress.json` is that same picture and has not been regenerated.
 
-Until 2026-10-10 the grid counted every difference found by the line-by-line
-comparisons as fixed once that area's work was merged. Each one has since been
-re-checked against the code. On 2026-10-12 the last 26 open differences were
-closed: 13 had already been fixed but not recorded, 8 were fixed then, and 5
-are done differently by design (see "Open-gap reconciliation" at the end of
-FIDELITY_PLAN.md).
+651 green, 33 teal (done differently by design), 0 red, 0 blue, 2,515 dark grey (3,199 total). Of the 697 gameplay functions, 519 were marked matching, 24 done differently by design (NovaSwift's own save format, input layer, frame loop, and SwiftUI lists and dialogs), and 154 drawing or debug plumbing.
 
 ## Original bugs and quirks
 
-The original has bugs and odd behaviour that players and plug-in authors rely
-on, and NovaSwift keeps them. The list of about 106 known quirks kept with
-wraitii's evnova-decomp reimplementation was checked against NovaSwift on
-2026-10-12. 92 behave as in the original, 8 of them after fixes made then: for
-example, fighter bays stay empty after an `Hxxx` ship change, the tractor beam
-pulls with the player's thrust, and fleet ships carry no cargo. 10 do not apply
-to NovaSwift. 3 differ on purpose: for example, a `DeathDelay` of 0 or 1 does not
-leave an immortal ghost ship. Ships with `shän` flag 0x0002 do not yet unfold for
-landing, and 7 smaller questions are still open. See "Original-quirk audit" at the
-end of FIDELITY_PLAN.md.
+The original executable is ground truth, including behaviour a reimplementation called a bug and changed. NovaSwift keeps those quirks. A `DeathDelay` of 0 or 1 does not leave an immortal ghost: NovaSwift uses a 1.8 s death instead, on purpose. Ships with `shän` Flags 0x0002 do not fold or unfold for hyperspace or landing. Fleet ships are spawned with empty holds. The kept quirks and the still-open questions are in §6 of [FIDELITY_PLAN.md](reverse-engineering/FIDELITY_PLAN.md).
 
 That is a measure of how much code has been compared, not a promise that the
 game plays identically or is bug-free. A comparison can miss timing, ordering
@@ -110,7 +94,7 @@ most useful feedback.
 A function is checked in one of two ways: a completed item in
 FIDELITY_PLAN.md cites its address, or a line-by-line comparison of its
 decompiled code against NovaSwift found it matching or found a difference that
-has since been fixed.
+has since been fixed. A function cited by an open item is not settled. Its square can still be green, because the grid has not been redrawn.
 
 The grid is regenerated by a script that reads the function map, the addresses
 cited in FIDELITY_PLAN.md and the line-by-line comparison results. It writes
@@ -187,18 +171,13 @@ None of these change the game's rules:
 
 ## Linux and Windows
 
-The Godot frontend ([GODOT_LAYER.md](GODOT_LAYER.md)) runs the same engine.
-Working: flight on the real flight model, rendering of ships, planets, shots,
-beams, asteroids and explosions from your data, HUD, radar, target lock, landing
-and launch, and the trade center. Not yet: sound, the galaxy map, outfitter,
-shipyard, bar and mission board, saving, the story runtime, and packaged builds.
-It has been built and run on macOS; the Linux and Windows builds are not verified yet.
+The Godot frontend ([GODOT_LAYER.md](GODOT_LAYER.md)) runs the same engine and calls the same Swift helpers as the Apple app. Flight, landing, the spaceport, the map and the story screens are wired. Where those helpers still differ from the executable, the open plan items apply on both frontends (EC-04, EC-05, EC-25, OS-06, EC-26, OS-08, UI-06). Frontend wiring that is still open is in [GODOT_FIDELITY_GAPS.md](GODOT_FIDELITY_GAPS.md). It has been built and run on macOS; the Linux and Windows builds are not verified yet.
 
 ## Known gaps
 
-- The deferred pieces listed above.
-- Open questions in the fidelity plan: a handful of constants and edge cases
-  that need an emulator run to settle.
+- The 16 open plan items listed above.
+- The deferred pieces listed above (UI-11, UI-13, UI-15's map cycling, AI-12, FL-23).
+- Open questions in §6 of the fidelity plan.
 - Ships with `shän` flag 0x0002 do not fold and unfold for hyperspace or
   landing.
 - Mission BBS and offer windows lack the original's map, Player Info and

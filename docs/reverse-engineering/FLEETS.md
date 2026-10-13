@@ -96,7 +96,7 @@ controls, and neither is decoded yet.
 (`weightedPick`, `Spawner.swift`, same algorithm as `DudeRes.pickShip`
 in `NovaModels.swift`). The "+/- 50%" variance itself isn't modeled as
 a per-arrival roll — `targetPopulation` is a fixed derived number, not
-re-rolled — see §7.
+re-rolled.
 
 ## 2. `flët` resource fields (lines 886–932)
 
@@ -110,10 +110,10 @@ re-rolled — see §7.
 | `Min` (×4) | "The minimum number of each type of escort to put in the fleet" | ✅ `escorts[].min` @10,12,14,16 |
 | `Max` (×4) | "The maximum number of each type of escort to put in the fleet" | ✅ `escorts[].max` @18,20,22,24 |
 | `Govt` | "ID of the fleet's government, or -1 for none" | ✅ `govt` @26 |
-| `LinkSyst` | "Which systems the fleet can be created in" (ranges — see §3) | ✅ decoded as `linkSystem` @28 **and now read** by `Spawner.isFleetEligible` — see §7 (updated) |
-| `AppearOn` | "A control bit test field that will cause a given fleet to appear only when the expression evaluates to true. If this field is left blank it will be ignored" | ✅ decoded as `appearOn` (`NovaAIModels.swift`), offset `@30`, a 256-byte NCB test string — **`Spawner` reads and gates on it, but the app never wires the host hook it defers to a real evaluator**, see §4/§7 (updated) |
-| `Quote` | "Show a random string from the STR# resource with this ID when the fleet enters from hyperspace. Any occurrences of the character '#'… will be replaced with a random digit (0-9)" | ✅ decoded as `hailQuote` @286 (`RSID`, 2 bytes) — **still never read anywhere**, no arrival-text event exists, see §7 (updated) |
-| `Flags` | `0x0001`: "Freighters (`InherentAI <= 2`) in this fleet will have random cargo when boarded" | ✅ decoded as `flags` @288 (`WORV`, 2 bytes) with `freightersHaveRandomCargo`, and **wired**: `Spawner.spawnFleet` rolls random standard-commodity cargo into a fleet's freighters (InherentAI ≤ 2) via `rollRandomFreighterCargo`, so boarding a convoy hauler yields loot. See §7 |
+| `LinkSyst` | "Which systems the fleet can be created in" (ranges — see §3) | ✅ decoded as `linkSystem` @28 **and now read** by `Spawner.isFleetEligible` — see §3 and §8 |
+| `AppearOn` | "A control bit test field that will cause a given fleet to appear only when the expression evaluates to true. If this field is left blank it will be ignored" | ✅ decoded as `appearOn` (`NovaAIModels.swift`), offset `@30`, a 256-byte NCB test string — **`Spawner` reads and gates on it, but the app never wires the host hook it defers to a real evaluator**, see §4 |
+| `Quote` | "Show a random string from the STR# resource with this ID when the fleet enters from hyperspace. Any occurrences of the character '#'… will be replaced with a random digit (0-9)" | ✅ decoded as `hailQuote` @286 (`RSID`, 2 bytes) — **still never read anywhere**, no arrival-text event exists, see §4 |
+| `Flags` | `0x0001`: "Freighters (`InherentAI <= 2`) in this fleet will have random cargo when boarded" | Decoded at @288 as `freightersHaveRandomCargo`. Fleet ships are spawned with empty holds. See §6 of [FIDELITY_PLAN.md](FIDELITY_PLAN.md) |
 
 `FleetRes.init` (`Sources/NovaSwiftKit/NovaAIModels.swift`) now reads
 through byte 288 (`appearOn`, `hailQuote`, `flags`), not just bytes 0–29 as
@@ -133,7 +133,7 @@ consistent with "if this field is left blank it will be ignored." A fleet
 using a non-blank `AppearOn` or `Quote` would need a scenario/plugin search
 to find a worked example; not attempted here. **Decoding these three fields
 is now done; evaluating/acting on them (the "wiring" half) is still entirely
-outstanding** — see §4 and §7 (updated).
+outstanding** — see §4.
 
 **Escort count roll.** The Bible doesn't state whether each escort count is
 independently rolled uniformly in `[Min, Max]` or something else (e.g.
@@ -187,8 +187,7 @@ silently ignored if it violates the fleet's own `LinkSyst`), or is it used for
 some *other*, `-1`/wildcard-only case where a fleet is expected to appear
 across many systems without being individually listed in each of their spawn
 tables (in which case per-system spawn-table wiring alone, as currently
-implemented, would systematically miss those fleets)? Nothing in the engine
-resolves this today — `linkSystem` is decoded and then never read (§7).
+implemented, would systematically miss those fleets)? The Bible does not say which reading the original uses. See §8.
 
 ## 4. `AppearOn` gating and the hyperspace-arrival `Quote`
 
@@ -233,11 +232,8 @@ resolves this today — `linkSystem` is decoded and then never read (§7).
   no arrival-text event anywhere in `Spawner`/`World` for any spawn origin**
   — `hailQuote` is read into `FleetRes` and never looked at again.
 - **`Flags 0x0001`** (random cargo on freighters with `InherentAI <= 2` when
-  boarded) is decoded as `FleetRes.freightersHaveRandomCargo` and **wired**: `Spawner.spawnFleet` calls `rollRandomFreighterCargo` for the
-  lead and each escort whose hull `InherentAI <= 2`, filling 30-90% of the hold
-  across one or two random standard commodities (types 0-5) at spawn — so the
-  existing boarding/plunder path (`World.boardingManifest`) finds real cargo on
-  a convoy hauler instead of an empty hold. (2 unit tests in `DudeCargoTests`.)
+  boarded) is decoded as `FleetRes.freightersHaveRandomCargo`. Fleet ships are
+  spawned with empty holds. See §6 of [FIDELITY_PLAN.md](FIDELITY_PLAN.md).
 
 ## 5. Relationship to reinforcement fleets
 
@@ -280,13 +276,13 @@ from the `AIBrain`/jamming docs), `ReinfRegen=2`(days). So today:
   rather than "should *I* personally engage"), it schedules the
   reinforcement fleet to arrive after `ReinfDelay` frames (converted via
   `galaxy.combatTuning.framesPerSecond`) and then honors `LinkSyst`
-  eligibility (§3/§7) before actually spawning it at the hyperspace edge.
+  eligibility (§3 and §8) before actually spawning it at the hyperspace edge.
   `ReinfRegen`'s "days" unit is approximated as a fixed number of sim-seconds
   (`secondsPerReinforcementDay = 60`, `Spawner.swift`) since no galaxy-day
   calendar clock is threaded into combat simulation at this layer (that
   lives one layer up, in `NovaSwiftStory.GameDate`) — a documented engine
   approximation, not a byte-verified constant, worth flagging alongside the
-  other engine inventions in §7's table.
+  the other approximations in this section.
   `Spawner` still only draws ambient/fleet arrivals from the static
   per-system `SpawnTable` built once at system entry — the reinforcement
   path is the one exception where something now calls back into fleet
@@ -339,28 +335,11 @@ No hits inside `gövt`, `düde`, or `përs` sections beyond what's already liste
 out to be the `DefenseDude` hit above, which is adjacent-but-distinct rather
 than a `flët` reference.
 
-## 7. What's implemented vs. what's missing
-
-| Bible spec | Status | Where |
-|---|---|---|
-| Lead ship + up to 4 escort types w/ independent min/max | ✅ implemented | `FleetRes` decode (`NovaAIModels.swift`); `Spawner.spawnFleet` rolls each escort count independently uniform-in-range (`Spawner.swift`) |
-| Fleet-wide `Govt` (or -1/none → fall back) | ✅ implemented, reasonable fallback | `Spawner.swift`: `govt >= 128 ? govt : (leadShip's govt ?? system's govt)` — not documented as the exact fallback order, but a sensible reading of "-1 for none" |
-| Lead ship flies its own hull's inherent AI, not a fixed disposition | ✅ implemented, and *better* than a naive reading — Bible doesn't say this explicitly but it's consistent with `düde.AIType 0` "use the ship's own inherent AI" | `Spawner.swift` |
-| Escorts fly their own hull's inherent AI + hold formation slot | ✅ implemented (not Bible-specified either way) | `Spawner.swift`; formation math in `AIBrain.escort` (`AIBrain.swift`) |
-| `LinkSyst` (which systems a fleet may spawn in) | ✅ **implemented and wired** — `FleetRes.linkSystem` is decoded and now read by `Spawner.isFleetEligible` (`Spawner.swift`), evaluated for every ambient fleet draw (`spawnOne`, `Spawner.swift`) and for the reinforcement fleet before it's summoned (`updateReinforcements`, `Spawner.swift`). All five documented bands (`-1`, specific-system, govt, ally, enemy) are handled; the ally/enemy bands reuse `Diplomacy.areAllied`/`.areEnemies` per §3's own analysis. Note: the engine resolved §8 open question 2 as "second validity check on top of a system's own `DudeTypes` reference," not as an independent sweep for unlisted `LinkSyst = -1` fleets — see §8 | `NovaAIModels.swift` (decode); `Spawner.swift` (consult) |
-| `AppearOn` control-bit gate | ⚠️ **decoded and consulted by `Spawner`, but the host hook it defers to has no real evaluator wired in the app** — `FleetRes.appearOn` reads the real 256-byte NCB test string (§2), and `Spawner.fleetAppearOnAllowed`/`applyAppearOnGate` (`Spawner.swift`) do gate every ambient/reinforcement fleet draw on it — but they do so by calling `world.fleetSpawnEligible(fleetID)`, a host-supplied closure the engine can't itself evaluate `NCBTest` against, and no code in `app/` ever assigns that closure a real implementation (contrast `persSpawnEligible`, which the app *does* wire, `GameContainerView.swift`). It sits at its coded default, `{ _ in false }` (`World.swift`), so today every fleet with a non-blank `AppearOn` is unconditionally rejected — always ineligible, regardless of the player's actual control-bit state. **Offset confirmed: `@30`, 256-byte NCB string** — see §2 | `NovaAIModels.swift` (decode); `Spawner.swift` (consult, calls the stubbed hook); `World.swift` (the unwired hook itself) |
-| `Quote` (hyperspace-arrival STR# text, `#`→digit) | ⚠️ **decoded but not wired** — `FleetRes.hailQuote` reads the real `RSID`, but there is no arrival-text event anywhere in `Spawner`/`World` for *any* spawn origin, fleet or dude, to read it into. **Offset confirmed: `@286`, `RSID`** — see §2 | `NovaAIModels.swift` (decode); `Spawner.spawnPose` (`Spawner.swift`) returns an `ArrivalMode` (`.hyperspace`/`.launch`/`.populate`) that only drives visual/audio arrival *effects*, no text — zero consult call sites |
-| `Flags 0x0001` (random cargo on freighters when boarded) | ✅ **decoded and wired** — `Spawner.spawnFleet` rolls random standard-commodity cargo into a fleet's freighters (InherentAI ≤ 2) via `rollRandomFreighterCargo` at spawn, so the boarding/plunder path finds loot. **Offset confirmed: `@288`, `WORV`** — see §2 | `NovaAIModels.swift` (decode); `Spawner.swift` `spawnFleet`/`rollRandomFreighterCargo` (consumers) |
-| `sÿst.AvgShips` "+/- 50%" live variance | ⚠️ partially implemented — `targetPopulation` derives once from `averageShips` (`min(maxPopulation, avg+2)`) but is a fixed number for the system's lifetime, not re-rolled per Bible's "+/- 50%" phrasing, and the `+2`/`maxPopulation=18` constants are the engine's own invention, not from the Bible | `Spawner.swift` |
-| `sÿst.DudeTypes`/`%Prob` weighted background traffic | ✅ implemented, matches the weighted-pick semantics | `Spawner.spawnOne`/`weightedPick` (`Spawner.swift`); `SystRes.dudeSpawns` (`NovaModels.swift`) |
-| `sÿst.ReinfFleet`/`ReinfTime`/`ReinfIntrval` (reactive reinforcement summon) | ✅ **implemented and wired** — decoded on `SystRes` and threaded through `SpawnTable` into `Spawner.updateReinforcements` (`Spawner.swift`), which detects a friendly-under-fire-and-outmatched condition (`governmentUnderAttackAndOutmatched`, `Spawner.swift`, gated by the govt's own `MaxOdds`) and summons the fleet after `ReinfDelay`, regen-gated by `ReinfRegen`. Both the *pre-fight gating* half (`gövt.MaxOdds` via `AIBrain.favorableOdds`) and this *reactive-summon* half are now implemented (see §5, and [AI_GROUND_TRUTH.md](AI_GROUND_TRUTH.md) §6 item 1/§2 note). One caveat: `ReinfRegen`'s "days" unit is approximated as a fixed 60 sim-seconds/day (`Spawner.swift`) since no galaxy-day calendar clock reaches this layer — an engine invention, not a Bible-verified conversion. **Offsets confirmed: `ReinfFleet@406`, `ReinfDelay@408`, `ReinfRegen@410`** — see §5; real system #128 "Kania" has a live, non-`-1` reinforcement fleet configured, proving this was a genuine live-data feature, not a theoretical one | `NovaModels.swift` (decode); `Spawner.swift` (consult) |
-| Fleets always arrive as a group at the hyperspace edge (never mid-system or launched from a planet) | ✅ implemented as a deliberate restriction | `Spawner.spawnOne`: fleets are excluded from `eligibleFleets` when `origin == .planet` (`Spawner.swift`) — not from the Bible text (which doesn't say fleets *can't* appear via other origins), but a defensible reading of "enters from hyperspace" in the `Quote` field's own wording |
-| A ship-count cap so escorts can't overflow the system | ⚠️ engine invention, not in the Bible | `Spawner.swift`: `guard world.npcs.count < maxPopulation else { return }` mid-escort-loop — can silently truncate a fleet's escort count if the system is near its cap, with no Bible-documented equivalent behavior (real Nova likely has its own "Max Ships On Screen"-style constant not captured in this doc's source range) |
+The implementation-status table that used to follow §6 was removed. Current gaps are in [STATUS.md](../STATUS.md).
 
 ## 8. Open questions the Bible prose alone doesn't resolve
 
-1. ~~Exact byte offsets for `AppearOn`/`Quote`/`Flags`~~ — **resolved**, see
-   §2 and §7. `third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc`
+1. ~~Exact byte offsets for `AppearOn`/`Quote`/`Flags`~~ — **resolved**, see §2. `third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc`
    turned out to have the authoritative `flët`/`sÿst` field layouts (TMPL
    #506/#521) all along; `novaswift-extract tmpl` just computed their offsets
    wrong (didn't multiply `Rnnn` repeat groups, didn't size several field
@@ -378,7 +357,7 @@ than a `flët` reference.
    fleets, regardless of how `LinkSyst` gets wired up later. **Still open
    against the original game's actual behavior** — but the engine has since
    made an implementation choice here (not a Bible-sourced answer):
-   `Spawner.isFleetEligible` (§7) treats `LinkSyst` as the "gate/validate"
+   `Spawner.isFleetEligible` treats `LinkSyst` as the "gate/validate"
    reading only, run as a filter on top of whatever a system's own
    `DudeTypes`/`ReinfFleet` already reference. It does **not** implement the
    "independent sweep" reading — a `LinkSyst = -1` fleet that isn't listed in
