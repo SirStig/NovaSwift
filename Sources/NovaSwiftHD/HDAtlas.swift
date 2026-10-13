@@ -3,6 +3,9 @@ import NovaSwiftKit
 #if canImport(CoreGraphics)
 import CoreGraphics
 import ImageIO
+#if canImport(Compression)
+import Compression
+#endif
 
 /// A high-resolution sprite sheet: the classic sheet's exact frame layout
 /// (same frame count, same order, `columns` frames per row) drawn at
@@ -133,6 +136,59 @@ public struct HDAtlas: @unchecked Sendable {
         guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         return CGImageSourceCreateImageAtIndex(src, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
     }
+
+    #if canImport(Compression)
+    /// The cache's own format: "NSA1", width and height (little-endian
+    /// UInt32), then the premultiplied RGBA rows, LZ4-compressed. About the
+    /// size of a PNG but ~20× quicker to read (4 ms against 87 ms for a
+    /// 1152×3456 hull), and already in the layout textures are made from.
+    public static func encodeRaw(_ image: CGImage) -> Data? {
+        let w = image.width, h = image.height
+        guard let ctx = makeContext(width: w, height: h) else { return nil }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        guard let src = ctx.data else { return nil }
+        let rowBytes = w * 4, count = rowBytes * h
+        // Tight rows (the context may pad them).
+        var pixels = [UInt8](repeating: 0, count: count)
+        pixels.withUnsafeMutableBytes { dst in
+            for y in 0..<h {
+                (dst.baseAddress! + y * rowBytes).copyMemory(from: src + y * ctx.bytesPerRow, byteCount: rowBytes)
+            }
+        }
+        var out = [UInt8](repeating: 0, count: count + count / 16 + 64)
+        let n = compression_encode_buffer(&out, out.count, pixels, count, nil, COMPRESSION_LZ4)
+        guard n > 0 else { return nil }
+        var data = Data(rawMagic)
+        withUnsafeBytes(of: UInt32(w).littleEndian) { data.append(contentsOf: $0) }
+        withUnsafeBytes(of: UInt32(h).littleEndian) { data.append(contentsOf: $0) }
+        data.append(out, count: n)
+        return data
+    }
+
+    public static func decodeRaw(_ data: Data) -> CGImage? {
+        guard data.count > 12, data.prefix(4).elementsEqual(rawMagic) else { return nil }
+        let w = Int(data.withUnsafeBytes { UInt32(littleEndian: $0.loadUnaligned(fromByteOffset: 4, as: UInt32.self)) })
+        let h = Int(data.withUnsafeBytes { UInt32(littleEndian: $0.loadUnaligned(fromByteOffset: 8, as: UInt32.self)) })
+        guard w > 0, h > 0, w <= maxTextureDimension * 2, h <= maxTextureDimension * 2 else { return nil }
+        let count = w * h * 4
+        let pixels = UnsafeMutablePointer<UInt8>.allocate(capacity: count)
+        let n = data.withUnsafeBytes { raw -> Int in
+            let body = raw.bindMemory(to: UInt8.self)
+            return compression_decode_buffer(pixels, count, body.baseAddress! + 12, body.count - 12, nil, COMPRESSION_LZ4)
+        }
+        guard n == count else { pixels.deallocate(); return nil }
+        // The image owns the buffer from here; it's freed with the image.
+        guard let provider = CGDataProvider(dataInfo: nil, data: pixels, size: count, releaseData: { _, p, _ in
+            UnsafeMutableRawPointer(mutating: p).deallocate()
+        }) else { pixels.deallocate(); return nil }
+        return CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: w * 4,
+                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+    }
+
+    private static let rawMagic: [UInt8] = Array("NSA1".utf8)
+    #endif
 }
 
 /// How big the classic art is on screen, per frame: the larger side of each

@@ -1,6 +1,9 @@
 import Foundation
 import NovaSwiftKit
 import Crypto
+#if canImport(Compression)
+import Compression
+#endif
 #if canImport(SceneKit)
 import SceneKit
 import simd
@@ -445,14 +448,43 @@ public final class HDBakeCache: @unchecked Sendable {
     }
 
     public func load(_ key: String, layout: BakeLayout, scale: Double) -> HDAtlas? {
-        guard let data = try? Data(contentsOf: directory.appendingPathComponent(key + ".png")),
-              let image = HDAtlas.decodePNG(data) else { return nil }
+        guard let image = loadImage(key) else { return nil }
         return HDAtlas(image: image, frameWidth: layout.frameWidth, frameHeight: layout.frameHeight,
                        frameCount: layout.frameCount, columns: layout.columns, pixelScale: scale)
     }
 
+    /// A stored image: the fast raw form, or a PNG from an older cache
+    /// (rewritten in the raw form, so it's only ever decoded slowly once).
+    public func loadImage(_ key: String) -> CGImage? {
+        #if canImport(Compression)
+        if let data = try? Data(contentsOf: directory.appendingPathComponent(key + ".nsa"), options: .mappedIfSafe),
+           let image = HDAtlas.decodeRaw(data) {
+            return image
+        }
+        #endif
+        let png = directory.appendingPathComponent(key + ".png")
+        guard let data = try? Data(contentsOf: png), let image = HDAtlas.decodePNG(data) else { return nil }
+        #if canImport(Compression)
+        if let raw = HDAtlas.encodeRaw(image),
+           (try? raw.write(to: directory.appendingPathComponent(key + ".nsa"), options: .atomic)) != nil {
+            try? FileManager.default.removeItem(at: png)
+        }
+        #endif
+        return image
+    }
+
     public func store(_ key: String, _ atlas: HDAtlas) {
-        guard let data = atlas.pngData() else { return }
+        store(key, image: atlas.image)
+    }
+
+    public func store(_ key: String, image: CGImage) {
+        #if canImport(Compression)
+        if let data = HDAtlas.encodeRaw(image) {
+            try? data.write(to: directory.appendingPathComponent(key + ".nsa"), options: .atomic)
+            return
+        }
+        #endif
+        guard let data = HDAtlas.encodePNG(image) else { return }
         try? data.write(to: directory.appendingPathComponent(key + ".png"), options: .atomic)
     }
 
@@ -587,8 +619,26 @@ public enum HDAssetPipeline {
                                cache: HDBakeCache?) throws -> [Int: HDAtlas] {
         switch e.descriptor.kind {
         case .sprite:
+            // Checked, capped and stored in the fast form once; a PNG decode
+            // (and any downscale) isn't repeated every launch.
+            let key = e.source.contentKey().map {
+                HDBakeCache.key(contentKey: $0, descriptor: e.descriptor, layout: layout, scale: maxScale, part: "sprite-v1")
+            }
+            if let cache, let key, let image = cache.loadImage(key) {
+                // The scale `HDAtlas.load` settled on: the pack's, capped.
+                let columns = min(e.descriptor.effectiveColumns, classic.frameCount)
+                let rows = (classic.frameCount + columns - 1) / columns
+                let cap = HDAtlas.clampScale(maxScale, logicalWidth: columns * classic.frameWidth,
+                                             logicalHeight: rows * classic.frameHeight)
+                let atlas = HDAtlas(image: image, frameWidth: classic.frameWidth, frameHeight: classic.frameHeight,
+                                    frameCount: classic.frameCount, columns: columns,
+                                    pixelScale: min(e.descriptor.effectiveScale, cap))
+                return [e.spriteID: atlas]
+            }
             guard let data = e.source.loadData() else { throw PipelineError.unreadable }
-            return [e.spriteID: try HDAtlas.load(data, descriptor: e.descriptor, classic: classic, maxScale: maxScale)]
+            let atlas = try HDAtlas.load(data, descriptor: e.descriptor, classic: classic, maxScale: maxScale)
+            if let cache, let key { cache.store(key, atlas) }
+            return [e.spriteID: atlas]
         case .model:
             let scale = bakeScale(e, layout: layout, maxScale: maxScale)
             guard let content = e.source.contentKey() else { throw PipelineError.unreadable }

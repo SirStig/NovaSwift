@@ -13,7 +13,7 @@ final class EditingBundleTests: XCTestCase {
         return d
     }
 
-    private func res(_ t: FourCharCode, _ id: Int, _ name: String, _ bytes: [UInt8]) -> Resource {
+    private func res(_ t: NovaSwiftKit.FourCharCode, _ id: Int, _ name: String, _ bytes: [UInt8]) -> Resource {
         Resource(type: t, id: id, name: name, data: Data(bytes))
     }
 

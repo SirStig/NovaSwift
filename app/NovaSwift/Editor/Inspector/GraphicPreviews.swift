@@ -1,5 +1,8 @@
 #if os(macOS)
 import SwiftUI
+import SceneKit
+import ImageIO
+import UniformTypeIdentifiers
 import NovaSwiftKit
 
 /// `ppat` / `PPat` pixel pattern: the decoded tile at 1x-8x and tiled over a sample surface the
@@ -91,6 +94,105 @@ private struct TiledPatternView: View {
                 }
             }
         }
+    }
+}
+#endif
+
+#if os(macOS)
+/// Whole-file images and models stored as a resource: `NSbl` HD assets (PNG atlas or USDZ
+/// model), `PNG ` / `PNGf`, and `icns`. Images go through ImageIO, so PNG, JPEG, GIF, TIFF,
+/// BMP, HEIC, WebP, ICNS and ICO all preview; a zip (`PK`) is loaded as USDZ in an
+/// orbitable SceneKit view. Anything else points at the Raw toggle.
+struct HDBlobPreview: View {
+    let key: ResourceKey
+    let data: Data
+    @ObservedObject var model: EditorModel
+
+    private enum Loaded { case image(CGImage, format: String, frames: Int), scene(SCNScene), failed(String) }
+
+    @State private var loaded: Loaded?
+    @State private var zoom: CGFloat = 1
+
+    private struct TaskKey: Hashable { let key: ResourceKey; let rev: Int }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            switch loaded {
+            case let .image(img, format, frames):
+                HStack {
+                    Text("\(format) · \(img.width)×\(img.height) px\(frames > 1 ? " · \(frames) images, largest shown" : "") · \(data.count.formatted()) bytes")
+                        .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+                    Spacer()
+                    Picker("", selection: $zoom) {
+                        ForEach([0.25, 0.5, 1, 2, 4], id: \.self) { Text("\($0.formatted())×").tag(CGFloat($0)) }
+                    }.pickerStyle(.segmented).labelsHidden().frame(width: 240)
+                }
+                ScrollView([.horizontal, .vertical]) {
+                    ZStack {
+                        CheckerboardBackground()
+                        Image(decorative: img, scale: 1).interpolation(zoom >= 1 ? .none : .high).resizable()
+                    }
+                    .frame(width: CGFloat(img.width) * zoom, height: CGFloat(img.height) * zoom)
+                }
+                .frame(maxWidth: .infinity).frame(minHeight: 200, maxHeight: 520)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.12)))
+            case .scene(let scene):
+                Text("USDZ model · \(data.count.formatted()) bytes — drag to orbit, scroll to zoom")
+                    .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+                SceneView(scene: scene, options: [.allowsCameraControl, .autoenablesDefaultLighting])
+                    .frame(maxWidth: .infinity).frame(height: 420)
+                    .background(Color.black)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.12)))
+            case .failed(let why):
+                EditorEmptyState(icon: "photo", title: "Can't preview this asset", subtitle: why)
+                    .frame(minHeight: 180)
+            case nil:
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.05))
+                    ProgressView().controlSize(.regular).tint(novaAmber)
+                }.frame(maxWidth: .infinity, minHeight: 200)
+            }
+        }
+        .task(id: TaskKey(key: key, rev: model.dataRevision)) {
+            loaded = nil
+            let d = data
+            let box = await Task.detached(priority: .userInitiated) { SpecBox(value: Self.load(d)) }.value
+            if Task.isCancelled { return }
+            loaded = box.value
+        }
+    }
+
+    private static func load(_ d: Data) -> Loaded {
+        // A zip is a USDZ; ImageIO would refuse it anyway.
+        if d.prefix(2).elementsEqual([0x50, 0x4B]) {
+            // SceneKit/ModelIO only read USDZ from a file URL.
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("nsbl-preview-\(UUID().uuidString).usdz")
+            defer { try? FileManager.default.removeItem(at: url) }
+            do {
+                try d.write(to: url)
+                return .scene(try SCNScene(url: url, options: [.checkConsistency: false]))
+            } catch { return .failed("The USDZ didn't load: \(error.localizedDescription)") }
+        }
+        if let src = CGImageSourceCreateWithData(d as CFData, nil), CGImageSourceGetCount(src) > 0 {
+            // icns/ico hold several sizes: show the largest.
+            let n = CGImageSourceGetCount(src)
+            let best = (0..<n).max { a, b in
+                func area(_ i: Int) -> Int {
+                    let p = CGImageSourceCopyPropertiesAtIndex(src, i, nil) as? [CFString: Any]
+                    return ((p?[kCGImagePropertyPixelWidth] as? Int) ?? 0) * ((p?[kCGImagePropertyPixelHeight] as? Int) ?? 0)
+                }
+                return area(a) < area(b)
+            } ?? 0
+            if let img = CGImageSourceCreateImageAtIndex(src, best, nil) {
+                let uti = (CGImageSourceGetType(src) as String?).flatMap { UTType($0) }
+                let format = uti?.preferredFilenameExtension?.uppercased() ?? "Image"
+                return .image(img, format: format, frames: n)
+            }
+        }
+        return .failed("Not an image or USDZ model ImageIO/SceneKit can read. Switch to Raw to edit the bytes.")
     }
 }
 #endif

@@ -31,7 +31,14 @@ struct InspectorView: View {
         .background(Color(white: 0.13))
     }
 
-    private static func isDialog(_ t: NovaSwiftKit.FourCharCode) -> Bool { t == NovaType.ditl || t == NovaType.dlog }
+    private static func isDialog(_ t: NovaSwiftKit.FourCharCode) -> Bool {
+        t == NovaType.ditl || t == NovaType.dlog || t == ToolboxType.alrt
+    }
+
+    /// `.raw` types that still get a read-only view above the Raw toggle.
+    private static func hasRawPreview(_ t: NovaSwiftKit.FourCharCode) -> Bool {
+        isDialog(t) || t == ToolboxType.menu || t == ToolboxType.cntl
+    }
 
     private func isHeavy(_ schema: ResourceSchema?) -> Bool {
         (schema?.fields.count ?? 0) >= Self.deferThreshold
@@ -46,7 +53,7 @@ struct InspectorView: View {
             InspectorHeader(model: model, ui: ui, env: env, key: key, res: res)
                 .id(key)
             Divider()
-            if ui.rawMode || (kind == .raw && !Self.isDialog(key.type)) {
+            if ui.rawMode || (kind == .raw && !Self.hasRawPreview(key.type)) {
                 HexEditorView(key: key, data: res.data, minimumSize: schema?.minimumSize ?? 0, model: model)
             } else {
                 ScrollViewReader { proxy in
@@ -98,12 +105,18 @@ struct InspectorView: View {
             if key.type == NovaType.strList { StringListEditor(key: key, data: res.data, model: model) }
             else if key.type == NovaType.desc { DescEditor(key: key, data: res.data, env: env, model: model) }
             else if key.type == GraphicsEnhancementType.descriptor { RawTextEditor(key: key, data: res.data, model: model) }
+            else if key.type == ToolboxType.text { MacTextEditor(key: key, data: res.data, model: model) }
             else { SingleStringEditor(key: key, data: res.data, model: model) }
         case .graphic:
             if key.type == NovaType.rleD || key.type == NovaType.rle8 || key.type == NovaType.pict || key.type == NovaType.cicn {
                 GraphicEditor(key: key, data: res.data, model: model)
+            } else if ClassicIcon.types.contains(key.type) {
+                // No encoder for these: view and export only.
+                GraphicEditor(key: key, data: res.data, model: model, importable: false)
             } else if key.type == NovaType.ppat || key.type == NovaType.ppatAlt {
                 PixPatPreview(key: key, data: res.data, model: model)
+            } else if key.type == GraphicsEnhancementType.blob || ToolboxType.imageFiles.contains(key.type) {
+                HDBlobPreview(key: key, data: res.data, model: model)
             } else {
                 EditorEmptyState(icon: "photo", title: "No preview for \(key.type.stringValue)", subtitle: "Switch to Raw to edit the bytes.")
                     .frame(minHeight: 200)
@@ -112,6 +125,8 @@ struct InspectorView: View {
             SoundEditor(key: key, data: res.data, model: model)
         case .raw:
             if Self.isDialog(key.type) { DialogPreviewEditor(model: model, key: key) }
+            else if key.type == ToolboxType.menu { MenuPreview(data: res.data) }
+            else if key.type == ToolboxType.cntl { ControlPreview(data: res.data) }
         }
     }
 }

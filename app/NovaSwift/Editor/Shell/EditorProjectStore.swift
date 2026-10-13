@@ -644,13 +644,15 @@ final class EditorProjectStore: ObservableObject {
                 try JSONEncoder().encode(infoOut).write(to: infoFile, options: .atomic)
             } catch { /* best effort */ }
             // A save/new/close may have cleared recovery while we were writing: drop the stale copy.
-            await MainActor.run {
-                if let self, self.recoveryGeneration != gen { self.removeRecoveryFiles() }
-            }
+            await self?.dropStaleRecovery(generation: gen)
         }
     }
 
     private var recoveryGeneration = 0
+
+    private func dropStaleRecovery(generation gen: Int) {
+        if recoveryGeneration != gen { removeRecoveryFiles() }
+    }
 
     private func removeRecoveryFiles() {
         let fm = FileManager.default

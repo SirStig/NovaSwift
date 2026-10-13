@@ -122,6 +122,16 @@ struct GameSettings: Codable, Equatable {
             case .low: return 32
             }
         }
+        /// Longest side a live model's textures are kept at. A ship is at most
+        /// a few hundred pixels on screen, so 1024 renders the same as the
+        /// packs' 2048 sources (measured: 0.3/255 mean difference) at a
+        /// quarter of the memory and upload.
+        var texturePixels: Int {
+            switch self {
+            case .full, .high: return 1024
+            case .medium, .low: return 512
+            }
+        }
     }
 
     enum LiveLighting: String, Codable, CaseIterable, Identifiable {

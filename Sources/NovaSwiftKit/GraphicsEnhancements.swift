@@ -210,10 +210,46 @@ public struct GraphicsPackManifest: Codable, Hashable, Sendable {
     }
 }
 
-/// Content keys already computed this run (see `GraphicsAssetSource.contentKey`).
+/// Content keys already computed (see `GraphicsAssetSource.contentKey`),
+/// kept on disk too: a hull pack runs to gigabytes, and re-reading and
+/// hashing all of it on every launch cost seconds of the loading screen.
 private enum ContentKeyMemo {
     static let lock = NSLock()
+    nonisolated(unsafe) static var loaded = false
     nonisolated(unsafe) static var keys: [String: String] = [:]
+    nonisolated(unsafe) static var saveScheduled = false
+
+    static let file: URL? = (try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask,
+                                                         appropriateFor: nil, create: true))?
+        .appendingPathComponent("NovaSwift/ContentKeys.json")
+
+    /// The remembered key for `memoKey`. Call with `lock` held.
+    static func lookup(_ memoKey: String) -> String? {
+        if !loaded {
+            loaded = true
+            if let file, let data = try? Data(contentsOf: file),
+               let stored = try? JSONDecoder().decode([String: String].self, from: data) {
+                keys.merge(stored) { mine, _ in mine }
+            }
+        }
+        return keys[memoKey]
+    }
+
+    /// Remember a key; the file is written once things settle. Call with `lock` held.
+    static func remember(_ memoKey: String, _ key: String) {
+        keys[memoKey] = key
+        guard !saveScheduled, file != nil else { return }
+        saveScheduled = true
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2) {
+            lock.lock()
+            let snapshot = keys
+            saveScheduled = false
+            lock.unlock()
+            guard let file, let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? data.write(to: file, options: .atomic)
+        }
+    }
 }
 
 /// Where an enhancement's asset bytes live.
@@ -241,14 +277,14 @@ public enum GraphicsAssetSource: Hashable, Sendable {
            let size = attrs[.size] as? Int, let date = attrs[.modificationDate] as? Date {
             memoKey = "\(url.path)|\(size)|\(date.timeIntervalSinceReferenceDate)"
             ContentKeyMemo.lock.lock()
-            let known = ContentKeyMemo.keys[memoKey!]
+            let known = ContentKeyMemo.lookup(memoKey!)
             ContentKeyMemo.lock.unlock()
             if let known { return known }
         }
         guard let data = loadData() else { return nil }
         let key = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         if let memoKey {
-            ContentKeyMemo.lock.lock(); ContentKeyMemo.keys[memoKey] = key; ContentKeyMemo.lock.unlock()
+            ContentKeyMemo.lock.lock(); ContentKeyMemo.remember(memoKey, key); ContentKeyMemo.lock.unlock()
         }
         return key
     }

@@ -25,12 +25,16 @@ struct EditorSidebar: View {
             },
             set: { new in
                 guard let new else { return }
-                switch new {
-                case let .tool(t):
-                    model.tool = t
-                case let .type(t):
-                    model.tool = .resources
-                    if model.selectedType != t { model.selectedType = t; model.selection = nil }
+                // List writes its selection during a view update; publishing model changes
+                // synchronously there is undefined behaviour, so apply them on the next turn.
+                DispatchQueue.main.async {
+                    switch new {
+                    case let .tool(t):
+                        model.tool = t
+                    case let .type(t):
+                        model.tool = .resources
+                        if model.selectedType != t { model.selectedType = t; model.selection = nil }
+                    }
                 }
             })
     }

@@ -33,8 +33,10 @@ final class EditorSpriteCache: @unchecked Sendable {
     private var order: [K] = []
     private let lock = NSLock()
 
-    func decode(type: NovaSwiftKit.FourCharCode, id: Int, data: Data) -> (EditorDecodedSprite?, String?) {
-        let k = K(type: type.rawValue, id: id, hash: data.hashValue)
+    /// `mask` is the companion 1-bit icon list for colour icons (`ClassicIcon.maskType`).
+    func decode(type: NovaSwiftKit.FourCharCode, id: Int, data: Data, mask: Data? = nil) -> (EditorDecodedSprite?, String?) {
+        var h = Hasher(); h.combine(data); h.combine(mask)
+        let k = K(type: type.rawValue, id: id, hash: h.finalize())
         lock.lock(); let hit = store[k]; lock.unlock()
         if let hit { return (hit, nil) }
         do {
@@ -44,6 +46,7 @@ final class EditorSpriteCache: @unchecked Sendable {
             case NovaType.rle8: sheet = try RLE8.decode(data)
             case NovaType.pict: sheet = try PICT.decode(data)
             case NovaType.cicn: sheet = try CICN.decode(data)
+            case _ where ClassicIcon.types.contains(type): sheet = try ClassicIcon.decode(type: type, data: data, mask: mask)
             default: return (nil, "No preview for \(type.stringValue)")
             }
             guard let d = EditorDecodedSprite(sheet) else { return (nil, "Couldn't build an image") }
@@ -142,11 +145,12 @@ struct RotationDial: View {
     }
 }
 
-/// rlëD / PICT / cicn viewer with import & export.
+/// rlëD / PICT / cicn viewer with import & export (classic icons: view & export only).
 struct GraphicEditor: View {
     let key: ResourceKey
     let data: Data
     @ObservedObject var model: EditorModel
+    var importable = true
 
     @State private var sprite: EditorDecodedSprite?
     @State private var failure: String?
@@ -194,9 +198,10 @@ struct GraphicEditor: View {
 
     private func decode() async {
         let k = key, d = data
+        let mask = ClassicIcon.maskType(for: k.type).flatMap { model.document.resource($0, k.id)?.data }
         loading = true
         let (s, err) = await Task.detached(priority: .userInitiated) {
-            EditorSpriteCache.shared.decode(type: k.type, id: k.id, data: d)
+            EditorSpriteCache.shared.decode(type: k.type, id: k.id, data: d, mask: mask)
         }.value
         sprite = s; failure = err; loading = false
         if let s, frame >= s.sheet.frameCount { frame = 0 }
@@ -204,7 +209,9 @@ struct GraphicEditor: View {
 
     private var controls: some View {
         HStack(spacing: 12) {
-            Button { importing = true } label: { Label("Import PNG…", systemImage: "square.and.arrow.down") }
+            if importable {
+                Button { importing = true } label: { Label("Import PNG…", systemImage: "square.and.arrow.down") }
+            }
             Menu {
                 Button("Sprite sheet (PNG)…") { exportPNG(sheet: true) }
                 Button("Current frame (PNG)…") { exportPNG(sheet: false) }
@@ -362,7 +369,7 @@ struct GraphicImportSheet: View {
         } catch { self.error = "\(error)"; sources = [] }
     }
 
-    private static func build(mode: Mode, sources: [RGBAImage], w: Int, h: Int, count: Int, rot: Int, alpha: Double) throws -> SpriteSheet {
+    nonisolated private static func build(mode: Mode, sources: [RGBAImage], w: Int, h: Int, count: Int, rot: Int, alpha: Double) throws -> SpriteSheet {
         guard !sources.isEmpty else { throw GraphicsEncodeError.badInput("no image chosen") }
         let o = SpriteImport.Options(alphaThreshold: UInt8(alpha), quantizeTo555: true)
         switch mode {

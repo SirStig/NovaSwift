@@ -209,7 +209,7 @@ struct FieldRow: View {
     @ViewBuilder private func contextual(_ m: ContextualValue.Meaning, value v: Int,
                                          set: @escaping (FieldValue) -> Void) -> some View {
         let width: IntWidth = { if case let .int(w, _) = field.kind { return w }
-            if case let .ref = field.kind { return .w16 }
+            if case .ref = field.kind { return .w16 }
             if case let .flags(w) = field.kind { return w }
             if case let .enumeration(w, _) = field.kind { return w }
             return .w16 }()

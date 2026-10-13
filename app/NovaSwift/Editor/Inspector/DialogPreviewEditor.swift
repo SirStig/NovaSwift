@@ -78,6 +78,15 @@ struct DialogPreviewEditor: View {
             guard let r = eff.resource(NovaType.dlog, key.id) else { return .failure(.init(message: "DLOG #\(key.id) not found")) }
             let w = DLOGRes(r)
             window = w; ditlID = w.itemsID
+        } else if key.type == ToolboxType.alrt {
+            // ALRT is bounds (8) + itemsID (2) + stages; lay it out as a DLOG (itemsID at 18)
+            // so the same window model draws it.
+            guard let r = eff.resource(ToolboxType.alrt, key.id), r.data.count >= 10 else {
+                return .failure(.init(message: "ALRT #\(key.id) not found or truncated"))
+            }
+            var d = Data(r.data.prefix(8)); d.append(Data(count: 10)); d.append(r.data[r.data.startIndex + 8 ..< r.data.startIndex + 10])
+            let w = DLOGRes(Resource(type: NovaType.dlog, id: r.id, name: r.name, data: d))
+            window = w; ditlID = w.itemsID
         } else {
             ditlID = key.id
             if let r = eff.resource(NovaType.dlog, key.id), DLOGRes(r).itemsID == ditlID { window = DLOGRes(r) }
@@ -105,7 +114,7 @@ struct DialogPreviewEditor: View {
     private func controls(_ l: Loaded) -> some View {
         HStack(spacing: 12) {
             let d = l.dialog
-            Text(d.window.map { "DLOG #\($0.id) · \($0.bounds.width)×\($0.bounds.height)" } ?? "No DLOG (standalone DITL)")
+            Text(d.window.map { "\(key.type == ToolboxType.alrt ? "ALRT" : "DLOG") #\($0.id) · \($0.bounds.width)×\($0.bounds.height)" } ?? "No DLOG (standalone DITL)")
                 .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
             Text("DITL #\(l.ditlKey.id) · \(d.items.items.count) item\(d.items.items.count == 1 ? "" : "s")")
                 .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)

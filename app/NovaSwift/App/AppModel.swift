@@ -134,6 +134,10 @@ final class AppModel: ObservableObject {
         // same persisted blob `settings`'s initializer loads. Falls back to
         // local storage transparently if iCloud isn't reachable.
         roster = PilotRoster(preferICloud: GameSettings.load().iCloudSaves)
+        // HD art for the selected pilot's ship is prepared before the rest.
+        data.hdPriorityShipTypes = { [weak self] in
+            self?.roster.selected.map { [$0.player.shipType] } ?? []
+        }
         // Re-publish when the data controller changes so views observing AppModel refresh.
         dataObserver = data.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()

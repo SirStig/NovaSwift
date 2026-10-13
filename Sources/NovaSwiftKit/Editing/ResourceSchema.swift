@@ -143,8 +143,8 @@ public struct RelatedResource: Sendable, Hashable {
 /// Which editor the UI should open for a type.
 public enum EditorKind: String, Sendable, Hashable {
     case form      // schema-driven field inspector
-    case text      // STR#, STR , dësc
-    case graphic   // PICT, rlëD, rlë8, cicn
+    case text      // STR#, STR , dësc, TEXT
+    case graphic   // PICT, rlëD, rlë8, cicn, ppat, classic icons/cursors/patterns, NSbl/PNG/icns
     case sound     // snd
     case raw       // hex only
 }

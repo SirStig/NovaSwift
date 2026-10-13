@@ -275,13 +275,19 @@ final class GameDataController: ObservableObject {
         if hdPrewarmTask == task { hdPrewarmTask = nil }
     }
 
+    /// The ship types whose HD art is prepared first (set by `AppModel`: the
+    /// selected pilot's ship), so the main menu's picture and the first frame
+    /// of flight don't wait behind the rest of a pack.
+    var hdPriorityShipTypes: () -> [Int] = { [] }
+
     private func runHDPrewarm() async {
         HDGraphics.shared.update(settings: GameSettings.load())
         guard HDGraphics.shared.isActive else { return }
         let phase = "Preparing HD graphics"
+        let first = Set(hdPriorityShipTypes().compactMap { game?.shan($0)?.baseSpriteID })
         let reports = AsyncStream<PrewarmProgress> { continuation in
             Task.detached(priority: .userInitiated) {
-                HDGraphics.shared.prewarm { done, total in
+                HDGraphics.shared.prewarm(first: first) { done, total in
                     continuation.yield(PrewarmProgress(phase: phase, completed: done, total: total))
                 }
                 continuation.finish()

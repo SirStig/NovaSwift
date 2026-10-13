@@ -84,6 +84,21 @@ enum Preview {
                        provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
     }
 
+    /// Mean absolute difference per channel (0–255) of two same-size renders.
+    static func meanDifference(_ a: CGImage?, _ b: CGImage?) -> Double? {
+        guard let a, let b, a.width == b.width, a.height == b.height else { return nil }
+        func pixels(_ img: CGImage) -> [UInt8]? {
+            guard let ctx = HDAtlas.makeContext(width: img.width, height: img.height), let d = ctx.data else { return nil }
+            ctx.draw(img, in: CGRect(x: 0, y: 0, width: img.width, height: img.height))
+            return Array(UnsafeBufferPointer(start: d.bindMemory(to: UInt8.self, capacity: ctx.bytesPerRow * img.height),
+                                             count: ctx.bytesPerRow * img.height))
+        }
+        guard let pa = pixels(a), let pb = pixels(b), pa.count == pb.count, !pa.isEmpty else { return nil }
+        var sum = 0
+        for i in 0..<pa.count { sum += abs(Int(pa[i]) - Int(pb[i])) }
+        return Double(sum) / Double(pa.count)
+    }
+
     static func write(_ image: CGImage, to url: URL) {
         try? HDAtlas.encodePNG(image)?.write(to: url)
     }

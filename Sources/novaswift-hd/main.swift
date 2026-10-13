@@ -568,6 +568,48 @@ case "model":
         Preview.write(cmp, to: out.appendingPathComponent("\(name)_compare.png"))
     }
 
+case "bench":
+    // bench <model.usdz>… — time each stage a live hull goes through
+    guard args.count >= 2 else { usage() }
+    func ms(_ t: Date) -> Int { Int(Date().timeIntervalSince(t) * 1000) }
+    for path in args.dropFirst() {
+        let src = GraphicsAssetSource.file(URL(fileURLWithPath: path))
+        var t = Date()
+        _ = src.contentKey()
+        let hash = ms(t); t = Date()
+        guard let node = try? ModelLoader.load(src) else { print("\(path): unreadable"); continue }
+        let load = ms(t)
+        var tris = 0
+        node.enumerateHierarchy { n, _ in if let g = n.geometry { tris += MeshSimplifier.triangleCount(g) } }
+        var line = "\((path as NSString).lastPathComponent): hash \(hash) ms, load \(load) ms, \(tris) tris"
+        for cells in [96, 56, 32] {
+            let copy = ModelLoader.instance(of: node)
+            t = Date()
+            let r = MeshSimplifier.simplify(copy, cells: cells)
+            line += ", simplify\(cells) \(ms(t)) ms → \(r.after)"
+        }
+        print(line)
+        // The live cache's copy: how fast it comes back, and whether it still
+        // renders like the original (mean per-channel difference, 0–255).
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("novaswift-bench-live")
+        let cache = LiveModelCache(directory: dir)
+        guard let baker = ModelBaker() else { continue }
+        let reference = baker.view(model: node, settings: .init(), heading: 30, pitch: 38, size: 512)
+        for px in [1024, 512] {
+            let copy = try! ModelLoader.load(src)
+            t = Date()
+            LiveModelCache.capTextures(copy, maxPixels: px)
+            let cap = ms(t); t = Date()
+            cache.store(copy, key: "bench\(px)")
+            let store = ms(t); t = Date()
+            guard let back = cache.load("bench\(px)") else { print("  \(px): reload failed"); continue }
+            let reload = ms(t)
+            let img = baker.view(model: back, settings: .init(), heading: 30, pitch: 38, size: 512)
+            print("  textures ≤\(px): cap \(cap) ms, store \(store) ms, reload \(reload) ms, render diff \(Preview.meanDifference(reference, img).map { String(format: "%.2f", $0) } ?? "n/a")")
+        }
+        cache.removeAll()
+    }
+
 default:
     usage()
 }

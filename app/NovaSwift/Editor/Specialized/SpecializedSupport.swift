@@ -55,8 +55,7 @@ enum SpecCache {
     static func compute<T>(_ model: EditorModel, _ work: @escaping @Sendable (SpecData) -> T) async -> T {
         let d = data(model)
         let box = await Task.detached(priority: .userInitiated) { () -> SpecBox<T> in
-            d.lock.lock(); defer { d.lock.unlock() }
-            return SpecBox(value: work(d))
+            d.lock.withLock { SpecBox(value: work(d)) }
         }.value
         return box.value
     }
