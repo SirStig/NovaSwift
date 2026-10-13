@@ -206,7 +206,7 @@ startup:
 - **Demo** — otherwise a data-free physics world: a ship you fly plus drifting
   hulls, drawn as primitives. Always runs, no data required.
 
-Either way, arrow keys / WASD fly the ship with the engine's real Newtonian
+Either way, the arrow keys fly the ship with the engine's real Newtonian
 momentum — you swing the nose and keep drifting, exactly like the Apple build,
 because it *is* the same `World.step`.
 
@@ -237,12 +237,47 @@ persisted through `StoryEngine`), `FlightPlunder` (board range, loot buttons,
 panic self-destruct, `World.resolveCapture` odds, Use as Escort / Take Command)
 and `FlightEscorts` (`EscortCommandPanel`, group orders, Release, roster respawn
 and loss). The frontend pauses the sim while a dialog is up. Keys (Controls.gd):
-Y hail (Alt-Y nearest stellar), B board, F/V/C/Alt-C escort attack/hold/formation/
-return, plus X defend and G panel because the original D/E are taken by the
-port's WASD / Q-E layout; pad D-pad ← hail, → board. Known gaps: `pêrs`
+Y hail (Alt-Y the selected stellar), B board, E the Escort Commands panel, F/D/V/C/
+Alt-C escort attack/defend/hold/formation/return — the original's own keys (the Apple
+app's `KeyBindings.defaults`); pad D-pad ← hail, → board. Known gaps: `pêrs`
 LinkMission offers from a hail/board are not presented; the Escorts window has no
-Upgrade/Sell (shipyard marks); Godot has no planet selection, so the nearest
-stellar stands in for the selected planet; landing is not gated on a bribe yet.
+Upgrade/Sell (shipyard marks).
+
+### Flight travel (selected stellar · landing clearance · gates · escorts across jumps)
+
+NovaWorld's `// MARK: Flight travel` (state in `Flight.swift`) mirrors what the Apple
+`GameScene`/`GameContainerView` do around the travel channel, all on shared code:
+
+- **Keys** (Controls.gd) are the original's table; `Controls.layout` ("original" default,
+  "modern" = `modernKeyBindings`) is Settings → Controls. Chorded pairs (R/Alt-R, N/Alt-N,
+  `/Shift-`/Alt-`, W/Alt-W, Y/Alt-Y) are tested chord-first because Godot also matches the
+  plain key. Targeting calls the original's `World.cyclePlayerTarget` /
+  `selectNearestEngaged` / `selectNearestHostileThreat` (snd 152/153 from the bridge).
+- **Selected stellar**: 1–4 (`select_nav_stellar`), N clears, a new selection disarms the
+  armed jump and H re-arms it (`StarMapRoute.selectHyperspace`), the Nav panel readout
+  (`nav_readout`: STR# 2002 #342–346), a bracket on the selected body. Hail-stellar and Land
+  use it (Land falls back to the nearest approachable stellar when none is selected).
+- **Landing** (`press_land`, UI-08): first press requests — `LandedServices.landingClearance`
+  / `refusalMessage` (MinStatus, `Require`, ranks, landing fee, domination, **bribes** from
+  `FlightComm.bribedStellars`), "No response." for uninhabited, the request line, then the
+  clearance line on reaching ±250 px; second press lands inside the square envelope
+  (`PlayerLanding`) or says too far / too fast / cloaked. The fee is charged on touchdown.
+  The old `attempt_land` / `can_land_now` stay as the forgiving test seam.
+- **Gates** (`press_land` on a gate): a wormhole transports at once (`wormholeExitCandidates`);
+  a hypergate the pilot may use (`SpobRes.playerMayUseGate`, stock gates need positive
+  standing with the "Hypergate" govt) opens the map in gate mode (`gate_picker_state`,
+  `gate_picker_choose`) — no fuel, no days, the far gate emits the ship on its emergence
+  angle (`World.placePlayerEmergingFromGate`) with the wing coming out of it.
+- **Map**: nebula art (`nav_nebulae` + `pict_rgba`, active explored ones, additive), Find
+  (`nav_find` = `StarMapFind`), gate spokes (opt-in), `nav_map_closed` re-syncs the route.
+- **Escorts across jumps**: `FlightEscorts.carryThroughJump` / `respawn` — disabled escorts
+  are lost, the rest keep shields/armor/fuel/ammo and drop in behind their slot (about 892 px,
+  or out of the gate); a launch refills them. Freighters share cargo on loss/drop.
+- **NPC death sounds**: `DeathBurstSounds` — nine bursts 0.2 s apart (jittered ±22 px) plus
+  the final blast, each the bööm's sound (`GameScene.beginNPCDeathSequence`). The visual
+  bursts are still the single generic dying/destroyed effect.
+
+Headless check: `godot/tests/fidelity_selfcheck.gd`.
 
 ## Cross-platform status of the core
 
@@ -317,7 +352,7 @@ CI `package-*` jobs, Steam Deck setup).
    `drain_events`/`drain_effects` are untouched. Beeps play on the pilot menu and
    galaxy map; no music (the Apple app only plays the title-menu track, and this
    frontend has no main menu). Headless check: `godot/tests/audio_selfcheck.gd`.
-   Not yet: the staggered NPC death-burst sounds (one bang per `shipDying`), a
+   The staggered NPC death-burst sounds are in (`DeathBurstSounds`). Not yet: a
    volume UI (`GameAudio.master_volume`/`sfx_volume`/`ui_volume` exist), beeps
    on the flight target keys, and the Apple app still keeps its own copy of the
    event table in `GameScene`.
@@ -355,10 +390,9 @@ CI `package-*` jobs, Steam Deck setup).
    `GameScene`/`GovernmentPalette` into `StarMapNavigator` (+ `World.
    hyperspaceRefusal`), `GovernmentMapPalette` and `HyperjumpCommit` (the pilot
    side of an arrival), which the Apple app now calls too. Gamepad: stick cursor
-   with snapping, D-pad next-system, A plot, Y add hop, B close. Not yet:
-   hypergate/wormhole links on the map, the nebula art, system search, escorts
-   and mission ships following a jump, jump sounds and the reduced-flashing
-   option. **Pilot save/load works** (`NovaWorld`'s "Pilots & saves"
+   with snapping, D-pad next-system, A plot, Y add hop, B close. Nebula art, Find,
+   the hypergate picker, opt-in gate spokes and escorts following a jump (damage
+   carried) are in — see "Flight travel". Not yet: the reduced-flashing option. **Pilot save/load works** (`NovaWorld`'s "Pilots & saves"
    section + `godot/screens/PilotMenu.gd`): the bridge reads and writes the very
    same `<uuid>.evpilot` files as the Apple app through `PilotArchive`, and the
    create/persist/prepare-for-play/migrate steps were lifted out of the Apple-only
@@ -372,7 +406,29 @@ CI `package-*` jobs, Steam Deck setup).
    `frequentAutosave` enhancement and Strict Play permadeath are not wired.
    `godot/tests/pilot_selfcheck.gd` exercises create → save → list → load →
    delete headlessly.
-5. **Story runtime** — bring `NovaSwiftStory` across for missions/crons/NCB.
+5. **Story runtime** — missions, crons and story text. ✅ *(except gambling, escort hiring and a few polish items below.)*
+   `GodotGameServices` (`godot/bridge/.../Story.swift`) is the bridge's
+   `GameServices` (the Apple `AppGameServices`); NovaWorld's "Story & missions"
+   section builds `StoryEngine`s over the live pilot and marshals. Landing runs the
+   engine's landing pass (cargo, completion text and pay, `OnSuccess` bits); launch
+   ticks the visit's days with services attached (crons, tribute, deadlines), then
+   the launch pass; a hyperjump arrival ticks its days and runs the flight pass.
+   Offers: the main spaceport rolls one on landing, each shop on opening (and on
+   the 30+Rand(30)-tick idle timer), the Bar on its patron timer, all through
+   `nextLaneOffer`/`present`. Screens: **Mission BBS** and **Bar** (+ **Holovid**) in
+   `Spaceport.gd`, modal story texts / offers and the **Player Info / Mission Info**
+   window (P, I; pause menu) in `screens/StoryScreens.gd`. In flight, mission ships
+   spawn through the shared `FlightMissions` (system match, ShipStart, aux budget),
+   goal/loss/aux events and the fail-if-disabled/boarded flags feed the engine
+   from `collectEvents`, escort/observe sightings run every 3 s, and a time limit
+   fails on launch/arrival. The glue was lifted out of the Apple `GameContainerView`
+   into `Sources/NovaSwiftStory/FlightMissions.swift` (+ `SpaceportStory`), which
+   the Apple app now calls; `HyperjumpCommit.apply` takes optional services.
+   Headless checks: `tests/story_selfcheck.gd` (accept a BBS delivery, jump, land,
+   pay + text, calendar advance) and `tests/story_menu_check.gd` (offer modal
+   owns input, BBS/bar/info focus). Not yet: Gambling, Hire Escort, the jettison
+   pods, in-flight `pêrs` mission offers (use `storyState.services` from the hail
+   code), the storyline-tag badge / map destination shortcut, `dësc` movies.
 6. **Packaging** — Godot export presets + CD for Linux/Windows artifacts.
 
 ## Non-goals
@@ -412,3 +468,117 @@ Esc/B) offers Resume, Settings, Save & Quit to Menu (`pilot_save_now`) and Quit
   extra height instead of bars (the HUD and screens lay out from the viewport rect).
 - Not done: game speed (`GameSpeedRules` is not bridged), Plugins, About, the
   authentic (cölr/PICT) main menu art, per-pad glyph names beyond Xbox layout.
+
+## Classic UI kit (`godot/ui/classic/`)
+
+The Apple app renders the *authentic* EV Nova UI from the player's own data
+(DLOG/DITL layouts, dialog PICT frames, three-state button art, `cölr` colours,
+the `ïntf` status bar). The Godot screens used to be plain Controls; this kit is
+the Godot side of the same thing. **Presentation setting** (`Prefs`
+`[presentation]`, Settings > Presentation, mirrors Apple `GameSettings`):
+`modern_menu` / `modern_dialogs` / `modern_hud`, all **false = Classic (default)**,
+all true = Nova Swift. `Prefs.ui_mode()` / `apply_ui_mode()` give the preset;
+`ClassicTheme.classic("dialogs"|"hud"|"menu")` is the one test a screen makes
+("data loaded and that flag off"). The existing plain screens stay as the Nova
+Swift option; a reskinned screen builds the Classic version when `classic(...)`
+is true and keeps its old code path otherwise (see `screens/PauseMenu.gd`, the
+worked example).
+
+### Files
+
+| File | Role |
+|---|---|
+| `ClassicTheme.gd` | static asset cache + look: `setup(nova)`, `pict(id)` -> Texture2D, `button_texture(width, state)`, `button_height()`, `palette()` / `color(key)` (cölr), `font_for("Charcoal"/"Geneva")`, `body_font()` (Arimo) / `chrome_font()` (Rubik), `string_at(strN, index1, fallback)`, `classic(kind)`, `FOCUS` colour |
+| `ClassicButton.gd` | `ClassicButton.make(label, width, style)` -> TextureButton: real 3-state art (PICT 7500+3s / masks 7600+3s), cölr label font/colours, `^ & + -` vector glyphs, amber focus outline, `refused` signal on a greyed press, `text` alias. `Style.NATIVE` = the bevelled grey prompt button, `Style.CHECK` = X check box |
+| `ClassicDialog.gd` | a DLOG/DITL dialog as a Control (below) |
+| `AuthenticHUD.gd` | the `ïntf` status bar (below) |
+| `fonts/` | Arimo + Rubik (SIL OFL, same files as `app/NovaSwift/Resources/Fonts`) as stand-ins for Geneva/Chicago and Charcoal, as in the Apple app |
+
+### `ClassicDialog`
+
+Preload it (`const ClassicDialog = preload("res://ui/classic/ClassicDialog.gd")`;
+no `class_name`, like `Controls.gd`). Item indices are 0-based DITL indices, the
+way the game and the Apple app address them.
+
+```gdscript
+# 1. any DLOG/DITL id; bind behaviour by index
+var d = ClassicDialog.from_ditl(nova, 1011, {
+    "frame_pict": 8531,                    # backdrop PICT: window = PICT size, art buttons
+    "labels":  {0: "Done"},                # button / checkbox labels
+    "texts":   {4: "Hello"},               # static text / edit initial text
+    "actions": {0: func(): done()},        # buttons + clickable pictures
+    "disabled": [2], "hidden": [5],
+    "default_item": 0, "cancel_item": 3,   # Return / Esc, pad A.. / pad B
+    "custom": {1: func(parent, rect): ...} # user items: build your own Control at rect
+})
+# 2. the original's two prompts (native white window, bevelled buttons)
+ClassicDialog.confirm(nova, "Quit?")                   # DLOG 3002: OK=item 0, Cancel=item 4
+ClassicDialog.text_prompt(nova, "Name?", "Ace")        # DLOG 3001: edit=item 4; edit_text(); prompt_answer()
+# 3. the app's own dësc-frame dialog (8524/8525/8526) with art buttons
+ClassicDialog.panel(nova, {"title": "Paused", "body_buttons": [{"label": "Resume", "action": cb}],
+                           "footer_buttons": [{"label": "OK", "default": true}]})
+ClassicDialog.modal(layer, d, 0.55)    # dim scrim + input block; d.close() frees it
+```
+
+Signals: `activated(index)`, `accepted` (default item), `cancelled` (cancel item).
+Accessors: `item(index)`, `set_text`, `edit_text`, `focus_first()`, `fit()`; `add_button /
+add_check / add_label / add_edit / add_picture(rect, index)` for hand-built layouts on
+top of any chrome (`Chrome.NATIVE / PICT / PANEL / NONE`).
+
+* **Scaling.** The Control is the window in 1:1 original pixels; `fit()` (run on
+  ready and on viewport resize) scales it by `nova.classic_crisp_scale` (fit the
+  viewport, never below 1x, capped 3x, **snapped down to 0.5 steps**) and centres on an
+  integer pixel. The root is `TEXTURE_FILTER_NEAREST`, so PICTs stay sharp on 1280x720 and
+  1280x800. Pass `"fit": false` to scale it yourself (e.g. inside a spaceport frame).
+* **Focus.** Every button/edit gets `focus_neighbor_*` from DITL geometry
+  (`classic_focus_neighbours`: nearest rect in each direction), the default item takes
+  initial focus, and `ui_accept` presses the focused ClassicButton (Godot). `ui_cancel`
+  activates the cancel item. The focus look is an amber outline + faint wash (art) or
+  the dotted rect (native) -- visible with keyboard/pad, hidden after a mouse click.
+* Items parked outside the window (the DITLs do this) are skipped, as the original does.
+  Beep: a button press plays snd 150 via `nova.sound_beep(1)`.
+
+### `AuthenticHUD`
+
+`AuthenticHUD.new()` + `setup(nova)` -> full-rect, mouse-transparent Control; reads the
+bridge every frame; `active` (Callable -> bool) hides it in menus/landed. Backdrop PICT
+(700 in the base data, per-government `ïntf` via `classic_interface_id(ship_type)`)
+anchored right and scaled to the viewport height; shield/armor/fuel bars at the exact
+`ïntf` rects/colours (jump-metered fuel, `classic_fuel_bar`); radar (stellar rings, ship dots,
+target blinks BrightRadar, player arrow); target name + shield/armor, secondary weapon +
+ammo, nav readout (STR# 2002 text via `nav_readout`), cargo free + credits (`creditsHUD`
+formatting), all in the `ïntf` font and bright/dim colours. `Main.gd` creates it
+(`_sync_classic_hud`, a CanvasLayer at layer 5) when `classic("hud")` and skips its
+primitive status bars / weapon / target / nav / radar; the land prompt and message log stay.
+Not drawn yet (no bridge data): target ship silhouette, shïp subtitle + govt code, IFF
+colours, per-commodity cargo rows, radar static.
+
+### Bridge (`// MARK: Classic UI` in `NovaWorld.swift`, logic in `ClassicUI.swift`)
+
+`classic_dialog(id)` -> JSON `{w,h,designW,designH,title,focus,items:[{i,kind,l,t,r,b,text,res,enabled}]}`
+(kind: button/checkbox/static/edit/picture/icon/control/user) or `{}` ·
+`classic_focus_neighbours(rects[l,t,r,b..])` -> `[up,down,left,right]` per rect ·
+`classic_crisp_scale(frameW, frameH, viewW, viewH)` · `classic_button_height()` ·
+`classic_button_rgba(width, state 0/1/2)` (composed art, no label) · `classic_colors()` (cölr JSON) ·
+`classic_interface_id(ship_type)` · `classic_interface(id)` (ïntf JSON: bg PICT/size, rects `[l,t,r,b]`,
+colours, fonts) · `classic_strings(id)` (STR#) · `classic_has_pict(id)` · `classic_bar_segment(l,t,w,h,a,b)` ·
+`classic_fuel_bar()`. PICT pixels: the existing `pict_info` / `pict_rgba`.
+
+### Shared code (`Sources/NovaSwiftKit/ClassicUIGeometry.swift`)
+
+Foundation-only geometry/raster lifted out of the SwiftUI-only app code (the Apple app still has its own copies;
+rewire later): `crispScale`, `centredOrigin`, `barSegment`, `fuelSplit`, `focusNeighbours`, and
+`ThreeStateButtonRaster` (mask + compose the three slices into one RGBA button). Tests:
+`Tests/NovaSwiftKitTests/ClassicUIGeometryTests.swift`. DLOG/DITL decoding, `ColrRes`, `IntfRes`,
+`ThreeStateButton` were already portable.
+
+### Recipe for reskinning a screen
+
+1. `if ClassicTheme.classic("dialogs"):` build with `ClassicDialog` (or `from_ditl` + `frame_pict` for a
+   spaceport frame, hand-placing live widgets via `custom` / `add_*`); else the old code.
+2. Keep the screen's public signals/fields; ClassicButton is a `TextureButton` (not `Button`) --
+   use `BaseButton` in type checks. It exposes `.text`.
+3. Verify with `godot/tests/classic_ui_selfcheck.gd` as a model (headless renders nothing, so the test
+   composes PNGs from the real PICTs/art with `Image.blend_rect`).
+
+Test: `NOVA_DATA_DIR=$PWD/data/base godot --headless --path godot -s res://tests/classic_ui_selfcheck.gd`.

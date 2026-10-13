@@ -23,6 +23,10 @@ struct SoundState {
     var chatterSoundID: Int?
     var chatterEnd: TimeInterval?
     var redAlert = RedAlertCue()
+    /// The staggered explosion sounds of dying NPC hulls, and how many cues they
+    /// have raised in total (a test seam).
+    var deaths = DeathBurstSounds()
+    var deathCuesEmitted = 0
     var rawCallAccumulator = 0.0
     var klaxxonOn = false
     var warpUpStarted = false
@@ -34,6 +38,7 @@ struct SoundState {
         chatterSoundID = nil
         chatterEnd = nil
         redAlert = RedAlertCue()
+        deaths.reset()
         rawCallAccumulator = 0
         klaxxonOn = false
         warpUpStarted = false

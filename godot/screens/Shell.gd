@@ -86,17 +86,29 @@ func _open_main_menu() -> void:
 		main_menu.visible = false
 		_open_data_setup(true))
 	main_menu.quit.connect(quit_game)
+	main_menu.enter_ship.connect(_enter_ship)
+
+
+## Classic menu "Enter Ship": resume the newest pilot; with none, open the pilot list.
+func _enter_ship() -> void:
+	var dir := ProjectSettings.globalize_path(PILOT_DIR)
+	var rows = JSON.parse_string(nova.pilot_list(dir))
+	if rows is Array and not rows.is_empty() and nova.pilot_load(dir, str(rows[0]["id"])):
+		_on_pilot_chosen()
+	else:
+		_open_pilots(false)
 
 
 func _open_pilots(start_new: bool) -> void:
-	main_menu.visible = false
+	main_menu.dialog_open(true)   # the classic menu stays on screen (inert) behind the dialog
 	pilot_menu = PilotMenu.new()
 	add_child(pilot_menu)
+	pilot_menu.over_menu = main_menu.classic_menu != null
 	pilot_menu.pilot_chosen.connect(_on_pilot_chosen)
 	pilot_menu.cancelled.connect(func():
 		pilot_menu = null
-		main_menu.visible = true
-		main_menu.refocus())
+		main_menu.refresh_pilot()   # a pilot may have been deleted
+		main_menu.dialog_open(false))
 	pilot_menu.setup(nova, ProjectSettings.globalize_path(PILOT_DIR), start_new)
 
 
@@ -201,6 +213,20 @@ func _save_and_menu() -> void:
 	pause_menu.queue_free()
 	pause_menu = null
 	_open_main_menu()
+
+
+## The pilot was lost (the death sequence ran out with no eject): back to the main menu
+## without saving — the pilot resumes from its last launch, as in the original.
+func return_to_menu() -> void:
+	if in_menu():
+		return
+	if pause_menu != null:
+		pause_menu.queue_free()
+		pause_menu = null
+	if has_data and main_menu == null:
+		_open_main_menu()
+	else:
+		start()
 
 
 ## Quit, saving the live pilot first when there is one.

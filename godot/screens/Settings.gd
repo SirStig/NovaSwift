@@ -26,7 +26,7 @@ signal changed
 signal closed
 
 const CAPTURE_TIMEOUT := 6.0
-const PAGES := ["Audio", "Video", "Controls"]
+const PAGES := ["Audio", "Video", "Presentation", "Controls"]
 
 var page := "Audio"
 var tab_buttons := {}          # page name -> Button
@@ -120,6 +120,7 @@ func show_page(p: String) -> void:
 	match p:
 		"Audio": _build_audio()
 		"Video": _build_video()
+		"Presentation": _build_presentation()
 		"Controls": _build_controls()
 	# Land focus on the tab, so left/right flips pages and down enters the page.
 	ShellUI.focus(tab_buttons[p])
@@ -205,12 +206,47 @@ func _build_video() -> void:
 	_check("VSync", "video", "vsync")
 	_slider("Window scale", "video", "scale", 0.75, 2.0, 0.25,
 		func(x: float): return "%dx%d" % [roundi(1280 * x), roundi(720 * x)])
+	_check("Gate links on the galaxy map (enhancement)", "map", "gate_links")
 	ShellUI.label(_content, "Window scale applies when not fullscreen. The play area adapts to 16:9 and 16:10 (Steam Deck) screens.", 13)
+
+
+## Presentation: Classic (the original's status bar / dialogs / menu, drawn from the
+## player's own data -- the default) or Nova Swift (the port's own screens), as in
+## the Apple app's GameSettings presets; the three toggles below mix them. Reads
+## Prefs[presentation]; screens pick the change up the next time they open (the
+## HUD immediately).
+func _build_presentation() -> void:
+	var modes := HBoxContainer.new()
+	modes.add_theme_constant_override("separation", 8)
+	_content.add_child(modes)
+	var mode_buttons := {}
+	for m in [[Prefs.UI_CLASSIC, "Classic"], [Prefs.UI_NOVA_SWIFT, "Nova Swift"]]:
+		var b := Button.new()
+		b.text = m[1]
+		b.toggle_mode = true
+		b.custom_minimum_size = Vector2(190, 40)
+		b.button_pressed = Prefs.ui_mode() == m[0]
+		b.pressed.connect(func():
+			Prefs.apply_ui_mode(m[0])
+			_mark_changed()
+			show_page.call_deferred("Presentation"))
+		modes.add_child(b)
+		mode_buttons[m[0]] = b
+	if first_control == null:
+		first_control = mode_buttons[Prefs.UI_CLASSIC]
+	ShellUI.label(_content, "Classic draws the original interface from your game data (status bar, dialogs, menu). Nova Swift uses the port's own modern screens.", 13)
+	for t in [["Modern main menu", "modern_menu"], ["Modern dialogs", "modern_dialogs"], ["Modern HUD (status bar)", "modern_hud"]]:
+		var c := _check(t[0], "presentation", t[1])
+		c.toggled.connect(func(_on: bool): show_page.call_deferred("Presentation"))
+	var mode_name := {Prefs.UI_CLASSIC: "Classic", Prefs.UI_NOVA_SWIFT: "Nova Swift", Prefs.UI_CUSTOM: "Custom"}
+	ShellUI.label(_content, "Current: " + str(mode_name[Prefs.ui_mode()]), 14, ShellUI.ACCENT)
 
 
 func _build_controls() -> void:
 	_slider("Stick dead zone", "input", "deadzone", 0.0, 0.5, 0.01, _pct)
-	ShellUI.label(_content, "Activate a key or pad button to rebind it (Esc cancels). Sticks and triggers are fixed.", 13)
+	var modern := _check("Modern key layout (the port's earlier keys)", "input", "modern_keys")
+	modern.toggled.connect(func(_on: bool): show_page.call_deferred("Controls"))
+	ShellUI.label(_content, "Off = the original's keys (arrows, Space, Ctrl, Z; W/Alt-W, R, N, E…). Activate a key or pad button to rebind it (Esc cancels). Sticks and triggers are fixed.", 13)
 	var scroll := ScrollContainer.new()
 	scroll.custom_minimum_size = Vector2(0, 290)
 	scroll.follow_focus = true
@@ -251,8 +287,17 @@ func _rebind_row(list: Control, action: String) -> void:
 
 
 static func _key_field(action: String) -> String:
-	var spec: Dictionary = Controls.BINDINGS[action]
-	return "alt_keys" if spec.has("alt_keys") and not spec.has("keys") else "keys"
+	# Which key field this row edits: the one the action is bound through right now
+	# (so the layout switch, which moves some actions between plain and chord keys,
+	# edits the field the player sees), else the one it is declared with.
+	var spec: Dictionary = Controls.effective(action)
+	for f in ["keys", "shift_keys", "alt_keys"]:
+		if not (spec.get(f, []) as Array).is_empty():
+			return f
+	var base: Dictionary = Controls.BINDINGS[action]
+	if base.has("keys"):
+		return "keys"
+	return "shift_keys" if base.has("shift_keys") else ("alt_keys" if base.has("alt_keys") else "keys")
 
 
 func _refresh_row(action: String) -> void:
@@ -350,6 +395,7 @@ func _reset_page() -> void:
 		"Audio": Prefs.reset_section("audio")
 		"Video":
 			Prefs.reset_section("video")
+			Prefs.reset_section("map")
 			Prefs.apply_video()
 		"Controls":
 			Prefs.reset_section("input")

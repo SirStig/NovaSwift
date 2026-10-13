@@ -50,7 +50,10 @@ func _run() -> void:
 			nova.hail_close()
 	ok = _check("a ship hail opened", opened) and ok
 
-	# --- hail a stellar
+	# --- hail a stellar: the selected one (nothing selected, nothing happens)
+	nova.clear_player_target()
+	ok = _check("hail with no stellar selected does nothing", _json(nova.hail_open(true)).get("result") == "nothing") and ok
+	ok = _check("select nav stellar 1", nova.select_nav_stellar(0)) and ok
 	var pr := _json(nova.hail_open(true))
 	print("  hail stellar: ", pr.get("result"), " ", pr.get("message"))
 	ok = _check("stellar hail opens", pr.get("result") == "window") and ok

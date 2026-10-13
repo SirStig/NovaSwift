@@ -394,6 +394,34 @@ func _show_escorts() -> void:
 			sel = m
 	var bar := HBoxContainer.new()
 	_box.add_child(bar)
+	if sel != null and int(sel["record"]) >= 0:
+		# The original's escort window (0x004853a0): Upgrade and Sell are exclusive toggle
+		# marks the fleet pass processes on leaving a shipyard stellar; the line below says
+		# so (STR# 2002 #292 / #295). Upgrade needs an UpgradeTo hull whose availability
+		# passes; Sell is never offered for a hired (or mission) escort.
+		var rec := int(sel["record"])
+		var detail: Array[String] = []
+		if int(sel["upgradeCost"]) > 0 and sel["canUpgrade"]:
+			detail.append("upgrade to %s %s cr" % [sel["upgradeName"], str(int(sel["upgradeCost"]))])
+		if sel["canSell"]:
+			detail.append("sell %s cr" % str(int(sel["sellValue"])))
+		var status := str(sel.get("status", ""))
+		if status != "":
+			_box.add_child(_label(status, 14, COL_AMBER))
+		elif not detail.is_empty():
+			_box.add_child(_label(", ".join(detail), 13, COL_DIM))
+		if sel["pendingUpgrade"]:
+			bar.add_child(_button("upg", "Cancel Upgrade", func():
+				nova.escort_cancel_upgrade(rec); _focus_key = "upg"; _show_escorts(), true))
+		elif sel["canUpgrade"]:
+			bar.add_child(_button("upg", "Upgrade", func():
+				nova.escort_request_upgrade(rec); _focus_key = "upg"; _show_escorts(), true))
+		if sel["pendingSale"]:
+			bar.add_child(_button("sell", "Cancel Sale", func():
+				nova.escort_cancel_sale(rec); _focus_key = "sell"; _show_escorts(), true))
+		elif sel["canSell"]:
+			bar.add_child(_button("sell", "Sell", func():
+				nova.escort_request_sale(rec); _focus_key = "sell"; _show_escorts(), true))
 	if sel != null and sel["canRelease"]:
 		bar.add_child(_button("rel", "Dismiss" if sel["origin"] == "Captured" else "Release", func():
 			nova.escort_release(int(sel["record"])); _esc_sel = -1; _focus_key = "close"; _show_escorts(), true))

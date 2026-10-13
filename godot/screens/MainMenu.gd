@@ -6,25 +6,44 @@
 # stick, Enter / A); no hover sounds, as in the original's menus. The title music
 # (audio/TitleMusic.gd) plays only while this menu is up.
 #
+# Presentation: with the data loaded and Settings > Presentation > "Modern main menu" off
+# (the default), this is the authentic menu instead (ui/classic/ClassicMainMenu.gd, a port of
+# the Apple AuthenticMainMenuView: title picture, shutter strips, the six real buttons,
+# the loaded-pilot readout). Preferences opens NovaSwift's own Settings screen (original
+# dialogs only ever sit behind a button inside it). The plain menu below is the Nova Swift option.
+#
 # The menu only reports what was chosen; Main.gd decides what happens next.
 extends CanvasLayer
 
 const ShellUI = preload("res://screens/ShellUI.gd")
 const TitleMusic = preload("res://audio/TitleMusic.gd")
+const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
+const ClassicMainMenu = preload("res://ui/classic/ClassicMainMenu.gd")
+const ClassicDialog = preload("res://ui/classic/ClassicDialog.gd")
+const ClassicButton = preload("res://ui/classic/ClassicButton.gd")
 
 signal new_pilot
 signal open_pilot
 signal settings
 signal game_data
 signal quit
+## Classic menu: "Enter Ship" -- resume the newest pilot (the host opens the list if none).
+signal enter_ship
 
 var music: Node   # TitleMusic, or null
-var first_button: Button
+var first_button: Control
 var _root: Control
+var classic_menu: Control    # the ClassicMainMenu when drawn in Classic presentation
+var _about: Control
+var _extra: Control
 
 
 func setup(nova: Object, data_dir: String, has_data: bool) -> void:
 	layer = 50
+	ClassicTheme.setup(nova)
+	if has_data and ClassicTheme.classic("menu"):
+		_setup_classic(nova, data_dir)
+		return
 	_root = ShellUI.screen(self, 1.0)
 	_root.add_child(_Stars.new())
 	_root.move_child(_root.get_child(_root.get_child_count() - 1), 1)   # above the backdrop, below the UI
@@ -57,6 +76,97 @@ func setup(nova: Object, data_dir: String, has_data: bool) -> void:
 		music.start(nova, data_dir)
 
 
+func _setup_classic(nova: Object, data_dir: String) -> void:
+	_root = Control.new()
+	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(_root)
+	classic_menu = ClassicMainMenu.make(nova)
+	_root.add_child(classic_menu)
+	refresh_pilot()
+	classic_menu.chosen.connect(_on_classic_choice)
+	first_button = classic_menu.buttons.get("open_pilot")
+
+	# Port-only extras, kept off the original's artwork: the data folder.
+	_extra = Control.new()
+	_extra.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_extra.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root.add_child(_extra)
+	var gd = ClassicButton.make("Game Data…", 120)
+	gd.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	gd.position = Vector2(14, -(gd.size.y + 12))
+	gd.pressed.connect(func():
+		nova.sound_beep(1)
+		game_data.emit())
+	_extra.add_child(gd)
+	var q = classic_menu.buttons.get("quit")
+	if q != null:
+		q.focus_neighbor_bottom = q.get_path_to(gd)
+		gd.focus_neighbor_top = gd.get_path_to(q)
+		gd.focus_neighbor_right = gd.get_path_to(q)
+
+	music = TitleMusic.new()
+	music.name = "TitleMusic"
+	add_child(music)
+	music.start(nova, data_dir)
+
+
+## Re-read the newest pilot for the readout (the host calls it when the pilot list changed).
+func refresh_pilot() -> void:
+	if classic_menu == null:
+		return
+	var dir := ProjectSettings.globalize_path("user://pilots")
+	var parsed = JSON.parse_string(classic_menu.nova.pilot_list(dir))
+	classic_menu.set_pilot(dir, str(parsed[0]["id"]) if (parsed is Array and not parsed.is_empty()) else "")
+
+
+func _on_classic_choice(action: String) -> void:
+	match action:
+		"new_pilot": new_pilot.emit()
+		"open_pilot": open_pilot.emit()
+		"enter_ship": enter_ship.emit()
+		"prefs": settings.emit()
+		"about": _show_about()
+		"quit": quit.emit()
+
+
+# About Nova: the data's own dësc 32767.
+func _show_about() -> void:
+	var nova: Object = classic_menu.nova
+	var text: String = nova.classic_desc_text(32767)
+	if text == "":
+		return
+	classic_menu.blocked = true
+	var d = ClassicDialog.panel(nova, {"text": text, "width": 560,
+		"footer_buttons": [{"label": "OK", "default": true, "cancel": true}]})
+	d.accepted.connect(_close_about)
+	d.cancelled.connect(_close_about)
+	_about = ClassicDialog.modal(_root, d, 0.6)
+
+
+func _close_about() -> void:
+	if _about != null:
+		_about.queue_free()
+		_about = null
+	classic_menu.blocked = false
+	classic_menu.focus_default.call_deferred()
+
+
+## A pilot dialog / sub-screen opens over the menu or closes. The classic menu stays on screen
+## behind the dialog (inert); the plain menu hides.
+func dialog_open(on: bool) -> void:
+	if classic_menu != null:
+		classic_menu.blocked = on
+		if _extra != null:
+			_extra.visible = not on
+		visible = true
+		if not on:
+			classic_menu.focus_default.call_deferred()
+		return
+	visible = not on
+	if not on:
+		refocus()
+
+
 # res://icon.png via the import pipeline when it ran, else straight off disk
 # (a fresh checkout run headless has no import cache).
 static func _icon() -> Texture2D:
@@ -74,6 +184,10 @@ func refresh_music() -> void:
 
 ## Back to the menu from a sub-screen: put focus back on the first button.
 func refocus() -> void:
+	if classic_menu != null:
+		classic_menu.blocked = false
+		classic_menu.focus_default.call_deferred()
+		return
 	ShellUI.focus(first_button)
 
 

@@ -51,6 +51,11 @@ func process_hotkeys() -> void:
 		log_message.emit(m)
 
 
+# Landing on a hypergate the pilot may use: the map in gate mode (pick a destination).
+func open_gate_picker() -> void:
+	_map.open_gate()
+
+
 func engage_hyperjump() -> void:
 	if nova.hyperjump_active():
 		return

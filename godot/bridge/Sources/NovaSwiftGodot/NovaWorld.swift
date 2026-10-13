@@ -127,8 +127,10 @@ class NovaWorld: Node2D {
         pendingEventNames.removeAll(keepingCapacity: true)
         pendingEffects.removeAll(keepingCapacity: true)
         sound.resetForNewWorld()
+        travel.resetForNewWorld()    // selected stellar, landing clearance, gate state
         interactionsWorldRebuilt()   // close hail/plunder windows, bring the escort wing back
         storyWorldRebuilt()          // attach the mission-ship host, drop active missions' ships in
+        gaps.resetForNewWorld()      // përs offer, self-destruct, pod respawn latches
     }
 
     // MARK: World setup
@@ -270,7 +272,9 @@ class NovaWorld: Node2D {
     func step(dt: Double) {
         guard let world = self.world else { return }
         // The engine flies a hyperjump itself; held keys mustn't fight it.
-        world.intent = world.playerJump == nil ? self.intent : ControlIntent()
+        var live = self.intent
+        live.selfDestruct = gaps.selfDestructHeld     // Alt-−, held
+        world.intent = world.playerJump == nil ? live : ControlIntent()
 
         let fixed = Self.fixedStep
         // Clamp before the loop, not inside it: a 4-second stall should drop the
@@ -281,10 +285,13 @@ class NovaWorld: Node2D {
             world.step(fixed)
             simAccumulator -= fixed
             collectEvents(from: world)    // World.events is cleared by the next step
+            gapsAfterTick(world)          // tribbles breed / perishables rot (EC-24)
         }
         tickSoundAlarms(dt: dt)       // red alert / klaxxon / warp-up cue
         tickInteractions(dt: dt)      // Escort Commands panel clock
+        tickTravel()                  // the 250 px landing-clearance arm
         tickStory(dt: dt)             // sightings, queued world edits
+        gapsTick()                    // the escape pod's respawn
         advanceHyperjump()            // arrival once the engine's jump has fired
         interpolationAlpha = fixed > 0 ? simAccumulator / fixed : 0
     }
@@ -327,9 +334,15 @@ class NovaWorld: Node2D {
     /// packed in a shape the renderer knows what to do with.
     private func collectEvents(from world: World) {
         for event in world.events {
-            sound.pending.append(contentsOf: SoundCues.cues(for: event, game: game))
+            if case let .shipDying(entityID, at, boomID) = event {
+                // A dying hull is ten staggered bursts, not one bang (see `DeathBurstSounds`).
+                sound.deaths.begin(entityID: entityID, at: at, boomID: boomID, game: game)
+            } else {
+                sound.pending.append(contentsOf: SoundCues.cues(for: event, game: game))
+            }
             interactionsNote(event)       // tribute / lost escort -> pilot
             storyNote(event)              // mission ship goals / losses, fail-if-disabled
+            gapsNote(event)               // scans, eject, pod respawn, game over
             if case let .combatChatter(soundID) = event { sound.chatterSoundID = soundID }
             pendingEventNames.append(String(String(describing: event).prefix { $0 != "(" }))
 
@@ -616,12 +629,19 @@ class NovaWorld: Node2D {
     /// The `spöb` id the player is docked at, or -1 while flying.
     @Callable(autoSnakeCase: true) func landedSpobID() -> Int { dockedSpobID ?? -1 }
 
-    /// Attempt to land on the nearest body in reach. Fails (returns false) if
-    /// out of reach or moving too fast, exactly like pressing the Land key does
-    /// in the Apple app. On success the frontend should stop calling `step()`
-    /// and show spaceport screens until `launch()`.
+    /// Test seam / "forgiving" lander: attempt to land on the nearest body in
+    /// reach with no clearance exchange and no fee. The game itself lands through
+    /// `press_land` (the original's two-press flow, below). Fails (returns false)
+    /// if out of reach or moving too fast. On success the frontend should stop
+    /// calling `step()` and show spaceport screens until `launch()`.
     @Callable(autoSnakeCase: true) func attemptLand() -> Bool {
         guard canLandNow(), let target = nearestReachableLandTarget() else { return false }
+        touchDown(spobID: target.id, chargeFee: false)
+        return true
+    }
+
+    /// Set the ship down at `spobID` and open the docked state.
+    private func touchDown(spobID: Int, chargeFee: Bool) {
         // Hand the flight ship's hold back to the pilot before the spaceport
         // screens read it. Anything picked up in flight — mined ore, plundered
         // cargo — lives on the `Ship` until touchdown, and `launch()` re-seeds
@@ -630,24 +650,29 @@ class NovaWorld: Node2D {
         // Fuel goes the same way: the pilot owns the tank level while docked
         // (refuelling is paid), and `launch()` carries it back out.
         if let ship = world?.player { pilot.cargo = ship.cargo; pilot.fuel = ship.fuel }
+        // The landing fee (EC-05): the full `spöb` fee, waived at a dominated
+        // stellar. Clearance already refused a landing the player couldn't pay for.
+        if chargeFee, let spob = game?.spob(spobID) {
+            let fee = LandedServices.landingFee(spob: spob, state: pilot)
+            if fee > 0 { pilot.credits = max(0, pilot.credits - fee) }
+        }
         storyLeavingSystem()                      // surviving aux ships go back to their budgets
-        dockedSpobID = target.id
+        dockedSpobID = spobID
         sound.pending.append(SoundCues.docking)   // .shipLanded for entity 0: snd 390
-        pilot.landedSpob = target.id
+        pilot.landedSpob = spobID
         // The landing pass: offer lists refresh, cargo is picked up / dropped, and a
         // mission whose objective is done here completes and pays (0x00443780).
         if let engine = storyEngine() {
-            engine.playerLanded(onSpob: target.id)
+            engine.playerLanded(onSpob: spobID)
             storyCommit(engine)
         }
         visitDays = SpaceportVisitDays()
         outfitterOwnedAtOpen = nil
         // The auto-refueller (oütf ModType 19) runs on docking, skipped at an
         // uninhabited stellar — shared with the Apple spaceport.
-        if let galaxy, let spob = game?.spob(target.id) {
+        if let galaxy, let spob = game?.spob(spobID) {
             SpaceportShops.autoRecharge(&pilot, spob: spob, galaxy: galaxy)
         }
-        return true
     }
 
     /// Take off from the current dock: rebuilds the system (fresh NPC spawn,
@@ -663,6 +688,7 @@ class NovaWorld: Node2D {
         pilot.landedSpob = spobID
         // The visit's days (FL-05): the dock-and-launch tick, +1 for outfitter
         // trades, +4 for a ship purchase — then the launch-tail save.
+        gapsDeparting(from: spobID)   // escort sales / upgrades, one payroll period (EC-22, EC-20)
         let days = visitDays.departureDays
         visitDays = SpaceportVisitDays()
         storyBindHooks()
@@ -1038,14 +1064,18 @@ class NovaWorld: Node2D {
         let ship = world.player
         storyLeavingSystem()                         // surviving aux ships go back to their budgets
         _ = world.returnJumpingFighters()
+        // AI-38: disabled escorts are lost, the rest keep shields/armor/fuel/ammo
+        // into the next system (`respawn` consumes this on the rebuild below).
+        interact.messages += interact.escorts.carryThroughJump(world: world, pilot: &pilot, game: game, via: .jump)
         let escortDays = world.attachedShipsTravelDays(galaxy: galaxy)
         ship.consumeJumpFuel()                       // one jump, however many hops (FL-06)
         nav.route.arrive(at: plan.destination, crossing: plan.hops, linked: nv.isLinked)
         nav.selected = nil
         pilot.cargo = ship.cargo
-        HyperjumpCommit.apply(&pilot, game: game, galaxy: galaxy, destination: plan.destination,
+        let jumpDays = HyperjumpCommit.apply(&pilot, game: game, galaxy: galaxy, destination: plan.destination,
                               passedThrough: plan.passedThrough, shipFuel: ship.fuel, extraDays: escortDays,
                               services: storyState.services)
+        gapsPayEscorts(periods: jumpDays)            // one payroll period per travel day (EC-20)
         // The mission pass runs after a jump's days: a deadline that ran out fails now.
         storyBindHooks()
         if !pilot.activeMissions.isEmpty, let engine = storyEngine() {
@@ -1866,16 +1896,8 @@ class NovaWorld: Node2D {
         return Self.json(d)
     }
 
-    /// The nearest stellar to the player — Godot has no planet selection, so it
-    /// stands in for the Apple app's selected planet.
-    private func nearestStellarID() -> Int? {
-        guard let world else { return nil }
-        let p = world.player.position
-        return world.systemContext.bodies.min { ($0.position - p).length < ($1.position - p).length }?.id
-    }
-
     /// Hail the locked ship — or, with `stellar` (Alt-Y) or no ship target, the
-    /// nearest stellar. JSON `{result: nothing|refused|escorts|window, message,
+    /// selected stellar (`GameScene.attemptHail`): nothing selected, nothing happens. JSON `{result: nothing|refused|escorts|window, message,
     /// beep}`; `beep` is the interface beep (1…5) the original sounds.
     @Callable(autoSnakeCase: true) func hailOpen(stellar: Bool) -> String {
         guard let world, let game, dockedSpobID == nil, world.player.isAlive else {
@@ -1884,7 +1906,7 @@ class NovaWorld: Node2D {
         let opening: FlightComm.Opening
         if !stellar, let tid = world.player.currentTargetID, let ship = world.ship(id: tid), ship.isAlive {
             opening = interact.comm.openShip(entityID: tid, world: world, game: game, pilot: &pilot)
-        } else if let spobID = nearestStellarID() {
+        } else if let spobID = travel.selectedSpob, world.systemContext.bodies.contains(where: { $0.id == spobID }) {
             opening = interact.comm.openPlanet(spobID: spobID, world: world, game: game, pilot: &pilot,
                                                systemID: currentSystemID ?? -1)
         } else {
@@ -1894,7 +1916,10 @@ class NovaWorld: Node2D {
         case .nothing: return interactionJSON("nothing")
         case let .refused(message): return interactionJSON("refused", message: message, beep: 4)
         case .escortWindow: return interactionJSON("escorts", beep: 5)
-        case .window: return interactionJSON("window", beep: 5)
+        case .window:
+            // A përs's LinkMission is offered over the hail like the bar's (Flags 0x0200 = on boarding).
+            if let offer = interact.comm.persOffer { gapsPresentPersOffer(personID: offer.personID, missionID: offer.missionID) }
+            return interactionJSON("window", beep: 5)
         }
     }
 
@@ -1972,7 +1997,9 @@ class NovaWorld: Node2D {
         switch r {
         case .nothing: return interactionJSON("nothing", beep: 4)     // snd 153 (0x0045a3d0)
         case let .recovered(line): return interactionJSON("recovered", message: line)
-        case .window: return interactionJSON("window")
+        case .window:
+            gapsBoardedPersOffer()
+            return interactionJSON("window")
         }
     }
 
@@ -2107,10 +2134,24 @@ class NovaWorld: Node2D {
     /// shield, armor, fighter, disabled, origin, canRelease}]`.
     @Callable(autoSnakeCase: true) func escortRoster() -> String {
         guard let world else { return "[]" }
+        let strs = game?.stringList(2002)
         return Self.json(interact.escorts.members(world: world, pilot: pilot).map { m in
-            ["entity": m.entityID, "record": m.recordID ?? -1, "name": m.name, "shield": m.shieldFraction,
-             "armor": m.armorFraction, "fighter": m.isFighter, "disabled": m.disabled,
-             "origin": m.originLabel, "canRelease": m.canRelease] as [String: Any]
+            // Upgrade / Sell are toggle marks the fleet pass processes on leaving a shipyard
+            // (NovaUi_RunEscortShipManagementWindow 0x004853a0, EC-22; STR# 2002 #292 / #295).
+            let rec = m.recordID.flatMap { pilot.escort(id: $0) }
+            let hull = game?.ship(m.shipTypeID)
+            let target = (m.recordID != nil && game != nil)
+                ? PilotEconomy.escortUpgradeTarget(pilot, recordID: m.recordID!, game: game!) : nil
+            let status = rec?.pendingUpgradeTo != nil ? (strs?.string(at: 292) ?? "")
+                : (rec?.pendingSale == true ? (strs?.string(at: 295) ?? "") : "")
+            return ["entity": m.entityID, "record": m.recordID ?? -1, "name": m.name, "shield": m.shieldFraction,
+                    "armor": m.armorFraction, "fighter": m.isFighter, "disabled": m.disabled,
+                    "origin": m.originLabel, "canRelease": m.canRelease,
+                    "canUpgrade": target != nil, "upgradeName": target?.displayName ?? "",
+                    "upgradeCost": hull?.escortUpgradeCost ?? 0, "pendingUpgrade": rec?.pendingUpgradeTo != nil,
+                    "canSell": m.recordID.map { PilotEconomy.canSellEscort(pilot, recordID: $0) } ?? false,
+                    "sellValue": hull.map { PilotEconomy.escortSellValue(for: $0) } ?? 0,
+                    "pendingSale": rec?.pendingSale == true, "status": status] as [String: Any]
         })
     }
 
@@ -2138,8 +2179,9 @@ class NovaWorld: Node2D {
     /// Lines for the status line raised by the above and by world events
     /// (a stellar submitting, an escort lost, a bribe's clearance).
     @Callable(autoSnakeCase: true) func drainInteractionMessages() -> PackedStringArray {
-        let lines = interact.messages + interact.comm.drainMessages()
+        let lines = interact.messages + interact.comm.drainMessages() + travel.messages
         interact.messages.removeAll()
+        travel.messages.removeAll()
         return PackedStringArray(lines)
     }
 
@@ -2158,14 +2200,617 @@ class NovaWorld: Node2D {
                                           systemID: currentSystemID ?? -1, world: world) {
             interact.messages.append(line)
         }
-        if let line = interact.escorts.note(event: event, pilot: &pilot) { interact.messages.append(line) }
+        if let line = interact.escorts.note(event: event, pilot: &pilot, world: world, game: game) {
+            interact.messages.append(line)
+        }
     }
 
     /// A world was (re)built: close the windows and bring the saved escort wing
     /// back around the player.
     private func interactionsWorldRebuilt() {
         interact.resetForNewWorld(system: currentSystemID)
-        if let world, game != nil { FlightEscorts.respawnRoster(world: world, pilot: pilot) }
+        if let world, game != nil { interact.escorts.respawn(world: world, pilot: pilot) }
+    }
+
+    // MARK: Flight travel
+    //
+    // What the Apple app's `GameScene` + `GameContainerView` do around the travel
+    // channel: the ship-target keys of the original's table (cycle ` / Shift-` /
+    // Alt-`, R, Alt-R, Alt-N), the selected stellar (1–4, N, H) and the Nav panel
+    // readout, the original's two-press landing with clearance (request, the 250 px
+    // arm, "cleared to land", bribes and `MinStatus` refusals, landing fee), and
+    // hypergate / wormhole travel (land on a gate → pick a destination; gates spend
+    // no fuel and no days). Every rule is shared code: `World.cyclePlayerTarget` /
+    // `selectNearestEngaged` / `selectNearestHostileThreat`, `PlayerLanding`,
+    // `LandedServices.landingClearance` + `refusalMessage`, `OriginalText`,
+    // `SpobRes.playerMayUseGate`, `NovaGame.gateDestinations` /
+    // `wormholeExitCandidates`, `World.placePlayerEmergingFromGate`. This section
+    // marshals and keeps the per-visit selection / clearance state (Flight.swift).
+
+    private var travel = TravelState()
+
+    private func beep(_ n: Int) {
+        if let cue = SoundCues.beep(n) { sound.pending.append(cue) }
+    }
+
+    private func post(_ line: String) {
+        if !line.isEmpty { travel.messages.append(line) }
+    }
+
+    /// Bodies the player can approach to land on / use (`GameScene.isPlayerLandTarget`).
+    private func landTargets() -> [StellarBody] {
+        world?.systemContext.bodies.filter { $0.isLandable || $0.isGate } ?? []
+    }
+
+    private func stellarBody(_ id: Int) -> StellarBody? {
+        world?.systemContext.bodies.first { $0.id == id }
+    }
+
+    private func nearestLandTarget() -> StellarBody? {
+        guard let world else { return nil }
+        let p = world.player.position
+        return landTargets().min { ($0.position - p).length < ($1.position - p).length }
+    }
+
+    /// A stellar takes the travel channel, which the original shares with the armed
+    /// hyperspace jump: a new selection disarms the jump (H re-arms it).
+    private func selectStellar(_ id: Int) {
+        if travel.selectedSpob != id { nav.route.disarm() }
+        travel.selectedSpob = id
+    }
+
+    // MARK: Targets and the travel selection
+
+    private func beepForNearestTarget(found: Ship?, was: Int?) {
+        if found == nil { beep(4) } else if found?.entityID != was { beep(3) }   // 0x0044b120
+    }
+
+    /// ` / Shift-` / Alt-`: step the ship target (UI-07) — in arrival order, no
+    /// wrap (past the last it clears to "No Target"), no range limit; `squad`
+    /// cycles only the player's escorts. Sounds snd 152 whatever it lands on.
+    /// Returns the new target's id or -1.
+    @Callable(autoSnakeCase: true) func cycleTarget(reverse: Bool, squad: Bool) -> Int {
+        beep(3)
+        return world?.cyclePlayerTarget(forward: !reverse, squad: squad)?.entityID ?? -1
+    }
+
+    /// Alt-R: the nearest ship outside the player's squad, no range limit (0x00462850).
+    @Callable(autoSnakeCase: true) func selectNearestEngaged() -> Int {
+        let was = world?.player.currentTargetID
+        let found = world?.selectNearestEngaged()
+        beepForNearestTarget(found: found, was: was)
+        return found?.entityID ?? -1
+    }
+
+    /// R: the nearest ship attacking the player's squad, not disabled, no range
+    /// limit (0x00462bd0).
+    @Callable(autoSnakeCase: true) func selectNearestHostileThreat() -> Int {
+        let was = world?.player.currentTargetID
+        let found = world?.selectNearestHostileThreat()
+        beepForNearestTarget(found: found, was: was)
+        return found?.entityID ?? -1
+    }
+
+    /// Alt-N: clear the ship target (snd 150 when there was one).
+    @Callable(autoSnakeCase: true) func clearShipTarget() {
+        if world?.player.currentTargetID != nil { beep(1) }
+        world?.clearPlayerTarget()
+    }
+
+    /// N: the original's clear command — the travel selection (a selected stellar
+    /// and an armed jump); snd 150.
+    @Callable(autoSnakeCase: true) func clearTravelSelection() {
+        beep(1)
+        travel.selectedSpob = nil
+        nav.route.disarm()
+    }
+
+    /// S: clear the secondary weapon selection (snd 152 when one was selected).
+    @Callable(autoSnakeCase: true) func clearSecondaryWeapon() {
+        guard let player = world?.player else { return }
+        if player.selectedSecondaryID != nil { beep(3) }
+        player.clearSecondary()
+    }
+
+    /// 1–4: the current system's first four nav stellars (snd 150). False when the
+    /// system has no such stellar.
+    @Callable(autoSnakeCase: true) func selectNavStellar(index: Int) -> Bool {
+        guard let game, let sys = game.system(currentSystemID ?? -1), index >= 0, index < sys.spobs.count,
+              stellarBody(sys.spobs[index]) != nil else { return false }
+        beep(1)
+        selectStellar(sys.spobs[index])
+        return true
+    }
+
+    /// The selected stellar's `spöb` id, or -1.
+    @Callable(autoSnakeCase: true) func selectedStellarID() -> Int { travel.selectedSpob ?? -1 }
+
+    /// Test seam: select stellar `id` without the key's beep.
+    @Callable(autoSnakeCase: true) func debugSelectStellar(id: Int) -> Bool {
+        guard stellarBody(id) != nil else { return false }
+        selectStellar(id)
+        return true
+    }
+
+    /// H: the travel channel goes back to hyperspace, re-arming the plotted route's
+    /// next hop (`StarMapRoute.selectHyperspace`).
+    @Callable(autoSnakeCase: true) func hyperspaceArm() {
+        travel.selectedSpob = nil
+        guard let cur = currentSystemID, let nv = navigator() else { return }
+        refreshNavVisibility()
+        nav.route.selectHyperspace(current: cur, linked: nv.isLinked)
+    }
+
+    /// The map window closed: the route head re-syncs (0x004a4fd0 → 0x004a8080).
+    @Callable(autoSnakeCase: true) func navMapClosed() {
+        guard let cur = currentSystemID, let nv = navigator() else { return }
+        nav.route.sync(current: cur, linked: nv.isLinked)
+    }
+
+    /// The original Nav panel (0x0045e400; UI-10) as `[title, name, dim]`:
+    /// "Hyperspace" (#345) with the armed next hop (dimmed until clear of the
+    /// no-jump zone with a jump of fuel; "Unexplored System" #346 before it has been
+    /// visited), "Hyperspace" / "No Destination" (#344) in travel mode 3 with
+    /// nothing armed, "Stellar Navigation" (#343) with the selected stellar, else
+    /// "Nav System Off" (#342). `dim` is "1" or "0".
+    @Callable(autoSnakeCase: true) func navReadout() -> PackedStringArray {
+        guard let game, let world else { return PackedStringArray() }
+        let text = OriginalText(game: game)
+        var hopName = ""
+        if let hop = nav.route.hops.first, let sys = game.system(hop) {
+            let known = pilot.exploredSystems.contains(hop) || (pilot.chartedSystems ?? []).contains(hop)
+            hopName = known ? sys.displayName : text.misc(346)
+        }
+        if nav.route.armed, travel.selectedSpob == nil, !hopName.isEmpty {
+            let radius = galaxy.map { PilotEconomy.hyperspaceNoJumpRadius(pilot, galaxy: $0) } ?? 1000
+            let ready = world.isClearOfNoJumpZone(radius: radius) && world.player.fuel >= ShipFuel.perJump
+            return PackedStringArray([text.misc(345), hopName, (!ready && world.playerJump == nil) ? "1" : "0"])
+        } else if nav.route.hyperspaceMode, travel.selectedSpob == nil {
+            return PackedStringArray([text.misc(345), text.misc(344), "0"])
+        } else if let id = travel.selectedSpob {
+            return PackedStringArray([text.misc(343), game.spob(id)?.displayName ?? text.misc(344), "0"])
+        }
+        return PackedStringArray([text.misc(342), "", "0"])
+    }
+
+    // MARK: Landing (the original's two presses)
+
+    /// Why a second Land press on `id` cannot set down (UI-08): cloaked, or the
+    /// original's too-fast / too-far split — too fast only when already cleared and
+    /// inside the envelope, too far otherwise.
+    private enum LandingProblem { case cloaked, tooFast, tooFar }
+
+    private func landingProblem(_ id: Int) -> LandingProblem? {
+        guard let p = world?.player, let body = stellarBody(id) else { return .tooFar }
+        if p.isEffectivelyCloaked { return .cloaked }
+        if canLand(on: body, p) { return nil }
+        let d = body.position - p.position
+        let inside = PlayerLanding.inEnvelope(offset: d, radius: body.radius)
+        let slow = PlayerLanding.isSlowEnough(p.velocity)
+        let cleared = travel.cleared.contains(id)
+        if (!cleared || !slow) && inside && cleared { return .tooFast }
+        return .tooFar
+    }
+
+    /// Whether `p` may set down on `body` right now: inside the square envelope,
+    /// under the per-axis speed limit, cleared, and not cloaked.
+    private func canLand(on body: StellarBody, _ p: Ship) -> Bool {
+        PlayerLanding.inEnvelope(offset: body.position - p.position, radius: body.radius)
+            && PlayerLanding.isSlowEnough(p.velocity)
+            && travel.cleared.contains(body.id)
+            && !p.isEffectivelyCloaked
+    }
+
+    /// The spöb to land on if the player may set down this instant: the selected one.
+    private func attemptLandSelected() -> Int? {
+        guard let id = travel.selectedSpob, let p = world?.player, p.isAlive, let body = stellarBody(id),
+              body.isLandable || body.isGate, canLand(on: body, p) else { return nil }
+        return id
+    }
+
+    private func landingRefusalReason(_ spob: SpobRes) -> String? {
+        guard let game, let galaxy else { return nil }
+        // `spöb.Flags` 0x0080 ("Can only land when destroyed"): a hidden base whose
+        // cover has to be blown off first — checked before every other gate.
+        if spob.landableOnlyWhenDestroyed, !pilot.isStellarDestroyed(spob.id) {
+            return "There is nowhere to land here."
+        }
+        let clearance = LandedServices.landingClearance(
+            spob: spob, system: currentSystemID ?? -1, state: pilot, game: game,
+            diplomacy: galaxy.makeDiplomacy(), contributedBits: game.contributedBits(pilot: pilot),
+            bribed: interact.comm.bribedStellars.contains(spob.id))
+        return LandedServices.refusalMessage(clearance, spob: spob, game: game)
+    }
+
+    /// Whether the player is cleared to use hypergate `id` (wormholes always pass).
+    private func playerMayUseGate(_ id: Int) -> Bool {
+        guard let spob = game?.spob(id), let world else { return false }
+        let dip = world.diplomacy
+        return spob.playerMayUseGate(standing: dip?.reputationHere ?? 0,
+                                     hostile: dip?.isHostileToPlayer(spob.government) ?? false,
+                                     allied: dip?.areAllied(spob.government, world.player.government) ?? false)
+    }
+
+    /// Per `step`: reaching ±250 px of the stellar a landing was requested from
+    /// grants clearance and sounds the clearance line (0x00459950).
+    private func tickTravel() {
+        guard let world, dockedSpobID == nil, world.player.isAlive, let request = travel.landingRequest,
+              !travel.cleared.contains(request), let body = stellarBody(request) else { return }
+        if PlayerLanding.inClearanceRange(offset: body.position - world.player.position) {
+            travel.cleared.insert(request)
+            postLandingClearance(request)
+        }
+    }
+
+    /// "Cleared to land" and its variants, then "Commence final approach." or
+    /// "Welcome to <stellar>.", and the landing fee when one is due.
+    private func postLandingClearance(_ id: Int) {
+        guard let game, let spob = game.spob(id), !spob.isUninhabited || spob.isGate else { return }
+        let fee = pilot.hasDominated(id) ? 0 : spob.landingFee
+        beep(2)   // NovaUi_UpdateTravelEngagementProgress 0x00459950
+        post(OriginalText(game: game).landingClearance(
+            body: OriginalText.Body(spob), stellar: spob.displayName, pilot: pilot.pilotName, fee: fee) { Int.random(in: 0..<$0) })
+    }
+
+    /// The land hint for the nearest approachable stellar in reach, as `[kind, name]`
+    /// with kind `land` ("Press L to land on X"), `request` ("…to request landing on
+    /// X"), `slowDown` or `none` — `PlayerLanding.prompt`, as the HUD shows it.
+    @Callable(autoSnakeCase: true) func landPrompt() -> PackedStringArray {
+        guard let world, let game, dockedSpobID == nil, world.player.isAlive, let near = nearestLandTarget(),
+              PlayerLanding.inEnvelope(offset: near.position - world.player.position, radius: near.radius)
+        else { return PackedStringArray(["none", ""]) }
+        let p = world.player
+        let canNow = !world.playerInEscapePod && canLand(on: near, p)
+        let prompt = PlayerLanding.prompt(canLandNow: canNow, slowEnough: PlayerLanding.isSlowEnough(p.velocity),
+                                          needsRequest: !travel.cleared.contains(near.id), cloaked: p.isEffectivelyCloaked)
+        let name = game.spob(near.id)?.displayName ?? ""
+        switch prompt {
+        case .land: return PackedStringArray(["land", name])
+        case .request: return PackedStringArray(["request", name])
+        case .slowDown: return PackedStringArray(["slowDown", name])
+        case .none: return PackedStringArray(["none", ""])
+        }
+    }
+
+    /// The Land key (0x00457580; UI-08). With nothing selected the nearest approachable
+    /// stellar is selected first. The first press on the selected stellar requests
+    /// clearance — a denied stellar says so (#81–83, or the fee line #61–64) and drops
+    /// the selection, an uninhabited one answers "No response." (#53) and is cleared
+    /// at once, any other gets a request line unless the ship is already inside 250 px
+    /// — and the clearance line follows on reaching 250 px. The second press lands,
+    /// or says why not: cloaked (#73), too fast (#69–72), too far (#65–68). A bribe
+    /// accepted from the comm window clears a refused stellar. Landing on a gate uses
+    /// it. JSON `{result: none | messages | landed | gate | transported, spob, name}`;
+    /// the lines are in `drain_interaction_messages`.
+    @Callable(autoSnakeCase: true) func pressLand() -> String {
+        guard let world, let game, dockedSpobID == nil, world.playerJump == nil, travel.gatePicker == nil,
+              world.player.isAlive else { return landJSON("none") }
+        if travel.selectedSpob == nil, let near = nearestLandTarget() { selectStellar(near.id) }
+        guard let id = travel.selectedSpob, let spob = game.spob(id) else { return landJSON("none") }
+        let text = OriginalText(game: game)
+        let kind = OriginalText.Body(spob)
+        if pilot.destroyedStellars?.contains(id) == true, !spob.landableOnlyWhenDestroyed {
+            beep(4)
+            post(text.unableToLand(body: kind, stellar: spob.displayName))
+            return landJSON("messages")
+        }
+        if landingProblem(id) == .cloaked {
+            beep(4)
+            post(text.misc(73))
+            return landJSON("messages")
+        }
+        guard travel.landingRequest == id else {
+            // First press: the request.
+            if spob.isUninhabited && !spob.isGate {
+                beep(1)   // 0x00459950: the "No response." line sounds snd 150
+                post(text.misc(53))
+                travel.landingRequest = id
+                travel.cleared.insert(id)
+                if let land = attemptLandSelected() { return requestLanding(land) }
+                return landJSON("messages")
+            }
+            // Clearance reads the per-system reputation: fold in this session's crimes first (EC-02).
+            pilot.applyReputationDelta(world.diplomacy?.consumeReputationDelta() ?? [:])
+            let refusal = spob.isGate ? nil : landingRefusalReason(spob)
+            let denied = spob.isGate ? !(spob.isWormhole || playerMayUseGate(id)) : refusal != nil
+            if denied {
+                beep(2)
+                post(refusal ?? text.landingDenied(body: kind))
+                travel.selectedSpob = nil
+                return landJSON("messages")
+            }
+            travel.landingRequest = id
+            if let body = stellarBody(id), PlayerLanding.inClearanceRange(offset: body.position - world.player.position) {
+                return landJSON("messages")   // the clearance line follows on the next tick
+            }
+            beep(2)
+            post(text.landingRequest(body: kind, stellar: spob.displayName, pilot: pilot.pilotName) { Int.random(in: 0..<$0) })
+            return landJSON("messages")
+        }
+        // Second press: land, or say why not.
+        if let land = attemptLandSelected() { return requestLanding(land) }
+        beep(4)
+        switch landingProblem(id) {
+        case .tooFast?: post(text.tooFast(body: kind))
+        case .cloaked?: post(text.misc(73))
+        default: post(text.tooFar(body: kind))
+        }
+        return landJSON("messages")
+    }
+
+    private func landJSON(_ result: String, spob: Int = -1) -> String {
+        Self.json(["result": result, "spob": spob, "name": game?.spob(spob)?.displayName ?? ""] as [String: Any])
+    }
+
+    /// Commit a landing the second press allowed: a gate is used rather than docked
+    /// with; a refusal that still stands (a bribe that lapsed, a destroyed stellar)
+    /// says so.
+    private func requestLanding(_ id: Int) -> String {
+        guard let game, let spob = game.spob(id) else { return landJSON("none") }
+        if pilot.destroyedStellars?.contains(id) == true, !spob.landableOnlyWhenDestroyed {
+            post("Nothing but wreckage remains.")
+            return landJSON("messages")
+        }
+        if spob.isGate { return handleGateLanding(spob) }
+        if let reason = landingRefusalReason(spob) {
+            post(reason)
+            return landJSON("messages")
+        }
+        touchDown(spobID: id, chargeFee: true)
+        return landJSON("landed", spob: id)
+    }
+
+    // MARK: Hypergates and wormholes
+
+    /// Landing on a gate. A wormhole flings you through (no choice); a hypergate
+    /// you're cleared for opens its destination picker; one you aren't refuses.
+    private func handleGateLanding(_ spob: SpobRes) -> String {
+        guard let game else { return landJSON("none") }
+        if spob.isWormhole { return beginWormholeTransport(from: spob) }
+        if playerMayUseGate(spob.id) {
+            // A gate with no links does nothing: `Stellar_EnterHypergate` 0x00456480
+            // returns -1 with no message or beep.
+            guard !game.gateDestinations(from: spob).isEmpty else { return landJSON("none") }
+            travel.openGates.insert(spob.id)
+            travel.gatePicker = spob.id
+            return landJSON("gate", spob: spob.id)
+        }
+        beep(2)   // 0x00457580: snd 151 + STR# 2002 #81
+        post(OriginalText(game: game).misc(81))
+        return landJSON("messages")
+    }
+
+    /// A wormhole spits you out at a visible linked wormhole, or a random other
+    /// link-less one if it has no links (OS-06); no choice, no exit = "Unable to use".
+    private func beginWormholeTransport(from wormhole: SpobRes) -> String {
+        guard let game else { return landJSON("none") }
+        let story = StoryEngine(game: game, player: pilot)
+        let exits = game.wormholeExitCandidates(from: wormhole, currentSystem: currentSystemID,
+                                                isVisible: { story.isSystemVisible($0) })
+        guard let dest = exits.randomElement() else {
+            beep(4)   // Stellar_EnterWormhole 0x00456ca0
+            post(OriginalText(game: game).misc(84) + " " + OriginalText(game: game).misc(86))
+            return landJSON("messages")
+        }
+        travel.openGates.insert(wormhole.id)
+        return transportThroughGate(destSystem: dest.systemID, destGate: dest.gateSpobID)
+            ? landJSON("transported", spob: dest.gateSpobID) : landJSON("none")
+    }
+
+    /// The hypergate picker, or `{}`: `{gate, name, here, destinations: [{gate, system,
+    /// name, x, y}]}`. Destinations are always shown — using a gate bypasses fog of war.
+    @Callable(autoSnakeCase: true) func gatePickerState() -> String {
+        guard let game, let gateID = travel.gatePicker, let gate = game.spob(gateID) else { return "{}" }
+        let dests = game.gateDestinations(from: gate, hidden: game.hiddenSystemIDs(for: pilot)).compactMap { d -> [String: Any]? in
+            guard let s = game.system(d.systemID) else { return nil }
+            return ["gate": d.gateSpobID, "system": d.systemID, "name": s.displayName, "x": s.x, "y": s.y]
+        }
+        let here = game.system(currentSystemID ?? -1)
+        return Self.json(["gate": gateID, "name": gate.displayName, "here": currentSystemID ?? -1,
+                          "prompt": OriginalText(game: game).misc(340),
+                          "hereX": here?.x ?? 0, "hereY": here?.y ?? 0, "destinations": dests] as [String: Any])
+    }
+
+    @Callable(autoSnakeCase: true) func gatePickerOpen() -> Bool { travel.gatePicker != nil }
+
+    /// Leave the picker without travelling.
+    @Callable(autoSnakeCase: true) func gatePickerCancel() { travel.gatePicker = nil }
+
+    /// Travel through the open gate to the destination whose far gate is `destGate`.
+    /// False if the picker isn't open or the gate isn't one of its destinations.
+    @Callable(autoSnakeCase: true) func gatePickerChoose(destGate: Int) -> Bool {
+        guard let game, let gateID = travel.gatePicker, let gate = game.spob(gateID),
+              let dest = game.gateDestinations(from: gate, hidden: game.hiddenSystemIDs(for: pilot))
+                  .first(where: { $0.gateSpobID == destGate }) else { return false }
+        travel.gatePicker = nil
+        return transportThroughGate(destSystem: dest.systemID, destGate: dest.gateSpobID)
+    }
+
+    /// Hypergate / wormhole connections between known systems (`spöb` HyperLink1-8,
+    /// each gate mapped to its containing system; undirected, deduped; a wormhole
+    /// whose links are all random contributes nothing), as `[a, b, wormhole]` triples.
+    /// The original draws these spokes only in the gate picker; the map shows them
+    /// everywhere only as the opt-in "gate links" enhancement.
+    @Callable(autoSnakeCase: true) func navGateLinks() -> PackedInt32Array {
+        guard let game, let nv = navigator() else { return PackedInt32Array() }
+        let known = knownSets()
+        let adjacent = nv.adjacentToKnown(explored: known.explored, charted: known.charted)
+        func shown(_ id: Int) -> Bool {
+            StarMapNavigator.visibility(of: id, explored: known.explored, adjacent: adjacent, charted: known.charted) != .unknown
+        }
+        var spobSystem: [Int: Int] = [:]
+        let systems = game.systems()
+        for s in systems { for sp in s.spobs { spobSystem[sp] = s.id } }
+        var seen = Set<Int>()
+        var flat: [Int32] = []
+        for s in systems where !nav.hidden.contains(s.id) {
+            for sp in s.spobs {
+                guard let gate = game.spob(sp), gate.isGate else { continue }
+                for target in gate.hyperLinks {
+                    guard let other = spobSystem[target], other != s.id, !nav.hidden.contains(other) else { continue }
+                    let a = s.id, b = other
+                    guard shown(a), shown(b) else { continue }
+                    if seen.insert(min(a, b) * 100_000 + max(a, b)).inserted {
+                        flat += [Int32(a), Int32(b), gate.isWormhole ? 1 : 0]
+                    }
+                }
+            }
+        }
+        return PackedInt32Array(flat)
+    }
+
+    /// The nebulae the map draws (0x004a51f0), as JSON `[{id, x, y, w, h, picts}]`:
+    /// by default only active ones the player has explored; `all` = every nebula
+    /// (the opt-in enhancement look). `picts` are the seven zoom-level PICT ids,
+    /// smallest first, then the full-size fallback (`NovaGame.nebulaImageID`).
+    @Callable(autoSnakeCase: true) func navNebulae(all: Bool) -> String {
+        guard let game else { return "[]" }
+        let drawn = all ? nil : storyEngine()?.exploredActiveNebulaIDs()
+        let rows = game.nebulae().compactMap { neb -> [String: Any]? in
+            if let drawn, !drawn.contains(neb.id) { return nil }
+            let base = 9500 + 7 * (neb.id - 128)
+            let variants = (0..<7).map { base + $0 }.filter { game.hasPICT($0) }
+            let full = [game.nebulaImageID(index: neb.id - 128), game.nebulaImageID(index: neb.id - 128) - 1,
+                        game.nebulaImageID(index: neb.id - 128) - 2].first { game.hasPICT($0) }
+            guard !variants.isEmpty || full != nil else { return nil }
+            return ["id": neb.id, "x": neb.x, "y": neb.y, "w": neb.width, "h": neb.height,
+                    "picts": variants, "full": full ?? -1]
+        }
+        return Self.json(rows)
+    }
+
+    /// The map's Find (`StarMapFind.find`, 0x004aab30): the known system (visited,
+    /// revealed or charted) whose name shares the longest prefix with `query`, or -1
+    /// (a beep). A hit selects it (never arms or plots) and sounds snd 154, a miss
+    /// snd 153.
+    @Callable(autoSnakeCase: true) func navFind(query: String) -> Int {
+        guard let game else { return -1 }
+        let known = game.systems().filter { !nav.hidden.contains($0.id) && pilot.isSystemExplored($0.id) }
+        if let id = StarMapFind.find(query, in: known.map { ($0.id, $0.displayName) }) {
+            nav.selected = id
+            beep(5)
+            return id
+        }
+        beep(4)
+        return -1
+    }
+
+    /// Whether hypergate `id` has been switched on this visit (a landing lights it).
+    @Callable(autoSnakeCase: true) func gateIsOpen(id: Int) -> Bool { travel.openGates.contains(id) }
+
+    /// The gate transport (`NovaTravel_CompleteRestrictedTravel`, OS-06): spend **no**
+    /// fuel and **no** days, need no hyperspace link, rebuild the destination reusing
+    /// the player's ship (damage/cargo carry), put it on the far gate on that gate's
+    /// emergence angle at half top speed, bring the escort wing out of the same gate
+    /// with its damage, and arrive with the Warp out sound. The frontend sees the
+    /// arrival through `take_jump_arrival`, as for a hyperjump.
+    private func transportThroughGate(destSystem: Int, destGate: Int) -> Bool {
+        guard let world, let game, let galaxy, dockedSpobID == nil, world.playerJump == nil else { return false }
+        let ship = world.player
+        storyLeavingSystem()
+        _ = world.returnJumpingFighters()
+        interact.messages += interact.escorts.carryThroughJump(world: world, pilot: &pilot, game: game, via: .gate(destGate))
+        pilot.cargo = ship.cargo
+        pilot.fuel = ship.fuel
+        storyBindHooks()
+        let engine = StoryEngine(game: game, player: pilot, services: storyState.services)
+        engine.playerJumped(toSystem: destSystem, via: [])
+        if !engine.player.activeMissions.isEmpty { engine.missionFlightPass() }
+        pilot = engine.player
+
+        let (w, _) = GameSession.makeWorld(game: game, systemID: destSystem, player: ship, galaxy: galaxy)
+        if let gate = w.systemContext.bodies.first(where: { $0.id == destGate }) {
+            w.placePlayerEmergingFromGate(gate)
+        } else {
+            w.placePlayerAtHyperspaceArrival(bearing: ship.angle)
+        }
+        ship.currentTargetID = nil
+        ship.wantsToDepart = false
+        self.world = w
+        self.intent = ControlIntent()
+        currentSystemID = destSystem
+        pilot.currentSystem = destSystem
+        nav.pending = nil
+        nav.selected = nil
+        refreshNavVisibility()
+        if let nv = navigator() { nav.route.arriveViaGate(at: destSystem, linked: nv.isLinked) }
+        nav.arrivedIn = game.system(destSystem)?.displayName ?? ""
+        resetFrameState()
+        travel.openGates.insert(destGate)          // the arrival gate glows as you pop out
+        sound.pending.append(SoundCues.hyperspaceArrive)   // gate travel plays only Warp out
+        return true
+    }
+
+    /// Test seam: how many death-burst sound cues have been raised so far, and a way
+    /// to start one for `entityID` heard from the player's position.
+    @Callable(autoSnakeCase: true) func debugDeathCuesEmitted() -> Int { sound.deathCuesEmitted }
+    @Callable(autoSnakeCase: true) func debugBeginDeathBursts(entityID: Int, boomID: Int) {
+        sound.deaths.begin(entityID: entityID, at: world?.player.position ?? Vec2(), boomID: boomID, game: game)
+    }
+    /// A bööm id whose sound exists, or -1 (for the test above).
+    @Callable(autoSnakeCase: true) func debugBoomWithSound() -> Int {
+        (128...1100).first { game?.boom($0)?.soundID != nil } ?? -1
+    }
+
+    /// Test seam: the escorts' state for the carry-across-a-jump check, as JSON
+    /// `[{record, entity, shield, armor}]` (fractions of the hull's maximum) in the live wing.
+    @Callable(autoSnakeCase: true) func debugEscortStates() -> String {
+        guard let world else { return "[]" }
+        return Self.json(world.playerEscorts.map {
+            ["record": $0.escortRecordID ?? -1, "entity": $0.entityID,
+             "shield": $0.shieldFraction, "armor": $0.armorFraction] as [String: Any]
+        })
+    }
+
+    /// Test seam: hire a `shipType` escort into the roster and bring it out beside the
+    /// player. Returns its record id, or -1.
+    @Callable(autoSnakeCase: true) func debugAddEscort(shipType: Int) -> Int {
+        guard let world, game?.ship(shipType) != nil else { return -1 }
+        let rec = pilot.registerEscort(shipType: shipType, name: "Test escort", origin: .hired, hireFee: 0, dailyFee: 0)
+        interact.escorts.respawn(world: world, pilot: pilot)
+        return rec.id
+    }
+
+    /// Test seam: candidate (system, stellar) pairs for a refused landing — inhabited
+    /// stellars owned by a government with a positive `MinStatus` — as a flat list.
+    @Callable(autoSnakeCase: true) func debugRefusedStellars() -> PackedInt32Array {
+        guard let game else { return PackedInt32Array() }
+        var flat: [Int32] = []
+        for spob in game.spobs() where spob.isLandable && !spob.isUninhabited && !spob.isGate
+            && spob.government >= 128 && spob.minStatus > 0 && spob.minStatus < 32767 && spob.landingFee == 0 {
+            if let sys = game.systemContaining(spob: spob.id) { flat += [Int32(sys), Int32(spob.id)] }
+            if flat.count >= 80 { break }
+        }
+        return PackedInt32Array(flat)
+    }
+
+    /// Test seam: set the player's legal record in the current system (a stock
+    /// hypergate needs positive standing with its owner).
+    @Callable(autoSnakeCase: true) func debugSetReputation(value: Int) {
+        world?.diplomacy?.setReputationHere(value)
+    }
+
+    /// Test seam: (system, gate) pairs of hypergates (`wormhole` false) or wormholes
+    /// (true), with the first destination `(system, gate)` after.
+    @Callable(autoSnakeCase: true) func debugGates(wormhole: Bool) -> PackedInt32Array {
+        guard let game else { return PackedInt32Array() }
+        var flat: [Int32] = []
+        for spob in game.spobs() where spob.isGate && spob.isWormhole == wormhole {
+            guard let sys = game.systemContaining(spob: spob.id) else { continue }
+            let dests = wormhole ? game.wormholeExitCandidates(from: spob, currentSystem: sys)
+                                 : game.gateDestinations(from: spob)
+            if let d = dests.first { flat += [Int32(sys), Int32(spob.id), Int32(d.systemID), Int32(d.gateSpobID)] }
+            if flat.count >= 40 { break }
+        }
+        return PackedInt32Array(flat)
+    }
+
+    /// Test seam: knock `fraction` (0…1) off every live escort's armor and shield.
+    @Callable(autoSnakeCase: true) func debugDamageEscorts(fraction: Double) {
+        for s in world?.playerEscorts ?? [] {
+            s.armor = s.maxArmor * (1 - fraction)
+            s.shield = s.maxShield * (1 - fraction)
+        }
     }
 
     // MARK: Story & missions
@@ -2436,6 +3081,8 @@ class NovaWorld: Node2D {
         guard let offer = storyState.services.pendingOffer, let engine = storyEngine() else { return false }
         let ok = engine.accept(offer.mission.id)
         storyCommit(engine)
+        if ok { gapsPersOfferAccepted(offer, engine: engine) }   // a përs's flags: leave / never again / replaced
+        gaps.persOfferPerson = nil
         autosave(.event)
         storyState.services.pendingOffer = nil
         storyState.inlineOffer = false
@@ -2446,6 +3093,7 @@ class NovaWorld: Node2D {
         guard let offer = storyState.services.pendingOffer, let engine = storyEngine() else { return }
         engine.decline(offer.mission.id)
         storyCommit(engine)
+        gaps.persOfferPerson = nil
         autosave(.event)
         storyState.services.pendingOffer = nil
         storyState.inlineOffer = false
@@ -2551,6 +3199,7 @@ class NovaWorld: Node2D {
         let pict = SpaceportStory.barPictureID(game: game, spob: spob).flatMap { game.hasPICT($0) ? $0 : nil } ?? -1
         return Self.json(["text": SpaceportStory.barText(game: game, spob: spob), "pict": pict,
                           "gamble": buttonLabel(11, "Gamble"), "holovid": buttonLabel(12, "Holovid"),
+                          "hire": buttonLabel(13, "Hire Escort"), "canHire": PilotEconomy.canAddEscort(pilot),
                           "leave": buttonLabel(1, "Leave")] as [String: Any])
     }
 
@@ -2604,8 +3253,8 @@ class NovaWorld: Node2D {
 
     /// Player Info's Jettison Cargo (0x0041f330 with jettison-all, UI-13): the
     /// hold and every abortable mission's cargo go overboard. Returns the line to
-    /// show ("Cargo jettisoned.", STR# 2002 #289) or "". The floating pods the
-    /// Apple scene spawns are not drawn here.
+    /// show ("Cargo jettisoned.", STR# 2002 #289) or "". The floating pods are
+    /// freeflight objects (`freeflight_transforms`).
     @Callable(autoSnakeCase: true) func jettisonCargo() -> String {
         guard let game, let engine = storyEngine() else { return "" }
         let docked = dockedSpobID != nil
@@ -2613,6 +3262,7 @@ class NovaWorld: Node2D {
         storyCommit(engine)
         world?.player.cargo = pilot.cargo
         autosave(.event)
+        if !docked, thrown.total > 0 { gapsSpawnJettisonPods(total: thrown.total, ordinaryTotal: thrown.ordinaryTotal) }
         guard !docked, thrown.total > 0, !thrown.missionFailedShown else { return "" }
         return game.stringList(2002)?.string(at: 289) ?? ""
     }
@@ -2683,6 +3333,529 @@ class NovaWorld: Node2D {
         world.player.velocity = Vec2()
         return true
     }
+
+    // MARK: Gameplay gaps
+    //
+    // What the Apple app does around hire / escorts / gambling / scans / përs
+    // offers / the eject, cloak and self-destruct keys / click-to-select that the
+    // earlier bridge sections didn't carry. Every rule is shared NovaSwiftStory
+    // code (`EscortHire`, `RaceSession`, `ContrabandScan.scanPlayer`,
+    // `FlightPersOffer`, `EscapePodRespawn`, `PilotEconomy` escort + junk
+    // functions); this section resolves the docked spöb / live world and marshals.
+    // GDScript side: godot/screens/BarScreens.gd (Hire Escort, Gamble), the Escorts
+    // window in Interactions.gd, Main.gd (keys, click, pods).
+
+    private var gaps = GapsState()
+
+    // --- Hire Escort (the bar) ---
+
+    /// The bar's Hire Escort browser (HireEscortView): `{ships: [{id, name, category,
+    /// shield, armor, guns, turrets, price, perDay, description, pict, locked,
+    /// canHire}], credits, hasRoom, labels{hire, done}}`.
+    @Callable(autoSnakeCase: true) func hireList() -> String {
+        guard let c = shopContext() else { return "{}" }
+        let rows: [[String: Any]] = EscortHire.stock(game: c.game, spob: c.spob, state: pilot).map { s in
+            let pict = c.game.shipPictID(for: s).flatMap { c.game.hasPICT($0) ? $0 : nil } ?? -1
+            return ["id": s.id, "name": s.displayName, "category": EscortHire.categoryLabel(s.escortCategory),
+                    "shield": s.shield, "armor": s.armor, "guns": s.maxGuns, "turrets": s.maxTurrets,
+                    "price": EscortHire.price(s, state: pilot, spob: c.spob, galaxy: c.galaxy),
+                    "perDay": s.escortDailyFee, "description": EscortHire.pilotDescription(s, game: c.game),
+                    "pict": pict, "locked": !NCBTest(s.availBits).evaluate(pilot),
+                    "canHire": EscortHire.canHire(s, state: pilot, spob: c.spob, galaxy: c.galaxy)]
+        }
+        return Self.json(["ships": rows, "credits": pilot.credits, "hasRoom": PilotEconomy.canAddEscort(pilot),
+                          "labels": ["hire": buttonLabel(13, "Hire Escort"), "done": buttonLabel(5, "Done")]]
+                         as [String: Any])
+    }
+
+    /// Hire ship `id` (must be on today's list): the price leaves the credits, the
+    /// escort joins on takeoff. False if refused (not on offer, wing full, too poor).
+    @discardableResult
+    @Callable(autoSnakeCase: true) func hireEscort(id: Int) -> Bool {
+        guard let c = shopContext(), let ship = c.game.ship(id),
+              EscortHire.stock(game: c.game, spob: c.spob, state: pilot).contains(where: { $0.id == id })
+        else { return false }
+        return EscortHire.hire(&pilot, ship, spob: c.spob, galaxy: c.galaxy)
+    }
+
+    // --- Escorts window: Upgrade / Sell marks (processed leaving a shipyard) ---
+
+    @discardableResult
+    @Callable(autoSnakeCase: true) func escortRequestUpgrade(record: Int) -> Bool {
+        guard let game else { return false }
+        return PilotEconomy.requestEscortUpgrade(&pilot, recordID: record, game: game) != nil
+    }
+
+    @Callable(autoSnakeCase: true) func escortCancelUpgrade(record: Int) {
+        PilotEconomy.cancelEscortUpgrade(&pilot, recordID: record)
+    }
+
+    @discardableResult
+    @Callable(autoSnakeCase: true) func escortRequestSale(record: Int) -> Bool {
+        PilotEconomy.requestEscortSale(&pilot, recordID: record)
+    }
+
+    @Callable(autoSnakeCase: true) func escortCancelSale(record: Int) {
+        PilotEconomy.cancelEscortSale(&pilot, recordID: record)
+    }
+
+    /// Leaving a spaceport (`Player_ProcessEscortFleetAtStellar` 0x004229d0, EC-22,
+    /// then one payroll period, EC-20): marked sales and upgrades at a shipyard
+    /// stellar — one text reports them — then the hired escorts' daily fees.
+    private func gapsDeparting(from spobID: Int) {
+        guard let game, let spob = game.spob(spobID) else { return }
+        let disabled = Set(world?.playerEscorts.filter(\.disabled).compactMap(\.escortRecordID) ?? [])
+        let pass = PilotEconomy.processEscortFleetAtStellar(&pilot, spob: spob, game: game, disabled: disabled)
+        if pass.transactions > 0 {
+            visitDays.escortsSoldOrUpgraded += pass.transactions
+            storyState.services.showStoryText(PilotEconomy.escortFleetPassText(pass, game: game), title: "")
+        }
+        gapsPayEscorts(periods: 1)
+    }
+
+    /// Escort payroll (EC-20): `periods` periods — one per spaceport visit, the
+    /// travel days per jump. An unpaid escort defects.
+    private func gapsPayEscorts(periods: Int) {
+        guard periods > 0, !pilot.hiredEscorts.isEmpty, let engine = storyEngine() else { return }
+        let disabled = Set(world?.playerEscorts.filter(\.disabled).compactMap(\.escortRecordID) ?? [])
+        engine.processEscortPayroll(periods: periods, skipping: disabled)
+        pilot = engine.player
+    }
+
+    // --- Gambling (the bar) ---
+
+    /// The Galaxy Racing Network chooser: `{colors: [{name, idle, chosen, win, lose}]
+    /// (PICT ids, -1 = none), chooser, credits, standard, max, prompt, winLabel,
+    /// labels{bet1000, bet, leave}}`.
+    @Callable(autoSnakeCase: true) func gambleInfo() -> String {
+        guard let game else { return "{}" }
+        func pict(_ id: Int) -> Int { game.hasPICT(id) ? id : -1 }
+        let s = game.stringList(2002)
+        let colors: [[String: Any]] = RaceColor.allCases.map {
+            ["name": $0.name, "idle": pict($0.idlePictID), "chosen": pict($0.chosenPictID),
+             "win": pict($0.winPictID), "lose": pict($0.losePictID)]
+        }
+        return Self.json([
+            "colors": colors, "chooser": pict(RaceColor.chooserPictID), "credits": pilot.credits,
+            "standard": LandedServices.RaceBet.standardWager(credits: pilot.credits),
+            "max": LandedServices.RaceBet.maxPromptedWager(credits: pilot.credits),
+            "prompt": s?.string(at: 372) ?? "Amount to bet:", "winLabel": s?.string(at: 370) ?? "Your winnings",
+            "labels": ["bet1000": buttonLabel(14, "Bet 1000"), "bet": buttonLabel(59, "Bet"),
+                       "leave": buttonLabel(1, "Leave")],
+        ] as [String: Any])
+    }
+
+    /// Bet `wager` credits on colour `pick` (0 blue … 3 red) and run the race: the
+    /// stake leaves the credits, a win pays four times it. JSON `{ok, winner, pick,
+    /// stake, payout, net, credits, text}`; `ok` false = refused, nothing charged.
+    @Callable(autoSnakeCase: true) func gambleBet(pick: Int, wager: Int) -> String {
+        guard let color = RaceColor(index: pick) else { return Self.json(["ok": false] as [String: Any]) }
+        var credits = pilot.credits
+        guard let o = gaps.race.place(pick: color, amount: wager, credits: &credits,
+                                      rand: { Int.random(in: 0..<$0) }) else {
+            return Self.json(["ok": false, "credits": pilot.credits] as [String: Any])
+        }
+        pilot.credits = credits
+        let text = game.map { OriginalText(game: $0) }
+        let unit = text?.misc(o.stake < 2 ? 32 : 33) ?? "credits"
+        let line: String
+        if o.won {
+            line = "\(game?.stringList(2002)?.string(at: 370) ?? "Your winnings"): \(OriginalText.grouped(o.payout)) \(unit)"
+        } else {
+            line = "\(o.winner.name) wins — you lose \(OriginalText.grouped(o.stake)) \(unit)."
+        }
+        return Self.json(["ok": true, "winner": o.winner.index, "pick": pick, "stake": o.stake, "payout": o.payout,
+                          "net": o.net, "credits": pilot.credits, "text": line] as [String: Any])
+    }
+
+    // --- Contraband scans and junk cargo in flight ---
+
+    /// A government ship finished scanning the player (`GameScene.onPlayerScanned`):
+    /// fail-if-scanned smuggling missions, then the `ScanFine` / `SmugPenalty`.
+    @discardableResult
+    private func gapsPlayerScanned(by govt: Int) -> PlayerScanOutcome? {
+        guard let game, let world, govt >= 0 else { return nil }
+        pilot.cargo = world.player.cargo             // pickups made in flight
+        let out = ContrabandScan.scanPlayer(state: &pilot, game: game, scannerGovt: govt, services: storyState.services)
+        if !out.failedMissionIDs.isEmpty { beep(2) } // Ship_ScanPlayerForContraband 0x00401800, snd 151
+        if let r = out.result, r.foundContraband {
+            // The smuggling flood goes to the live per-system record (EC-02).
+            if r.smugglingPenalty > 0 { world.diplomacy?.recordSmuggling(against: govt) }
+            beep(5)                                  // the scan result line sounds snd 154
+        }
+        for line in out.messages { post(line) }
+        world.player.cargo = pilot.cargo
+        if !out.failedMissionIDs.isEmpty || out.result != nil { _ = autosave(.event) }
+        return out
+    }
+
+    /// Tribbles breed and perishables rot, on the original's 0…1024 frame counter
+    /// (EC-24); run once per sim tick, in flight only.
+    private func gapsAfterTick(_ world: World) {
+        guard world.player.isAlive, let galaxy else { return }
+        for _ in 0..<world.rawCallsThisStep {
+            gaps.junkFrame = (gaps.junkFrame + 1) % PilotEconomy.junkCargoFramePeriod
+            guard PilotEconomy.junkCargoEventDue(frame: gaps.junkFrame) else { continue }
+            var held = pilot
+            held.cargo = world.player.cargo
+            if PilotEconomy.runJunkCargoEvent(&held, galaxy: galaxy) {
+                world.player.cargo = held.cargo
+                pilot.cargo = held.cargo
+            }
+        }
+    }
+
+    // --- World events the section reacts to (called from collectEvents) ---
+
+    private func gapsNote(_ event: WorldEvent) {
+        guard let game else { return }
+        switch event {
+        case let .shipScanned(scannerID, targetID, _) where targetID == World.playerEntityID:
+            post("You are being scanned.")
+            if let govt = world?.ship(id: scannerID)?.government { gapsPlayerScanned(by: govt) }
+        case let .playerEjected(previous, newClass, intoPod, _):
+            // OS-02: the old hull's OnRetire, the outfits that don't stay with the pilot
+            // go with it, the pod (or bay fighter) is what the pilot now owns; a pod
+            // can't lead, so the escorts are released.
+            EscapePodRespawn.eject(&pilot, from: previous, into: newClass, game: game)
+            if intoPod { pilot.escorts = nil }
+            let strs = game.stringList(2002)
+            if intoPod { post(strs?.string(at: 38) ?? "") }
+            else { post("\(strs?.string(at: 52) ?? "") \(game.ship(newClass)?.displayName ?? "").") }
+            _ = autosave(.event)
+        case .escapePodRespawn:
+            gaps.podRespawnPending = true
+        case .playerDestroyed:
+            gaps.playerDestroyed = true
+        default:
+            break
+        }
+    }
+
+    /// After the tick loop: the pod's respawn (`respawnFromEscapePod`) rebuilds the world,
+    /// so it can't run inside it.
+    private func gapsTick() {
+        if gaps.podRespawnPending {
+            gaps.podRespawnPending = false
+            gapsRespawnFromPod()
+        }
+    }
+
+    /// The escape pod landed: every mission is abandoned, the pilot is a class-zero
+    /// ship at the nearest friendly shipyard the death system's neighbours offer, the
+    /// pod drifted 15…44 days (`EscapePodRespawn`, OS-02).
+    private func gapsRespawnFromPod() {
+        guard let game, let galaxy, var engine = storyEngine() else { return }
+        let deathSystem = currentSystemID ?? pilot.currentSystem
+        for id in pilot.activeMissions.map(\.missionID) { engine.abortMission(id) }
+        pilot = engine.player
+        EscapePodRespawn.resetToClassZero(&pilot, game: game)
+        engine = storyEngine() ?? engine
+        let target = EscapePodRespawn.respawnStellar(from: deathSystem, state: pilot, game: game,
+                                                     isVisible: { engine.isSystemVisible($0) })
+        let systemID = target?.system ?? game.systems().first?.id ?? deathSystem
+        pilot.currentSystem = systemID
+        pilot.exploredSystems.insert(systemID)
+        pilot.landedSpob = nil
+        var rng = NovaRandom(seed: UInt64(pilot.date.julianDay) &* 2_654_435_761 &+ UInt64(systemID))
+        if let days = storyEngine() {
+            days.advanceDays(EscapePodRespawn.driftDays(roll30: rng.range(30)))
+            pilot = days.player
+        }
+        EscapePodRespawn.finishRespawn(&pilot, game: game, galaxy: galaxy,
+                                       registrationDigits: (0..<4).map { _ in rng.range(9) + 1 })
+        _ = autosave(.podRespawn)
+        _ = makeWorld(systemID: systemID)
+        world?.player.position = Vec2(50, -50)
+        world?.player.angle = 0
+        storyState.services.showStoryText(game.descText(13999), title: "")
+    }
+
+    /// The death sequence ran out with no eject (once): a game over — the frontend lets the
+    /// explosion play, then returns to the main menu. Nothing is saved, so the pilot
+    /// resumes from its last launch.
+    @Callable(autoSnakeCase: true) func takePlayerDestroyed() -> Bool {
+        defer { gaps.playerDestroyed = false }
+        return gaps.playerDestroyed
+    }
+
+    // --- përs LinkMission offers on hail / board ---
+
+    /// Present the LinkMission `missionID` that përs `personID` offers right now, as the
+    /// in-flight accept/decline dialog (the story screens poll it).
+    private func gapsPresentPersOffer(personID: Int, missionID: Int) {
+        guard let game, let engine = storyEngine() else { return }
+        if FlightPersOffer.present(missionID: missionID, engine: engine, game: game) {
+            storyState.inlineOffer = false
+            gaps.persOfferPerson = personID
+            beep(5)    // Ship_HandlePlayerTargetActionCommand 0x00454910: the offer sounds snd 154
+        } else {
+            storyCommit(engine)    // a can't-refuse offer with no text activated silently
+        }
+    }
+
+    /// A boarded përs offering its LinkMission on boarding rather than hailing (Flags 0x0200).
+    private func gapsBoardedPersOffer() {
+        guard let world, let game, let sid = interact.plunder.shipID,
+              let pid = world.ship(id: sid)?.personID, let pers = game.pers(pid),
+              let engine = storyEngine() else { return }
+        let enc = PersEncounter.hail(pers, player: pilot, game: game, engine: engine, boarding: true)
+        if let mid = enc.offerMissionID { gapsPresentPersOffer(personID: pid, missionID: mid) }
+    }
+
+    /// The pending përs offer was accepted / declined: the person's flags apply.
+    private func gapsPersOfferAccepted(_ offer: MissionOffer, engine: StoryEngine) {
+        guard let game, let pid = gaps.persOfferPerson else { return }
+        gaps.persOfferPerson = nil
+        FlightPersOffer.afterAccept(personID: pid, offer: offer, engine: engine, state: &pilot, world: world, game: game)
+    }
+
+    // --- Flight keys ---
+
+    /// Alt-− is held (the self-destruct command, UI-15): the countdown runs while it stays down.
+    @Callable(autoSnakeCase: true) func setSelfDestruct(held: Bool) { gaps.selfDestructHeld = held }
+
+    /// U: toggle the cloaking device (oütf ModType 17). Refused with snd 153 if none is fitted.
+    @Callable(autoSnakeCase: true) func toggleCloak() {
+        guard let world else { return }
+        if !world.player.hasCloak { beep(4) }   // 0x0044b120
+        world.togglePlayerCloak()
+        if world.player.hasCloak {
+            post(world.player.cloakEngaged ? "Cloaking device engaged." : "Cloaking device disengaged.")
+        }
+    }
+
+    /// Alt-X: abandon ship — works while disabled or going down, with an escape pod or an
+    /// ejectable fighter bay (OS-02).
+    @Callable(autoSnakeCase: true) func requestEject() { world?.requestEject() }
+
+    @Callable(autoSnakeCase: true) func canEject() -> Bool { world?.canPlayerEject ?? false }
+
+    /// Call every deployed fighter home.
+    @Callable(autoSnakeCase: true) func recallFighters() {
+        guard let world, !world.player.fighterBays.isEmpty else { return }
+        world.playerRecallFighters()
+    }
+
+    // --- Jettisoned cargo pods and resource boxes ---
+
+    /// Every floating box (a jettison's pods, a destroyed rock's yield) as `[x, y]`, eased
+    /// between ticks.
+    @Callable(autoSnakeCase: true) func freeflightTransforms() -> PackedFloat32Array {
+        guard let world else { return PackedFloat32Array() }
+        var flat: [Float] = []
+        for box in world.freeflightObjects {
+            flat.append(Float(lerp(box.renderPrevPosition.x, box.position.x, interpolationAlpha)))
+            flat.append(Float(lerp(box.renderPrevPosition.y, box.position.y, interpolationAlpha)))
+        }
+        return PackedFloat32Array(flat)
+    }
+
+    /// Per box, SAME order: `[spïn id (500 + set), rotation frame]` — draw it as sprite kind 7.
+    @Callable(autoSnakeCase: true) func freeflightStyles() -> PackedInt32Array {
+        guard let world else { return PackedInt32Array() }
+        var flat: [Int32] = []
+        for box in world.freeflightObjects { flat.append(Int32(500 + box.spriteSet)); flat.append(Int32(box.spriteFrame)) }
+        return PackedInt32Array(flat)
+    }
+
+    /// The jettison's floating pods (0x0041f330, UI-13): the player ship throws
+    /// `clamp(trunc(total / 5), 1, 12)`, and every non-mission freighter escort (InherentAI < 3)
+    /// its share of the ordinary cargo.
+    private func gapsSpawnJettisonPods(total: Int, ordinaryTotal: Int) {
+        guard let world, let galaxy else { return }
+        func pods(_ tons: Double) -> Int { tons > 0 ? min(12, max(1, Int(tons / 5))) : 0 }
+        world.spawnJettisonedPods(from: world.player, count: pods(Double(total)))
+        let fleet = PilotEconomy.cargoCapacity(pilot, galaxy: galaxy)
+        guard fleet > 0 else { return }
+        for escort in world.playerEscorts where escort.missionID == nil && escort.escortRecordID != nil {
+            guard let hull = galaxy.game.ship(escort.shipTypeID), hull.inherentAI < 3 else { continue }
+            let share = Double(ordinaryTotal) * Double(hull.cargoSpace) / Double(fleet)
+            world.spawnJettisonedPods(from: escort, count: pods(share))
+        }
+    }
+
+    // --- Click to select (GameScene.selectAt) ---
+
+    /// A click at world point (`x`, `y`): the first targetable ship under it is locked; else the
+    /// nearest stellar within its radius + 15 takes the travel selection (a hypergate
+    /// powers up if the player is cleared, a wormhole says so); a click on the player's own
+    /// ship clears the ship target; empty space clears the travel stellar. JSON
+    /// `{kind: ship|stellar|player|none, id}`.
+    @Callable(autoSnakeCase: true) func clickSelect(x: Double, y: Double) -> String {
+        guard let world, let game, dockedSpobID == nil, world.player.isAlive else {
+            return Self.json(["kind": "none", "id": -1] as [String: Any])
+        }
+        let p = Vec2(x, y)
+        // The mouse pick of 0x00438fc7: the sprite rect, grown by 16 on every side when narrower than 48 px.
+        if let npc = world.npcs.first(where: { npc in
+            guard npc.isAlive, world.canTarget(npc, by: world.player) else { return false }
+            let half = npc.radius * 2 < 48 ? npc.radius + 16 : npc.radius
+            let d = npc.position - p
+            return abs(d.x) <= half && abs(d.y) <= half
+        }) {
+            _ = world.selectTarget(id: npc.entityID)
+            return Self.json(["kind": "ship", "id": npc.entityID] as [String: Any])
+        }
+        let hit = world.systemContext.bodies
+            .filter { (($0.position - p).length) <= $0.radius + 15 }
+            .min { ($0.position - p).length < ($1.position - p).length }
+        if let body = hit {
+            selectStellar(body.id)
+            if let spob = game.spob(body.id) { gapsGateClicked(spob) }
+            return Self.json(["kind": "stellar", "id": body.id] as [String: Any])
+        }
+        if (world.player.position - p).length <= world.player.radius + 24 {
+            world.clearPlayerTarget()
+            return Self.json(["kind": "player", "id": 0] as [String: Any])
+        }
+        travel.selectedSpob = nil
+        return Self.json(["kind": "none", "id": -1] as [String: Any])
+    }
+
+    /// Clicking a hypergate powers it up if the player is cleared to use it (a wormhole
+    /// needs nothing); `GameScene.handleGateClick`.
+    private func gapsGateClicked(_ spob: SpobRes) {
+        guard let game else { return }
+        if spob.isWormhole {
+            post("Wormhole — fly into it to be swept across the galaxy.")
+        } else if spob.isHypergate {
+            if playerMayUseGate(spob.id) {
+                post(travel.openGates.insert(spob.id).inserted
+                     ? "\(spob.name) hypergate online — land on it to travel." : "\(spob.name) hypergate is online.")
+            } else {
+                beep(2)     // 0x00457580: snd 151 + STR# 2002 #81
+                post(OriginalText(game: game).misc(81))
+            }
+        }
+    }
+
+    // --- Test seams (godot/tests/gameplay_gaps_selfcheck.gd). Not used by the game. ---
+
+    @Callable(autoSnakeCase: true) func debugSetCredits(amount: Int) { pilot.credits = amount }
+
+    @Callable(autoSnakeCase: true) func debugGiveCargo(id: Int, tons: Int) {
+        pilot.cargo[id, default: 0] += tons
+        world?.player.cargo = pilot.cargo
+    }
+
+    /// Dock at any stellar without flying there (shop screens read the spöb only).
+    @Callable(autoSnakeCase: true) func debugDockAt(spobID: Int) -> Bool {
+        guard game?.spob(spobID) != nil else { return false }
+        touchDown(spobID: spobID, chargeFee: false)
+        return true
+    }
+
+    /// `[{junk, name, boughtAt: [spöb…], soldAt: [spöb…]}]` for every jünk type.
+    @Callable(autoSnakeCase: true) func debugJunkSpots() -> String {
+        guard let game else { return "[]" }
+        return Self.json(game.junks().map {
+            ["junk": $0.id, "name": $0.name, "boughtAt": $0.highs, "soldAt": $0.lows, "flags": Int($0.flags),
+             "scanMask": Int($0.scanMask)] as [String: Any]
+        })
+    }
+
+    /// Run the in-flight scan consequence for a ship of `govt`; JSON of what happened.
+    @Callable(autoSnakeCase: true) func debugScanPlayer(govt: Int) -> String {
+        guard let out = gapsPlayerScanned(by: govt) else { return "{}" }
+        return Self.json(["fine": out.result?.fine ?? 0, "found": out.result?.foundContraband ?? false,
+                          "warning": out.result?.warningOnly ?? false, "cargo": out.result?.contrabandCargo ?? [],
+                          "failed": out.failedMissionIDs, "credits": pilot.credits, "messages": out.messages] as [String: Any])
+    }
+
+    /// `[{id, scanMask, scanFine, smugPenalty}]` for every government that polices something.
+    @Callable(autoSnakeCase: true) func debugPolicingGovts() -> String {
+        guard let game else { return "[]" }
+        return Self.json(game.govts().filter { $0.scanMask != 0 && $0.smugglePenalty != 0 }.map {
+            ["id": $0.id, "scanMask": Int($0.scanMask), "scanFine": $0.scanFine, "smugPenalty": $0.smugglePenalty] as [String: Any]
+        })
+    }
+
+    /// One junk-cargo event on the hold (tribbles breed, perishables rot); true if it changed.
+    @Callable(autoSnakeCase: true) func debugRunJunkEvent() -> Bool {
+        guard let world, let galaxy else { return false }
+        var held = pilot
+        held.cargo = world.player.cargo
+        let changed = PilotEconomy.runJunkCargoEvent(&held, galaxy: galaxy)
+        world.player.cargo = held.cargo
+        pilot.cargo = held.cargo
+        return changed
+    }
+
+    /// Fit the player an escape pod and disable the hull so Alt-X can eject.
+    @Callable(autoSnakeCase: true) func debugPrepareEject() {
+        world?.player.hasEscapePod = true
+        world?.player.heldDisabled = true
+    }
+
+    @Callable(autoSnakeCase: true) func debugPlayerShipType() -> Int { world?.player.shipTypeID ?? -1 }
+
+    /// The pilot's escort roster with its pending marks.
+    @Callable(autoSnakeCase: true) func debugEscortRecords() -> String {
+        Self.json(pilot.escortWing.map { ["record": $0.id, "ship": $0.shipType, "origin": "\($0.origin)",
+                                          "pendingSale": $0.pendingSale == true, "pendingUpgrade": $0.pendingUpgradeTo ?? -1,
+                                          "dailyFee": $0.dailyFee,
+                                          "sellValue": game?.ship($0.shipType).map { PilotEconomy.escortSellValue(for: $0) } ?? 0,
+                                          "upgradeCost": game?.ship($0.shipType)?.escortUpgradeCost ?? 0] as [String: Any] })
+    }
+
+    /// Register a captured (free, sellable) escort of `shipType` in the roster; its record id.
+    @Callable(autoSnakeCase: true) func debugAddCapturedEscort(shipType: Int) -> Int {
+        guard let game, let ship = game.ship(shipType) else { return -1 }
+        return pilot.registerEscort(shipType: shipType, name: ship.name, origin: .captured).id
+    }
+
+    /// `[shipType, upgradesTo, cost]` of a hull the escort window would offer Upgrade for (the
+    /// target's availability passing), or empty.
+    @Callable(autoSnakeCase: true) func debugUpgradableShip() -> PackedInt32Array {
+        guard let game else { return PackedInt32Array() }
+        for s in game.ships() where s.escortUpgradesTo >= 128 && s.escortUpgradeCost > 0 {
+            guard let t = game.ship(s.escortUpgradesTo), NCBTest(t.availBits).evaluate(pilot) else { continue }
+            return PackedInt32Array([Int32(s.id), Int32(t.id), Int32(s.escortUpgradeCost)])
+        }
+        return PackedInt32Array()
+    }
+
+    /// Empty the escort roster (a clean slate for a test).
+    @Callable(autoSnakeCase: true) func debugClearEscorts() {
+        for e in pilot.escortWing { pilot.removeEscort(id: e.id) }
+    }
+
+    /// Put the player ship at (`x`, `y`) at rest.
+    @Callable(autoSnakeCase: true) func debugMovePlayer(x: Double, y: Double) {
+        world?.player.position = Vec2(x, y)
+        world?.player.velocity = Vec2()
+    }
+
+    /// Tons of cargo `id` aboard the flying ship.
+    @Callable(autoSnakeCase: true) func debugCargoHeld(id: Int) -> Int { world?.player.cargo[id] ?? 0 }
+
+    @Callable(autoSnakeCase: true) func debugPilotShipType() -> Int { pilot.shipType }
+
+    /// Own a cloaking device (oütf ModType 17) and rebuild the world so the ship carries it.
+    @Callable(autoSnakeCase: true) func debugEquipCloak() -> Bool {
+        guard let game, let o = game.outfits().first(where: { $0.has(.cloak) }) else { return false }
+        pilot.grantOutfit(o.id)
+        return makeWorld(systemID: currentSystemID ?? -1)
+    }
+
+    /// `[{pers, mission, onBoard, deactivate, leave}]` — përs that offer a LinkMission.
+    @Callable(autoSnakeCase: true) func debugPersOffers() -> String {
+        guard let game else { return "[]" }
+        return Self.json(game.perses().filter { $0.linkMission >= 128 && game.mission($0.linkMission) != nil }.map {
+            ["pers": $0.id, "mission": $0.linkMission, "onBoard": $0.offerMissionOnBoard,
+             "deactivate": $0.deactivateAfterMission, "leave": $0.leaveAfterMission] as [String: Any]
+        })
+    }
+
+    /// Present përs `personID`'s LinkMission `missionID` as a hail would. True if a dialog is up.
+    @Callable(autoSnakeCase: true) func debugPresentPersOffer(personID: Int, missionID: Int) -> Bool {
+        gapsPresentPersOffer(personID: personID, missionID: missionID)
+        return storyState.services.pendingOffer != nil
+    }
+
+    /// Whether përs `id` is recorded as never to appear again.
+    @Callable(autoSnakeCase: true) func debugPersDefeated(id: Int) -> Bool { pilot.isPersDefeated(id) }
 
     // MARK: Audio
     //
@@ -2776,6 +3949,9 @@ class NovaWorld: Node2D {
     /// cue (spin-up start; cut at 350 / multiplier), and the chatter hold.
     private func tickSoundAlarms(dt: Double) {
         guard let world else { return }
+        let bursts = sound.deaths.advance(dt: dt)
+        sound.deathCuesEmitted += bursts.count
+        sound.pending.append(contentsOf: bursts)
         sound.rawCallAccumulator += max(0, dt) * OriginalClock.rawCallsPerSecond
         let calls = Int(sound.rawCallAccumulator)
         sound.rawCallAccumulator -= Double(calls)
@@ -2809,6 +3985,228 @@ class NovaWorld: Node2D {
             sound.chatterEnd = nil
             world.combatChatterPlaying = false
         }
+    }
+
+    // MARK: Classic UI
+    //
+    // Data for godot/ui/classic/ (the authentic-UI kit). Thin forwards into
+    // ClassicUI.swift; PICT pixels come from `pict_info` / `pict_rgba` (Spaceport
+    // section). All reads are empty when no game is loaded.
+
+    /// DLOG/DITL `id` as JSON — see `ClassicUIBackend.dialog`. `{}` if absent.
+    @Callable(autoSnakeCase: true) func classicDialog(id: Int) -> String {
+        game.map { ClassicUIBackend.dialog($0, id) } ?? "{}"
+    }
+
+    /// Neighbour indices `[up, down, left, right]` per rect (-1 = none) for a flat
+    /// `[l,t,r,b, …]` array — gamepad / keyboard focus derived from DITL geometry.
+    @Callable(autoSnakeCase: true) func classicFocusNeighbours(rects: PackedInt32Array) -> PackedInt32Array {
+        PackedInt32Array(ClassicUIBackend.focusNeighbours(rects.map { $0 }))
+    }
+
+    /// The scale to draw a `frameW`x`frameH` 1:1 layout at inside the viewport
+    /// (>= 1, snapped down to 0.5 steps so nearest-filtered art stays even).
+    @Callable(autoSnakeCase: true) func classicCrispScale(frameW: Int, frameH: Int, viewW: Double, viewH: Double) -> Double {
+        ClassicUIBackend.crispScale(frameW: frameW, frameH: frameH, viewW: viewW, viewH: viewH)
+    }
+
+    /// Height of the three-state button art (25 in the stock data).
+    @Callable(autoSnakeCase: true) func classicButtonHeight() -> Int {
+        game.map { ClassicUIBackend.buttonHeight($0) } ?? 25
+    }
+
+    /// A composed `width` x `classic_button_height()` button, RGBA8. `state`: 0
+    /// normal, 1 pressed, 2 grey. No label (the frontend draws it).
+    @Callable(autoSnakeCase: true) func classicButtonRGBA(width: Int, state: Int) -> PackedByteArray {
+        guard let game else { return PackedByteArray() }
+        return PackedByteArray(ClassicUIBackend.buttonRGBA(game, width: width, state: state))
+    }
+
+    /// The `cölr` palette + fonts as JSON (`"#rrggbb"` colours).
+    @Callable(autoSnakeCase: true) func classicColors() -> String {
+        game.map { ClassicUIBackend.colors($0) } ?? "{}"
+    }
+
+    /// The `ïntf` id for hull `shipType` (its govt's status bar), 128 default.
+    @Callable(autoSnakeCase: true) func classicInterfaceID(shipType: Int) -> Int {
+        game.map { ClassicUIBackend.interfaceID($0, shipType: shipType) } ?? 128
+    }
+
+    /// `ïntf` `id` as JSON: backdrop PICT id/size, rects `[l,t,r,b]`, colours, fonts.
+    @Callable(autoSnakeCase: true) func classicInterface(id: Int) -> String {
+        game.map { ClassicUIBackend.interface($0, id) } ?? "{}"
+    }
+
+    /// Every string of `STR#` `id` (entry n at index n-1; the game counts from 1).
+    @Callable(autoSnakeCase: true) func classicStrings(id: Int) -> PackedStringArray {
+        PackedStringArray(game.map { ClassicUIBackend.strings($0, id) } ?? [])
+    }
+
+    /// Whether the loaded data has PICT `id`.
+    @Callable(autoSnakeCase: true) func classicHasPict(id: Int) -> Bool {
+        game?.hasPICT(id) ?? false
+    }
+
+    /// The part `[x, y, w, h]` of a bar rect (`l,t,w,h`) between fractions `a`..`b`
+    /// — wide bars fill from the left, tall ones from the bottom, in whole pixels.
+    @Callable(autoSnakeCase: true) func classicBarSegment(l: Int, t: Int, w: Int, h: Int, a: Double, b: Double) -> PackedInt32Array {
+        let r = ClassicUIGeometry.barSegment(left: l, top: t, width: w, height: h, from: a, to: b)
+        return PackedInt32Array([Int32(r.x), Int32(r.y), Int32(r.w), Int32(r.h)])
+    }
+
+    /// The jump-meter fuel gauge as `[full, partial]` fractions of the bar: `0..full`
+    /// is whole hyperjumps (ïntf fuelFull), `full..full+partial` the remainder
+    /// (fuelPartial). `[0, 0]` with no world.
+    @Callable(autoSnakeCase: true) func classicFuelBar() -> PackedFloat64Array {
+        guard let p = world?.player, p.maxFuel > 0 else { return PackedFloat64Array([0, 0]) }
+        let jumps = Int((p.fuel / ShipFuel.perJump).rounded(.down))
+        let s = ClassicUIGeometry.fuelSplit(fuelFraction: max(0, min(1, p.fuel / p.maxFuel)),
+                                            jumps: jumps, maxFuelUnits: p.maxFuel)
+        return PackedFloat64Array([s.full, s.partial])
+    }
+
+    // -- Main menu / pilot dialogs (screens/MainMenu.gd, PilotMenu.gd classic paths) --
+
+    /// The authentic main menu's layout JSON (see `ClassicUIBackend.mainMenu`); `{}` with no game.
+    @Callable(autoSnakeCase: true) func classicMainMenu() -> String {
+        game.map { ClassicUIBackend.mainMenu($0) } ?? "{}"
+    }
+
+    /// `[frameW, frameH, frameCount]` of `spïn` `spin`; `mode` 0 = its sheet, 1 = rlëD / stacked-PICT tiles.
+    @Callable(autoSnakeCase: true) func classicSpinInfo(spin: Int, mode: Int) -> PackedInt32Array {
+        PackedInt32Array(game.map { ClassicUIBackend.spinInfo($0, spin: spin, mode: mode) } ?? [])
+    }
+
+    /// RGBA8 of one spïn frame (`w*h*4`, w/h from `classic_spin_info`), or empty.
+    @Callable(autoSnakeCase: true) func classicSpinTileRgba(spin: Int, frame: Int, mode: Int) -> PackedByteArray {
+        guard let game, let t = ClassicUIBackend.spinTile(game, spin: spin, frame: frame, mode: mode) else { return PackedByteArray() }
+        return PackedByteArray(t.rgba)
+    }
+
+    /// The main-menu pilot readout JSON for save `id` in `dir` (`""` = no pilot loaded).
+    @Callable(autoSnakeCase: true) func classicMenuReadout(dir: String, id: String) -> String {
+        guard let game else { return "{}" }
+        let save = UUID(uuidString: id).flatMap { try? archive(at: dir).load(id: $0) }
+        return ClassicUIBackend.menuReadout(game, save: save)
+    }
+
+    /// The ship-name prompt after the new-pilot dialog (STR# 2002 #121 + hull name).
+    @Callable(autoSnakeCase: true) func pilotShipNamePrompt(scenarioID: Int) -> String {
+        guard let game, let sc = game.selectableScenarios().first(where: { $0.id == scenarioID }) else { return "" }
+        return PilotFactory.shipNamePrompt(scenario: sc, game: game)
+    }
+
+    /// `pilot_create` with the dialog's Strict Play box.
+    @Callable(autoSnakeCase: true)
+    func pilotCreateStrict(dir: String, scenarioID: Int, name: String, isMale: Bool, nickname: String,
+                           shipName: String, strictPlay: Bool) -> String {
+        guard let game, let scenario = game.selectableScenarios().first(where: { $0.id == scenarioID }),
+              name.count <= PilotFactory.maxNameLength else { return "" }
+        let a = archive(at: dir)
+        var save = PilotSaves.makeNew(name: name, isMale: isMale, strictPlay: strictPlay, scenario: scenario, game: game,
+                                      nickname: nickname, shipName: shipName.isEmpty ? nil : shipName)
+        save.player.rosterID = save.id
+        guard let written = try? a.save(save, backup: false) else { return "" }
+        var state = written.player
+        PilotSaves.migrate(&state, game: game)
+        adoptPilot(state, saveID: written.id)
+        return written.id.uuidString
+    }
+
+    /// `dësc` `id` text (About Nova = 32767, Acknowledgements = 32766).
+    @Callable(autoSnakeCase: true) func classicDescText(id: Int) -> String { game?.descText(id) ?? "" }
+
+    /// Play `snd ` `id` as a menu sound (the main-menu click 600/601, shutter 602/603).
+    @Callable(autoSnakeCase: true) func soundMenu(id: Int) {
+        sound.pending.append(SoundCue(soundID: id, priority: OriginalAudio.Priority.menuTransition))
+    }
+
+    // -- Authentic status-bar extras (ui/classic/AuthenticHUD.gd) --
+
+    /// The target panel's text, as `GameScene.updateOriginalTargetText` builds it: `{name, subtitle, shipType,
+    /// hidesLine, statusLabel, statusValue, code, noTarget}`; `{}` with no target.
+    @Callable(autoSnakeCase: true) func hudTargetInfo() -> String {
+        guard let world, let game, let target = lockedTarget else { return "{}" }
+        let misc = { (n: Int) -> String in game.stringList(2002)?.string(at: n) ?? "" }
+        let hull = game.ship(target.shipTypeID)
+        let pers = target.personID.flatMap { game.pers($0) }
+        var name = target.displayName ?? target.name
+        if target.displayName == nil, let pers, !pers.name.isEmpty { name = pers.name.novaDisplayName }
+        var subtitle = target.displaySubtitle ?? ""
+        if target.displaySubtitle == nil, let hull { subtitle = hull.subtitle }
+        let hides = (hull?.hidesShieldArmorOnStatusDisplay ?? false) || (pers?.shieldMod ?? 0) < 0
+        var label = "", value = ""
+        if target.disabled {
+            let threshold = target.hullFlags & 0x10 != 0 ? 10.0 : 33.333
+            let waiting = target.missionShipGoal == .rescue && target.armorFraction * 100 >= threshold
+            value = misc(waiting ? 348 : 347)
+        } else if target.shield > 0 {
+            label = misc(13); value = "\(Int(target.shieldFraction * 100))%"
+        } else if hull?.showArmorOnTargetDisplay == true {
+            label = misc(16); value = "\(Int(target.armorFraction * 100))%"
+        } else {
+            value = misc((hull?.shield ?? 0) < 1 ? 14 : 15)
+        }
+        var code = game.govt(target.government)?.targetCode ?? ""
+        if world.isPlayerEscort(target) { code = misc((hull?.mass ?? 100) < 100 ? 169 : 168) }
+        return Self.json(["name": name, "subtitle": subtitle, "shipType": target.shipTypeID >= 128 ? target.shipTypeID : -1,
+                          "hidesLine": hides, "statusLabel": label, "statusValue": value, "code": code])
+    }
+
+    /// The cargo panel (`GameContainerView.cargoPanel`): `{rows:[{name,tons}], special, free}`.
+    @Callable(autoSnakeCase: true) func hudCargoPanel() -> String {
+        guard let game, let galaxy else { return "{}" }
+        let mission = PilotEconomy.missionCargo(pilot, game: game)
+        var rows: [[String: Any]] = []
+        for c in Commodity.allCases {
+            let tons = (pilot.cargo[c.cargoID] ?? 0) - (mission[c.cargoID] ?? 0)
+            if tons > 0 { rows.append(["name": game.commodityName(c), "tons": tons]) }
+        }
+        let loaded = pilot.activeMissions.filter { am in
+            am.isCarryingCargo && (am.resolvedCargoType ?? game.mission(am.missionID)?.cargoType ?? -1) != -1
+        }
+        let junk = pilot.cargo.filter { $0.key >= 128 && $0.value > 0 }.keys.sorted()
+        var special = ""
+        if !loaded.isEmpty || !junk.isEmpty {
+            let misc = game.stringList(2002)
+            if loaded.count == 1, let am = loaded.first {
+                let type = am.resolvedCargoType ?? game.mission(am.missionID)?.cargoType ?? -1
+                special = Commodity(rawValue: type).map { game.commodityName($0) } ?? game.junk(type)?.name ?? (misc?.string(at: 21) ?? "")
+            } else if loaded.isEmpty, junk.count == 1 {
+                special = game.junk(junk[0])?.name ?? ""
+            } else {
+                special = misc?.string(at: 21) ?? "Multiple"
+            }
+        }
+        return Self.json(["rows": rows, "special": special, "free": PilotEconomy.cargoFree(pilot, galaxy: galaxy)])
+    }
+
+    /// Whether the player's ship carries an IFF (oütf ModType 14): the radar then colours contacts.
+    @Callable(autoSnakeCase: true) func hudHasIff() -> Bool {
+        guard let game, let galaxy else { return false }
+        return PilotEconomy.loadout(pilot, galaxy: galaxy)?.outfits.keys.contains { game.outfit($0)?.has(.iff) == true } ?? false
+    }
+
+    /// Per live ship, SAME order as `ship_transforms()`: the IFF class `Ship_GetShipRadarColor` picks --
+    /// 0 disabled (grey), 1 threat (red), 2 squad (green), 3 other (blue), 4 the player.
+    @Callable(autoSnakeCase: true) func shipIffClasses() -> PackedInt32Array {
+        guard let world = self.world else { return PackedInt32Array() }
+        var flat: [Int32] = [4]
+        for npc in world.npcs where npc.isAlive {
+            switch world.radarIFFClass(of: npc) {
+            case .disabled: flat.append(0)
+            case .threat: flat.append(1)
+            case .squad: flat.append(2)
+            case .other: flat.append(3)
+            }
+        }
+        return PackedInt32Array(flat)
+    }
+
+    /// The player's chance (percent) that a radar refresh shows only static (OS-05).
+    @Callable(autoSnakeCase: true) func radarStaticChance() -> Int {
+        guard let world else { return 0 }
+        return world.radarStaticChance(for: world.player)
     }
 
     // MARK: App shell

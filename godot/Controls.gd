@@ -7,6 +7,19 @@
 # Switch Pro, 8BitDo) just work: Godot normalises them all to the SDL/Xbox
 # layout below, and Steam Input presents the Deck's own controls the same way.
 #
+# The keyboard defaults are the original's table, exactly as the Apple app ships it
+# (KeyBindings.defaults, itself `NovaPrefs_ResetKeyBindings` 0x004b4400): arrows fly,
+# Space fires the primary, Control the secondary, Z the afterburner; W / Alt-W step the
+# secondary, S clears it; ` / Shift-` / Alt-` cycle ship targets, R takes the nearest
+# hostile, Alt-R the nearest ship; N clears the travel selection (Alt-N the ship target),
+# 1-4 pick the system's nav stellars; Y hails (Alt-Y the stellar), L lands, M is the map,
+# H re-arms the route, J jumps, B boards; P Player Info, I Mission Info; E shows the
+# Escort Commands panel (then 1-5 pick a group) and F attack · D defend · V hold ·
+# C formation · Alt-C return to hangar order them.
+# "Key layout" in Settings -> Controls can switch to the port's earlier layout (the Apple
+# app's `modernKeyBindings` enhancement: Return fires secondaries, Shift is the
+# afterburner, Tab / R / T / U target, P pauses); the default is the original's.
+#
 # The pad layout mirrors the Apple app's `PadBindings.defaults`
 # (app/NovaSwift/Input/PadBindings.swift) so a player moving between the two
 # builds keeps their muscle memory:
@@ -20,13 +33,9 @@
 #   D-pad ↓      land         D-pad ↑  hyperjump (J)         Back/Select  galaxy map (M)
 #   D-pad ←      hail target  D-pad →  board (B)
 #
-# Hail / board / escorts keep the original's keys (KeyBindings.defaults): Y hail
-# (Alt-Y the nearest stellar), B board, F attack · V hold · C formation · Alt-C
-# return to hangar. Two originals are taken by this port's WASD / Q-E layout, so:
-# escort *defend* is X (the original's D turns right here) and the Escort
-# Commands panel is G (the original's E cycles the secondary weapon). 1–5 pick an
-# escort group while the panel is up. Inside the comm window: G greetings,
-# R request assistance, E / Enter / Esc close (the original's own shortcuts).
+# 1-5 pick an escort group while the Escort Commands panel is up (otherwise 1-4 select
+# nav stellars). Inside the comm window: G greetings, R request assistance, E / Enter /
+# Esc close (the original's own shortcuts).
 #
 # Player Info (P / pause menu) and Mission Info (I): tabs General · Cargo · Extras ·
 # Honors · Missions; focus nav moves, A/Enter presses, B/Esc/P/I close. In the
@@ -34,7 +43,7 @@
 #
 # Galaxy map: left stick moves a cursor that snaps to nearby systems, right
 # stick pans, LB/RB zoom, A plot (arm a linked jump), Y add a hop (Shift+click),
-# X toggle auto-route (enhancement), B / Back close.
+# X toggle auto-route (enhancement), L3 find a system, B / Back close.
 #
 # Docked (screens/Spaceport.gd): d-pad / stick move focus, A press (buy), X sell,
 # Y buy-quantity prompt (ship info in the shipyard), RB sell-quantity prompt,
@@ -60,16 +69,19 @@ const AIM_THRESHOLD := 0.5
 # Analog triggers count as "held" past this, as GameControllerInput does (0.1).
 const TRIGGER_THRESHOLD := 0.1
 
-# action -> { keys: [Key], buttons: [JoyButton], axes: [[JoyAxis, sign]] }
+# action -> { keys: [Key], alt_keys: [Key] (Alt chords), shift_keys: [Key] (Shift
+# chords), buttons: [JoyButton], axes: [[JoyAxis, sign]] }. Godot matches a chord's
+# plain key too (extra modifiers are ignored), so the polling code tests the chord
+# variant of a pair first (Main.gd `_chord`, Interactions.gd).
 const BINDINGS := {
 	# Flight (held)
-	"turn_left": {"keys": [KEY_LEFT, KEY_A], "axes": [[JOY_AXIS_LEFT_X, -1.0]]},
-	"turn_right": {"keys": [KEY_RIGHT, KEY_D], "axes": [[JOY_AXIS_LEFT_X, 1.0]]},
-	"thrust": {"keys": [KEY_UP, KEY_W],
+	"turn_left": {"keys": [KEY_LEFT], "axes": [[JOY_AXIS_LEFT_X, -1.0]]},
+	"turn_right": {"keys": [KEY_RIGHT], "axes": [[JOY_AXIS_LEFT_X, 1.0]]},
+	"thrust": {"keys": [KEY_UP],
 		"axes": [[JOY_AXIS_LEFT_Y, -1.0], [JOY_AXIS_TRIGGER_RIGHT, 1.0]]},
-	"reverse": {"keys": [KEY_DOWN, KEY_S],
+	"reverse": {"keys": [KEY_DOWN],
 		"axes": [[JOY_AXIS_LEFT_Y, 1.0], [JOY_AXIS_TRIGGER_LEFT, 1.0]]},
-	"afterburner": {"keys": [KEY_SHIFT], "buttons": [JOY_BUTTON_LEFT_STICK]},
+	"afterburner": {"keys": [KEY_Z], "buttons": [JOY_BUTTON_LEFT_STICK]},
 	"fire_primary": {"keys": [KEY_SPACE], "buttons": [JOY_BUTTON_A]},
 	"fire_secondary": {"keys": [KEY_CTRL], "buttons": [JOY_BUTTON_B]},
 	# Right-stick aim (analog; read as a vector, never as a button)
@@ -78,21 +90,36 @@ const BINDINGS := {
 	"aim_up": {"axes": [[JOY_AXIS_RIGHT_Y, -1.0]]},
 	"aim_down": {"axes": [[JOY_AXIS_RIGHT_Y, 1.0]]},
 	# Flight (press once)
-	"target_nearest": {"buttons": [JOY_BUTTON_X]},
-	"target_nearest_hostile": {"keys": [KEY_TAB], "buttons": [JOY_BUTTON_Y]},
-	"clear_target": {"keys": [KEY_BACKSPACE], "buttons": [JOY_BUTTON_RIGHT_STICK]},
-	"secondary_prev": {"keys": [KEY_Q], "buttons": [JOY_BUTTON_LEFT_SHOULDER]},
-	"secondary_next": {"keys": [KEY_E], "buttons": [JOY_BUTTON_RIGHT_SHOULDER]},
+	"target_next": {"keys": [KEY_QUOTELEFT]},
+	"target_prev": {"shift_keys": [KEY_QUOTELEFT]},
+	"target_escort_next": {"alt_keys": [KEY_QUOTELEFT]},
+	"target_nearest": {"alt_keys": [KEY_R], "buttons": [JOY_BUTTON_X]},
+	"target_nearest_hostile": {"keys": [KEY_R], "buttons": [JOY_BUTTON_Y]},
+	"clear_target": {"keys": [KEY_N], "buttons": [JOY_BUTTON_RIGHT_STICK]},
+	"clear_ship_target": {"alt_keys": [KEY_N]},
+	"nav_stellar_1": {"keys": [KEY_1]},
+	"nav_stellar_2": {"keys": [KEY_2]},
+	"nav_stellar_3": {"keys": [KEY_3]},
+	"nav_stellar_4": {"keys": [KEY_4]},
+	"secondary_next": {"keys": [KEY_W], "buttons": [JOY_BUTTON_RIGHT_SHOULDER]},
+	"secondary_prev": {"alt_keys": [KEY_W], "buttons": [JOY_BUTTON_LEFT_SHOULDER]},
+	"clear_secondary": {"keys": [KEY_S]},
 	"land": {"keys": [KEY_L], "buttons": [JOY_BUTTON_DPAD_DOWN]},
-	# In-flight interactions (screens/Interactions.gd). The Alt chords also match
-	# the plain key (Godot ignores extra modifiers), so the polling code checks
-	# the Alt variant first.
+	# In-flight interactions (screens/Interactions.gd).
 	"hail_target": {"keys": [KEY_Y], "buttons": [JOY_BUTTON_DPAD_LEFT]},
 	"hail_stellar": {"alt_keys": [KEY_Y]},
 	"board_target": {"keys": [KEY_B], "buttons": [JOY_BUTTON_DPAD_RIGHT]},
-	"escort_panel": {"keys": [KEY_G]},
+	# Ship commands of the original's table (Apple KeyBindings.defaults): U toggles the
+	# cloak, Alt-X abandons ship (escape pod / ejectable bay), Alt-− is the self-destruct
+	# (held five seconds, released to abort). Fighters are recalled by a key only in the
+	# modern layout (G); the original calls them home through the escort orders.
+	"toggle_cloak": {"keys": [KEY_U]},
+	"eject": {"alt_keys": [KEY_X]},
+	"self_destruct": {"alt_keys": [KEY_MINUS]},
+	"recall_fighters": {"keys": []},
+	"escort_panel": {"keys": [KEY_E]},
 	"escort_attack": {"keys": [KEY_F]},
-	"escort_defend": {"keys": [KEY_X]},
+	"escort_defend": {"keys": [KEY_D]},
 	"escort_hold": {"keys": [KEY_V]},
 	"escort_formation": {"keys": [KEY_C]},
 	"escort_return": {"alt_keys": [KEY_C]},
@@ -110,6 +137,7 @@ const BINDINGS := {
 	"launch": {"keys": [KEY_L], "buttons": [JOY_BUTTON_B]},
 	# Navigation. The original binds the map to M and the hyperdrive to J.
 	"galaxy_map": {"keys": [KEY_M], "buttons": [JOY_BUTTON_BACK]},
+	"hyperspace_arm": {"keys": [KEY_H]},
 	"hyperjump": {"keys": [KEY_J], "buttons": [JOY_BUTTON_DPAD_UP]},
 	# Story (screens/StoryScreens.gd, Spaceport.gd). The original binds Player Info
 	# to P and Mission Info to I (KeyBindings.defaults); the Apple pad layout has no
@@ -126,21 +154,55 @@ const BINDINGS := {
 	"map_cursor_right": {"axes": [[JOY_AXIS_LEFT_X, 1.0]]},
 	"map_cursor_up": {"axes": [[JOY_AXIS_LEFT_Y, -1.0]]},
 	"map_cursor_down": {"axes": [[JOY_AXIS_LEFT_Y, 1.0]]},
-	"map_pan_left": {"keys": [KEY_LEFT, KEY_A], "axes": [[JOY_AXIS_RIGHT_X, -1.0]]},
-	"map_pan_right": {"keys": [KEY_RIGHT, KEY_D], "axes": [[JOY_AXIS_RIGHT_X, 1.0]]},
-	"map_pan_up": {"keys": [KEY_UP, KEY_W], "axes": [[JOY_AXIS_RIGHT_Y, -1.0]]},
-	"map_pan_down": {"keys": [KEY_DOWN, KEY_S], "axes": [[JOY_AXIS_RIGHT_Y, 1.0]]},
+	"map_pan_left": {"keys": [KEY_LEFT], "axes": [[JOY_AXIS_RIGHT_X, -1.0]]},
+	"map_pan_right": {"keys": [KEY_RIGHT], "axes": [[JOY_AXIS_RIGHT_X, 1.0]]},
+	"map_pan_up": {"keys": [KEY_UP], "axes": [[JOY_AXIS_RIGHT_Y, -1.0]]},
+	"map_pan_down": {"keys": [KEY_DOWN], "axes": [[JOY_AXIS_RIGHT_Y, 1.0]]},
 	"map_zoom_in": {"keys": [KEY_EQUAL, KEY_KP_ADD], "buttons": [JOY_BUTTON_RIGHT_SHOULDER]},
 	"map_zoom_out": {"keys": [KEY_MINUS, KEY_KP_SUBTRACT], "buttons": [JOY_BUTTON_LEFT_SHOULDER]},
 	"map_select": {"keys": [KEY_ENTER, KEY_KP_ENTER], "buttons": [JOY_BUTTON_A]},
 	"map_extend": {"keys": [KEY_TAB], "buttons": [JOY_BUTTON_Y]},
 	"map_auto_route": {"keys": [KEY_T], "buttons": [JOY_BUTTON_X]},
 	"map_center": {"keys": [KEY_C], "buttons": [JOY_BUTTON_RIGHT_STICK]},
+	"map_find": {"keys": [KEY_F], "buttons": [JOY_BUTTON_LEFT_STICK]},
 	"map_close": {"keys": [KEY_ESCAPE], "buttons": [JOY_BUTTON_B]},
 }
 
 
-# Player rebinds, action -> { keys?: [Key], buttons?: [JoyButton], alt_keys?: [Key] }.
+# The key layout in force: "original" (the default — the original's table, above) or
+# "modern" (the Apple app's `modernKeyBindings` enhancement layout, MODERN_KEYS below).
+# Prefs.gd fills this from [input] layout before register().
+const LAYOUT_ORIGINAL := "original"
+const LAYOUT_MODERN := "modern"
+static var layout := LAYOUT_ORIGINAL
+
+# The port's earlier layout (KeyBindings.modernDefaults): only the actions whose keys
+# differ from BINDINGS appear; an empty list unbinds. Return fires secondaries (no
+# Control-arrow clash on macOS), Shift is the afterburner, Tab cycles targets, R/T take
+# the nearest ship / hostile and U clears the target; P pauses (Player Info and Mission
+# Info are menu-driven there). The original's Alt-` / Shift-` / Alt-N / Alt-C extras have
+# no key in that layout.
+const MODERN_KEYS := {
+	"afterburner": {"keys": [KEY_SHIFT]},
+	"fire_secondary": {"keys": [KEY_ENTER]},
+	"target_next": {"keys": [KEY_TAB]},
+	"target_prev": {"shift_keys": []},
+	"target_escort_next": {"alt_keys": []},
+	"target_nearest": {"keys": [KEY_R], "alt_keys": []},
+	"target_nearest_hostile": {"keys": [KEY_T]},
+	"clear_target": {"keys": [KEY_U]},
+	"clear_ship_target": {"alt_keys": []},
+	"escort_formation": {"keys": []},
+	"escort_return": {"alt_keys": []},
+	"toggle_cloak": {"keys": [KEY_C]},
+	"recall_fighters": {"keys": [KEY_G]},
+	"player_info": {"keys": []},
+	"mission_info": {"keys": []},
+	"pause_menu": {"keys": [KEY_ESCAPE, KEY_P]},
+}
+
+
+# Player rebinds, action -> { keys?: [Key], buttons?: [JoyButton], alt_keys?: [Key], shift_keys?: [Key] }.
 # Only the fields the player changed are present; everything else (including the
 # analog axes, which are never rebindable — as with the Apple app's sticks) comes
 # from BINDINGS. Prefs.gd fills this from user://settings.cfg before register().
@@ -151,42 +213,55 @@ static var overrides := {}
 # play; Q is both "previous weapon" in flight and "buy quantity" when docked).
 const GROUPS := {
 	"Flight": ["turn_left", "turn_right", "thrust", "reverse", "afterburner", "fire_primary",
-		"fire_secondary", "target_nearest", "target_nearest_hostile", "clear_target",
-		"secondary_prev", "secondary_next", "land", "galaxy_map", "hyperjump", "player_info",
+		"fire_secondary", "secondary_next", "secondary_prev", "clear_secondary",
+		"target_next", "target_prev", "target_escort_next", "target_nearest_hostile", "target_nearest",
+		"clear_target", "clear_ship_target", "nav_stellar_1", "nav_stellar_2", "nav_stellar_3",
+		"nav_stellar_4", "land", "galaxy_map", "hyperspace_arm", "hyperjump", "player_info",
 		"mission_info", "pause_menu", "hail_target", "hail_stellar", "board_target",
 		"escort_panel", "escort_attack", "escort_defend", "escort_hold", "escort_formation",
+		"toggle_cloak", "eject", "self_destruct", "recall_fighters",
 		"escort_return", "escort_group_1", "escort_group_2", "escort_group_3",
 		"escort_group_4", "escort_group_5"],
 	"Docked": ["trade_sell", "shop_buy_qty", "shop_sell_qty", "ship_info", "launch", "bbs_accept"],
 	"Galaxy map": ["map_pan_left", "map_pan_right", "map_pan_up", "map_pan_down", "map_zoom_in",
-		"map_zoom_out", "map_select", "map_extend", "map_auto_route", "map_center", "map_close"],
+		"map_zoom_out", "map_select", "map_extend", "map_auto_route", "map_center", "map_find", "map_close"],
 }
 
 const ACTION_LABELS := {
 	"turn_left": "Turn left", "turn_right": "Turn right", "thrust": "Thrust", "reverse": "Reverse / brake",
 	"afterburner": "Afterburner", "fire_primary": "Fire primary", "fire_secondary": "Fire secondary",
-	"target_nearest": "Target nearest", "target_nearest_hostile": "Target nearest hostile",
-	"clear_target": "Clear target", "secondary_prev": "Previous secondary", "secondary_next": "Next secondary",
+	"target_nearest": "Target nearest ship", "target_nearest_hostile": "Target nearest hostile",
+	"target_next": "Next target", "target_prev": "Previous target", "target_escort_next": "Next escort",
+	"clear_target": "Clear travel selection", "clear_ship_target": "Clear ship target",
+	"nav_stellar_1": "Nav stellar 1", "nav_stellar_2": "Nav stellar 2", "nav_stellar_3": "Nav stellar 3",
+	"nav_stellar_4": "Nav stellar 4", "clear_secondary": "Clear secondary", "hyperspace_arm": "Arm route (hyperspace)",
+	"secondary_prev": "Previous secondary", "secondary_next": "Next secondary",
 	"land": "Land", "galaxy_map": "Galaxy map", "hyperjump": "Hyperjump", "player_info": "Player info",
 	"mission_info": "Mission info", "pause_menu": "Pause menu", "hail_target": "Hail target",
 	"hail_stellar": "Hail stellar", "board_target": "Board target", "escort_panel": "Escort commands",
 	"escort_attack": "Escorts: attack", "escort_defend": "Escorts: defend", "escort_hold": "Escorts: hold",
 	"escort_formation": "Escorts: formation", "escort_return": "Escorts: return to hangar",
+	"toggle_cloak": "Toggle cloak", "eject": "Eject (escape pod)", "self_destruct": "Self-destruct (hold)",
+	"recall_fighters": "Recall fighters",
 	"escort_group_1": "Escort group 1", "escort_group_2": "Escort group 2", "escort_group_3": "Escort group 3",
 	"escort_group_4": "Escort group 4", "escort_group_5": "Escort group 5",
 	"trade_sell": "Sell", "shop_buy_qty": "Buy quantity", "shop_sell_qty": "Sell quantity",
 	"ship_info": "Ship info", "launch": "Launch", "bbs_accept": "Accept mission",
 	"map_pan_left": "Pan left", "map_pan_right": "Pan right", "map_pan_up": "Pan up", "map_pan_down": "Pan down",
 	"map_zoom_in": "Zoom in", "map_zoom_out": "Zoom out", "map_select": "Plot course", "map_extend": "Add hop",
-	"map_auto_route": "Auto-route", "map_center": "Recentre", "map_close": "Close map",
+	"map_auto_route": "Auto-route", "map_center": "Recentre", "map_find": "Find system",
+	"map_close": "Close map",
 }
 
 
 ## The binding spec in force for `action`: BINDINGS with the player's overrides on top.
 static func effective(action: String) -> Dictionary:
 	var spec: Dictionary = (BINDINGS[action] as Dictionary).duplicate(true)
+	if layout == LAYOUT_MODERN and MODERN_KEYS.has(action):
+		for field in MODERN_KEYS[action]:
+			spec[field] = (MODERN_KEYS[action][field] as Array).duplicate()
 	var o: Dictionary = overrides.get(action, {})
-	for field in ["keys", "buttons", "alt_keys"]:
+	for field in ["keys", "buttons", "alt_keys", "shift_keys"]:
 		if o.has(field):
 			spec[field] = (o[field] as Array).duplicate()
 	return spec
@@ -236,6 +311,8 @@ static func describe_keys(action: String) -> String:
 		parts.append(OS.get_keycode_string(k))
 	for k in spec.get("alt_keys", []):
 		parts.append("Alt+" + OS.get_keycode_string(k))
+	for k in spec.get("shift_keys", []):
+		parts.append("Shift+" + OS.get_keycode_string(k))
 	return " / ".join(parts) if not parts.is_empty() else "—"
 
 
@@ -289,6 +366,11 @@ static func register() -> void:
 			ak.physical_keycode = key
 			ak.alt_pressed = true
 			InputMap.action_add_event(action, ak)
+		for key in spec.get("shift_keys", []):
+			var sk := InputEventKey.new()
+			sk.physical_keycode = key
+			sk.shift_pressed = true
+			InputMap.action_add_event(action, sk)
 		for button in spec.get("buttons", []):
 			var b := InputEventJoypadButton.new()
 			b.device = -1   # any connected pad

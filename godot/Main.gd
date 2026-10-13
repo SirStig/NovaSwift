@@ -28,9 +28,11 @@
 #
 # Controls: every input is an InputMap action registered by Controls.gd with both
 # a keyboard key and a gamepad binding (Steam Deck / any SDL pad) — see that file
-# for the full table. Keyboard: arrows/WASD fly, Shift burn, Space/Ctrl fire,
-# Tab target, Backspace clear, Q/E cycle secondary, L land/launch; docked UI is
-# screens/Spaceport.gd. Pad: left stick fly, right stick aim, A/B fire, D-pad ↓ land.
+# for the full table. Keyboard: the original's keys (as the Apple app ships them) —
+# arrows fly, Z burn, Space/Ctrl fire, ` cycle targets, R/Alt-R nearest hostile/ship,
+# W/Alt-W switch secondary, 1-4 nav stellar, L land (two presses), M map, J jump;
+# docked UI is screens/Spaceport.gd. Pad: left stick fly, right stick aim, A/B fire,
+# D-pad ↓ land.
 
 extends Node2D
 
@@ -42,6 +44,8 @@ const Interactions = preload("res://screens/Interactions.gd")   # hail, board/pl
 const GameAudio = preload("res://audio/GameAudio.gd")          # snd playback (voice pool)
 const StoryScreens = preload("res://screens/StoryScreens.gd") # story texts, mission offers, Player/Mission Info
 const Spaceport = preload("res://screens/Spaceport.gd")     # landing, trade, outfitter, shipyard
+const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")   # Classic UI kit (original ïntf HUD, DLOG/DITL dialogs)
+const AuthenticHUD = preload("res://ui/classic/AuthenticHUD.gd")
 
 var _shell: Node             # Shell: menus around the game (see screens/Shell.gd)
 
@@ -90,6 +94,9 @@ var _shot_style: PackedInt32Array
 var _beams: PackedFloat32Array
 var _roid_xf: PackedFloat32Array
 var _roid_style: PackedInt32Array
+var _box_xf: PackedFloat32Array       # floating boxes: a jettison's pods, a rock's yield
+var _box_style: PackedInt32Array
+var _death_timer := -1.0              # game over: seconds until the main menu (the wreck plays out first)
 var _background := Color(0.02, 0.02, 0.06)
 
 const SHIP_SIZE := 14.0
@@ -273,6 +280,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("pause_menu") and _can_pause():
 		get_viewport().set_input_as_handled()
 		_shell.open_pause()
+	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT \
+			and _can_pause():
+		# Click to select (GameScene.selectAt): a ship under the pointer locks as the target,
+		# a stellar takes the travel selection, your own ship clears the target, empty
+		# space clears the stellar. Screen -> world is the inverse of _to_screen.
+		var vp := get_viewport_rect().size
+		var pw: Vector2 = nova.player_position()
+		var world_pos := Vector2(pw.x + (event.position.x - vp.x * 0.5), pw.y - (event.position.y - vp.y * 0.5))
+		nova.click_select(world_pos.x, world_pos.y)
 
 
 func _can_pause() -> bool:
@@ -349,9 +365,11 @@ func _process(delta: float) -> void:
 
 	nova.set_intent(_held("turn_left"), _held("turn_right"), _held("thrust"), _held("reverse"),
 		_held("afterburner"), _held("fire_primary"), _held("fire_secondary"))
+	nova.set_self_destruct(_held("self_destruct"))   # Alt-−, held: the five-second countdown
 	var aim: float = Controls.aim_heading()
 	nova.set_aim_heading(not is_nan(aim), 0.0 if is_nan(aim) else aim)
 	nova.step(delta)
+	_check_game_over(delta)
 
 	_snapshot_frame()
 	_process_hotkeys()
@@ -373,6 +391,8 @@ func _snapshot_frame() -> void:
 	_beams = nova.beam_segments()
 	_roid_xf = nova.asteroid_transforms()
 	_roid_style = nova.asteroid_styles()
+	_box_xf = nova.freeflight_transforms()
+	_box_style = nova.freeflight_styles()
 
 
 func _on_launch() -> void:
@@ -393,45 +413,101 @@ func _update_top_label() -> void:
 			mode, ("  ·  " + ship_name) if ship_name != "" else "", nova.ship_count(),
 		] \
 		+ ("L-stick fly · R-stick aim · A/B fire · X/Y target · LB/RB weapon · L3 burn · D-pad ↓ land"
-			if Controls.pad_connected() else
-			"arrows/WASD fly · Shift burn · Space fire · Ctrl secondary · Tab target · Q/E switch weapon · L land")
+			if Controls.pad_connected() else _keyboard_hint())
 
 
-# Discrete actions fire once per press, not once per held frame.
+# The keyboard cheat-sheet in the top label, from the live bindings (so it follows the
+# layout and any rebinds).
+func _keyboard_hint() -> String:
+	var parts := [
+		"%s/%s/%s/%s fly" % [Controls.describe_keys("turn_left"), Controls.describe_keys("turn_right"),
+			Controls.describe_keys("thrust"), Controls.describe_keys("reverse")],
+		"%s burn" % Controls.describe_keys("afterburner"),
+		"%s fire" % Controls.describe_keys("fire_primary"),
+		"%s secondary" % Controls.describe_keys("fire_secondary"),
+		"%s target" % Controls.describe_keys("target_next"),
+		"%s switch weapon" % Controls.describe_keys("secondary_next"),
+		"%s land" % Controls.describe_keys("land"),
+	]
+	return " · ".join(parts)
+
+
+# Godot also matches a chord's plain key (extra modifiers are ignored), so of a
+# (chord, plain) pair the chord is tested first and wins.
+func _chord(chord: String, plain: String) -> String:
+	if Input.is_action_just_pressed(chord):
+		return "chord"
+	if Input.is_action_just_pressed(plain):
+		return "plain"
+	return ""
+
+
+# Discrete actions fire once per press, not once per held frame. The ship-target keys
+# are the original's (0x0044b120 sounds: a new target snd 152, none found snd 153,
+# clearing snd 150 — all raised by the bridge, as is the Alt-N / N / S beeps).
 func _process_hotkeys() -> void:
-	# Target keys sound as the original does (0x0044b120): a new target snd 152,
-	# nothing found snd 153, re-picking the current one silent; clearing snd 150.
-	if Input.is_action_just_pressed("target_nearest"):
-		_beep_for_target(nova.player_target_id(), nova.select_nearest_target(false))
-	if Input.is_action_just_pressed("target_nearest_hostile"):
-		_beep_for_target(nova.player_target_id(), nova.select_nearest_target(true))
-	if Input.is_action_just_pressed("clear_target"):
-		nova.sound_beep(1)
-		nova.clear_player_target()
+	if Input.is_action_just_pressed("target_prev"):
+		nova.cycle_target(true, false)
+	elif Input.is_action_just_pressed("target_escort_next"):
+		nova.cycle_target(false, true)
+	elif Input.is_action_just_pressed("target_next"):
+		nova.cycle_target(false, false)
+	match _chord("target_nearest", "target_nearest_hostile"):
+		"chord": nova.select_nearest_engaged()
+		"plain": nova.select_nearest_hostile_threat()
+	match _chord("clear_ship_target", "clear_target"):
+		"chord": nova.clear_ship_target()
+		"plain": _clear_target()
+	if Input.is_action_just_pressed("clear_secondary"):
+		nova.clear_secondary_weapon()
 	if Input.is_action_just_pressed("secondary_prev"):
 		_log_weapon_switch(nova.cycle_secondary_weapon(false))
-	if Input.is_action_just_pressed("secondary_next"):
+	elif Input.is_action_just_pressed("secondary_next"):
 		_log_weapon_switch(nova.cycle_secondary_weapon(true))
 	if Input.is_action_just_pressed("land"):
 		_on_land()
+	if Input.is_action_just_pressed("toggle_cloak"):
+		nova.toggle_cloak()
+	if Input.is_action_just_pressed("eject"):
+		nova.request_eject()
+	if Input.is_action_just_pressed("recall_fighters"):
+		nova.recall_fighters()
+	if Input.is_action_just_pressed("hyperspace_arm"):
+		nova.hyperspace_arm()
 	_nav.process_hotkeys()   # M map, J hyperjump
 	_interact.process_hotkeys()   # Y hail, B board, escort panel + orders
 	_story.process_hotkeys()      # P Player Info, I Mission Info
+	# 1-5 pick an escort group while the Escort Commands panel is up (Interactions);
+	# otherwise 1-4 select the system's nav stellars.
+	if not nova.escort_panel_open():
+		for i in 4:
+			if Input.is_action_just_pressed("nav_stellar_%d" % (i + 1)):
+				nova.select_nav_stellar(i)
 
 
-func _beep_for_target(was: int, found: int) -> void:
-	if found < 0:
-		nova.sound_beep(4)
-	elif found != was:
-		nova.sound_beep(3)
+# N: the original clears the travel selection (a selected stellar and an armed jump);
+# the modern layout's clear key drops the ship target as well.
+func _clear_target() -> void:
+	if Controls.layout == Controls.LAYOUT_MODERN:
+		nova.clear_player_target()
+	nova.clear_travel_selection()
 
 
+# The Land key is the original's two presses (the bridge's press_land): the first on the
+# selected stellar (the nearest approachable one if none is) requests clearance —
+# refused with the original's text if the stellar denies you, bribes included — the
+# second sets down. Landing on a gate uses it instead.
 func _on_land() -> void:
-	var spob_name: String = nova.nearest_landable_name()
-	if nova.attempt_land():
-		_suppress_held()
-		_fx.clear()
-		_push_log("Docked at " + spob_name)
+	var r = JSON.parse_string(nova.press_land())
+	var result: String = r.get("result", "none") if r is Dictionary else "none"
+	match result:
+		"landed":
+			_suppress_held()
+			_fx.clear()
+			_push_log("Docked at " + str(r.get("name", "")))
+		"gate":
+			_suppress_held()
+			_nav.open_gate_picker()
 
 
 # Held this frame, unless still suppressed from before a screen change.
@@ -571,6 +647,7 @@ func _draw() -> void:
 	if _has_data:
 		_draw_bodies(center, pw)
 		_draw_asteroids(center, pw)
+		_draw_freeflight(center, pw)
 
 	var target_id: int = nova.player_target_id()
 	# Beams under the hulls so a beam reads as coming *out* of the barrel;
@@ -580,12 +657,43 @@ func _draw() -> void:
 	_draw_projectiles(center, pw)
 	_draw_effects(center, pw)
 
-	_draw_status_bars(vp)
-	_draw_weapon_readout(vp)
-	_draw_target_panel(vp, target_id)
+	if not _sync_classic_hud():   # Classic presentation: the ïntf status bar (a CanvasLayer) draws these
+		_draw_status_bars(vp)
+		_draw_weapon_readout(vp)
+		_draw_target_panel(vp, target_id)
 	_draw_land_prompt(vp)
-	_draw_radar(vp, pw)
+	if not _classic_hud_on:
+		_draw_nav_panel(vp)
+		_draw_radar(vp, pw)
 	_draw_message_log(vp)
+
+
+# Classic presentation (Settings > Presentation, default): the original `ïntf` status
+# bar from the player's data replaces the primitive HUD below. Created/freed here as
+# the setting changes; returns whether it is showing.
+var _classic_hud: CanvasLayer
+var _classic_hud_on := false
+
+func _sync_classic_hud() -> bool:
+	ClassicTheme.setup(nova)
+	var want: bool = _has_data and ClassicTheme.classic("hud")
+	if want and _classic_hud == null:
+		var hud = AuthenticHUD.new()
+		hud.setup(nova)
+		if hud.is_ready():
+			hud.active = func(): return not _shell.in_menu() and not nova.is_landed()
+			_classic_hud = CanvasLayer.new()
+			_classic_hud.layer = 5
+			_classic_hud.add_child(hud)
+			add_child(_classic_hud)
+		else:
+			hud.free()
+			want = false   # data without an ïntf/backdrop keeps the primitive HUD
+	elif not want and _classic_hud != null:
+		_classic_hud.queue_free()
+		_classic_hud = null
+	_classic_hud_on = want and _classic_hud != null
+	return _classic_hud_on
 
 
 func _to_screen(world_pos: Vector2, center: Vector2, pw: Vector2) -> Vector2:
@@ -602,6 +710,7 @@ func _draw_bodies(center: Vector2, pw: Vector2) -> void:
 
 	var xf: PackedFloat32Array = nova.body_transforms()
 	var ids: PackedInt32Array = nova.body_spob_ids()
+	var selected_spob: int = nova.selected_stellar_id()
 	var i := 0
 	var n := 0
 	while i + 3 < xf.size():
@@ -615,6 +724,19 @@ func _draw_bodies(center: Vector2, pw: Vector2) -> void:
 		else:
 			var col: Color = BODY_COLORS[kind] if kind < BODY_COLORS.size() else BODY_COLORS[1]
 			draw_circle(pos, maxf(radius, 6.0), col)
+		# A lit hypergate / live wormhole glows; the travel-selected stellar is bracketed.
+		if kind == 2 or kind == 3:
+			if kind == 3 or nova.gate_is_open(spob_id):
+				var glow := Color(0.3, 0.85, 0.98) if kind == 2 else Color(0.78, 0.45, 1.0)
+				draw_arc(pos, maxf(radius, 20.0) * 1.2, 0.0, TAU, 32, glow, 2.0, true)
+		if spob_id == selected_spob:
+			var half := maxf(maxf(radius, entry["fw"] * 0.5 if entry != null else 0.0), 14.0) + 8.0
+			var bc := Color(0.55, 0.8, 1.0, 0.95)
+			for sx in [-1.0, 1.0]:
+				for sy in [-1.0, 1.0]:
+					var corner := pos + Vector2(sx * half, sy * half)
+					draw_line(corner, corner - Vector2(sx * 9.0, 0.0), bc, 2.0)
+					draw_line(corner, corner - Vector2(0.0, sy * 9.0), bc, 2.0)
 		i += 4
 		n += 1
 
@@ -635,6 +757,32 @@ func _draw_asteroids(center: Vector2, pw: Vector2) -> void:
 			draw_circle(pos, maxf(radius, 4.0), COLOR_ROCK)
 		i += 4
 		n += 1
+
+
+# Jettisoned cargo pods and a destroyed rock's resource boxes: spïn 500+n rotation sheets.
+func _draw_freeflight(center: Vector2, pw: Vector2) -> void:
+	var n := 0
+	while n * 2 + 1 < _box_xf.size():
+		var pos := _to_screen(Vector2(_box_xf[n * 2], _box_xf[n * 2 + 1]), center, pw)
+		var spin_id: int = _box_style[n * 2] if n * 2 + 1 < _box_style.size() else -1
+		var frame: int = _box_style[n * 2 + 1] if n * 2 + 1 < _box_style.size() else 0
+		var entry = _sprite_entry(SPRITE_WEAPON, spin_id) if spin_id >= 0 else null
+		if entry != null:
+			_draw_sprite(entry, pos, frame % maxi(entry["frames"], 1))
+		else:
+			draw_circle(pos, 3.0, Color(0.7, 0.7, 0.7))
+		n += 1
+
+
+# The death sequence ran out with no eject: let the wreck play out, then back to the main
+# menu without saving — the pilot resumes from its last launch (OS-02, FL-03).
+func _check_game_over(delta: float) -> void:
+	if nova.take_player_destroyed():
+		_death_timer = 2.2
+	if _death_timer >= 0.0:
+		_death_timer -= delta
+		if _death_timer < 0.0:
+			_shell.return_to_menu()
 
 
 func _draw_ships(center: Vector2, pw: Vector2, target_id: int) -> void:
@@ -945,6 +1093,10 @@ func _draw_weapon_readout(vp: Vector2) -> void:
 		return
 
 	var weapon_name: String = nova.secondary_weapon_name()
+	if weapon_name == "":   # S cleared the selection
+		draw_string(ThemeDB.fallback_font, pos, "No Secondary Weapon",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE, Color(0.7, 0.7, 0.75, 0.8))
+		return
 	var ammo: int = nova.secondary_weapon_ammo()
 	var cooldown: float = nova.secondary_weapon_cooldown_fraction()
 	var label := "%s - %d" % [weapon_name, ammo] if ammo >= 0 else weapon_name
@@ -1025,16 +1177,47 @@ func _draw_message_log(vp: Vector2) -> void:
 		pos.y -= 18
 
 
-# In flight: prompt to land once a landable body is in reach, matching the
-# Apple app's "Press L to land on X" / "Slow down to land on X" HUD text.
+# The Land control's name for prompts: the pad's button when a controller is connected,
+# else the key.
+func _land_label() -> String:
+	return Controls.describe_buttons("land") if Controls.pad_connected() else Controls.describe_keys("land")
+
+
+# In flight: the original's land hint while an approachable stellar is in reach
+# (PlayerLanding.prompt, via the bridge): "Press L to request landing on X" before
+# clearance, "Press L to land on X" after, "Slow down to land on X" when speed is what
+# stops it — the Apple app's HUD text.
 func _draw_land_prompt(vp: Vector2) -> void:
-	var spob_name: String = nova.nearest_landable_name()
-	if spob_name == "":
+	var prompt: PackedStringArray = nova.land_prompt()
+	if prompt.size() < 2 or prompt[0] == "none":
 		return
-	var ready: bool = nova.can_land_now()
-	var text: String = ("Press L to land on " + spob_name) if ready else ("Slow down to land on " + spob_name)
-	var col := Color(0.6, 1.0, 0.7, 0.95) if ready else Color(0.9, 0.8, 0.4, 0.9)
+	var spob_name := prompt[1]
+	var text := ""
+	var col := Color(0.6, 1.0, 0.7, 0.95)
+	match prompt[0]:
+		"land": text = "Press %s to land on %s" % [_land_label(), spob_name]
+		"request":
+			text = "Press %s to request landing on %s" % [_land_label(), spob_name]
+		_:
+			text = "Slow down to land on " + spob_name
+			col = Color(0.9, 0.8, 0.4, 0.9)
 	var pos := Vector2(vp.x * 0.5, vp.y - 70)
 	var w := ThemeDB.fallback_font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE).x
 	draw_string(ThemeDB.fallback_font, pos - Vector2(w * 0.5, 0), text,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE, col)
+
+
+# The original Nav panel (0x0045e400): title (Nav System Off / Stellar Navigation /
+# Hyperspace) over the selected stellar or the armed next hop; the hop is dimmed until
+# the jump could actually be made. Strings and state are the bridge's.
+func _draw_nav_panel(vp: Vector2) -> void:
+	var rd: PackedStringArray = nova.nav_readout()
+	if rd.size() < 3:
+		return
+	var pos := Vector2(20, vp.y - 130)
+	draw_string(ThemeDB.fallback_font, pos, rd[0], HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE - 2,
+		Color(0.7, 0.8, 0.9, 0.9))
+	if rd[1] != "":
+		var col := Color(0.55, 0.8, 1.0) if rd[2] != "1" else Color(0.45, 0.5, 0.58)
+		draw_string(ThemeDB.fallback_font, pos + Vector2(0, 17), rd[1], HORIZONTAL_ALIGNMENT_LEFT, -1,
+			HUD_FONT_SIZE, col)

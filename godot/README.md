@@ -22,7 +22,8 @@ godot/
   screens/DataSetup.gd   "where is your EV Nova data?" + folder picker + Run Demo
   screens/ShellUI.gd     shared theme (visible focus ring) + builders
   screens/PilotMenu.gd   pilot screen (list / new / load / delete)
-  screens/Spaceport.gd   docked UI: landing, Trade Center, Outfitter, Shipyard, Recharge
+  screens/Spaceport.gd   docked UI: landing, Bar, Mission BBS, Trade Center, Outfitter, Shipyard, Recharge
+  screens/StoryScreens.gd story texts, mission offers, Player Info / Mission Info (P / I)
   screens/Interactions.gd  in-flight hail, board/plunder, capture and escort dialogs + Escort Commands panel
   audio/TitleMusic.gd    main-menu music (STR# 130 #2 mp3; .mov/missing = silence)
   audio/GameAudio.gd     sound: snd -> AudioStreamWAV cache + 16-voice player pool
@@ -84,10 +85,23 @@ as `.evpilot` files in Godot's `user://pilots` (same format as the Apple app) at
 each launch and on quit. `NOVA_SKIP_PILOT_MENU=1` skips the screen (throwaway
 pilot).
 
-Controls: **arrows / WASD** fly (you swing the nose and keep drifting — that's
-the engine's real physics), **Shift** afterburner, **Space** fire primary,
-**Ctrl** fire secondary, **Tab** target nearest hostile, **Backspace** clear
-target, **Q**/**E** cycle secondary weapon, **L** land. Docked (screens/Spaceport.gd, all by focus
+Controls are the original's keys, exactly as the Apple app ships them: **arrows** fly
+(you swing the nose and keep drifting — that's the engine's real physics), **Z**
+afterburner, **Space** fire primary, **Ctrl** fire secondary, **W** / **Alt-W** next /
+previous secondary (**S** clears it), **`** / **Shift-`** / **Alt-`** cycle ship targets
+(escorts only with Alt), **R** nearest hostile, **Alt-R** nearest ship, **N** clear the
+travel selection (**Alt-N** the ship target), **1–4** select the system's nav stellars,
+**L** land, **Y** / **Alt-Y** hail the target / the selected stellar, **B** board, **H**
+re-arm the route, **E** the Escort Commands panel (then **1–5** pick a group) with
+**F** attack · **D** defend · **V** hold · **C** formation · **Alt-C** return to hangar,
+**P** Player Info, **I** Mission Info. Settings → Controls has a "Modern key layout"
+switch (the Apple app's `modernKeyBindings`: Shift burns, Return fires secondaries, Tab /
+R / T / U target, P pauses), off by default, and every key is rebindable. Landing is the
+original's two presses on the **selected** stellar (the nearest one if none is selected):
+the first requests clearance — a refusal (standing, `Require`, landing fee) says why and
+drops the selection; a bribe from the hail window (**Alt-Y**) buys it — the second sets
+down. Landing on a hypergate (when cleared) opens the galaxy map in gate mode to pick a
+destination; a wormhole flings you through. Docked (screens/Spaceport.gd, all by focus
 navigation): arrows / d-pad move, **Enter**/A press (buy), **S**/X sell,
 **Q**/Y buy-quantity prompt (**I**/Y ship info in the shipyard), **E**/RB
 sell-quantity prompt, **Esc**/B back out — from the landing screen, launch.
@@ -98,7 +112,9 @@ plots — arms a jump to a linked system, as in the original; **Shift+click**
 (pad **Y**) adds a hop; **T** (pad **X**) toggles the auto-route enhancement;
 wheel / **+ −** (pad **LB/RB**) zoom, right-drag / arrows (pad right stick) pan,
 pad left stick moves a cursor that snaps to systems and the D-pad hops to the
-next one; **C** recentres; **M** / **Esc** (pad **B**) close. Headless check:
+next one; **C** recentres; **F** (pad **L3**) finds a system by name; **M** / **Esc** (pad
+**B**) close. Nebula art is drawn; hypergate / wormhole spokes show only in the gate picker
+unless Settings → Video "Gate links on the galaxy map" (an enhancement) is on. Headless check:
 `NOVA_SKIP_PILOT_MENU=1 NOVA_SELFTEST=nav godot --headless --path godot`
 plots a 2-hop route and flies both jumps (`NOVA_SELFTEST=map` drives the screen).
 
@@ -138,3 +154,18 @@ tags each record with its codec and stores raw off Apple) and the workflow is
 back on push/PR. The first green Linux run is what will actually confirm the
 core compiles off Apple end to end — the LZFSE failure masked everything
 downstream of it, so more platform edges may surface behind it.
+
+Missions: the Mission BBS and Bar are on the landing screen (A/Enter selects, **A** key /
+pad **X** accepts a BBS listing); offers also pop on landing and when opening shops.
+**P** (or the pause menu) opens Player Info, **I** Mission Info (abort there). Headless:
+`godot --headless --path godot -s res://tests/story_selfcheck.gd` (and `story_menu_check.gd`).
+
+Gameplay gaps closed (see `screens/BarScreens.gd`, the bridge's `// MARK: Gameplay gaps`): the
+bar's **Hire Escort** browser (daily fees are paid at each launch and per jump day; the Escorts
+window's **Upgrade / Sell** marks are processed by the fleet pass when you leave a shipyard
+stellar) and **Gamble** (Galaxy Racing Network; the holovid clip isn't played), a përs's
+LinkMission offer over a hail or boarding, in-flight contraband scans (jünk `ScanMask` vs the
+scanner's `ScanFine` / `SmugPenalty`) and junk events, **U** cloak, **Alt-X** eject (escape pod →
+respawn after the pod's flight), **Alt-−** self-destruct (hold), jettison pods drawn, and a
+left-click in flight selects the ship / stellar under the pointer. A destroyed pilot with no pod
+returns to the main menu (unsaved). Headless: `tests/gameplay_gaps_selfcheck.gd`.

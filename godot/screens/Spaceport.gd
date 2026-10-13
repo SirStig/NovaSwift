@@ -19,6 +19,8 @@ extends CanvasLayer
 ## the actual nova.launch().
 signal launch_requested
 
+const BarScreens = preload("res://screens/BarScreens.gd")   # Hire Escort, Gamble
+
 const PANEL_SIZE := Vector2(1180, 660)
 const COL_DIM := Color(0.62, 0.66, 0.74)
 const COL_HI := Color(1.0, 0.95, 0.7)
@@ -55,10 +57,13 @@ var _shop_wait := 0.0
 var _reopen_bbs_pending := false  # the BBS reopens afresh once an accept's texts are read
 var _bbs_list: Array = []
 var _bbs_nodes: Dictionary = {}
+var _bar_screens                  # BarScreens: the bar's Hire Escort + Gamble overlays
 
 
 func setup(nova: Object) -> void:
 	_nova = nova
+	_bar_screens = BarScreens.new()
+	_bar_screens.setup(self, nova)
 	layer = 40
 	visible = false
 	_root = Control.new()
@@ -909,8 +914,16 @@ func _show_bar() -> void:
 	_add_status()
 	var bar := HBoxContainer.new()
 	_col.add_child(bar)
+	# The original's bar: Hire Escort (live under the six-escort cap), Holovid, Gamble, Leave.
+	var hire := _button(str(b.get("hire", "Hire Escort")), _bar_screens.open_hire, bar)
+	hire.name = "bar_hire"
+	hire.disabled = not bool(b.get("canHire", true))
 	var holo := _button(str(b.get("holovid", "Holovid")), _holovid, bar)
-	_button(str(b.get("leave", "Leave")), _show_hub, bar)
+	holo.name = "bar_holovid"
+	var gamble := _button(str(b.get("gamble", "Gamble")), _bar_screens.open_gamble, bar)
+	gamble.name = "bar_gamble"
+	var leave := _button(str(b.get("leave", "Leave")), _show_hub, bar)
+	leave.name = "bar_leave"
 	for c in bar.get_children():
 		c.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_label(_hint("A press · B leave", "Enter press · Esc leave"), 13)

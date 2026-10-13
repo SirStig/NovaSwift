@@ -11,7 +11,18 @@
 #                      to any system (the `autoRoutePlotting` ENHANCEMENT, off by
 #                      default — the original has no pathfinding)
 #   J / D-pad up       close the map and engage the hyperdrive
+#   F / L3             find a system by name (the original's Find: longest common prefix
+#                      of the known systems' names; selects and centres, never plots)
 #   M / Back / B / Esc close
+#
+# Nebulae (nëbu art, drawn the way the original's map does: only active ones the pilot
+# has explored, added over the dark background) are always shown. The hypergate /
+# wormhole spokes between systems appear in the picker below (the original) and, as an
+# opt-in enhancement (Settings -> Video), on the plain map too.
+#
+# Gate picker (open_gate): landing on a hypergate the pilot may use opens this map in
+# gate mode — the gate's destinations are marked with bold blue spokes from the current
+# system, a click / A picks one and the bridge flies the transport (no fuel, no days).
 #   Gamepad: left stick drives a cursor that snaps to nearby systems, D-pad hops
 #   to the next system in that direction, right stick pans, LB/RB zoom, R3 recentre.
 #   Mouse: wheel zooms, right/middle-drag pans.
@@ -19,6 +30,8 @@
 # Opened by Main.gd; emits `closed` and `jump_requested`, and `message` for the log.
 
 extends CanvasLayer
+
+const Prefs = preload("res://Prefs.gd")
 
 signal closed
 signal jump_requested
@@ -46,9 +59,21 @@ const COLOR_CURRENT := Color(1.0, 0.7, 0.28)
 const COLOR_ADJACENT := Color(0.42, 0.42, 0.42)
 const COLOR_TEXT := Color(0.85, 0.9, 1.0)
 const COLOR_DIM := Color(0.6, 0.65, 0.75)
+const COLOR_GATE_HYPER := Color(0.3, 0.85, 0.95, 0.85)
+const COLOR_GATE_WORM := Color(0.78, 0.45, 1.0, 0.85)
+const COLOR_GATE_ROUTE := Color(0.25, 0.62, 1.0)
 
 var nova
 var _canvas: Control
+var _neb: Control                # nebula art, added over the background
+var _find_box: PanelContainer
+var _find_edit: LineEdit
+
+var _gate := {}                  # gate picker state (empty = the plain map)
+var _gate_dests := {}            # destination system id -> {gate, name, pos}
+var _gate_links := PackedInt32Array()   # [a, b, wormhole] triples
+var _nebulae: Array = []         # [{id, x, y, w, h, picts, full}]
+var _tex := {}                   # PICT id -> Texture2D (or null)
 
 var _ids := PackedInt32Array()
 var _info := {}                  # id -> {pos: Vector2, vis: int, color: Color}
@@ -74,11 +99,25 @@ func setup(world) -> void:
 	nova = world
 	layer = 10
 	visible = false
+	var bg := ColorRect.new()
+	bg.color = COLOR_BG
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(bg)
+	_neb = Control.new()
+	_neb.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_neb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var add_mat := CanvasItemMaterial.new()
+	add_mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD   # the original blends with addMax
+	_neb.material = add_mat
+	_neb.draw.connect(_draw_nebulae)
+	add_child(_neb)
 	_canvas = Control.new()
 	_canvas.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_canvas.mouse_filter = Control.MOUSE_FILTER_STOP
 	_canvas.draw.connect(_on_draw)
 	add_child(_canvas)
+	_build_find_box()
 
 
 func is_open() -> bool:
@@ -99,10 +138,40 @@ func open() -> void:
 	_canvas.queue_redraw()
 
 
+## The hypergate picker: the map in gate mode (see the header). No-op unless the bridge
+## has a gate picker open.
+func open_gate() -> void:
+	if nova == null or not nova.has_game():
+		return
+	var st = JSON.parse_string(nova.gate_picker_state())
+	if not (st is Dictionary) or st.is_empty():
+		return
+	nova.nav_refresh()
+	_reload()
+	_gate = st
+	_gate_dests.clear()
+	for d in st["destinations"]:
+		_gate_dests[int(d["system"])] = {"gate": int(d["gate"]), "name": str(d["name"]),
+			"pos": Vector2(d["x"], d["y"])}
+	_center = Vector2(st["hereX"], st["hereY"])
+	_cursor = _canvas.size * 0.5
+	_hover = -1
+	_pad_mode = _pad_connected()
+	visible = true
+	nova.sound_beep(3)
+	_canvas.queue_redraw()
+
+
 func close() -> void:
 	if not visible:
 		return
 	visible = false
+	if not _gate.is_empty():
+		nova.gate_picker_cancel()
+		_gate = {}
+	else:
+		nova.nav_map_closed()   # closing re-syncs the route head (0x004a4fd0)
+	_find_box.visible = false
 	nova.sound_beep(1)   # and returns with snd 150
 	closed.emit()
 
@@ -132,6 +201,9 @@ func _reload() -> void:
 		_names[id] = nova.nav_system_name(id)
 		i += stride
 	_links = nova.nav_links()
+	_gate_links = nova.nav_gate_links() if bool(Prefs.get_value("map", "gate_links")) else PackedInt32Array()
+	var neb = JSON.parse_string(nova.nav_nebulae(false))
+	_nebulae = neb if neb is Array else []
 	_reload_route()
 
 
@@ -154,6 +226,14 @@ func _to_map(p: Vector2) -> Vector2:
 func _nearest(screen: Vector2, radius: float) -> int:
 	var best := -1
 	var best_d := radius
+	if not _gate.is_empty():
+		# In gate mode only the gate's destinations can be picked.
+		for id in _gate_dests:
+			var dg := _to_screen(_gate_dests[id]["pos"]).distance_to(screen)
+			if dg < best_d:
+				best_d = dg
+				best = id
+		return best
 	for id in _ids:
 		var d := _to_screen(_info[id]["pos"]).distance_to(screen)
 		if d < best_d:
@@ -167,7 +247,7 @@ func _process(delta: float) -> void:
 		return
 	var moved := false
 
-	# Pan: arrows/WASD or the right stick.
+	# Pan: the arrow keys or the right stick.
 	var pan := Input.get_vector("map_pan_left", "map_pan_right", "map_pan_up", "map_pan_down", 0.2)
 	if pan != Vector2.ZERO:
 		_center += pan * PAN_SPEED * delta / _zoom
@@ -203,12 +283,20 @@ func _input(event: InputEvent) -> void:
 	if not visible:
 		return
 
+	# The Find box owns the keyboard while it is up (Esc closes just the box).
+	if _find_box.visible:
+		if event.is_action_pressed("ui_cancel"):
+			get_viewport().set_input_as_handled()
+			_find_box.visible = false
+			_canvas.queue_redraw()
+		return
+
 	# Closing (and the jump shortcut) first, so nothing leaks to the flight code.
 	if event.is_action_pressed("map_close") or event.is_action_pressed("galaxy_map"):
 		get_viewport().set_input_as_handled()
 		close()
 		return
-	if event.is_action_pressed("hyperjump"):
+	if event.is_action_pressed("hyperjump") and _gate.is_empty():
 		get_viewport().set_input_as_handled()
 		close()
 		jump_requested.emit()
@@ -240,7 +328,10 @@ func _input(event: InputEvent) -> void:
 			JOY_BUTTON_DPAD_UP: pass   # also "hyperjump", handled above
 			JOY_BUTTON_DPAD_DOWN: _step_direction(Vector2.DOWN)
 
-	if event.is_action_pressed("map_zoom_in"):
+	if event.is_action_pressed("map_find") and _gate.is_empty():
+		get_viewport().set_input_as_handled()
+		open_find()
+	elif event.is_action_pressed("map_zoom_in"):
 		_zoom_at(1.25, _canvas.size * 0.5)
 	elif event.is_action_pressed("map_zoom_out"):
 		_zoom_at(0.8, _canvas.size * 0.5)
@@ -302,6 +393,9 @@ func _zoom_at(factor: float, screen: Vector2) -> void:
 
 
 func _plot(id: int, extend: bool) -> void:
+	if not _gate.is_empty():
+		_pick_gate_destination(id)
+		return
 	if extend:
 		nova.nav_shift_click(id)
 	elif _auto_route:
@@ -313,6 +407,62 @@ func _plot(id: int, extend: bool) -> void:
 	_canvas.queue_redraw()
 
 
+# Gate mode: travel through the gate to the destination system `id`.
+func _pick_gate_destination(id: int) -> void:
+	if not _gate_dests.has(id):
+		return
+	if nova.gate_picker_choose(int(_gate_dests[id]["gate"])):
+		visible = false
+		_gate = {}
+		_find_box.visible = false
+		closed.emit()   # the bridge has already rebuilt the destination; Main resumes flight
+
+
+# --- Find ------------------------------------------------------------------------
+
+func _build_find_box() -> void:
+	_find_box = PanelContainer.new()
+	_find_box.visible = false
+	_find_box.position = Vector2(20, 20)
+	var box := HBoxContainer.new()
+	box.add_theme_constant_override("separation", 8)
+	var l := Label.new()
+	l.text = "Find system:"
+	box.add_child(l)
+	_find_edit = LineEdit.new()
+	_find_edit.custom_minimum_size = Vector2(260, 0)
+	_find_edit.placeholder_text = "name…"
+	_find_edit.text_submitted.connect(do_find)
+	box.add_child(_find_edit)
+	_find_box.add_child(box)
+	add_child(_find_box)
+
+
+func open_find() -> void:
+	_find_edit.text = ""
+	_find_box.visible = true
+	_find_edit.grab_focus()
+	if DisplayServer.has_feature(DisplayServer.FEATURE_VIRTUAL_KEYBOARD):
+		DisplayServer.virtual_keyboard_show("")
+
+
+## Run the original's Find on `query`: a hit selects the system (and plots a course there
+## when auto-route is on) and centres the view; a miss just beeps. Returns the system id
+## or -1.
+func do_find(query: String) -> int:
+	var id: int = nova.nav_find(query)
+	_find_box.visible = false
+	if id == -1:
+		return -1
+	if _auto_route:
+		nova.nav_plot_course(id)
+	_reload_route()
+	if _info.has(id):
+		_center = _info[id]["pos"]
+	_canvas.queue_redraw()
+	return id
+
+
 func _system_label(id: int) -> String:
 	var n: String = _names.get(id, "")
 	return n if n != "" else "Unknown system"
@@ -320,10 +470,48 @@ func _system_label(id: int) -> String:
 
 # MARK: Drawing
 
+func _pict_tex(id: int) -> Texture2D:
+	if _tex.has(id):
+		return _tex[id]
+	var tex: Texture2D = null
+	var info: PackedInt32Array = nova.pict_info(id)
+	if info.size() >= 2 and info[0] > 0 and info[1] > 0:
+		var bytes: PackedByteArray = nova.pict_rgba(id)
+		if bytes.size() >= info[0] * info[1] * 4:
+			tex = ImageTexture.create_from_image(
+				Image.create_from_data(info[0], info[1], false, Image.FORMAT_RGBA8, bytes))
+	_tex[id] = tex
+	return tex
+
+
+# Nebula art (0x004a51f0): each nebula is placed by its map-space box and drawn with the
+# smallest of its seven zoom-level PICTs that is at least as wide or tall as the
+# destination (the last one otherwise).
+func _draw_nebulae() -> void:
+	var view := Rect2(Vector2.ZERO, _neb.size)
+	for neb in _nebulae:
+		var tl := _to_screen(Vector2(neb["x"], neb["y"]))
+		var rect := Rect2(tl.round(), (Vector2(neb["w"], neb["h"]) * _zoom).round())
+		if not rect.intersects(view):
+			continue
+		var pick: Texture2D = null
+		for pid in neb["picts"]:
+			var t := _pict_tex(int(pid))
+			if t == null:
+				continue
+			pick = t
+			if rect.size.x <= t.get_width() or rect.size.y <= t.get_height():
+				break
+		if pick == null and int(neb["full"]) >= 0:
+			pick = _pict_tex(int(neb["full"]))
+		if pick != null:
+			_neb.draw_texture_rect(pick, rect, false)
+
+
 func _on_draw() -> void:
 	var c := _canvas
 	var size := c.size
-	c.draw_rect(Rect2(Vector2.ZERO, size), COLOR_BG)
+	_neb.queue_redraw()
 	var font := ThemeDB.fallback_font
 	var fs := ThemeDB.fallback_font_size
 	var view := Rect2(Vector2.ZERO, size).grow(60.0)
@@ -339,6 +527,30 @@ func _on_draw() -> void:
 		if not view.has_point(pa) and not view.has_point(pb):
 			continue
 		c.draw_line(pa, pb, COLOR_LINK_NEAR if a == _current or b == _current else COLOR_LINK, 1.0, true)
+
+	# Hypergate (cyan) and wormhole (violet) spokes: the opt-in enhancement.
+	var gi := 0
+	while gi + 2 < _gate_links.size():
+		var ga := _gate_links[gi]
+		var gb := _gate_links[gi + 1]
+		var worm := _gate_links[gi + 2] != 0
+		gi += 3
+		if _info.has(ga) and _info.has(gb):
+			c.draw_dashed_line(_to_screen(_info[ga]["pos"]), _to_screen(_info[gb]["pos"]),
+				COLOR_GATE_WORM if worm else COLOR_GATE_HYPER, 1.3, 4.0)
+
+	# Gate picker: bold blue spokes from here to each destination, a ring on each.
+	if not _gate.is_empty():
+		var here := _to_screen(Vector2(_gate["hereX"], _gate["hereY"]))
+		for did in _gate_dests:
+			var dp := _to_screen(_gate_dests[did]["pos"])
+			c.draw_line(here, dp, COLOR_GATE_ROUTE, 3.0, true)
+			c.draw_arc(dp, 9.0, 0.0, TAU, 24, COLOR_GATE_ROUTE, 2.0, true)
+			if not _info.has(did):
+				c.draw_circle(dp, 3.0, COLOR_GATE_ROUTE)
+			if _zoom >= 0.5 or did == _hover:
+				c.draw_string(ThemeDB.fallback_font, dp + Vector2(12.0, 4.0), str(_gate_dests[did]["name"]),
+					HORIZONTAL_ALIGNMENT_LEFT, -1, ThemeDB.fallback_font_size - 2, COLOR_TEXT)
 
 	# Route: green while the fuel lasts, red past it.
 	if _route.size() > 0 and _info.has(_current):
@@ -397,6 +609,9 @@ func _on_draw() -> void:
 
 
 func _draw_panel(c: Control, font: Font, fs: int, size: Vector2) -> void:
+	if not _gate.is_empty():
+		_draw_gate_panel(c, font, fs, size)
+		return
 	var focus := _hover if _hover != -1 else (_selected if _selected != -1 else _current)
 	var lines: Array = []
 	lines.append(("Current: " + _system_label(_current)) if focus == _current
@@ -423,7 +638,25 @@ func _draw_panel(c: Control, font: Font, fs: int, size: Vector2) -> void:
 		c.draw_string(font, rect.position + Vector2(10, 8 + (n + 1) * (fs + 6) - 4), lines[n],
 			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, COLOR_TEXT if n < 2 else COLOR_DIM)
 
-	var hint := ("L-stick cursor · D-pad next system · A plot · Y add hop · X auto-route · D-pad ↑ jump · "
+	var hint := ("L-stick cursor · D-pad next system · A plot · Y add hop · X auto-route · L3 find · D-pad ↑ jump · "
 		+ "LB/RB zoom · R-stick pan · B close") if _pad_mode else (
-		"Click plot · Shift+click add hop · J jump · T auto-route · wheel zoom · right-drag pan · C center · M/Esc close")
+		"Click plot · Shift+click add hop · J jump · T auto-route · F find · wheel zoom · right-drag pan · C center · M/Esc close")
+	c.draw_string(font, Vector2(20, size.y - 16), hint, HORIZONTAL_ALIGNMENT_LEFT, -1, fs - 2, COLOR_DIM)
+
+
+# The gate picker's panel: the original's "select a destination" prompt (STR# 2002 #340)
+# and the gate's name.
+func _draw_gate_panel(c: Control, font: Font, fs: int, size: Vector2) -> void:
+	var focus := _hover if _hover != -1 else -1
+	var lines: Array = [str(_gate["name"]), str(_gate["prompt"])]
+	if focus != -1:
+		lines.append(str(_gate_dests[focus]["name"]))
+	var h := lines.size() * (fs + 6) + 16
+	var rect := Rect2(Vector2(20, size.y - h - 40), Vector2(430, h))
+	c.draw_rect(rect, Color(0.04, 0.06, 0.1, 0.85))
+	c.draw_rect(rect, Color(0.3, 0.45, 0.65, 0.6), false, 1.0)
+	for n in lines.size():
+		c.draw_string(font, rect.position + Vector2(10, 8 + (n + 1) * (fs + 6) - 4), lines[n],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, COLOR_TEXT if n != 1 else COLOR_ROUTE)
+	var hint := "Click / A pick a destination · wheel zoom · right-drag pan · Esc / B leave"
 	c.draw_string(font, Vector2(20, size.y - 16), hint, HORIZONTAL_ALIGNMENT_LEFT, -1, fs - 2, COLOR_DIM)

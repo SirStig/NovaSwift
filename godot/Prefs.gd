@@ -5,7 +5,14 @@
 #
 #   [audio]   master · sfx · ui · music (0…1) · muted
 #   [video]   fullscreen · vsync · scale (window size multiple of 1280×720)
-#   [input]   deadzone (Controls.stick_deadzone)
+#   [input]   deadzone (Controls.stick_deadzone) · modern_keys (Controls.layout: the port's
+#             earlier key layout instead of the original's, default off)
+#   [map]     gate_links — draw hypergate / wormhole spokes on the plain galaxy map (an
+#             enhancement; the original draws them only in the gate picker), default off
+#   [presentation] modern_menu · modern_dialogs · modern_hud — Classic (all false, default)
+#             draws the original ïntf status bar and DLOG/DITL dialogs from the user's data
+#             (ui/classic/); Nova Swift (all true) keeps the port's own screens. See
+#             ui_mode()/apply_ui_mode().
 #   [data]    dir — the EV Nova data folder chosen in the data-setup screen
 #   [keys]    action -> { keys, buttons, alt_keys } — only what the player rebound
 #
@@ -25,8 +32,13 @@ const SCALES := [0.75, 1.0, 1.25, 1.5, 2.0]
 const DEFAULTS := {
 	"audio": {"master": 1.0, "sfx": 1.0, "ui": 1.0, "music": 0.7, "muted": false},
 	"video": {"fullscreen": false, "vsync": true, "scale": 1.0},
-	"input": {"deadzone": Controls.STICK_DEADZONE},
+	"input": {"deadzone": Controls.STICK_DEADZONE, "modern_keys": false},
 	"data": {"dir": ""},
+	"map": {"gate_links": false},
+	# Presentation (mirrors the Apple GameSettings modernMainMenu / modernDialogs /
+	# modernHUD toggles). false = the authentic original UI (default); true = the
+	# port's own "Nova Swift" screens. Classic = all off, Nova Swift = all on.
+	"presentation": {"modern_menu": false, "modern_dialogs": false, "modern_hud": false},
 }
 
 static var _cfg := ConfigFile.new()
@@ -40,6 +52,7 @@ static func load_all() -> void:
 	_cfg.load(path)   # a missing file is fine: every getter falls back to DEFAULTS
 	_loaded = true
 	Controls.stick_deadzone = float(get_value("input", "deadzone"))
+	Controls.layout = Controls.LAYOUT_MODERN if bool(get_value("input", "modern_keys")) else Controls.LAYOUT_ORIGINAL
 	Controls.overrides = {}
 	if _cfg.has_section("keys"):
 		for action in _cfg.get_section_keys("keys"):
@@ -69,6 +82,8 @@ static func set_value(section: String, key: String, value: Variant) -> void:
 	_cfg.set_value(section, key, value)
 	if section == "input" and key == "deadzone":
 		Controls.stick_deadzone = float(value)
+	elif section == "input" and key == "modern_keys":
+		Controls.layout = Controls.LAYOUT_MODERN if bool(value) else Controls.LAYOUT_ORIGINAL
 
 
 ## Back to factory settings for the sections the Settings screen's pages edit.
@@ -109,6 +124,31 @@ static func apply_video() -> void:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 		var size := Vector2i((Vector2(BASE_SIZE) * float(get_value("video", "scale"))).round())
 		DisplayServer.window_set_size(size)
+
+
+# --- presentation presets (Apple GameSettings.UIMode) ---------------------------
+
+const UI_CLASSIC := "classic"
+const UI_NOVA_SWIFT := "nova_swift"
+const UI_CUSTOM := "custom"
+
+
+## "classic" (all authentic), "nova_swift" (all modern) or "custom" (mixed).
+static func ui_mode() -> String:
+	var on := 0
+	for k in ["modern_menu", "modern_dialogs", "modern_hud"]:
+		if bool(get_value("presentation", k)):
+			on += 1
+	return UI_CLASSIC if on == 0 else (UI_NOVA_SWIFT if on == 3 else UI_CUSTOM)
+
+
+## Stamp the three toggles from a preset (UI_CUSTOM is a no-op).
+static func apply_ui_mode(mode: String) -> void:
+	if mode == UI_CUSTOM:
+		return
+	var modern := mode == UI_NOVA_SWIFT
+	for k in ["modern_menu", "modern_dialogs", "modern_hud"]:
+		set_value("presentation", k, modern)
 
 
 # --- game data location -------------------------------------------------------

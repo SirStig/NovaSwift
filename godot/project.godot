@@ -19,6 +19,11 @@ run/main_scene="res://Main.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
 config/icon="res://icon.png"
 
+[autoload]
+
+; Logical viewport = window size in points (no magnify-to-fill). See WindowScale.gd.
+WindowScale="*res://WindowScale.gd"
+
 [display]
 
 window/size/viewport_width=1280
