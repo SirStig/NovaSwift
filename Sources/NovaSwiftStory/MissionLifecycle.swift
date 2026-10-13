@@ -139,6 +139,11 @@ extension StoryEngine {
         am.failed = false
         am.objectiveComplete = false
         am.slot = firstFreeSlot()
+        if m.timeLimit > 0, let d = t.deadline, let slot = am.slot {
+            var table = player.slotDeadlines ?? [:]
+            table[slot] = d
+            player.slotDeadlines = table
+        }
         populateMissionShips(&am, m)
         am.shipSystemResolved = true
         player.activeMissions.append(am)
@@ -256,7 +261,16 @@ extension StoryEngine {
         if !failed, complete, !wasComplete {
             showMissionText(m.shipDoneText, for: m, active: am)
             if m.shipGoal != .none { runScript(m.onShipDone, m, "OnShipDone") }
-            if m.autoAbortWhenStarted { resolveAutoAbort(serial: serial) }
+            if m.autoAbortWhenStarted {
+                if slotIndex(serial: serial) != nil {
+                    resolveAutoAbort(serial: serial)
+                } else {
+                    // 0x00443c60 calls Mission_ResolveMisnSlot (0x00447d90) whether or not the
+                    // OnShipDone script already cleared the slot (an `A` on its own mission runs
+                    // OnAbort via 0x00440aa0): OnAbort and the abort side effects run a second time.
+                    runAutoAbortEffects(m)
+                }
+            }
         }
     }
 
@@ -530,12 +544,18 @@ extension StoryEngine {
     /// An auto-abort (Flags 0x0001) mission's objective is done (0x00447d90):
     /// OnAbort, DatePostInc days, Flags 0x0008 drains a jump of fuel and Flags2
     /// 0x0002 pays PayVal. The original applies no CompGovt reward here.
-    private func resolveAutoAbort(serial: Int) {
-        guard let i = slotIndex(serial: serial), let m = game.mission(player.activeMissions[i].missionID) else { return }
+    /// `Mission_ResolveMisnSlot` (0x00447d90) minus the slot teardown: OnAbort, the post-increment
+    /// days, the Flags 0x0008 fuel cost and the Flags2 0x0002 pay.
+    private func runAutoAbortEffects(_ m: MissionRes) {
         runScript(m.onAbort, m, "OnAbort")
         if m.datePostIncrement > 0 { advanceDays(m.datePostIncrement) }
         if m.flags1 & 0x0008 != 0 { player.fuel = currentFuel() - 100 }
         if m.flags2 & 0x0002 != 0 { applyPayVal(m.pay) }
+    }
+
+    private func resolveAutoAbort(serial: Int) {
+        guard let i = slotIndex(serial: serial), let m = game.mission(player.activeMissions[i].missionID) else { return }
+        runAutoAbortEffects(m)
         services?.releaseMissionShips(missionID: m.id)
         guard let j = slotIndex(serial: serial) else { return }
         let am = player.activeMissions.remove(at: j)
@@ -757,7 +777,10 @@ extension StoryEngine {
             fields = .init(travelSpob: am.travelSpobID, returnSpob: returnStellar(of: am, m),
                            cargoType: am.resolvedCargoType ?? m.cargoType,
                            cargoQty: am.resolvedCargoQty ?? max(0, m.cargoQty),
-                           pay: m.pay, deadline: am.deadline, specialShipName: name ?? "", accepted: true)
+                           pay: m.pay,
+                           // A no-time-limit mission reads whatever its slot last held (0x004444f0).
+                           deadline: am.deadline ?? am.slot.flatMap { player.slotDeadlines?[$0] },
+                           specialShipName: name ?? "", accepted: true)
         } else {
             let t = offerTargets(for: m)
             fields = .init(travelSpob: t.travelSpob, returnSpob: t.returnSpob, cargoType: t.cargoType,

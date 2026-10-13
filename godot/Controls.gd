@@ -334,6 +334,19 @@ static func describe_keys(action: String) -> String:
 	return " / ".join(parts) if not parts.is_empty() else "—"
 
 
+## The first bound keyboard key's name for `action`, or "" when none is bound -- what the new-pilot travel
+## hints (STR# 2002 #24-28) embed; the original expands an unbound slot to the empty string.
+static func first_key_name(action: String) -> String:
+	var spec: Dictionary = effective(action)
+	for k in spec.get("keys", []):
+		return OS.get_keycode_string(int(k))
+	for k in spec.get("alt_keys", []):
+		return "Alt+" + OS.get_keycode_string(int(k))
+	for k in spec.get("shift_keys", []):
+		return "Shift+" + OS.get_keycode_string(int(k))
+	return ""
+
+
 const _BUTTON_NAMES := {
 	JOY_BUTTON_A: "A", JOY_BUTTON_B: "B", JOY_BUTTON_X: "X", JOY_BUTTON_Y: "Y",
 	JOY_BUTTON_BACK: "Back", JOY_BUTTON_GUIDE: "Guide", JOY_BUTTON_START: "Start",

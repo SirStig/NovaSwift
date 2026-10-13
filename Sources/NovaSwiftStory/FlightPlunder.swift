@@ -120,8 +120,13 @@ public final class FlightPlunder {
         let loot = world.takePlunderOutfits(from: manifest.shipID)
         guard !loot.isEmpty else { return }
         for oid in loot { pilot.grantOutfit(oid) }
-        let names = Set(loot.compactMap { game.outfit($0)?.name })
-        pendingMessages.append("Salvaged \(loot.count) item(s)\(names.isEmpty ? "" : ": \(names.sorted().joined(separator: ", "))").")
+        // "You retrieved a <outfit> from this ship." (#106 / #108, 0x00482940):
+        // the original hands over one outfit type per boarding, so the first
+        // type in the loot names the line.
+        guard let first = loot.first, let outfit = game.outfit(first) else { return }
+        let count = loot.filter { $0 == first }.count
+        pendingMessages.append(OriginalText(game: game).retrievedOutfit(
+            count: count, singular: outfit.lowercaseDisplayName, plural: outfit.lowercasePluralDisplayName))
     }
 
     /// Lines raised by boarding itself (loot), drained by the frontend.
@@ -184,7 +189,7 @@ public final class FlightPlunder {
             guard credits > 0 else { return r }
             panic?.looted(.credits)
             pilot.credits += credits
-            r.messages.append("Took \(credits) credits.")
+            r.messages.append(text.plunderedCredits)   // #116 #33 #108
         case .cargo:
             // The hold the fleet shares: the live ship's, folded into the pilot first.
             pilot.cargo = world.player.cargo
@@ -194,23 +199,26 @@ public final class FlightPlunder {
             if let (commodity, tons) = taken.first {
                 pilot.cargo = world.player.cargo   // the engine already loaded the ship
                 let name = Commodity(rawValue: commodity).map { game.commodityName($0) } ?? ""
-                r.messages.append("\(text.misc(115)) \(OriginalText.grouped(tons)) \(text.misc(tons == 1 ? 1 : 2)) \(text.misc(391)) \(name) \(text.misc(108))")
+                r.messages.append(text.plunderedCargo(tons: tons, name: name))
             } else {
-                r.messages.append(text.misc(114))
+                r.messages.append(text.plunderCargoNoRoom)
             }
         case .energy:
+            // 0x00482940, slot 6: #6 when nothing fits, #5 when the tank is
+            // still short afterwards, #4 when it is full.
             let took = world.takePlunderFuel(from: id)
-            guard took >= 1 else { return r }
+            guard took >= 1 else { r.messages.append(text.plunderedEnergy(tookAny: false, tankFull: false)); return r }
             panic?.looted(.fuel)
             pilot.fuel = world.player.fuel
-            let jumps = Int((took / 100).rounded())
-            r.messages.append(jumps > 0 ? "Siphoned \(Int(took)) fuel (~\(jumps) jump\(jumps == 1 ? "" : "s"))."
-                                        : "Siphoned \(Int(took)) fuel.")
+            r.messages.append(text.plunderedEnergy(tookAny: true, tankFull: world.player.fuel >= world.player.maxFuel))
         case .ammo:
+            // Asked before the take: a bank emptied by it no longer qualifies.
+            let ammoOutfit = world.ammoPlunderOutfit(of: id)
             let rounds = world.takePlunderAmmo(from: id, freeMass: PilotEconomy.freeMass(pilot, galaxy: galaxy))
-            guard rounds > 0 else { return r }
+            guard rounds > 0, let ammoOutfit else { r.messages.append(text.misc(117)); return r }
             panic?.looted(.ammo)
-            r.messages.append("Transferred \(rounds) round\(rounds == 1 ? "" : "s") of ammunition.")
+            r.messages.append(text.plunderedAmmo(rounds: rounds, singular: ammoOutfit.lowercaseDisplayName,
+                                                 plural: ammoOutfit.lowercasePluralDisplayName))
         case .capture:
             return capture(id, world: world, game: game, pilot: &pilot)
         }
@@ -281,7 +289,7 @@ public final class FlightPlunder {
         let record = pilot.registerEscort(shipType: cap.shipTypeID, name: name, origin: .captured)
         world.ship(id: cap.shipID)?.escortRecordID = record.id
         applyOnCapture(shipType: cap.shipTypeID, game: game, pilot: &pilot)
-        return ["Ship captured — it joins your escorts."]
+        return [OriginalText(game: game).capturedAsEscortLine]   // #123
     }
 
     /// "Take command": the captured hull becomes the flagship and the old one

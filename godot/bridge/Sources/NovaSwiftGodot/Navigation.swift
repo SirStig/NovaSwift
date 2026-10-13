@@ -31,4 +31,13 @@ struct NavState {
     var messages: [String] = []
     /// Name of the system just arrived in, until `take_jump_arrival` reads it.
     var arrivedIn: String?
+    /// The `quickHyperjump` enhancement's maneuver, while it runs (shared `QuickHyperjump`; the
+    /// engine's `playerJump` stays nil for it). The overlay values are the last ones it asked for.
+    var quick: QuickHyperjump?
+    var quickFlash = 0.0
+    var quickStreak = 0.0
+    var quickStretch = 1.0
+    /// Seconds the destination fades in after the last arrival: `QuickHyperjump.arriveFadeSeconds`
+    /// after a quick jump, 0 = the frontend's own (Mac 1.5 s) fade after the original's.
+    var arrivalFade = 0.0
 }

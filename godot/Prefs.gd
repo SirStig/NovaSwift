@@ -28,6 +28,7 @@
 #   [pilots]  dir (the Pilots folder; "" = the default, see screens/PilotFiles.gd) · recent (paths of
 #             pilot files opened lately) · migrated (user://pilots copied across once)
 #   [classic] the original Preferences window's (DLOG 4003) flags and levels (screens/ClassicPreferences.gd)
+#   [updates] check · beta · last_check · last_attempt · skipped -- the auto-updater (updater/UpdateController.gd)
 #   [keys]    action -> { keys, buttons, alt_keys } — only what the player rebound
 #
 # Every GameSettings field with a Godot equivalent has a key here (docs/GODOT_SETTINGS_KEYS.md is the
@@ -61,8 +62,15 @@ const DEFAULTS := {
 	"classic": {"share_processor_time": true, "intro_music": true, "play_movies": true,
 		"smoke_trails": true, "ship_animations": true, "engine_glow": true, "running_lights": true,
 		"weapon_effects": true, "parallax_starfield": true, "ambient_sounds": true,
-		"hyperspace_effects": true, "check_for_updates": false,
+		"hyperspace_effects": true,
 		"sound_volume_step": 5, "brightness_step": 3},
+	# Auto-updater (godot/updater/, docs/UPDATER.md). check = look for a newer release (at most once per 24 h, from
+	# the main menu) and offer it -- nothing is ever downloaded without the player choosing Update now; beta =
+	# = "Experimental updates" (key kept from the old "beta" name): also offer experimental releases;
+	# installed_channel / pending_channel = channel of the running build / of an install in flight; last_check / last_attempt = Unix seconds; skipped = the version the player chose
+	# "Skip this version" for. The original Preferences window's "Check For Updates" box (DITL item 21) IS updates/check.
+	"updates": {"check": true, "beta": false, "last_check": 0, "last_attempt": 0, "skipped": "",
+		"installed_channel": "stable", "pending_channel": ""},
 	"map": {"gate_links": false, "show_borders": false},
 	# Tutorial hints (Apple GameSettings.tutorialHints + the per-install UserDefaults seen flags):
 	# enabled gates the one-time hint cards, flight training offer; seen = the NovaHints storage keys

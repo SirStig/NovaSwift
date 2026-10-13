@@ -41,6 +41,9 @@ window/stretch/aspect="expand"
 
 [rendering]
 
+; Required so the macOS (arm64) export is allowed; harmless elsewhere (extra ASTC imports).
+textures/vram_compression/import_etc2_astc=true
+
 ; Black, not Godot's default grey: any frame where no screen has drawn yet
 ; (e.g. main menu -> flight hand-off) shows black like the original.
 environment/defaults/default_clear_color=Color(0, 0, 0, 1)

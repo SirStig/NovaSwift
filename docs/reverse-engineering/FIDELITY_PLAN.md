@@ -3909,3 +3909,258 @@ default and permadeath scope (FL-03), and the hyperspace fade (FL-04).
    NovaSwift save slots with it (FL-03).
 5. Hitch behaviour (Q-FL-13) and persisting offer rolls / aux ships in `.evpilot` (Q-MS-06).
 6. Whether any FIX-only item listed at the end of §3 should be kept as a toggle instead.
+
+## 2026-10-13 closing pass (folding hulls, targeting, open questions, quick hyperjump)
+
+Written, not built or run: the user builds and tests. Everything below is in shared code first
+(`Sources/`), then wired into the Apple scene and the Godot bridge. Tests are listed per item.
+
+### 1. Folding hulls (`shän` Flags 0x0002, and 0x0080 "ship unfolds to fire")
+
+**Original** (`Ship_UpdateVisualState` 0x00428340, the Flags 0x0002 branch; class +0xa24 is shän +0x2e,
++0x9fe AnimDelay, +0xa00 the set count, +0xa06 FramesPer). Per-ship state: current set `+0xc8fc`, direction
+`+0xc8fa` (+1 unfolding, −1 folding, 0 at rest), timer `+0xe4e4`, last weapon-fire tick `+0xa8`. The hull sheet's
+sets are the fold frames; the drawn frame is `set × FramesPer + heading`.
+- **Step.** Direction +1: timer += frame scale; when `AnimDelay < timer` the timer clears and the set goes up
+  by one; once `setCount ≤ set` it is clamped to the last set and the direction clears (so a finished unfold
+  takes one extra AnimDelay). Direction −1: same timer, set goes down, direction clears at set 0. Direction 0
+  clears the timer. A disabled hull is not special-cased (it keeps folding; the banking/animation arms are
+  the ones that go dead).
+- **Unfold (set 0, direction +1; a 0x0080 hull starts at its last set with direction 0):** takeoff
+  (`Stellar_HandleStellarEntryAndExit` 0x00457580 :490), the player's hyperspace arrival (the jump-fire block
+  of `Ship_HandlePlayerShipCore` 0x0044aa70 :1678 and its copies 0x0044d371 / 0x0044f3d0 / 0x0044e019 /
+  0x0044df50 / 0x0044bf50 / 0x0044eed5 / 0x0044c2e0), a new game (`Ship_ResetPlayerShipState` 0x004b3350 :58), an NPC
+  jump-in (`FUN_00410e20`, state 8, set 0 direction +1 whatever the flags), and the AI tick
+  (`Ship_UpdateShipAI` 0x00401000 :88 arrival, :240 parked and no longer coasting): a normal hull unfolds at
+  once; a 0x0080 hull only after 45 ticks (60 Hz) without firing.
+- **Fold (direction −1, only above set 0):** the player engaging a jump (0x0044c4e9 and every fragment copy;
+  a 0x0080 hull does not), an NPC in control mode 4 or 0x0d (`Ship_UpdateShipAI` :123; not 0x0080), and an NPC
+  that has reached the stop box at a stellar (`Ship_UpdateShipAiState` 0x00405590 :180, **including** 0x0080
+  hulls). Landing needs nothing: the player's landed screen replaces the view (Q8 closed: there is no landing
+  unfold beyond the takeoff one). Spawned ships and bay fighters start fully extended (0x004254b0, 0x0041e640).
+- **0x0080.** `Weapon_FireShipWeapons` 0x00414550 and `Weapon_FirePlayerWeaponBank` 0x00455150 stamp `+0xa8`
+  with the tick on every attempt and, for a 0x0002+0x0080 hull above set 0 with more than one set, set the
+  direction to −1 and **return without firing**. The hull has to reach set 0 before a shot leaves, and it
+  extends again 45 ticks after the last attempt.
+- Quirk kept: an aborted or collapsed jump leaves a folded hull folded (nothing in the decompile unfolds it
+  again before the next takeoff or arrival).
+
+**Done.** `Sources/NovaSwiftEngine/HullAnimator.swift`: `HullFoldConfig` (from `ShanRes`, honours the Ship
+Animations preference), `HullFoldState` (the step and every trigger above), `World.resolveFoldConfig` /
+`beginPlayerHullLaunch`; `Ship.fold` and `Ship.slot` (World.swift); `World.step` steps every ship and calls
+`noteFireAttempt` in `fireWeapons`; the player jump engage is observed in the `playerJump` branch; arrival is
+`World.placePlayerAtHyperspaceArrival` and `GameSession.makeWorld`; NPC triggers are in
+`OriginalAI.update` / `enterArrival` and `OriginalAIStateMachine` (stop box). `HullAnimConfig.baseSet` and the
+Apple `HullAnim.baseSet` take `foldSet:` and a `.folding` hull ignores `disabled`. Renderers: Apple `GameScene`
+(player and NPC sync) and Godot `FlightVisuals.build` pass `ship.fold.currentSet`; `World.shipAnimations` is
+pushed from the setting (Apple `configureNewWorld`, Godot `FlightVisuals.advance`).
+**Tests.** `HullFoldTests` (step timing, the extra period, launch / jump / stellar / idle / 0x0080 rules,
+`baseSet`). **Unsure it compiles:** none known; the `didSet` on `World.shipAnimations` touches `allShips`.
+Observation, not changed: `ShanRes.hidesLightsWhenDisabled` is 0x0040 (Bible "hide running lights"); the
+decompile's disabled check on the alternate sprite is 0x0020 and animation pauses on a disabled hull only with
+0x0010, while `baseSet` returns set 0 for a disabled animated hull whatever the flags.
+
+### 2. UI-07 targeting details
+
+- **Slot reuse.** `Ship_AllocateShipSlotInSystem` 0x004254b0 scans from slot 1 for the first free one
+  (`+0xb8 == 0`), so a freed slot is taken by the next arrival and the cycle (slot order) no longer follows
+  spawn order. **Done:** `Ship.slot` is the lowest free slot among `npcs` when `World.addNPC` adds it;
+  `playerCycleCandidates` sorts by slot and `cyclePlayerTarget` steps by slot (resuming from the current ship's
+  slot even when it left the candidates).
+- **AI state 0x15.** `Ship_IsShipInAiState0x15` 0x004159c0 (`+0xc8c8 == 0x15`, the hypergate emergence hold) is
+  tested by 0x00461bd0 and 0x00461f60 (cycle) and 0x00462850 (nearest engaged); not by 0x00462bd0 (nearest
+  hostile). **Done:** `World.isEmergingFromGate` excludes it from the cycle and from `selectNearestEngaged`.
+**Tests.** `PlayerTargetSlotTests` (slots 1…n, freed-slot reuse and order both ways, state 0x15 skipped in the
+cycle and in Alt-R). `PlayerTargetCycleTests` still holds (slots fill in spawn order in a fresh system).
+
+### 3. The eight decompile questions
+
+1. **Miners hostile after an assistance request (0x0047e470) — closed, no gap.** The comm window's only paths to
+   `Ship_SetShipHostileToPlayer` are the refused bribe (prompt 0x1e) and the aggressive-govt branches. A miner in
+   state 0x10 (or any state outside idle / travel / depart / gate entry / scan approach,
+   `Ship_IsShipInNonIdleAiState` 0x00411270) takes the busy branch (`FUN_0040fca0` / `FUN_0040fce0` false →
+   prompt 0x10 for AI type < 5), never the assist payment. `OriginalAIComms.pressAssistance` already has that
+   state test and the refusal-only hostility. Nothing else in the window touches hostility.
+2. **`OnShipDone` text on abort (0x00443c60) — found a real gap, fixed.** Order in the original: ShipDoneText
+   dialog (+0x43), then the OnShipDone payload (only when the ship goal is not −1), then
+   `Mission_ResolveMisnSlot` 0x00447d90 if the auto-abort flag (+0x55 bit 0) is set. The text is **not**
+   suppressed; an `A` in the payload (`Mission_ExecuteMisnScriptEngine` 0x00449370 :112 →
+   `Mission_ClearMisnSlotAssignments(slot, 1)` 0x00440aa0) runs OnAbort and clears the slot, and then
+   `Mission_ResolveMisnSlot` runs anyway: OnAbort runs a **second** time with the post-increment days, the
+   Flags 0x0008 fuel cost and the Flags2 0x0002 pay. **Done:** `MissionLifecycle.evaluateObjective` replays
+   those effects (`runAutoAbortEffects`) when the script removed the slot of an auto-abort mission. Test:
+   `ClosingPassMissionTests` (`A200` self-abort gives two OnAbort runs; without the abort, one).
+3. **Carrier escort weapon-1 range (Q1) — closed, already matches.** `Ship_IssueEscortOrders` 0x004152e0
+   :46–48 probes `Weapon_IsShipWithinWeaponRangeOfTarget(…, 1)` both ways with the literal weapon index; the
+   port keeps that (`OriginalAIEscorts.escortOrders`, `escortProbeRange`).
+4. **chär Initial Record order — closed, already matches.** `PilotData_InitializePlayerState` 0x004cd4b0 walks the
+   four (govt, status) pairs in order and, per system, writes `+status` when the owner is allied with the pair's
+   govt, else `−status` when hostile or xenophobic, else leaves it; later pairs overwrite earlier ones, and
+   neutral systems keep the InitialRec set by `Game_ResetReputationAndAvailability`. `SystemReputation.initial`
+   does exactly this (`statuses where govt >= 128`, in order, overwriting). OnStart (`param_2 == 0` arm) runs
+   separately.
+5. **Stale `<DL>` slot dates — real gap, fixed.** `Mission_ActivateMissionAtSlot` 0x0043f100 writes the slot's
+   date (`DAT_005914b8 + slot × 0x14 + 6`) only when TimeLimit > 0 (`Mission_ComputeDateAfterSteps` 0x0043f080
+   returns early for steps < 1) and nothing clears it, so a no-time-limit mission accepted into a used slot
+   prints the previous occupant's deadline for `<DL>` (0x004444f0 active arm); a never-used slot prints the zero
+   date. **Done:** `PlayerState.slotDeadlines` (persisted, optional) is written at activation for timed
+   missions, and `resolveMissionText` falls back to it. Test: `ClosingPassMissionTests`.
+6. **Extra carrier-jump cases (Q-OS-04) — closed, all ported.** `Ship_UpdateEscortAI` 0x004048a0 :52–:75 and
+   `Ship_UpdateShipAiState` 0x00405590 :66: a follower whose leader is in control mode 4 / 0x0d (or state 2 mode
+   1 or has a positive jump timer) goes to squad-jump state 0x0b; an **inertialess** follower of a non-player
+   leader detaches and jumps by itself (state 2 mode 4); a behavior-5 fighter in state 0x0b that
+   `Stellar_CanShipInitiateJumpSequence` 0x00415b80 refuses goes back to state 5 and is recovered by
+   `Ship_RecoverCarriedShipToBay` 0x00415ea0 (75 px per axis); a follower whose leader is gone or destroyed
+   reverts to its class AI type. All four are in `OriginalAIStateMachine` (:63) and
+   `OriginalAIEscorts.escortSupervisor` (:283–:292). Q-OS-04 is settled: a fighter that cannot jump is
+   **recovered**, not lost, while the carrier spins up; if the carrier leaves first it is released to its class
+   AI.
+7. **Tractor refusal and STR# 2002 #36 (0x0044eed5) — closed, never printed.** 0x0044eed5 is the
+   tractor-locked player tick (entered from 0x0044aa70 :1187 when `+0xc8dc` names another ship). Every
+   `Resource_LoadStringEntry(…, 0x7d2, 0x24)` in 0x0044aa70 / 0x0044bf50 / 0x0044c2e0 / 0x0044c8d0 / 0x0044eed5
+   is the overlay-clear test (`FUN_0046ef00` against the live message, then an empty
+   `NovaHud_ShowOverlayMessage`), together with #42, #30 and #31. No site prints #36, so a locked ship's jump
+   is refused silently, as `hyperspaceRefusal` already does.
+8. **Caps Lock — closed.** `Frame_SpaceflightLoop` 0x00417600 :387 reads `GetKeyState(0x14)` (`FUN_00872375`)
+   and sets only `DAT_00596d34`, the x2 flag (cleared, or held off by the 1× jump rule); nothing else reads the
+   key. The "Caps Lock does something else" idea is contradicted; `GameSpeedRules.x2Flag` is the whole of it.
+
+### 4. Godot S12: the `quickHyperjump` enhancement
+
+**Shared.** `Sources/NovaSwiftEngine/QuickHyperjump.swift` is the Apple `GameScene.stepJump` align / accelerate /
+flash logic moved out unchanged (constants: 3 s align cap, 0.45 s burst or 0.18 s for a fast jump, divided by
+the ModType-22 speed factor, 0.14 s white-out ramp, over-speed ceiling 4 × top speed, 0.35 s arrival fade).
+`step(dt:player:)` returns the intent to fly, the white level, the streak opacity and stretch, and `commit` /
+`stopChargeLoop` on the frame the white-out peaks. `QuickHyperjump(flashOnly:)` is the gate transport's flash.
+The snd 128 charge loop (`SoundCues.hyperspaceChargeID`) sounds from the start until the commit
+(`chargeLoopSounding`).
+**Apple.** `GameScene` keeps `jumpPhase` for its own bookkeeping but the three phases now call
+`quickJump.step`, draw the returned values and commit on `frame.commit` (no behaviour change intended).
+**Godot.** Bridge (`NovaWorld.swift`, state in `Navigation.swift`): `begin_hyperjump` starts a `QuickHyperjump`
+instead of `PlayerHyperjump` when `plumbing.enhancements.quickHyperjump` (Prefs `gameplay/quick_hyperjump`,
+unchanged key); `step` flies it off the display clock and commits through the existing `completeHyperjump`;
+`hyperjump_active` covers both; `hyperjump_state` returns phase 4 / 5 / 6 with three extra values
+`[flash, streak opacity, streak stretch]`. **New bridge methods:** `hyperspace_charge_loop_sound() -> int`
+(128 while the maneuver runs, else −1) and `jump_arrival_fade() -> float` (0.35 after a quick jump, else 0).
+GDScript: `screens/HyperjumpFx.gd` draws the white ramp (Reduce Flashing cap, Hyperspace Fx off = black, no
+streaks), the streak fan and the 0.35 s arrival fade; `audio/GameAudio.gd` gains a dedicated looping
+`HyperspaceCharge` player (`_track_charge`, `charge_playing`, cut by `stop_all`). Both guard the new methods
+with `has_method`. Streaks assume a north-up view (the bearing is a compass angle), unlike Apple's
+camera-rotated container.
+**Tests.** `QuickHyperjumpTests`; `godot/tests/closing_pass_selfcheck.gd` (fake-bridge checks of the
+presentation and the loop, plus a real quick jump when the rebuilt bridge and a demo world allow it, else SKIP).
+`docs/GODOT_FIDELITY_GAPS.md` S12 and `docs/GODOT_SETTINGS_KEYS.md` still describe it as open or key-only; the
+docs pass should change them.
+
+## 2026-10-13 closing pass (text, hints, Player Info, quotes, Apple fixes)
+
+Status key: **WRITTEN, NOT BUILT** — nothing here was compiled or run (the user builds and tests); every Swift file was
+only syntax-parsed (`swiftc -parse`) and every GDScript file parse-checked. Shared code first (`Sources/`), then both
+frontends. STR# numbers are 1-based, as `OriginalText.misc(n)`.
+
+### 1. UI-11 invented status lines — WRITTEN, NOT BUILT
+
+New shared text: `Sources/NovaSwiftStory/FlightStatusText.swift` (`extension OriginalText`). Each replaced or removed line,
+with the decompiled call site:
+
+| Line (Apple `app/` / Godot bridge) | Decision | Original (STR# 2002, address) |
+|---|---|---|
+| "Your illicit cargo was detected — mission failed." | replaced | #286 "Your ship has been scanned - mission failed.", snd 151, none when the mission has Flags 0x0400 (`Ship_ScanPlayerForContraband` 0x00401800) |
+| "<govt>: contraband detected — you are let off with a warning." / "<govt> fined you Ncr…" | replaced | `<scanner>:  <pilot>, <finding> has been detected.` + ` You have been fined N credit(s).` when ScanFine is non-zero: mission cargo #376 #377 #378 #379, junk #376 + junk name + #378 #379, outfit #375 + a/an (#393/#394) or plural + #379; fine #380 + #32/#33; 0x190 raw calls, snd 154 (0x00401800). `ContrabandScan.scanLines`, `OriginalText.scanDetected`; the scanner is the përs name else the hull's class name (`World.broadcastLabel`) |
+| "<govt> logs your smuggling; your standing worsens." | removed | the SmugPenalty flood prints nothing (0x00401800) |
+| "You are being scanned." | removed | nothing prints when a scan starts; the interceptor's "<class>:  <pilot>, prepare to be scanned." (#381–383, 0x190, snd 154, 0x00403de0) is the AI's own overlay and was already there (its closing "!" is now "." as in the original) |
+| "Took N credits." | replaced | #116 + #33 + #108 "You stole all the credits from this ship." (0x00482940 slot 3) |
+| "Siphoned N fuel (~N jumps)." | replaced | slot 6: #6 nothing fits, #5 tank still short, #4 tank full (0x00482940) |
+| "Transferred N rounds of ammunition." | replaced | #115 + lower-case count word (STR# 137) + outfit's lower-case singular/plural + #108; #117 when nothing fits (0x00482940 slot 4) |
+| "Salvaged N item(s): …" (përs ItemClass loot) | replaced | #106 + a/an or count word + lower-case outfit name + #108 "You retrieved a … from this ship." (0x00482940 head) |
+| "Ship captured — it joins your escorts." (and the Godot debug console's copy) | replaced | #123 (0x00482940) |
+| "<name> transfers fuel and makes repairs." | replaced | `<class>:  Repairs complete, <pilot>.` — #384, 0xf0, snd 151 (`Ship_ApplyShipAiControls` 0x00408150, only when the target is the player) |
+| "<stellar> scrambles N defenders." | removed | the original prints no line when defenders launch (Demand Tribute is the comm window, 0x00480030) |
+| "<stellar> submits to your rule — it will pay tribute daily." | removed | no status line (0x00480030); the comm window shows the reply (also removed from the shared `FlightComm.apply` Godot uses) |
+| "<stellar> has been destroyed." / "… has been restored." (shot down, story Y/Z) | removed | no line in the original; also removed from `FlightComm.apply` and the Godot story services |
+| "<escort> was destroyed." | removed | `Ship_ApplyDamageToShip` 0x004192d0 prints nothing for an escort (also `FlightEscorts.note` / `carryThroughJump`) |
+| "Your ship has been destroyed." | removed | "Ship destroyed." (#288) is posted when the hull begins to go down (`.playerDying`, 0x004192d0); no second line |
+| "Your ship was disabled / destroyed — mission failed.", "You were boarded — mission failed." | replaced | #284 "Mission failed.", once, snd 151 (0x004192d0) |
+| "Nothing but wreckage remains.", "There is nowhere to land here." | replaced | `OriginalText.unableToLand` (#84 + #87/#88 + stellar + #89/#90; inactive sprite set / wrong system, 0x00457580 l.178–220) |
+| "Wormhole — fly into it…", "<name> hypergate online — land on it to travel.", "… is online." (clicks) | removed | no click-to-target in the original; the Land key's request line (#74/#75) is the only text. The glow and charge sound on a click stay (Apple) |
+| "Cloaking device engaged / disengaged." | removed | no text for a cloak toggle; only snd 380/381 (`SoundCues`) |
+| "Camera: <view>" | removed | the camera views are a port-only control; the change itself is the feedback |
+| Escape-pod eject line (#38 posted for a pod) | fixed | #38 is the bomb line. A pod prints nothing; a bay fighter shows #52 + class + "." for 0x200 raw calls (0x0044aa70 l.37919) |
+| (missing) nonlethal bomb | added | "Your <outfit> has exploded!" (#39 + lower-case name + #40/#41, 0x190; the `0x0044b3d4` bomb block). `HazardOutfits.Outcome.nonlethal` gained `line` |
+| Godot status lines had no wildcard pass | added | the Godot `post` now runs `OriginalText.expandStatusText` (`{G …}`, `<PN>`, `<PSN>` — 0x0044a4d0 / 0x004444f0), as the Apple HUD's `expandText` always did |
+
+Kept on purpose (NovaSwift's own, not original status text): the training flight's "Docking clamps engaged" and "Training
+flight" lines (`TutorialContainerView`, Godot `training`), the Godot map's "Auto-route plotting on/off" and "No route to that
+system" (enhancement feedback inside the map), and the plugin editor's test-run harness (`app/NovaSwift/Editor/Run/`), which still
+posts its own sentences; the hard-coded fallbacks that only show when STR# 2002 is missing.
+
+New shared API: `Sources/NovaSwiftStory/FlightStatusText.swift`, `World.broadcastLabel(of:game:)`
+(`Sources/NovaSwiftEngine/BroadcastLabel.swift`), `World.ammoPlunderOutfit(of:)` (`Boarding.swift`),
+`ContrabandScan.scanLines` / `scanPlayer(…scannerLabel:)` / `PlayerScanOutcome.messages` (rewritten), `OriginalText.bombExploded`.
+Apple: `GameScene.onPlayerScanned` is now `(govt, label)`; `GameContainerView.failActiveMissions(where:)` lost its `reason`.
+
+### 2. UI-11 new-pilot travel hint chain (STR# 2002 #22–31) — WRITTEN, NOT BUILT
+
+`Sources/NovaSwiftStory/TravelHints.swift` (`TravelHintTracker`) is `DAT_007cab1c` and `PlayerTick_FlightTutorialHints`
+(the fragment at 0x00451f8f inside `Ship_HandlePlayerShipCore` 0x0044aa70). Checked once per 60 raw calls while the state is
+below 2. State −3 (new pilot): #22 (station, spöb Flags 0x10) or #23 + stellar + #24 + Land key + #25, then −2. State −1:
+#26 + map key + #27 + jump key + #28, then 0. Beyond 2,000,000 px² from the system centre with state ≤ 0: #30, state 1; state 1
+beyond 10,000,000 px²: #31, state 2; both suppressed while the ship is disabled. Each hint is 0x200 raw calls with snd 154.
+The launch tail (0x00456134) skips the launch line and resets the state to −1 while the state is below 3 — the quirk that
+the hyperspace hint reappears at every launch until the first jump; a loaded pilot, a jump spin-up (0x0044c561), a hyperspace
+arrival (0x0044f83f) and a ship reset latch it to 0x7fff. NovaSwift's own `tutorialHints` cards are untouched.
+**Apple:** `AppModel.travelHints` (`beginNewPilot()` in `createPilot`, `latch()` in `play`), `GameScene.onTravelHintTick` +
+`travelHintInputs()` (distance, disabled, nearest landable stellar), the container wires the tick, key names come from
+`KeyBindings`, `postLaunchLine` asks `launched()`, `postArrivalLine` latches. **Godot:** `NovaWorld.tickTravelHints`,
+`pilotCreate`/`pilotCreateStrict` begin it, `adoptPilot` and the arrival line latch, the launch line asks `launched()`.
+**New bridge methods:** `set_hint_key_names(land, map, jump)` (called from `Main.gd _sync_hint_keys`, guarded by `has_method`),
+test seams `debug_travel_hint_state/begin/latch/launch/eval`. New GDScript helper `Controls.first_key_name(action)`.
+
+### 3. UI-13 Player Info — WRITTEN, NOT BUILT
+
+Tab / Shift-Tab step General → Cargo → Extras → Honors, wrapping; Enter, Esc and the Player Info key close (dispatch callback
+0x0049a3a0 of `NovaUi_RunPlayerSpecialInteractionWindow` 0x00499c10; the window owns the keyboard, flight is paused behind it).
+**Apple:** `PlayerInfoView` takes focus (`.focusable().focused`, `onKeyPress`) with a `closeToken` (the bound Player Info key).
+**Godot:** `StoryScreens._input` (before GUI focus navigation can eat Tab) with `_cycle_info_tab`. The cargo page now follows
+`NovaUi_BuildPlayerSpecialInteractionStrings` 0x0049c050: "Current cargo in your ship|fleet:" (#362 + #365/#366), a blank
+line, one sentence of "<count word> ton(s) of <name>" for commodities then junk (the first count word capitalised; STR# 137
+words for 1–10, digits beyond; junk uses its lower-case name), ", " between, "and" (#392) before the last, ".", a blank line, then the
+free-space footer (#364, with the ship's own share "(none free in your ship)" / "  (N tons free in your ship)" when the fleet is larger).
+Not changed: the Extras and Honors pages are still one entry per line, not the original's prose with `similar_to` grouping.
+
+### 4. përs HailQuote broadcast gates — WRITTEN, NOT BUILT
+
+`PersQuoteBroadcaster` (0x00433050 l.220–320) already modelled flags 0x0004, 0x0008, 0x0010 (forced, once), 0x0020, 0x0400, 0x0800
+(AI state 2), 0x0080 and the idle / 45 s / 1-in-140 roll. Added: the player-class gates 0x1000 / 0x2000 / 0x4000 (player hull
+`shïp` AiType = InherentAI, in-memory `+0x12`, equal to 1 / equal to 2 / above 2; `playerClassAllows`), and the announcement's
+snd 154 at priority 1 (`Mission_ShowMissionShipAnnouncement` 0x00426d10 — the old "the broadcast is silent" comment was wrong; the
+Godot tick now beeps too). The turns-hostile trigger (`Ship_SetShipHostileToPlayer` 0x00410700) is the broadcaster's forced 0x0010
+path; the ambush (`Mission_TrySpawnMissionShipAmbush` 0x00426dd0) was already in `OriginalSpawning.originalTryAmbush` with snd 154.
+Not modelled: the "ship in a jump state with control mode 4 or 0x0D" skip.
+
+### 5. Apple vs original — WRITTEN, NOT BUILT
+
+- (a) Classic status-message rect: `MessageLogView(classicRect:)` — left + 25, right − sidebar − 50, bottom − 5, 30 px tall, 12 pt
+  white, no shadow, top-aligned so the pen is at `rect.top + ascent` (`NovaHud_ShowOverlayMessage` 0x0047e2d0, draw 0x004bcd30, rect
+  0x0087550b). Used when the authentic HUD is active (Classic and Enhanced); Nova Swift mode (`modernHUD`) keeps its own look.
+- (b) Title music scaled twice: the sound-step level moved from the main mixer to the effects bus (`GameAudio.applyVolumes`), so the
+  music node's `pref × 0x30` / `pref × 0x20` gains are the only step scaling (was (step/8)²).
+- (c) Ambient and quickHyperjump charge loops: the Effects slider already rides the effects bus, so the loops play at volume 1
+  (was Effects twice).
+- (d) Ambient `CustSndID` check `>= 128` (0x00491f30) in Apple `GameAudio.startAmbient`, in the Godot bridge `landed_ambient_sound`
+  and in `GameAudio.gd start_ambient`. Godot's music level and loop gain already matched (b) and (c).
+
+### 6. Tests — WRITTEN, NOT RUN
+
+Swift: `Tests/NovaSwiftStoryTests/FlightStatusTextTests.swift` (scan sentences, plunder, assistance, bomb, count words, the cargo
+page, the whole hint state machine incl. the launch quirk and the 60-call cadence), `Tests/NovaSwiftEngineTests/PersQuoteBroadcasterTests.swift`
+(`testPlayerClassGates`, `testQuoteSoundsTheIncomingBeep`). Godot: `godot/tests/status_text_closing_selfcheck.gd` (hint chain via the
+seams, `first_key_name`, Player Info Tab / Shift-Tab / Enter, the ≥ 128 ambient gate; SKIPs groups an older dylib lacks).
+
+### 7. Files changed
+
+`Sources/`: new `NovaSwiftStory/FlightStatusText.swift`, `NovaSwiftStory/TravelHints.swift`, `NovaSwiftEngine/BroadcastLabel.swift`; edited
+`NovaSwiftStory/{ContrabandFlight,FlightPlunder,PlayerInfoPages,WorldPilotLink,FlightComm,FlightEscorts}.swift`,
+`NovaSwiftEngine/{PersQuoteBroadcaster,Boarding}.swift`, `NovaSwiftEngine/OriginalAI/OriginalAISupervisors.swift` (scan warning ends with "."). `app/`: `Game/GameScene.swift`,
+`Game/GameContainerView.swift`, `Game/PlayerInfoView.swift`, `Audio/GameAudio.swift`, `App/AppModel.swift`. Godot: bridge
+`NovaWorld.swift`, `Debug.swift`; `Controls.gd`, `Main.gd`, `audio/GameAudio.gd`, `screens/StoryScreens.gd`, new `tests/status_text_closing_selfcheck.gd`.

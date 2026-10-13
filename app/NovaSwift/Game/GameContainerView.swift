@@ -308,7 +308,7 @@ final class GameHost {
         // The consequence needs live pilot state, so it's wired from here.
         if let scanGame = aiGame {
             let pilotStore = model.pilot
-            scene.onPlayerScanned = { [weak pilotStore, weak hud, weak scene] scannerGovt in
+            scene.onPlayerScanned = { [weak pilotStore, weak hud, weak scene] scannerGovt, scannerLabel in
                 guard let pilotStore else { return }
                 // Smuggling missions (mïsn Flags 0x0020 "fail if scanned") are
                 // blown when this govt's scan finds their illegal cargo aboard —
@@ -319,30 +319,50 @@ final class GameHost {
                     let carrying = (pilotStore.state.cargo[cargoType] ?? 0) > 0
                     return carrying && scanGame.isMissionCargoContraband(id, to: scannerGovt)
                 }
+                // Mission Flags 0x0400 suppress the "mission failed" line and its beep.
+                let failShown = scanFailIDs.first.flatMap { scanGame.mission($0)?.invisible == false } ?? false
                 if !scanFailIDs.isEmpty {
                     let engine = StoryEngine(game: scanGame, player: pilotStore.state)
                     for id in scanFailIDs { engine.failMission(id) }
                     pilotStore.state = engine.player
-                    hud?.post("Your illicit cargo was detected — mission failed.")
-                    model.audio.play(.beep2)   // Ship_ScanPlayerForContraband 0x00401800, snd 151
+                    if failShown { model.audio.play(.beep2) }   // Ship_ScanPlayerForContraband 0x00401800, snd 151
                     pilotStore.save()
                 }
-                guard let result = ContrabandScan.enforce(on: &pilotStore.state, game: scanGame,
-                                                           govtID: scannerGovt, recordCrime: false),
-                      result.foundContraband else { return }
-                // The smuggling flood goes to the live per-system record (EC-02).
-                if result.smugglingPenalty > 0 { scene?.recordSmuggling(against: scannerGovt) }
-                let name = scanGame.govt(scannerGovt)?.displayName ?? "Patrol"
-                model.audio.play(.beep5)   // the scan result line sounds snd 154 (0x00401800)
-                if result.warningOnly {
-                    hud?.post("\(name): contraband detected — you are let off with a warning.")
-                } else if result.fine > 0 {
-                    hud?.post("\(name) fined you \(result.fine)cr for carrying contraband.")
+                let result = ContrabandScan.enforce(on: &pilotStore.state, game: scanGame,
+                                                    govtID: scannerGovt, recordCrime: false)
+                if let result, result.foundContraband {
+                    // The smuggling flood goes to the live per-system record (EC-02).
+                    if result.smugglingPenalty > 0 { scene?.recordSmuggling(against: scannerGovt) }
+                    model.audio.play(.beep5)   // the scan result line sounds snd 154 (0x00401800)
                 }
-                if result.smugglingPenalty > 0 {
-                    hud?.post("\(name) logs your smuggling; your standing worsens.")
+                // The original's sentences (STR# 2002 #286, #375-#380): no
+                // invented "let off with a warning" / "logs your smuggling" lines.
+                for line in ContrabandScan.scanLines(failed: failShown, result: result, state: pilotStore.state,
+                                                     game: scanGame, scanner: scannerLabel) {
+                    hud?.post(line, rawCalls: 400)   // 0x190 raw calls
                 }
                 pilotStore.save()
+            }
+
+            // The new-pilot travel hint chain (STR# 2002 #22-31; UI-11).
+            scene.onTravelHintTick = { [weak scene, weak hud] elapsed in
+                guard let scene, let game = model.data.game else { return }
+                let tracker = model.travelHints
+                if scene.isJumping { tracker.latch(); return }   // the spin-up latches it (0x0044c561)
+                guard let inputs = scene.travelHintInputs() else { return }
+                let nearest = inputs.nearestSpobID.flatMap { game.spob($0) }
+                    .map { TravelHintTracker.Stellar(name: $0.displayName, isStation: $0.isStation) }
+                func key(_ action: GameAction) -> String {
+                    let token = model.bindings.token(for: action)
+                    return token.isEmpty ? "" : KeyBindings.label(token)
+                }
+                let keys = TravelHintTracker.Keys(land: key(.land), map: key(.galaxyMap), jump: key(.hyperjump))
+                if let hint = tracker.tick(rawCalls: elapsed / OriginalClock.rawCallSeconds,
+                                           distanceSquared: inputs.distanceSquared, disabled: inputs.disabled,
+                                           nearest: nearest, keys: keys, text: OriginalText(game: game)) {
+                    hud?.post(hint.text, rawCalls: hint.rawCalls)
+                    model.audio.play(.beep5)   // DAT_00591570, snd 154, priority 1
+                }
             }
 
             // IFF (oütf ModType 14, "colorized radar"): EV Nova only tints radar
@@ -926,7 +946,8 @@ struct GameContainerView: View {
                 }
 
                 GeometryReader { geo in
-                    MessageLogView(hud: host.hud, rightInset: touchRightInset(host, in: geo.size))
+                    MessageLogView(hud: host.hud, rightInset: touchRightInset(host, in: geo.size),
+                                   classicRect: activeHUDStyle(host) != nil)
                 }
 
                 EscortCommandPanelView(hud: host.hud,
@@ -1571,7 +1592,9 @@ struct GameContainerView: View {
         // while the surface is intact. (Checked here rather than dropped from the
         // approach list so the player gets a reason, not a dead planet.)
         if spob.landableOnlyWhenDestroyed, !model.pilot.state.isStellarDestroyed(spob.id) {
-            return "There is nowhere to land here."
+            // The sprite set is inactive until the cover is blown: the original's
+            // "unable to land" sentence (0x00457580), not an invented one.
+            return OriginalText(game: game).unableToLand(body: OriginalText.Body(spob), stellar: spob.displayName)
         }
         let clearance = LandedServices.landingClearance(
             spob: spob, system: nav.currentSystemID, state: model.pilot.state, game: game,
@@ -1677,7 +1700,13 @@ struct GameContainerView: View {
         // its cover is blown).
         if model.pilot.state.destroyedStellars?.contains(id) == true,
            host?.game?.spob(id)?.landableOnlyWhenDestroyed != true {
-            host?.hud.post("Nothing but wreckage remains.")
+            // A destroyed stellar is an inactive sprite set: "Your ship is unable to
+            // land on X. …" (#84/#88/#90, 0x00457580).
+            if let game = host?.game, let spob = game.spob(id) {
+                host?.hud.post(OriginalText(game: game).unableToLand(body: OriginalText.Body(spob),
+                                                                      stellar: spob.displayName),
+                               rawCalls: OriginalText.Duration.landing)
+            }
             return
         }
         // A gate isn't a spaceport — landing on it *uses* it. Route gates to gate
@@ -1877,6 +1906,7 @@ struct GameContainerView: View {
     /// and wormhole variants, with "No stellar objects present." (#49) when
     /// it has none.
     private func postArrivalLine(systemID: Int, gateID: Int?) {
+        model.travelHints.latch()   // hyperspace arrival re-latches the hint state (0x0044f83f)
         guard let game = model.data.game, let system = game.system(systemID) else { return }
         if let buoy = game.systemMessageText(system.message) {
             host?.hud.post(buoy, rawCalls: OriginalText.Duration.buoy)
@@ -1906,6 +1936,10 @@ struct GameContainerView: View {
             }
             return
         }
+        // Below hint state 3 (a fresh pilot, until the first jump) the launch line is
+        // skipped and the hint state resets to -1 (0x00456134): the quirk that shows
+        // the hyperspace hint at every launch until the first jump.
+        guard model.travelHints.launched() else { return }
         let name = game.spob(spobID)?.displayName ?? ""
         host?.hud.post(OriginalText(game: game).launch(stellar: name, player: model.pilot.state) { Int.random(in: 0..<$0) })
     }
@@ -1975,15 +2009,13 @@ struct GameContainerView: View {
             handleMissionShipLost(missionID: missionID, goal: goal)
         }
         host?.scene.onPlayerDisabled = {
-            failActiveMissions(where: { $0.failIfPlayerDisabled },
-                               reason: "Your ship was disabled — mission failed.")
+            failActiveMissions(where: { $0.failIfPlayerDisabled })
         }
         // OS-02. A hull going down fails the same Flags2-0x0004 missions as a
         // disable; ejecting hands the pilot the new craft; the pod's landing
         // respawns them.
         host?.scene.onPlayerDying = {
-            failActiveMissions(where: { $0.failIfPlayerDisabled },
-                               reason: "Your ship was destroyed — mission failed.")
+            failActiveMissions(where: { $0.failIfPlayerDisabled })
         }
         host?.scene.onPlayerEjected = { previous, newClass, intoPod in
             guard let game = model.data.game else { return }
@@ -1995,8 +2027,7 @@ struct GameContainerView: View {
         host?.scene.onEscapePodRespawn = { respawnFromEscapePod() }
         host?.scene.onPlayerBoarded = {
             // mïsn.Flags 0x8000 — "mission fails if you're boarded by pirates".
-            failActiveMissions(where: { $0.flags1 & 0x8000 != 0 },
-                               reason: "You were boarded — mission failed.")
+            failActiveMissions(where: { $0.flags1 & 0x8000 != 0 })
         }
         host?.scene.onPlayerBoardedBy = { boarderID, ratio in
             // AI-29: the boarders take cargo and credits
@@ -2019,10 +2050,9 @@ struct GameContainerView: View {
         // Demand-Tribute domination feedback. Each defense wave announces itself
         // (fires on the first wave and on every relaunch as the field is cleared);
         // a surrender persists through the story engine + daily tribute.
-        host?.scene.onStellarDefendersLaunched = { spobID, count, _ in
-            let name = model.data.game?.spob(spobID)?.name ?? "The stellar"
-            host?.hud.post("\(name) scrambles \(count) defender\(count == 1 ? "" : "s").")
-        }
+        // The original prints no status line when a stellar's defenders launch (the
+        // comm window's reply text and the ships themselves are the feedback), so
+        // there is no handler here.
         // Bomb fuses count simulation ticks (OS-08).
         host?.scene.onPlayerTick = {
             if let host, landedSpobID == nil { checkHazardOutfits(host) }
@@ -2082,12 +2112,11 @@ struct GameContainerView: View {
         flightMissionServices.onSetStellarDestroyed = { spobID, destroyed in
             // Persisted in PlayerState by the engine; the body itself drops out
             // of the world on the next system (re)build. Surface it now.
-            let name = model.data.game?.spob(spobID)?.name ?? "A stellar object"
             // Keep the renderer's mirror current so `Flags2` 0x0080 ("animate
             // only when destroyed") flips without waiting for a system rebuild.
+            // The original prints no line for a story Y/Z stellar op.
             if destroyed { host?.scene.destroyedStellarIDs.insert(spobID) }
             else { host?.scene.destroyedStellarIDs.remove(spobID) }
-            host?.hud.post(destroyed ? "\(name) has been destroyed." : "\(name) has been restored.")
         }
         // A failed / aborted / resolved mission releases its ships (MS-07);
         // docked, the original removes them instead.
@@ -2108,9 +2137,8 @@ struct GameContainerView: View {
                let hull = game.ship(rec.shipType), hull.inherentAI < 3 {
                 transferCargoToEscort(holds: hull.cargoSpace, game: game)
             }
-            if let lost = model.pilot.state.removeEscort(id: recordID) {
-                host?.hud.post("\(lost.name) was destroyed.")
-            }
+            // (The original prints no line when an escort dies.)
+            _ = model.pilot.state.removeEscort(id: recordID)
             model.pilot.save()
         }
         // AI-38: a disabled escort drops out of the wing; a freighter first
@@ -2124,9 +2152,7 @@ struct GameContainerView: View {
             model.pilot.save()
         }
         host?.scene.onEscortAbandoned = { recordID, destroyed in
-            if let lost = model.pilot.state.removeEscort(id: recordID), destroyed {
-                host?.hud.post("\(lost.name) was destroyed.")
-            }
+            _ = model.pilot.state.removeEscort(id: recordID)   // `destroyed` prints nothing in the original
             model.pilot.save()
         }
         // Boarding repaired a former freighter escort: its cargo comes back
@@ -2301,12 +2327,14 @@ struct GameContainerView: View {
     /// `fail-if-scanned/disabled/boarded` conditions). Snapshots the id list
     /// first since `failMission` mutates `activeMissions`, routes through the
     /// flight services so OnFailure/failure-text surface, and persists once.
-    private func failActiveMissions(where predicate: (MissionRes) -> Bool, reason: String) {
+    private func failActiveMissions(where predicate: (MissionRes) -> Bool) {
         guard let game = model.data.game else { return }
         let engine = StoryEngine(game: game, player: model.pilot.state, services: flightMissionServices)
         guard FlightMissions.failActive(engine: engine, where: predicate) else { return }
         model.pilot.state = engine.player
-        host?.hud.post(reason)
+        // The original shows "Mission failed." (#284) once, whatever the cause
+        // (Ship_ApplyDamageToShip 0x004192d0).
+        host?.hud.post(OriginalText(game: game).missionFailedLine)
         model.audio.play(.beep2)   // mission failed: Ship_ApplyDamageToShip 0x004192d0, snd 151
         saveGame(reason: .event)
     }
@@ -2852,7 +2880,8 @@ struct GameContainerView: View {
                 PlayerInfoView(graphics: graphics, pilot: model.pilot,
                                shipFigures: playerInfoFigures(),
                                onJettison: { jettisonHold() },
-                               onDone: { showPilotInfoPanel = false })
+                               onDone: { showPilotInfoPanel = false },
+                               closeToken: model.bindings.token(for: .playerInfo))
                     .transition(.opacity)
             }
             // Covers the flight HUD: only the dialog is live, Ⓑ closes it.
@@ -2959,7 +2988,8 @@ struct GameContainerView: View {
         case let .detonated(line, outfitID):
             host.hud.post(line)
             Log.scene.notice("Bomb outfit \(outfitID, privacy: .public) detonated")
-        case let .nonlethal(outfitID, boomID):
+        case let .nonlethal(outfitID, boomID, line):
+            host.hud.post(line, rawCalls: 400)   // "Your <outfit> has exploded!" (#39-41), 0x190 raw calls
             host.scene.triggerPlayerOutfitExplosion(radius: 24, boomID: boomID)
             Log.scene.notice("Nonlethal bomb outfit \(outfitID, privacy: .public) went off")
         }
@@ -3025,7 +3055,8 @@ struct GameContainerView: View {
         model.pilot.state.credits += credits
         model.pilot.save()
         host?.hud.credits = model.pilot.state.credits
-        host?.hud.post("Took \(credits) credits.")
+        // "You stole all the credits from this ship." (#116 #33 #108; 0x00482940)
+        if let game = host?.game { host?.hud.post(OriginalText(game: game).plunderedCredits) }
         refreshBoard(scene, shipID: shipID)
     }
 
@@ -3041,14 +3072,14 @@ struct GameContainerView: View {
         plunderPanic?.looted(.cargo)
         let text = OriginalText(game: game)
         guard let (commodity, tons) = taken.first else {
-            host?.hud.post(text.misc(114))
+            host?.hud.post(text.plunderCargoNoRoom)
             refreshBoard(scene, shipID: shipID)
             return
         }
         model.pilot.state.cargo[commodity, default: 0] += tons
         model.pilot.save()
         let name = Commodity(rawValue: commodity).map { game.commodityName($0) } ?? ""
-        host?.hud.post("\(text.misc(115)) \(OriginalText.grouped(tons)) \(text.misc(tons == 1 ? 1 : 2)) \(text.misc(391)) \(name) \(text.misc(108))")
+        host?.hud.post(text.plunderedCargo(tons: tons, name: name))
         refreshBoard(scene, shipID: shipID)
     }
 
@@ -3057,13 +3088,20 @@ struct GameContainerView: View {
     /// pilot so it survives the flight, and let `updateHUD` repaint the gauge.
     private func plunderTakeFuel(_ scene: GameScene, shipID: Int) {
         let took = scene.plunderFuel(shipID)
-        guard took >= 1 else { return }
+        guard let game = host?.game else { return }
+        let text = OriginalText(game: game)
+        // 0x00482940, slot 6: #6 when nothing fits, #5 while the tank is still
+        // short, #4 once it is full.
+        guard took >= 1 else {
+            host?.hud.post(text.plunderedEnergy(tookAny: false, tankFull: false))
+            refreshBoard(scene, shipID: shipID)
+            return
+        }
         plunderPanic?.looted(.fuel)
         model.pilot.state.fuel = scene.playerShip?.fuel
         model.pilot.save()
-        let jumps = Int((took / 100).rounded())
-        host?.hud.post(jumps > 0 ? "Siphoned \(Int(took)) fuel (~\(jumps) jump\(jumps == 1 ? "" : "s"))."
-                                 : "Siphoned \(Int(took)) fuel.")
+        let full = (scene.playerShip.map { $0.fuel >= $0.maxFuel }) ?? false
+        host?.hud.post(text.plunderedEnergy(tookAny: true, tankFull: full))
         refreshBoard(scene, shipID: shipID)
     }
 
@@ -3077,10 +3115,19 @@ struct GameContainerView: View {
     }
 
     private func plunderTakeAmmo(_ scene: GameScene, shipID: Int) {
+        // Name the ammo outfit before the take (an emptied bank no longer qualifies).
+        let ammoOutfit = scene.plunderAmmoOutfit(shipID)
         let rounds = scene.plunderAmmo(shipID, freeMass: plunderFreeMass)
-        guard rounds > 0 else { return }
+        guard let game = host?.game else { return }
+        let text = OriginalText(game: game)
+        guard rounds > 0, let ammoOutfit else {
+            host?.hud.post(text.misc(117))   // "You couldn't store any of the ammo…"
+            refreshBoard(scene, shipID: shipID)
+            return
+        }
         plunderPanic?.looted(.ammo)
-        host?.hud.post("Transferred \(rounds) round\(rounds == 1 ? "" : "s") of ammunition.")
+        host?.hud.post(text.plunderedAmmo(rounds: rounds, singular: ammoOutfit.lowercaseDisplayName,
+                                          plural: ammoOutfit.lowercasePluralDisplayName))
         refreshBoard(scene, shipID: shipID)
     }
 
@@ -3092,8 +3139,13 @@ struct GameContainerView: View {
         guard !loot.isEmpty else { return }
         for oid in loot { model.pilot.state.grantOutfit(oid) }
         model.pilot.save()
-        let names = Set(loot.compactMap { host?.game?.outfit($0)?.name })
-        host?.hud.post("Salvaged \(loot.count) item(s)\(names.isEmpty ? "" : ": \(names.sorted().joined(separator: ", "))").")
+        // "You retrieved a <outfit> from this ship." (#106 / #108; 0x00482940): one
+        // outfit type per boarding.
+        if let game = host?.game, let first = loot.first, let outfit = game.outfit(first) {
+            host?.hud.post(OriginalText(game: game).retrievedOutfit(
+                count: loot.filter { $0 == first }.count,
+                singular: outfit.lowercaseDisplayName, plural: outfit.lowercasePluralDisplayName))
+        }
     }
 
     /// A boarded `pêrs` offering its LinkMission on boarding rather than
@@ -3234,7 +3286,7 @@ struct GameContainerView: View {
         scene.tagEscort(entityID: cap.entityID, recordID: record.id)
         applyOnCapture(shipType: cap.shipType)
         model.pilot.save()
-        host?.hud.post("Ship captured — it joins your escorts.")
+        if let game = host?.game { host?.hud.post(OriginalText(game: game).capturedAsEscortLine) }   // #123
         pendingCaptureChoice = nil
     }
 
@@ -3483,8 +3535,7 @@ struct GameContainerView: View {
             let current = model.settings.cameraView.effective(live3D: live3DOn)
             let next = views[((views.firstIndex(of: current) ?? 0) + 1) % views.count]
             model.settings.cameraView = next
-            model.commitSettings()
-            host?.hud.post("Camera: \(next.label)")
+            model.commitSettings()   // silent: the original has no camera views, so no status line
         case .cameraZoomIn, .cameraZoomOut:
             // The Settings slider's range, a step at a time.
             let z = model.settings.cameraZoom * (action == .cameraZoomIn ? 1 / 1.15 : 1.15)
@@ -4036,8 +4087,7 @@ struct GameContainerView: View {
         engine.dominateStellar(spobID)
         model.pilot.state = engine.player
         saveGame(reason: .event)
-        let name = game.spob(spobID)?.name ?? "The stellar"
-        host?.hud.post("\(name) submits to your rule — it will pay tribute daily.")
+        // (No status line: the original reports a surrender through the comm window only.)
         if var state = hailDialogState, case let .planet(id) = state.kind, id == spobID,
            let spob = game.spob(spobID) {
             state.hostile = false
@@ -4057,8 +4107,7 @@ struct GameContainerView: View {
         engine.stellarShotDown(spobID)
         model.pilot.state = engine.player
         saveGame(reason: .event)
-        let name = game.spob(spobID)?.name ?? "The stellar"
-        host?.hud.post("\(name) has been destroyed.")
+        // (No status line: a destroyed stellar is just the explosion and its OnDestroy ops.)
     }
 
     private func hailShowsAssistButton(_ state: HailDialogState) -> Bool {
@@ -4609,9 +4658,22 @@ struct MessageLogView: View {
     @ObservedObject var hud: GameHUDModel
     /// Width the status-bar sidebar takes on the right.
     var rightInset: CGFloat = 0
+    /// Classic / Enhanced presentation (the authentic status bar is up): the line
+    /// is drawn in the original's exact rect — left + 25, right − sidebar − 50,
+    /// 5 px above the bottom, 30 px tall, 12 pt white, no shadow, the pen at
+    /// `rect.top + ascent` (`NovaHud_ShowOverlayMessage` 0x0047e2d0, the overlay
+    /// draw 0x004bcd30, rect set up at 0x0087550b). The Nova Swift look keeps
+    /// its own styling.
+    var classicRect = false
 
     /// The original's message rect is one 26 px line (0x0087550b).
     static let lineHeight: CGFloat = 26
+    /// The Classic rect's height (0x0087550b).
+    static let classicRectHeight: CGFloat = 30
+
+    private func plain(_ text: String) -> String {
+        text.replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ")
+    }
 
     /// Mirrors `ContextualActionsView.bottomPadding` — sits flush with the true
     /// bottom edge (just clearing the safe area on iOS, which already clears
@@ -4624,7 +4686,34 @@ struct MessageLogView: View {
         #endif
     }
 
-    var body: some View {
+    @ViewBuilder var body: some View {
+        if classicRect { classicBody } else { modernBody }
+    }
+
+    /// The original's rect: top-left aligned so the line box starts at the rect's
+    /// top (the pen lands at `top + ascent`), clipped at the right edge (no
+    /// ellipsis), no shadow.
+    private var classicBody: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            ZStack(alignment: .topLeading) {
+                if let m = hud.message {
+                    Text(plain(m.text))
+                        .novaFont(.hud, size: 12)
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: Self.classicRectHeight, maxHeight: Self.classicRectHeight,
+                   alignment: .topLeading)
+            .clipped()
+            .padding(.leading, 25).padding(.trailing, rightInset + 50).padding(.bottom, 5)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private var modernBody: some View {
         VStack {
             Spacer()
             HStack {

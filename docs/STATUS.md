@@ -179,8 +179,7 @@ task. After editing it, run `python3 scripts/render-progress.py` to redraw
 Partly done, in short: the public online lobby list and iCloud game-data upload
 need the CloudKit schema promoted to Production; multiplayer host migration
 rebuilds the world rather than handing over; the `carryEncounter` session rule
-is not used yet; no plug-ins ship inside the app; the Godot port's Linux and Windows builds
-are not verified yet (table below); the Godot port's Key Settings dialog, `.mov` title music, shot murk fog and the S26 map rule are written but not yet built, and its LAN multiplayer, plug-in editor and HD packs are planned. Live 3D hulls are written but not yet checked on real devices. Multiplayer has not yet
+is not used yet; no plug-ins ship inside the app; the Godot port's Linux build is only headless-verified and its Windows build is not built yet (table below); the Godot port's Key Settings dialog, `.mov` title music, shot murk fog and the S26 map rule are written but not yet built, and its LAN multiplayer, plug-in editor and HD packs are planned. Live 3D hulls are written but not yet checked on real devices. Multiplayer has not yet
 been played end to end on two real devices. The plug-in importer can't open
 StuffIt archives that use the newer compression methods, and most catalog
 entries have no icon yet. Classic Mac pilot import still needs testing against
@@ -216,7 +215,7 @@ None of these change the game's rules:
 
 The Godot frontend ([GODOT_LAYER.md](GODOT_LAYER.md)) runs the same engine and calls the same Swift helpers as the Apple app, so wherever a helper still differs from the executable, the open plan items apply on both frontends (EC-04, EC-05, EC-25, OS-06, EC-26, OS-08, UI-06). This section is only about frontend wiring. The row-by-row list is [GODOT_FIDELITY_GAPS.md](GODOT_FIDELITY_GAPS.md).
 
-Everything has been built and run on macOS only. No Linux, Windows or Steam Deck build has been made or run, and no flight visual has been checked on a real GPU.
+Packaging (local, no CI; see [PACKAGING.md](PACKAGING.md)): the macOS arm64 app is exported, ad-hoc signed and loads the extension headless. The Linux x86_64 / Steam Deck tarball is built in a `swift:6.3-jammy` container (`scripts/package-linux-docker.sh`), needs glibc 2.35 at most, resolves every library, and in a clean Ubuntu 22.04 container the exported binary loads the extension and parses the game data headless. It has not been run on a real Steam Deck or with a GPU. The Windows package script (`scripts/package-windows.ps1`) is written but has not been run: it needs a Windows PC with the Swift toolchain. No flight visual has been checked on a real GPU on any of these.
 
 | Subsystem | State |
 |---|---|

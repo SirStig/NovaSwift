@@ -69,6 +69,36 @@ final class PersQuoteBroadcasterTests: XCTestCase {
         XCTAssertGreaterThan(quotes, 0)
     }
 
+    /// 0x00433050: flags 0x1000 / 0x2000 / 0x4000 mute the quote when the player's hull
+    /// has shïp AiType 1 / 2 / above 2.
+    func testPlayerClassGates() {
+        let ok = PersQuoteBroadcaster.playerClassAllows
+        XCTAssertTrue(ok(0, 1))
+        XCTAssertFalse(ok(0x1000, 1))
+        XCTAssertTrue(ok(0x1000, 2))
+        XCTAssertFalse(ok(0x2000, 2))
+        XCTAssertTrue(ok(0x2000, 1))
+        XCTAssertFalse(ok(0x4000, 3))
+        XCTAssertFalse(ok(0x4000, 4))
+        XCTAssertTrue(ok(0x4000, 2))
+        XCTAssertTrue(ok(0x1000 | 0x2000 | 0x4000, 0), "an unknown hull passes every class gate")
+        XCTAssertFalse(ok(0x1000 | 0x4000, 1))
+    }
+
+    /// 0x00426d10: the announcement sounds snd 154 as it shows, with the 0x1a4-frame overlay.
+    func testQuoteSoundsTheIncomingBeep() {
+        let (w, game) = setup(persFlags: 0, ships: 1)
+        let caster = PersQuoteBroadcaster()
+        _ = w.drainEvents()
+        let n = caster.step(world: w, game: game, elapsed: 1.0 / 30, barBusy: false,
+                            grudge: { _ in false }, hostile: { _ in false },
+                            missionAvailable: { _ in true }, roll: { 0 }).count
+        XCTAssertEqual(n, 1)
+        let events = w.drainEvents()
+        XCTAssertTrue(events.contains { if case .interfaceBeep(let id) = $0 { return id == 154 } else { return false } })
+        XCTAssertTrue(events.contains { if case .overlayMessage(_, let frames) = $0 { return frames == 0x1a4 } else { return false } })
+    }
+
     struct SplitMix {
         var s: UInt64
         init(seed: UInt64) { s = seed }

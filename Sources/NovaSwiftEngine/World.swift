@@ -212,6 +212,12 @@ public final class Ship {
     /// Unique per-instance id assigned by the world (player == 0). Distinct from
     /// `shipTypeID`, which is the `shïp` resource id used for the sprite.
     public var entityID: Int = 0
+    /// The original's ship-table slot (1...63; the player is slot 0). A new ship takes the lowest
+    /// free slot (`Ship_AllocateShipSlotInSystem` 0x004254b0), so a slot freed by a departed or
+    /// destroyed ship is reused and the target cycle (slot order) follows it, not spawn order.
+    public var slot: Int = 0
+    /// Fold / unfold state for a `shän` Flags 0x0002 hull (see `HullFoldState`).
+    public var fold = HullFoldState()
     public var shipTypeID: Int = -1
     /// For a player escort, the id of its persistent `EscortRecord` in the pilot
     /// save (nil for ambient NPCs and the player). This is the stable link that
@@ -1444,6 +1450,16 @@ public final class World {
     public var systemContext = SystemContext() { didSet { pendingChatter = nil } }
     /// Catalog used to instantiate NPC ships & weapons. Optional for physics-only.
     public var galaxy: Galaxy?
+    /// The "Ship Animations" preference. Off, the original loads every hull with a single sprite
+    /// set (0x004b4ee0), so nothing folds. Set before ships are added; the frontends push it.
+    public var shipAnimations = true {
+        didSet {
+            guard shipAnimations != oldValue else { return }
+            foldConfigs.removeAll()
+            for s in allShips { s.fold.configResolved = false }
+        }
+    }
+    var foldConfigs: [Int: HullFoldConfig] = [:]
     /// Populates and refreshes the NPC population.
     public var spawner: Spawner?
     /// The original NPC AI, which drives every brained NPC.
@@ -1627,6 +1643,8 @@ public final class World {
     public func addNPC(_ ship: Ship, arrival: ArrivalMode = .populate) -> Int {
         ship.entityID = nextEntityID
         nextEntityID += 1
+        ship.slot = lowestFreeShipSlot()
+        resolveFoldConfig(ship)
         npcs.append(ship)
         switch arrival {
         case .populate:
@@ -2494,6 +2512,7 @@ public final class World {
         let profStepT0 = profiler != nil ? DispatchTime.now().uptimeNanoseconds : 0
 
         events.removeAll(keepingCapacity: true)
+        for s in allShips where !s.fold.configResolved { resolveFoldConfig(s) }
         playerScanCooldown = max(0, playerScanCooldown - dt)
         latchPlayerOutfitGovernments()
         rawCallsThisStep = cadence.advance(dt)
@@ -2522,6 +2541,7 @@ public final class World {
             } else if escapePodLanded {
                 player.velocity = Vec2()   // waiting for the host's respawn
             } else if player.isAlive, var jump = playerJump {
+                player.fold.foldForPlayerJump()   // 0x0044c4e9: a folding hull folds as the jump engages
                 // Each spin-up tick pushes the leader's jump state to its
                 // escorts, before the timer advances (0x00422340).
                 if jump.phase == .spinUp { originalAI.syncSquadJump(world: self, leaderTimer: max(1, jump.timer)) }
@@ -2613,6 +2633,7 @@ public final class World {
                     }
                 }
                 s.deionize(dt)
+                s.fold.step(ticks: dt * OriginalClock.ticksPerSecond)   // 0x00428340 fold branch
                 if !s.disabled { s.regen(dt) }
                 if s.isPlayer { s.regenFuel(dt) }
             }
@@ -2915,6 +2936,9 @@ public final class World {
         let isAI = ship.brain != nil
         updateBeamLoops(for: ship, primary: primary, secondary: secondary, isAI: isAI)
         guard anyTrigger, ship.isAlive, !ship.disabled else { return }
+        // 0x00414550 / 0x00455150: a fire attempt stamps the clock, and a weapons-fold hull
+        // (shän 0x0002 + 0x0080) not yet at set 0 unfolds instead of firing.
+        if ship.fold.noteFireAttempt() { return }
         let target = ship.currentTargetID.flatMap { self.ship(id: $0) }
         // AI-03: an NPC shooting at the player reloads slower while the
         // player's combat rating is low.

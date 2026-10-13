@@ -264,7 +264,8 @@ public final class FlightEscorts {
             guard let rid = recordByEntity[entityID] else { return nil }
             recordByEntity[entityID] = nil
             if droppedRecords.remove(rid) != nil {
-                return pilot.removeEscort(id: rid).map { "\($0.name) was destroyed." }
+                _ = pilot.removeEscort(id: rid)
+                return nil   // the original prints no line when an escort dies (UI-11)
             }
             return lose(recordID: rid, game: game, pilot: &pilot)
         default:
@@ -276,7 +277,8 @@ public final class FlightEscorts {
     /// cargo share down with it, and the record leaves the pilot.
     private func lose(recordID: Int, game: NovaGame?, pilot: inout PlayerState) -> String? {
         if let game { transferCargo(recordID: recordID, game: game, pilot: &pilot) }
-        return pilot.removeEscort(id: recordID).map { "\($0.name) was destroyed." }
+        _ = pilot.removeEscort(id: recordID)
+        return nil   // no status line for a lost escort in the original (UI-11)
     }
 
     /// Before a jump or gate transport replaces the world (`carryEscortsThroughJump`):

@@ -51,3 +51,10 @@ venv/
 # Branding generator (rebuilds the icon/logo/loading art; outputs are committed, the tool isn't).
 scripts/branding/
 .vscode/
+
+# --- Packaging (local Linux/Windows/macOS builds) ---
+# Per-platform SwiftPM build dirs and caches used by scripts/package-*.sh (e.g. .build-linux/).
+.build-*/
+.swiftpm-cache/
+packaging/out/
+*.tpz

@@ -178,7 +178,9 @@ public final class OriginalAI {
         if arrivalSentinel {
             rec.state = OriginalAIState.arrival
             rec.mode = OriginalAIMode.arrivalSlowdown
+            ship.fold.unfoldIfIdle()   // 0x00401000: unfold while the jump-in slows down
         } else if jumpControl {
+            ship.fold.foldForJump()    // 0x00401000: a folding hull folds in control mode 4 / 0x0d
             // State 0x0B leaves the squad jump when its reason goes away.
             if rec.state == OriginalAIState.squadJump, let leaderID = leader(of: ship) {
                 if leaderID == World.playerEntityID {
@@ -216,6 +218,8 @@ public final class OriginalAI {
             }
             updateState(rec, ship: ship, host: host, ticks: ticks)
         }
+        // 0x00401000 (tail): parked and no longer coasting, a folded hull unfolds again.
+        if ordinary, rec.maneuverTimer <= 0, rec.state != OriginalAIState.travel { ship.fold.unfoldIfIdle() }
         applyControls(rec, ship: ship, host: host, ticks: ticks)
     }
 
@@ -413,6 +417,7 @@ public final class OriginalAI {
         rec.mode = OriginalAIMode.arrivalSlowdown
         rec.jumpTimer = -999
         rec.desiredSpeed = -50
+        ship.fold.beginArrival()   // 0x00410e20: set 0, unfolding
         // AI-12: the Spawner owns the placement (`Rand(360)` bearing at
         // `OriginalSpawnRules.jumpInRadius`, escorts ±150 px off their lead,
         // mission ships ±256 px), so the AI keeps the pose it was given.

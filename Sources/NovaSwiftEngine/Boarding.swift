@@ -165,6 +165,15 @@ extension World {
         return plunderAmmoRoom(bank: bank, freeMass: freeMass)
     }
 
+    /// The ammo outfit whose rounds the boarding of `shipID` offers, so the
+    /// "You salvaged two <rockets> from this ship." line can name it
+    /// (0x00482940). Ask before `takePlunderAmmo`: a bank emptied by the
+    /// take no longer qualifies.
+    public func ammoPlunderOutfit(of shipID: Int) -> OutfRes? {
+        guard let s = ship(id: shipID), s !== player, let bank = plunderAmmoBank(s) else { return nil }
+        return plunderAmmoOutfit(for: bank)
+    }
+
     /// Move the offered bank's rounds into the player's matching pool and
     /// return the rounds taken. Decrements the hulk's rounds so re-boarding
     /// can't duplicate them.

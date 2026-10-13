@@ -475,17 +475,17 @@ public final class FlightComm {
             let engine = StoryEngine(game: game, player: pilot)
             engine.dominateStellar(spobID)
             pilot = engine.player
-            let name = game.spob(spobID)?.name ?? "The stellar"
             if var window = hail, case let .planet(id) = window.kind, id == spobID, let spob = game.spob(spobID) {
                 refreshPlanet(&window, spob: spob, systemID: systemID, pilot: pilot, game: game)
                 hail = window
             }
-            return "\(name) submits to your rule — it will pay tribute daily."
+            // The original prints no status line for a surrender (UI-11).
+            return nil
         case let .stellarDestroyed(spobID, _, _, _):
             let engine = StoryEngine(game: game, player: pilot)
             engine.stellarShotDown(spobID)
             pilot = engine.player
-            return "\(game.spob(spobID)?.name ?? "The stellar") has been destroyed."
+            return nil   // no status line for a destroyed stellar in the original (UI-11)
         default:
             return nil
         }

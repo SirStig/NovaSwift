@@ -40,6 +40,10 @@ if [ "$(uname -s)" = "Linux" ]; then
   SWIFT_FLAGS+=(-Xlinker -rpath -Xlinker '$ORIGIN')
 fi
 
+# Optional separate SwiftPM scratch dir (e.g. BUILD_SCRATCH=.build-linux for the container
+# build, so it never mixes with the host's .build).
+if [ -n "${BUILD_SCRATCH:-}" ]; then SWIFT_FLAGS+=(--scratch-path "$PWD/$BRIDGE_DIR/$BUILD_SCRATCH"); fi
+
 echo "→ swift version:"; swift --version | sed 's/^/    /'
 echo "→ building NovaSwiftGodot ($CONFIG) in $BRIDGE_DIR …"
 swift build --package-path "$BRIDGE_DIR" -c "$CONFIG" "${SWIFT_FLAGS[@]}"

@@ -5,9 +5,11 @@ import Foundation
 /// 0x00461f60) and the two "nearest" scans (0x00462bd0 hostile, 0x00462850
 /// engaged). None of them has a range limit.
 ///
-/// The cycle walks ships in slot order. NovaSwift has no slot table; `npcs` is
-/// kept in spawn order, which is the order the original's slots fill in a
-/// fresh system (a freed slot being reused by a later ship is not modelled).
+/// The cycle walks ships in slot order. Each NPC carries its `Ship.slot`, taken from the lowest
+/// free slot when it is added (`Ship_AllocateShipSlotInSystem` 0x004254b0), so a slot freed by a
+/// departed or destroyed ship is reused by the next arrival and the cycle follows slot order,
+/// not spawn order. A ship in AI state 0x15 (holding inside a hypergate as it emerges,
+/// `Ship_IsShipInAiState0x15` 0x004159c0) is never a cycle or nearest-engaged candidate.
 /// The port's nearest-first, wrapping, range-capped cycle survives as the
 /// `nearestFirstTargeting` enhancement, driven by the app.
 extension World {
@@ -25,8 +27,14 @@ extension World {
     /// two halves never mix.
     public func playerCycleCandidates(squad: Bool) -> [Ship] {
         npcs.filter { npc in
-            npc.isAlive && canTarget(npc, by: player) && isInPlayerSquad(npc) == squad
-        }
+            npc.isAlive && !isEmergingFromGate(npc) && canTarget(npc, by: player)
+                && isInPlayerSquad(npc) == squad
+        }.sorted { $0.slot < $1.slot }
+    }
+
+    /// `Ship_IsShipInAiState0x15`: the gate-emergence hold.
+    func isEmergingFromGate(_ npc: Ship) -> Bool {
+        originalAI.record(for: npc.entityID)?.state == OriginalAIState.gateEmerge
     }
 
     /// Step the ship target one place along the cycle. Past the last eligible
@@ -36,11 +44,10 @@ extension World {
     public func cyclePlayerTarget(forward: Bool = true, squad: Bool = false) -> Ship? {
         let order = playerCycleCandidates(squad: squad)
         let next: Ship?
-        if let current = player.currentTargetID, let at = npcs.firstIndex(where: { $0.entityID == current }) {
+        if let current = player.currentTargetID, let at = npcs.first(where: { $0.entityID == current })?.slot {
             // Resume from the current ship's slot even when it is no longer a
             // candidate (it cloaked, or the modifier changed).
-            let slots = order.compactMap { s in npcs.firstIndex { $0 === s }.map { (s, $0) } }
-            next = forward ? slots.first { $0.1 > at }?.0 : slots.last { $0.1 < at }?.0
+            next = forward ? order.first { $0.slot > at } : order.last { $0.slot < at }
         } else {
             next = forward ? order.first : order.last
         }
@@ -104,13 +111,14 @@ extension World {
     /// included, with no range limit (0x00462850).
     @discardableResult
     public func selectNearestEngaged() -> Ship? {
-        nearestOriginal { _ in true }
+        nearestOriginal(engaged: true) { _ in true }   // 0x00462850 also skips state 0x15
     }
 
-    private func nearestOriginal(_ accept: (Ship) -> Bool) -> Ship? {
+    private func nearestOriginal(engaged: Bool = false, _ accept: (Ship) -> Bool) -> Ship? {
         let p = player.position
         let best = npcs.filter { npc in
             npc.isAlive && canTarget(npc, by: player) && !isInPlayerSquad(npc) && accept(npc)
+                && !(engaged && isEmergingFromGate(npc))
         }.min { ($0.position - p).length < ($1.position - p).length }
         guard let best else { return nil }
         return selectTarget(id: best.entityID)

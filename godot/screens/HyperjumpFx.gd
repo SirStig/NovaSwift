@@ -7,6 +7,11 @@
 # The original draws NO speed streaks (the tunnel is only the ship's own position step and the parallax
 # dust the starfield already shows), so none are drawn here. "Reduce flashing" caps the white at 0.45;
 # Classic Preferences > Hyperspace Fx off skips the fade and flashes black for 0.1 s.
+#
+# With the `quickHyperjump` enhancement (Prefs gameplay/quick_hyperjump) the shared QuickHyperjump flies the
+# turn and burst instead: hyperjump_state() reports phases 4 align / 5 accelerate / 6 flash plus the white
+# level, streak opacity and stretch the frame asked for (GameScene.stepJump's `.align/.accelerate/.flash`),
+# and the arrival fades in over jump_arrival_fade() (0.35 s) instead of the Mac's 1.5 s.
 
 extends CanvasLayer
 
@@ -25,6 +30,9 @@ var _progress := 0.0
 var _fade := 0.0                # 0..1 white overlay while the jump charges
 var _flash := 0.0               # 0..1 white after arrival
 var _bearing := 0.0
+var _quick_streak: float = 0.0  # quickHyperjump streak opacity 0..1 (0 = none)
+var _quick_stretch: float = 1.0 # ... and how far the lines are stretched along the bearing
+var _arrive_len: float = -1.0   # arrival fade seconds from the bridge; <= 0 = the default look
 var _streaks: Array = []        # {pos: Vector2 (0..1), speed: float, len: float}
 
 
@@ -64,16 +72,32 @@ func _process(delta: float) -> void:
 	_progress = st[1]
 	_bearing = st[3]
 
+	_quick_streak = 0.0
+	_quick_stretch = 1.0
 	if _phase == 0:
 		_fade = 0.0
+	elif _phase >= 4 and st.size() >= 7:
+		# quickHyperjump: the white-out ramp is the shared frame's, capped by Reduce Flashing.
+		_fade = st[4] * _cap()
+		if not _no_fx():
+			_quick_streak = st[5]
+			_quick_stretch = st[6]
 	elif st[2] > 0.5 and not _no_fx():
 		_fade = minf(_cap(), _fade + delta / FADE_SECONDS * _cap())
 
-	_flash = maxf(0.0, _flash - delta / (ARRIVE_FADE_NO_FX if _no_fx() else ARRIVE_FADE) * _cap())
+	var fade_len: float = _arrive_len
+	if fade_len <= 0.0:
+		fade_len = ARRIVE_FADE_NO_FX if _no_fx() else ARRIVE_FADE
+	_flash = maxf(0.0, _flash - delta / fade_len * _cap())
 	var arrival: String = nova.take_jump_arrival()
 	if arrival != "":
 		_flash = _cap()
 		_fade = 0.0
+		_arrive_len = -1.0
+		if nova.has_method("jump_arrival_fade"):
+			var quick_len: float = float(nova.jump_arrival_fade())
+			if quick_len > 0.0:
+				_arrive_len = quick_len
 		arrived.emit(arrival)
 
 	var active := _phase != 0 or _flash > 0.0
@@ -84,8 +108,25 @@ func _process(delta: float) -> void:
 
 func _on_draw() -> void:
 	var size := _canvas.size
+	if _quick_streak > 0.0:
+		_draw_quick_streaks(size)
 	var white := maxf(_fade, _flash)
 	if white > 0.0:
 		var c := Color.BLACK if _no_fx() else Color.WHITE
 		c.a = white
 		_canvas.draw_rect(Rect2(Vector2.ZERO, size), c)
+
+
+## The quickHyperjump streak fan (GameScene.buildJumpOverlays): thin bright lines running along the outbound
+## bearing, spread across the view, `_quick_stretch` times longer as the burst builds. Compass bearing on a
+## north-up view: 0 = up, clockwise.
+func _draw_quick_streaks(size: Vector2) -> void:
+	var dir := Vector2(sin(_bearing), -cos(_bearing))
+	var side := Vector2(-dir.y, dir.x)
+	var center: Vector2 = size * 0.5
+	var color := Color(0.8, 0.9, 1.0, clampf(_quick_streak * 0.7, 0.0, 1.0))
+	for s in _streaks:
+		var pos: Vector2 = s["pos"]
+		var length: float = float(s["len"]) * 300.0 * _quick_stretch
+		var off: Vector2 = side * ((pos.x - 0.5) * size.length()) + dir * ((pos.y - 0.5) * size.length())
+		_canvas.draw_line(center + off - dir * length * 0.5, center + off + dir * length * 0.5, color, 1.5)

@@ -11,7 +11,11 @@
 # ships 2.38+). Building on a newer distro silently raises the glibc floor.
 # No EV Nova data is ever included (BYO-data).
 #
-#   scripts/package-linux.sh [--godot /path/to/godot] [--skip-build] [--skip-export]
+#   scripts/package-linux.sh [--godot /path/to/godot] [--skip-build] [--skip-export] [--libs-only]
+#
+# Normally driven from a Mac by scripts/package-linux-docker.sh, which runs
+# --libs-only in a container, exports the .pck/binary with the host Godot, then
+# runs --skip-build --skip-export in the container to assemble + verify.
 #
 # Why a dynamic Swift runtime and not -static-stdlib: SwiftGodot is itself a
 # dynamic library that libNovaSwiftGodot.so links, and both would embed their own
@@ -24,11 +28,13 @@ cd "$(dirname "$0")/.."
 GODOT="${GODOT:-godot}"
 SKIP_BUILD=0
 SKIP_EXPORT=0
+LIBS_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --godot) GODOT="$2"; shift 2 ;;
     --skip-build) SKIP_BUILD=1; shift ;;
     --skip-export) SKIP_EXPORT=1; shift ;;
+    --libs-only) LIBS_ONLY=1; shift ;;   # stop after step 2 (used by package-linux-docker.sh)
     *) echo "unknown arg $1" >&2; exit 2 ;;
   esac
 done
@@ -60,6 +66,7 @@ is_system_lib() {
 
 # Resolve every transitive dependency of the bridge libs with ldd and copy the
 # non-system ones next to them.
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:/usr/lib/swift/linux"
 collect() {
   local lib="$1" dep path
   while read -r dep _ path _; do
@@ -87,6 +94,11 @@ for so in "$BIN"/*.so*; do
     fi
   fi
 done
+
+if [ "$LIBS_ONLY" -eq 1 ]; then
+  echo "✓ Linux libs ready in $BIN (export + assemble: rerun with --skip-build --skip-export after exporting)"
+  exit 0
+fi
 
 # --- 3. Godot export ---------------------------------------------------------
 if [ "$SKIP_EXPORT" -eq 0 ]; then

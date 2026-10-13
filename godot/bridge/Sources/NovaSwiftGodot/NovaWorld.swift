@@ -320,7 +320,16 @@ class NovaWorld: Node2D {
         // The engine flies a hyperjump itself; held keys mustn't fight it.
         var live = settingsPlayerIntent(self.intent)  // Settings: invert turn, mouse aim, auto-landing
         live.selfDestruct = gaps.selfDestructHeld     // Alt-−, held
-        world.intent = world.playerJump == nil ? live : ControlIntent()
+        // The quickHyperjump maneuver (shared QuickHyperjump) flies the ship itself, off the display clock.
+        var quickFrame: QuickHyperjump.Frame?
+        if var q = nav.quick, world.player.isAlive {
+            let f = q.step(dt: max(0, min(dt, 0.1)), player: world.player)
+            nav.quick = q
+            if let flash = f.flash { nav.quickFlash = flash }
+            if let streak = f.streakIntensity { nav.quickStreak = streak; nav.quickStretch = f.streakStretch }
+            quickFrame = f
+        }
+        world.intent = world.playerJump == nil && nav.quick == nil ? live : (quickFrame?.intent ?? ControlIntent())
         settingsAutoTarget(world)                     // Settings: auto-target after firing
 
         // Settings > Game speed, doubled while the original's Caps Lock 2x flag is up
@@ -343,9 +352,11 @@ class NovaWorld: Node2D {
         tickSoundAlarms(dt: dt)       // red alert / klaxxon / warp-up cue
         tickInteractions(dt: dt)      // Escort Commands panel clock
         tickHailQuotes(dt: dt)        // pêrs HailQuote broadcasts (0x00433050)
+        tickTravelHints(dt: dt)       // the new-pilot travel hint chain (STR# 2002 #22-31)
         tickTravel()                  // the 250 px landing-clearance arm
         tickStory(dt: dt)             // sightings, queued world edits
         gapsTick()                    // the escape pod's respawn
+        advanceQuickHyperjump(quickFrame)   // quickHyperjump: commit on the white-out frame
         advanceHyperjump()            // arrival once the engine's jump has fired
         advanceFlightVisuals(dt: dt)  // hull overlay clocks, animated stellars
         tickPeriodicAutosave(dt: dt)  // frequent autosave's in-flight heartbeat
@@ -832,7 +843,9 @@ class NovaWorld: Node2D {
                 beep(5)
                 post(launchMessage, rawCalls: OriginalText.Duration.missionQuote)
             }
-        } else {
+        } else if travelHints.launched() {
+            // Below hint state 3 the launch line is skipped and the state resets to -1
+            // (0x00456134): a fresh pilot sees the hyperspace hint at every launch.
             post(StatusLineBackend.launch(game: game, pilot: pilot, spobID: spobID))
         }
         return true
@@ -1082,7 +1095,7 @@ class NovaWorld: Node2D {
     /// completes the arrival.
     @Callable(autoSnakeCase: true) func beginHyperjump() -> String {
         guard let world, let game, let galaxy, let cur = currentSystemID,
-              dockedSpobID == nil, world.playerJump == nil else { return "" }
+              dockedSpobID == nil, world.playerJump == nil, nav.quick == nil else { return "" }
         refreshNavVisibility()
         let text = OriginalText(game: game)
         let hops = navNextJumpHops()
@@ -1098,24 +1111,47 @@ class NovaWorld: Node2D {
         let route = nav.route.hops
         // The ship turns toward the armed first hop, even on a multi-jump (A9).
         let bearing = StarMapNavigator.outboundHeading(game: game, from: cur, to: route[0])
-        world.playerJump = PlayerHyperjump(
-            bearing: bearing, fastJump: PilotEconomy.hasInstantJump(pilot, galaxy: galaxy),
-            soundTicks60: galaxy.hyperspaceWarpUpSoundTicks60,
-            soundTicks60X2: galaxy.hyperspaceWarpUp2xSoundTicks60,
-            multiplier: galaxy.jumpDurationMultiplier(hull: p.shipTypeID))
-        if let line = world.strandedFighterWarning(game: game) { nav.messages.append(line) }   // "Wait for me!" (FL-23)
+        let fastJump = PilotEconomy.hasInstantJump(pilot, galaxy: galaxy)
+        if plumbing.enhancements.quickHyperjump {
+            // Enhancement: the port's quick align / burst / flash instead of the original's jump. Same
+            // flow as Apple `GameScene.beginJump`; the snd 128 charge loop starts with it (`hyperspaceChargeLoopSound`).
+            nav.quick = QuickHyperjump(outboundHeading: bearing, instant: fastJump,
+                                       speed: PilotEconomy.jumpSpeedFactor(pilot, galaxy: galaxy))
+            nav.quickFlash = 0; nav.quickStreak = 0; nav.quickStretch = 1
+        } else {
+            world.playerJump = PlayerHyperjump(
+                bearing: bearing, fastJump: fastJump,
+                soundTicks60: galaxy.hyperspaceWarpUpSoundTicks60,
+                soundTicks60X2: galaxy.hyperspaceWarpUp2xSoundTicks60,
+                multiplier: galaxy.jumpDurationMultiplier(hull: p.shipTypeID))
+            if let line = world.strandedFighterWarning(game: game) { nav.messages.append(line) }   // "Wait for me!" (FL-23)
+        }
         nav.pending = PendingHyperjump(destination: route[hops - 1], hops: hops,
                                        passedThrough: Array(route.prefix(max(0, hops - 1))), bearing: bearing)
         return ""
     }
 
     /// True from engage until the arrival (or collapse).
-    @Callable(autoSnakeCase: true) func hyperjumpActive() -> Bool { world?.playerJump != nil }
+    @Callable(autoSnakeCase: true) func hyperjumpActive() -> Bool { world?.playerJump != nil || nav.quick != nil }
 
     /// `[phase, progress, fadeTriggered, bearing]` for the jump visual. Phase:
     /// 0 none, 1 braking, 2 spinning up (the tunnel), 3 fired. `fadeTriggered`
     /// is the original's white fade (progress past 55).
+    ///
+    /// During the `quickHyperjump` enhancement the phase is 4 align / 5 accelerate / 6 flash and the
+    /// array carries three more values: `[.., flash 0..1, streak opacity 0..1, streak stretch]`
+    /// (the shared `QuickHyperjump` frame; the frontend draws them, capped by Reduce Flashing).
     @Callable(autoSnakeCase: true) func hyperjumpState() -> PackedFloat32Array {
+        if let q = nav.quick {
+            let phase: Float
+            switch q.phase {
+            case .align: phase = 4
+            case .accelerate: phase = 5
+            case .flash: phase = 6
+            }
+            return PackedFloat32Array([phase, 0, 0, Float(q.outboundHeading),
+                                       Float(nav.quickFlash), Float(nav.quickStreak), Float(nav.quickStretch)])
+        }
         guard let jump = world?.playerJump else { return PackedFloat32Array([0, 0, 0, 0]) }
         let phase: Float
         switch jump.phase {
@@ -1132,10 +1168,33 @@ class NovaWorld: Node2D {
         return nav.arrivedIn ?? ""
     }
 
+    /// Seconds the destination fades in after the arrival `take_jump_arrival` just reported: 0.35 after a
+    /// `quickHyperjump`, 0 = use the original's (the Mac's 1.5 s) fade.
+    @Callable(autoSnakeCase: true) func jumpArrivalFade() -> Double { nav.arrivalFade }
+
+    /// The snd the `quickHyperjump` charge loop plays while the maneuver runs (`SoundCues.hyperspaceChargeID`,
+    /// looped from the start of the turn until the white-out commits, Apple `startHyperspaceCharge`), else -1.
+    @Callable(autoSnakeCase: true) func hyperspaceChargeLoopSound() -> Int {
+        nav.quick?.chargeLoopSounding == true ? SoundCues.hyperspaceChargeID : -1
+    }
+
     /// Status-line messages the jump produced (e.g. a collapsed field), drained.
     @Callable(autoSnakeCase: true) func drainNavMessages() -> PackedStringArray {
         defer { nav.messages.removeAll() }
         return PackedStringArray(nav.messages)
+    }
+
+    /// Called by `step` after its ticks: the quick jump fires on the frame its white-out peaks (the
+    /// shared `QuickHyperjump.Frame.commit`); a dead player drops it.
+    private func advanceQuickHyperjump(_ frame: QuickHyperjump.Frame?) {
+        guard nav.quick != nil else { return }
+        guard let world, world.player.isAlive, let plan = nav.pending else {
+            nav.quick = nil; nav.pending = nil; return
+        }
+        guard frame?.commit == true else { return }
+        nav.quick = nil                                         // the charge loop is cut with it
+        nav.arrivalFade = QuickHyperjump.arriveFadeSeconds
+        completeHyperjump(plan)
     }
 
     /// Called by `step` after its ticks: finish a fired jump or clean up a dead one.
@@ -1145,7 +1204,9 @@ class NovaWorld: Node2D {
             world.playerJump = nil; nav.pending = nil; return
         }
         switch jump.phase {
-        case .fired: completeHyperjump(plan)
+        case .fired:
+            nav.arrivalFade = 0
+            completeHyperjump(plan)
         case .collapsed:
             // Ship disabled - hyperspace field collapsed (STR# 2002 #35): no system change.
             world.playerJump = nil
@@ -1241,7 +1302,7 @@ class NovaWorld: Node2D {
     /// of a hyperjump in progress. -1 when neither.
     @Callable(autoSnakeCase: true) func prewarmTarget() -> Int {
         if dockedSpobID != nil { return currentSystemID ?? -1 }
-        if world?.playerJump != nil, let plan = nav.pending { return plan.destination }
+        if world?.playerJump != nil || nav.quick != nil, let plan = nav.pending { return plan.destination }
         return -1
     }
 
@@ -1938,6 +1999,7 @@ class NovaWorld: Node2D {
         var state = written.player
         PilotSaves.migrate(&state, game: game)
         adoptPilot(state, saveID: written.id)
+        travelHints.beginNewPilot()   // new_pilot_flow end: hint state -3 (STR# 2002 #22-31)
         return written.id.uuidString
     }
 
@@ -2327,6 +2389,7 @@ class NovaWorld: Node2D {
         pilot.rosterID = saveID
         pilotSaveID = saveID
         pilotStarted = true
+        travelHints.latch()   // a loaded pilot has no hints (pilot_file.cpp:1602)
     }
 
     /// `AppModel.autosave`, minus the settings the Godot build doesn't have yet.
@@ -2726,8 +2789,11 @@ class NovaWorld: Node2D {
 
     private func post(_ line: String, rawCalls: Int = 0) {
         if line.isEmpty { return }
-        travel.messages.append(line)
-        statusLine.note(line, rawCalls: rawCalls)   // a non-default display length (the buoy, a quote)
+        // Every status-bar line gets the original's wildcard pass (`{G …}` / `<PN>` / `<PSN>`, 0x0044a4d0 and
+        // 0x004444f0), so a HailQuote never reaches the screen raw — as the Apple HUD's `expandText` does.
+        let shown = game.map { OriginalText(game: $0).expandStatusText(line, player: pilot) } ?? line
+        travel.messages.append(shown)
+        statusLine.note(shown, rawCalls: rawCalls)   // a non-default display length (the buoy, a quote)
     }
 
     /// Bodies the player can approach to land on / use (`GameScene.isPlayerLandTarget`).
@@ -2885,7 +2951,7 @@ class NovaWorld: Node2D {
         if nav.route.armed, travel.selectedSpob == nil, !hopName.isEmpty {
             let radius = galaxy.map { PilotEconomy.hyperspaceNoJumpRadius(pilot, galaxy: $0) } ?? 1000
             let ready = world.isClearOfNoJumpZone(radius: radius) && world.player.fuel >= ShipFuel.perJump
-            return PackedStringArray([text.misc(345), hopName, (!ready && world.playerJump == nil) ? "1" : "0"])
+            return PackedStringArray([text.misc(345), hopName, (!ready && world.playerJump == nil && nav.quick == nil) ? "1" : "0"])
         } else if nav.route.hyperspaceMode, travel.selectedSpob == nil {
             return PackedStringArray([text.misc(345), text.misc(344), "0"])
         } else if let id = travel.selectedSpob {
@@ -2934,7 +3000,7 @@ class NovaWorld: Node2D {
         // `spöb.Flags` 0x0080 ("Can only land when destroyed"): a hidden base whose
         // cover has to be blown off first — checked before every other gate.
         if spob.landableOnlyWhenDestroyed, !pilot.isStellarDestroyed(spob.id) {
-            return "There is nowhere to land here."
+            return OriginalText(game: game).unableToLand(body: OriginalText.Body(spob), stellar: spob.displayName)
         }
         let clearance = LandedServices.landingClearance(
             spob: spob, system: currentSystemID ?? -1, state: pilot, game: game,
@@ -3014,7 +3080,7 @@ class NovaWorld: Node2D {
     /// it. JSON `{result: none | messages | landed | gate | transported, spob, name}`;
     /// the lines are in `drain_interaction_messages`.
     @Callable(autoSnakeCase: true) func pressLand() -> String {
-        guard let world, let game, dockedSpobID == nil, world.playerJump == nil, travel.gatePicker == nil,
+        guard let world, let game, dockedSpobID == nil, world.playerJump == nil, nav.quick == nil, travel.gatePicker == nil,
               world.player.isAlive else { return landJSON("none") }
         if travel.selectedSpob == nil, let near = nearestLandTarget() { selectStellar(near.id) }
         if plumbing.autoLanding || plumbing.enhancements.forgivingLanding {
@@ -3082,7 +3148,9 @@ class NovaWorld: Node2D {
     private func requestLanding(_ id: Int, confirmed: Bool = false) -> String {
         guard let game, let spob = game.spob(id) else { return landJSON("none") }
         if pilot.destroyedStellars?.contains(id) == true, !spob.landableOnlyWhenDestroyed {
-            post("Nothing but wreckage remains.")
+            // An inactive sprite set: "Your ship is unable to land on X. …" (0x00457580).
+            post(OriginalText(game: game).unableToLand(body: OriginalText.Body(spob), stellar: spob.displayName),
+                 rawCalls: OriginalText.Duration.landing)
             return landJSON("messages")
         }
         if spob.isGate { return handleGateLanding(spob) }
@@ -3265,7 +3333,7 @@ class NovaWorld: Node2D {
     /// with its damage, and arrive with the Warp out sound. The frontend sees the
     /// arrival through `take_jump_arrival`, as for a hyperjump.
     private func transportThroughGate(destSystem: Int, destGate: Int) -> Bool {
-        guard let world, let game, let galaxy, dockedSpobID == nil, world.playerJump == nil else { return false }
+        guard let world, let game, let galaxy, dockedSpobID == nil, world.playerJump == nil, nav.quick == nil else { return false }
         let ship = world.player
         storyLeavingSystem()
         let abandonedFighters = world.returnJumpingFighters()
@@ -3411,7 +3479,7 @@ class NovaWorld: Node2D {
         s.onStellarDestroyed = { [weak self] id, destroyed in
             guard let self else { return }
             let name = self.game?.spob(id)?.name ?? "A stellar object"
-            self.storyState.services.messages.append(destroyed ? "\(name) has been destroyed." : "\(name) has been restored.")
+            _ = (name, destroyed)   // the original prints no line for a story Y/Z stellar op
         }
         s.onReleaseShips = { [weak self] id in
             guard let self, let world = self.world, let galaxy = self.galaxy else { return }
@@ -3511,20 +3579,21 @@ class NovaWorld: Node2D {
             let left = pilot.activeMissions[i].auxShipsRemaining ?? m.auxShipCount
             pilot.activeMissions[i].auxShipsRemaining = max(0, left - count)
         case let .shipDisabled(entityID, _) where entityID == World.playerEntityID:
-            storyFailActive("Your ship was disabled — mission failed.") { $0.failIfPlayerDisabled }
+            storyFailActive { $0.failIfPlayerDisabled }
         case .playerDying:
-            storyFailActive("Your ship was destroyed — mission failed.") { $0.failIfPlayerDisabled }
+            storyFailActive { $0.failIfPlayerDisabled }
         case let .shipBoarded(entityID, _) where entityID == World.playerEntityID:
-            storyFailActive("You were boarded — mission failed.") { $0.flags1 & 0x8000 != 0 }
+            storyFailActive { $0.flags1 & 0x8000 != 0 }
         default:
             break
         }
     }
 
-    private func storyFailActive(_ reason: String, where predicate: (MissionRes) -> Bool) {
+    private func storyFailActive(where predicate: (MissionRes) -> Bool) {
         guard let engine = storyEngine(), FlightMissions.failActive(engine: engine, where: predicate) else { return }
         storyCommit(engine)
-        storyState.services.messages.append(reason)
+        // "Mission failed." (#284), once whatever the cause (0x004192d0).
+        if let game { storyState.services.messages.append(OriginalText(game: game).missionFailedLine) }
         if let cue = SoundCues.beep(2) { sound.pending.append(cue) }   // snd 151
         autosave(.event)
     }
@@ -4230,10 +4299,11 @@ class NovaWorld: Node2D {
     /// A government ship finished scanning the player (`GameScene.onPlayerScanned`):
     /// fail-if-scanned smuggling missions, then the `ScanFine` / `SmugPenalty`.
     @discardableResult
-    private func gapsPlayerScanned(by govt: Int) -> PlayerScanOutcome? {
+    private func gapsPlayerScanned(by govt: Int, scannerLabel: String? = nil) -> PlayerScanOutcome? {
         guard let game, let world, govt >= 0 else { return nil }
         pilot.cargo = world.player.cargo             // pickups made in flight
-        let out = ContrabandScan.scanPlayer(state: &pilot, game: game, scannerGovt: govt, services: storyState.services)
+        let out = ContrabandScan.scanPlayer(state: &pilot, game: game, scannerGovt: govt, services: storyState.services,
+                                            scannerLabel: scannerLabel)
         if !out.failedMissionIDs.isEmpty { beep(2) } // Ship_ScanPlayerForContraband 0x00401800, snd 151
         if let r = out.result, r.foundContraband {
             // The smuggling flood goes to the live per-system record (EC-02).
@@ -4272,7 +4342,8 @@ class NovaWorld: Node2D {
             break
         case let .detonated(line, _):
             post(line)
-        case let .nonlethal(_, boomID):
+        case let .nonlethal(_, boomID, line):
+            post(line, rawCalls: 400)   // "Your <outfit> has exploded!" (#39-41), 0x190 raw calls
             world.emitExplosion(at: world.player.position, radius: 24, boomID: boomID)
         }
     }
@@ -4312,8 +4383,11 @@ class NovaWorld: Node2D {
         guard let game else { return }
         switch event {
         case let .shipScanned(scannerID, targetID, _) where targetID == World.playerEntityID:
-            post("You are being scanned.")
-            if let govt = world?.ship(id: scannerID)?.government { gapsPlayerScanned(by: govt) }
+            // Nothing is printed when a scan starts (the interceptor's taunt is the AI's own
+            // overlay line); the result sentence comes from the scan outcome (0x00401800).
+            if let world, let scanner = world.ship(id: scannerID) {
+                _ = gapsPlayerScanned(by: scanner.government, scannerLabel: world.broadcastLabel(of: scanner, game: game))
+            }
         case let .playerEjected(previous, newClass, intoPod, _):
             // OS-02: the old hull's OnRetire, the outfits that don't stay with the pilot
             // go with it, the pod (or bay fighter) is what the pilot now owns; a pod
@@ -4321,8 +4395,8 @@ class NovaWorld: Node2D {
             EscapePodRespawn.eject(&pilot, from: previous, into: newClass, game: game)
             if intoPod { pilot.escorts = nil }
             let strs = game.stringList(2002)
-            if intoPod { post(strs?.string(at: 38) ?? "") }
-            else { post("\(strs?.string(at: 52) ?? "") \(game.ship(newClass)?.displayName ?? "").") }
+            // Into a pod nothing is printed; into a bay fighter "Escaping in <class>." (#52, 0x200).
+            if !intoPod { post("\(strs?.string(at: 52) ?? "") \(game.ship(newClass)?.displayName ?? "").", rawCalls: 0x200) }
             _ = autosave(.event)
         case let .asteroidMined(cargoType, quantity, _):
             gapsMined(cargoType: cargoType, quantity: quantity)
@@ -4428,10 +4502,7 @@ class NovaWorld: Node2D {
     @Callable(autoSnakeCase: true) func toggleCloak() {
         guard let world else { return }
         if !world.player.hasCloak { beep(4) }   // 0x0044b120
-        world.togglePlayerCloak()
-        if world.player.hasCloak {
-            post(world.player.cloakEngaged ? "Cloaking device engaged." : "Cloaking device disengaged.")
-        }
+        world.togglePlayerCloak()   // the original prints nothing for a cloak toggle (only snd 380/381)
     }
 
     /// Alt-X: abandon ship — works while disabled or going down, with an escape pod or an
@@ -4527,11 +4598,10 @@ class NovaWorld: Node2D {
     private func gapsGateClicked(_ spob: SpobRes) {
         guard let game else { return }
         if spob.isWormhole {
-            post("Wormhole — fly into it to be swept across the galaxy.")
+            return   // no status line in the original (the Land key's request line is all it shows)
         } else if spob.isHypergate {
             if playerMayUseGate(spob.id) {
-                post(travel.openGates.insert(spob.id).inserted
-                     ? "\(spob.name) hypergate online — land on it to travel." : "\(spob.name) hypergate is online.")
+                travel.openGates.insert(spob.id)
             } else {
                 beep(2)     // 0x00457580: snd 151 + STR# 2002 #81
                 post(OriginalText(game: game).misc(81))
@@ -5315,6 +5385,7 @@ class NovaWorld: Node2D {
         var state = written.player
         PilotSaves.migrate(&state, game: game)
         adoptPilot(state, saveID: written.id)
+        travelHints.beginNewPilot()   // new_pilot_flow end: hint state -3 (STR# 2002 #22-31)
         return written.id.uuidString
     }
 
@@ -5340,7 +5411,8 @@ class NovaWorld: Node2D {
     /// The landed stellar's ambient loop (`spöb` CustSndID) as the Apple app starts it
     /// (`GameAudio.startAmbient`): the snd id, or -1 when not docked / the stellar has none.
     @Callable(autoSnakeCase: true) func landedAmbientSound() -> Int {
-        guard let id = dockedSpobID, let s = game?.spob(id)?.ambientSoundID, s >= 0 else { return -1 }
+        // The original loads CustSndID only when it is >= 128 (0x00491f30).
+        guard let id = dockedSpobID, let s = game?.spob(id)?.ambientSoundID, s >= 128 else { return -1 }
         return s
     }
 
@@ -5504,11 +5576,15 @@ class NovaWorld: Node2D {
         case .playerDying:
             post(strs?.string(at: 288) ?? "")                 // "Ship destroyed"
         case .playerDestroyed:
-            post("Your ship has been destroyed.")
+            break   // "Ship destroyed." (#288) was posted at .playerDying; the original adds no line here
         case let .repairSystemEngaged(entityID) where entityID == World.playerEntityID:
             post(strs?.string(at: 37) ?? "")                  // OS-07
         case let .assistanceDelivered(entityID):
-            post("\(world?.ship(id: entityID)?.name ?? "Ally") transfers fuel and makes repairs.")
+            // "<class>:  Repairs complete, <pilot>." (#384, 0xf0; Ship_ApplyShipAiControls 0x00408150)
+            if let helper = world?.ship(id: entityID) {
+                post(OriginalText(game: game).repairsComplete(
+                    shipClass: game.ship(helper.shipTypeID)?.name ?? helper.name, pilot: pilot.pilotName))
+            }
         case let .escortRejoined(_, fighter):
             post(strs?.string(at: fighter ? 128 : 127) ?? "")
         case let .fighterRecoveredToBay(_, captured):
@@ -5527,9 +5603,55 @@ class NovaWorld: Node2D {
     /// The arrival line after a jump or gate (B1): the buoy, else "Arriving in the X system on
     /// <date>." Queued on the status-line channel like every other message.
     private func postArrivalLine(systemID: Int, gateID: Int?, abandonedFighters: Int) {
+        travelHints.latch()   // hyperspace arrival re-latches the hint state (0x0044f83f)
         guard let game, let line = StatusLineBackend.arrival(game: game, pilot: pilot, systemID: systemID,
                                                              gateID: gateID, abandonedFighters: abandonedFighters) else { return }
         post(line.text, rawCalls: line.rawCalls)
+    }
+
+    // MARK: Travel hint chain (UI-11)
+
+    /// The new-pilot hint state (`DAT_007cab1c`, STR# 2002 #22-31); the shared rules are
+    /// `TravelHintTracker`. A fresh pilot starts at -3, everything else latched.
+    private var travelHints = TravelHintTracker()
+    private var hintKeyNames = TravelHintTracker.Keys(land: "", map: "", jump: "")
+
+    /// The display names of the Land, Map and Jump keys the hint text embeds (empty = unbound).
+    /// The frontend refreshes them when its bindings change.
+    @Callable(autoSnakeCase: true) func setHintKeyNames(land: String, map: String, jump: String) {
+        hintKeyNames = TravelHintTracker.Keys(land: land, map: map, jump: jump)
+    }
+
+    private func tickTravelHints(dt: Double) {
+        guard let world, let game, dockedSpobID == nil, world.player.isAlive, dt > 0 else { return }
+        if world.playerJump != nil { travelHints.latch(); return }   // the spin-up latches it (0x0044c561)
+        let p = world.player.position
+        let nearest = world.systemContext.bodies
+            .filter { $0.isLandable && !$0.isGate && pilot.destroyedStellars?.contains($0.id) != true }
+            .min { ($0.position - p).length < ($1.position - p).length }
+            .flatMap { game.spob($0.id) }
+            .map { TravelHintTracker.Stellar(name: $0.displayName, isStation: $0.isStation) }
+        if let hint = travelHints.tick(rawCalls: dt / OriginalClock.rawCallSeconds,
+                                       distanceSquared: p.x * p.x + p.y * p.y, disabled: world.player.disabled,
+                                       nearest: nearest, keys: hintKeyNames, text: OriginalText(game: game)) {
+            post(hint.text, rawCalls: hint.rawCalls)
+            beep(hint.beep)   // DAT_00591570: snd 154, priority 1
+        }
+    }
+
+    // Test seams (godot/tests/travel_hints_selfcheck.gd). Not used by the game.
+    @Callable(autoSnakeCase: true) func debugTravelHintState() -> Int { travelHints.state }
+    @Callable(autoSnakeCase: true) func debugTravelHintBegin() { travelHints.beginNewPilot() }
+    @Callable(autoSnakeCase: true) func debugTravelHintLatch() { travelHints.latch() }
+    /// The launch-tail rule: true when the launch line may show (state >= 3); else the state resets to -1.
+    @Callable(autoSnakeCase: true) func debugTravelHintLaunch() -> Bool { travelHints.launched() }
+    /// Run one evaluation (as if 60 raw calls elapsed) at `distance_squared` from the system centre with a
+    /// stellar "Earth" nearby. Returns the hint text, or "" when none shows.
+    @Callable(autoSnakeCase: true) func debugTravelHintEval(distanceSquared: Double, disabled: Bool) -> String {
+        guard let game else { return "" }
+        let earth = TravelHintTracker.Stellar(name: "Earth", isStation: false)
+        return travelHints.evaluate(distanceSquared: distanceSquared, disabled: disabled, nearest: earth,
+                                    keys: hintKeyNames, text: OriginalText(game: game))?.text ?? ""
     }
 
     /// The pêrs HailQuote broadcast (B3; `GameScene.broadcastHailQuotes`, 0x00433050): ships and
@@ -5550,7 +5672,10 @@ class NovaWorld: Node2D {
             },
             roll: { force ? 0 : Double.random(in: 0..<1) })
         // (the world's own .overlayMessage event is cleared by the next step uncollected: post once, here)
-        for q in quotes { post(q, rawCalls: PersQuoteBroadcaster.overlayFrames) }
+        for q in quotes {
+            post(q, rawCalls: PersQuoteBroadcaster.overlayFrames)
+            beep(5)   // Mission_ShowMissionShipAnnouncement 0x00426d10: snd 154, priority 1
+        }
     }
 
     /// Test seam (status_line_selfcheck): make the nearest NPC a gate-free pêrs that has a HailQuote,

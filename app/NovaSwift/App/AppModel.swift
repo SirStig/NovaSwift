@@ -40,6 +40,12 @@ final class AppModel: ObservableObject {
     /// original does for a loaded pilot whose ship is gone. Session-only.
     @Published var killedPilotID: UUID?
 
+    /// The original's new-pilot travel hint state (`DAT_007cab1c`, STR# 2002
+    /// #22-31; UI-11). A created pilot starts it at -3; a loaded pilot, a jump
+    /// and every arrival latch it (see `TravelHintTracker`). Session-only, as in
+    /// the original (it is never saved).
+    let travelHints = TravelHintTracker()
+
     @Published var settings: GameSettings = .load()
     @Published var bindings: KeyBindings = .load()
     @Published var padBindings: PadBindings = .load()
@@ -507,6 +513,7 @@ final class AppModel: ObservableObject {
         roster.setSelected(save.id)                 // a new pilot becomes the loaded one
         pilot.begin(state: save.player, rosterID: save.id)
         pilot.migrateIfNeeded(game: game)
+        travelHints.beginNewPilot()                 // new_pilot_flow end: hint state -3
         return scenario
     }
 
@@ -537,6 +544,7 @@ final class AppModel: ObservableObject {
             state = engine.player
         }
         pilot.begin(state: state, rosterID: save.id)
+        travelHints.latch()                         // a loaded pilot has no hints (pilot_file.cpp:1602)
         // Migrate at adoption as well as at `finishLoadingIntoGame`. It's
         // idempotent, and the cost of a path that somehow skips it is no longer
         // cosmetic: the player's loadout is built purely from `outfits`, so an

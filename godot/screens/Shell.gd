@@ -30,6 +30,7 @@ const IntroSequence = preload("res://screens/IntroSequence.gd")
 const Tutorial = preload("res://screens/Tutorial.gd")
 const Hints = preload("res://screens/Hints.gd")
 const Inert = preload("res://ui/novaswift/NovaInert.gd")
+const UpdateController = preload("res://updater/UpdateController.gd")   # auto-updater (godot/updater/)
 
 ## Seconds a slow operation runs before the loading screen appears (no flash for quick ones),
 ## and the least time it then stays up (no flicker when the work ends just after).
@@ -63,6 +64,7 @@ var intro: Node                # the new pilot's IntroSequence while it plays
 var offer: Node                # the flight-training offer while it is up
 var coach: Node                # the training flight's coach overlay (Tutorial.gd)
 var hints: Node                # one-time hint cards (Hints.gd)
+var updater: Node              # UpdateController: daily update check + prompt (group "nova_updater")
 var killed_id := ""            # the loaded pilot that was killed: the menu reads "<name> has been killed"
 var _training_exit := "play"   # "play" (new pilot: begin play after) | "menu" (replayed from Settings)
 var _data_from_menu := false
@@ -81,6 +83,9 @@ func setup(world: Object, game_audio: Node) -> void:
 	hints = Hints.new()
 	add_child(hints)
 	hints.setup(nova, self)
+	updater = UpdateController.new()
+	add_child(updater)
+	updater.setup(self)
 
 
 ## Any full-screen shell screen is up (the world is not shown / stepped).
@@ -226,6 +231,8 @@ func _open_main_menu() -> void:
 	main_menu.plugins.connect(_open_plugins.bind(main_menu))
 	main_menu.quit.connect(quit_game)
 	main_menu.enter_ship.connect(_enter_ship)
+	if updater != null:
+		updater.on_main_menu_shown.call_deferred()   # housekeeping + (at most daily) update check
 
 
 ## Classic menu "Enter Ship": resume the newest pilot; with none, open the pilot list.

@@ -74,7 +74,7 @@ the engine is running with. The tables and rules are the shared `Sources/NovaSwi
 | `chaseTilt` | `graphics/chase_tilt` | float degrees | 30 | Chase tilt | yes (flight agent) |
 | `hdGraphics`, `hdDetail`, `hullPresentation`, `modelDetail`, `liveLighting`, quality presets | none | | | HD / 3D options | n/a for now (no HD pipeline in Godot, parity package 9) |
 | classic Preferences: `smokeTrails`, `shipAnimations`, `runningLights`, `weaponEffects`, `parallaxStarfield` | `classic/smoke_trails`, `ship_animations`, `running_lights`, `weapon_effects`, `parallax_starfield` | bool | true | Original Preferences window | yes (flight renderer) |
-| classic: `playMovies`, `ambientSounds`, `shareProcessorTime`, `checkForUpdates`, `brightnessStep` | `classic/play_movies`, `ambient_sounds`, `share_processor_time`, `check_for_updates`, `brightness_step` | bool / int 0..5 | true / false / 3 | Original Preferences window | key only (no movies, no ambient loop, no brightness ramp in Godot) |
+| classic: `playMovies`, `ambientSounds`, `shareProcessorTime`, `brightnessStep` | `classic/play_movies`, `ambient_sounds`, `share_processor_time`, `brightness_step` | bool / int 0..5 | true / false / 3 | Original Preferences window | key only (no movies, no ambient loop, no brightness ramp in Godot) |
 | classic: `introMusic`, `soundVolumeStep` | `classic/intro_music`, `classic/sound_volume_step` | bool / int 0..7 | true / 5 | Original Preferences window | yes (existing) |
 
 ## Audio (Apple: Settings > Audio)
@@ -109,6 +109,23 @@ the engine is running with. The tables and rules are the shared `Sources/NovaSwi
 |---|---|---|---|---|---|
 | `reduceFlashing` | `graphics/reduce_flashing` | bool | false | Reduce flashing & motion | yes (flight agent: particles, flashes, shake, jump flash) |
 | `colorblindMode` | `accessibility/colorblind_mode` | enum `none` `protanopia` `deuteranopia` `tritanopia` | `none` | Colorblind mode | yes (screen-space shader using the engine's `ColorblindFilter` matrix, over everything) |
+
+## Updates (Godot desktop only; no Apple field -- the Apple app updates through its store)
+
+The auto-updater (`godot/updater/`, design in `docs/UPDATER.md`). Settings > Support > Updates; the original Preferences
+window's "Check For Updates" box (DITL item 21) is the same `updates/check` pref (the old `classic/check_for_updates` key is gone).
+
+| Apple field | Prefs `section/key` | Type / range | Default | Label | Wired |
+|---|---|---|---|---|---|
+| (none) | `updates/check` | bool | true | Check for updates (also Classic Preferences > Check For Updates) | yes (`UpdateController.on_main_menu_shown`; off = no automatic check, "Check Now" still works) |
+| (none) | `updates/beta` | bool | false | Experimental updates (key kept from the old "beta" name): also offer experimental releases (GitHub pre-release flag, semver suffix, or signed `channel`); turning it off on an experimental build offers Return to stable | yes (`UpdateChecker.candidates`, `UpdateController`) |
+| (none) | `updates/installed_channel` / `updates/pending_channel` | string `stable` / `experimental` | `stable` / `` | (internal) channel of the running build / of an install in flight | yes |
+| (none) | `updates/last_check` | int Unix seconds | 0 | (shown as "Last checked") -- stamped only after a check that got a valid answer; the next automatic check is >= 24 h later | yes |
+| (none) | `updates/last_attempt` | int Unix seconds | 0 | (internal) -- stamped on every attempt; a failed check is retried no sooner than 1 h later | yes |
+| (none) | `updates/skipped` | string version | "" | (set by "Skip This Version") -- the automatic check stays quiet about exactly that version; "Check Now" ignores it | yes |
+
+Not applicable and never prompted: development (editor) builds, headless runs, builds with the placeholder public key
+(`godot/updater/update_pubkey.pem`), and macOS (offers the download page only).
 
 ## Caps Lock 2x (no key; a live input)
 

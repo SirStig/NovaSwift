@@ -5,6 +5,7 @@ import GameController
 import NovaSwiftKit
 import NovaSwiftEngine
 import NovaSwiftHD
+import NovaSwiftStory
 #if os(macOS)
 import AppKit
 #else
@@ -152,7 +153,7 @@ final class GameScene: SKScene {
             hostile: { [weak self] in self?.isEffectivelyHostileToPlayer($0) ?? false },
             missionAvailable: { [weak self] in self?.persMissionAvailableProvider?($0) ?? true },
             roll: { Double.random(in: 0..<1) })
-        _ = posted   // the përs quote broadcast is silent in the original (0x00433050)
+        _ = posted   // each quote shows, and sounds snd 154, through the world's overlay-message event (0x00426d10)
     }
     /// The gate the last in-place system reload emerged from (nil for a
     /// hyperspace arrival) — picks the arrival line's wording (UI-11).
@@ -471,6 +472,9 @@ final class GameScene: SKScene {
     private enum JumpPhase { case none, engaged, align, accelerate, flash, arrive }
     private var jumpPhase: JumpPhase = .none
     private var jumpClock: Double = 0
+    /// The `quickHyperjump` maneuver (align / accelerate / flash) and a gate transport's flash. The
+    /// logic is the shared engine's `QuickHyperjump`; the scene only draws what it returns.
+    private var quickJump = QuickHyperjump(flashOnly: 0)
     /// Heading the ship turns to before the jump (toward the destination system
     /// on the galactic map).
     private var jumpOutboundHeading: Double = 0
@@ -497,10 +501,26 @@ final class GameScene: SKScene {
     private var jumpArriveGateID: Int?
 
     /// Invoked when a government ship completes a scan of the player, with that
-    /// ship's government id. The host wires this to the contraband scan-and-fine
-    /// (`ContrabandScan.enforce`), which needs live pilot state the scene doesn't
-    /// hold. nil = no consequence (e.g. the no-data demo path).
-    var onPlayerScanned: ((Int) -> Void)?
+    /// ship's government id and the name it speaks with (përs name, else class
+    /// name; `World.broadcastLabel`). The host wires this to the contraband
+    /// scan-and-fine (`ContrabandScan.enforce`), which needs live pilot state the
+    /// scene doesn't hold. nil = no consequence (e.g. the no-data demo path).
+    var onPlayerScanned: ((Int, String) -> Void)?
+    /// The new-pilot travel hint chain tick (UI-11, STR# 2002 #22-31), run with
+    /// the HUD's elapsed seconds; the container owns the tracker and the keys.
+    var onTravelHintTick: ((Double) -> Void)?
+    /// What the hint chain reads off the world: the player's squared distance from
+    /// the system centre, whether the ship is disabled, and the nearest stellar the
+    /// Land key could reach (`Stellar_FindNearestAvailableTravelStellar` 0x00462db0:
+    /// an active, landable body; gates are left out). nil while the player is dead.
+    func travelHintInputs() -> (distanceSquared: Double, disabled: Bool, nearestSpobID: Int?)? {
+        guard let world, world.player.isAlive else { return nil }
+        let p = world.player.position
+        let nearest = world.systemContext.bodies
+            .filter { $0.isLandable && !$0.isGate && !destroyedStellarIDs.contains($0.id) }
+            .min { ($0.position - p).length < ($1.position - p).length }
+        return (p.x * p.x + p.y * p.y, world.player.disabled, nearest?.id)
+    }
     /// Fired once each time the player opens fire with the primary weapon (the
     /// rising edge of the fire trigger). Used by the flight-training tutorial to
     /// detect the "shoot" step; nil in normal play.
@@ -1951,7 +1971,7 @@ final class GameScene: SKScene {
         animClock += dt
         blinkClock += dt
         let baseSet = hullAnim.baseSet(turnSign: turn, animClock: animClock, disabled: false,
-                                       carriesKeyShip: p.carriesKeyShip)
+                                       carriesKeyShip: p.carriesKeyShip, foldSet: p.fold.currentSet)
         let spin = hdSpin(renderHeading(p), framesPerSet: hullAnim.framesPerSet, texture: rotationTextures.first)
         shipSprite?.zRotation = spin; engineGlowSprite?.zRotation = spin; lightNode?.zRotation = spin
         altNode?.zRotation = spin; weaponGlowNode?.zRotation = spin
@@ -2350,11 +2370,10 @@ final class GameScene: SKScene {
 
     func togglePlayerCloak() {
         // No cloak to run: the refusal sounds snd 153 (0x0044b120).
+        // The original prints nothing for a cloak toggle: only the cloak
+        // sounds (snd 380 / 381, `SoundCues`).
         if !world.player.hasCloak { audio?.play(.beep4) }
         world.togglePlayerCloak()
-        if world.player.hasCloak {
-            hud?.post(world.player.cloakEngaged ? "Cloaking device engaged." : "Cloaking device disengaged.")
-        }
     }
 
     /// Call every deployed player fighter back to dock, regardless of combat.
@@ -2879,16 +2898,22 @@ final class GameScene: SKScene {
                 // message and wire the contraband-fine consequence. NPC-on-NPC
                 // scans happen silently (no on-screen sweep); the green ring read
                 // as clutter over every passing ship.
+                // The original prints nothing when a scan starts: the interceptor's
+                // "prepare to be scanned" taunt (0x00403de0) is the AI's own overlay
+                // line, and the result sentence comes from the host (0x00401800).
                 if targetID == 0 {
-                    hud?.post("You are being scanned.")
                     // -1 govt = independent (no scan law).
-                    if let govt = world.ship(id: scannerID)?.government, govt >= 0 {
-                        onPlayerScanned?(govt)
+                    if let scanner = world.ship(id: scannerID), scanner.government >= 0, let game = galaxy?.game {
+                        onPlayerScanned?(scanner.government, world.broadcastLabel(of: scanner, game: game))
                     }
                 }
             case let .assistanceDelivered(entityID):
-                let name = world.ship(id: entityID)?.name ?? "Ally"
-                hud?.post("\(name) transfers fuel and makes repairs.")
+                // "<class>:  Repairs complete, <pilot>." (#384, 0xf0 raw calls;
+                // Ship_ApplyShipAiControls 0x00408150).
+                if let game = galaxy?.game, let helper = world.ship(id: entityID) {
+                    hud?.post(OriginalText(game: game).repairsComplete(
+                        shipClass: game.ship(helper.shipTypeID)?.name ?? helper.name, pilot: world.pilotName))
+                }
                 audio?.play(.beep2)   // Ship_ApplyShipAiControls 0x00408150, snd 151
                 audio?.play(.docking)
             case let .personGrudge(pid):
@@ -2906,11 +2931,11 @@ final class GameScene: SKScene {
                 onPlayerDying?()
             case let .playerEjected(previous, newClass, intoPod, _):
                 adoptPlayerHull()
-                if intoPod {
-                    if let line = galaxy?.game.stringList(2002)?.string(at: 38) { hud?.post(line) }
-                } else if let line = galaxy?.game.stringList(2002)?.string(at: 52) {
-                    // "You abandon your ship for <class>."
-                    hud?.post("\(line) \(galaxy?.game.ship(newClass)?.displayName ?? "").")
+                // Into an escape pod the original prints nothing; into a bay fighter
+                // it shows "Escaping in <class>." (#52, 0x200 raw calls; 0x0044aa70).
+                // (#38 is the bomb line, not a pod line.)
+                if !intoPod, let line = galaxy?.game.stringList(2002)?.string(at: 52) {
+                    hud?.post("\(line) \(galaxy?.game.ship(newClass)?.displayName ?? "").", rawCalls: 0x200)
                 }
                 onPlayerEjected?(previous, newClass, intoPod)
             case .escapePodRespawn:
@@ -2920,10 +2945,9 @@ final class GameScene: SKScene {
                 // play out the multi-burst wreck explosion while the host counts
                 // down to the menu.
                 audio?.stopAllLoops()
-                // Say it out loud. The wreck freezing and the controls going dead
-                // is not, on its own, legible as "you died" — players read it as
-                // the ship having glitched.
-                hud?.post("Your ship has been destroyed.")
+                // The original shows no further line here: "Ship destroyed." (#288)
+                // was posted when the hull began to go down (.playerDying,
+                // Ship_ApplyDamageToShip 0x004192d0).
                 hud?.landPrompt = ""
                 hud?.landName = ""
                 hud?.landReady = false
@@ -3067,6 +3091,7 @@ final class GameScene: SKScene {
         w.spawner?.model = settings.systemAliveness.spawnModel
         w.spawner?.populationScale = settings.systemAliveness.populationScale
         w.enhancements = settings.enhancements
+        w.shipAnimations = settings.shipAnimations   // folding hulls need the extra sprite sets
         w.strictPlay = strictPlay
         w.playerCombatRating = playerCombatRatingProvider?() ?? 0
         w.playerPersGrudges = persGrudges
@@ -3105,6 +3130,8 @@ final class GameScene: SKScene {
     func ammoAboard(_ id: Int, freeMass: Int = .max) -> Int { world?.ammoAboard(id, freeMass: freeMass) ?? 0 }
     /// Transfer a boarded hulk's matching ammunition into the player's weapons.
     func plunderAmmo(_ id: Int, freeMass: Int = .max) -> Int { world?.takePlunderAmmo(from: id, freeMass: freeMass) ?? 0 }
+    /// The ammo outfit the boarding offers (ask before `plunderAmmo`), for the status line.
+    func plunderAmmoOutfit(_ id: Int) -> OutfRes? { world?.ammoPlunderOutfit(of: id) }
 
     /// Roll to capture a boarded hulk. On success returns the captured hull's
     /// live entityID / shïp type / name, but doesn't decide what happens to
@@ -3271,10 +3298,9 @@ final class GameScene: SKScene {
     /// with a message and does nothing if not.
     private func handleGateClick(_ spobID: Int) {
         guard let spob = galaxy?.game.spob(spobID) else { return }
-        if spob.isWormhole {
-            hud?.post("Wormhole — fly into it to be swept across the galaxy.")
-            return
-        }
+        // The original has no click-to-target and no status line for a wormhole:
+        // the Land key's request line (#74/#75) is all it shows.
+        if spob.isWormhole { return }
         guard spob.isHypergate else { return }
         if playerMayUseGate(spobID) {
             if openGateIDs.insert(spobID).inserted {
@@ -3283,9 +3309,6 @@ final class GameScene: SKScene {
                                 kind: .hypergate)
                 }
                 audio?.play(.hyperspaceCharge)
-                hud?.post("\(spob.name) hypergate online — land on it to travel.")
-            } else {
-                hud?.post("\(spob.name) hypergate is online.")
             }
         } else {
             audio?.play(.beep2)   // landing refused: Stellar_HandleStellarEntryAndExit 0x00457580, snd 151
@@ -4365,7 +4388,8 @@ final class GameScene: SKScene {
             }
             let heading = node.hullAnim.heading(forAngle: renderHeading(npc))
             let set = node.hullAnim.baseSet(turnSign: turn, animClock: node.animClock,
-                                            disabled: npc.disabled, carriesKeyShip: npc.carriesKeyShip)
+                                            disabled: npc.disabled, carriesKeyShip: npc.carriesKeyShip,
+                                            foldSet: npc.fold.currentSet)
             let spin = hdSpin(renderHeading(npc), framesPerSet: node.hullAnim.framesPerSet, texture: node.textures.first)
             // Five direct writes, not a five-element array built per ship per frame.
             node.sprite?.zRotation = spin; node.engineGlow?.zRotation = spin; node.light?.zRotation = spin
@@ -4751,8 +4775,9 @@ final class GameScene: SKScene {
         // Orient the streak fan along the direction of travel.
         jumpStreaks?.zRotation = -CGFloat(outboundHeading + viewRotation)   // camera space
         if settings.enhancements.quickHyperjump {
+            quickJump = QuickHyperjump(outboundHeading: outboundHeading, instant: fastJump, speed: speed)
             jumpPhase = fastJump ? .accelerate : .align
-            jumpArriveFade = 0.35
+            jumpArriveFade = QuickHyperjump.arriveFadeSeconds
             // Spin-up sound as the maneuver starts — a loop, so it can be cut
             // off the instant the jump commits.
             audio?.startHyperspaceCharge()
@@ -4803,6 +4828,7 @@ final class GameScene: SKScene {
         jumpCommitted = false
         jumpClock = 0
         world.player.velocity = Vec2()      // you're sitting on the gate — no run-up
+        quickJump = QuickHyperjump(flashOnly: jumpOutboundHeading)
         jumpPhase = .flash                   // straight to the white-out; no maneuver
         // Gate travel has no Warp up; the original plays only Warp out
         // (Stellar_EnterHypergate 0x00456480), which the arrival does.
@@ -4877,44 +4903,25 @@ final class GameScene: SKScene {
                 break
             }
 
-        case .align:
-            // Rotate to the outbound heading first — nothing else. No braking or
-            // swinging around to face our velocity's reverse: the ship simply turns
-            // to point at the destination, then holds while `.accelerate` does the
-            // slow tear-away. (Any residual cruise velocity just carries along.)
-            intent.desiredHeading = jumpOutboundHeading
-            let aimErr = abs(angleDelta(from: p.angle, to: jumpOutboundHeading))
-            // The player's auto-turn stops within one whole-degree step (FL-10).
-            let settled = max(0.1, Double(p.stats.playerTurnDegPerTick) * .pi / 180 + 1e-6)
-            if aimErr < settled || jumpClock > 3.0 {    // 3s safety cap so a slow turner can't stall
-                enterJumpPhase(.accelerate)
+        case .align, .accelerate, .flash:
+            // The shared `QuickHyperjump` flies the turn, the burst and the white-out; the scene draws it.
+            let frame = quickJump.step(dt: dt, player: p)
+            intent = frame.intent
+            switch quickJump.phase {
+            case .align: jumpPhase = .align
+            case .accelerate: jumpPhase = .accelerate
+            case .flash: jumpPhase = .flash
             }
-
-        case .accelerate:
-            // Point at the exit and pour on speed; the stars streak. We lift the
-            // player's own speed cap (the same over-speed mechanism NPC jump-ins
-            // use) so the ship visibly tears away rather than crawling to cruise.
-            intent.desiredHeading = jumpOutboundHeading
-            if abs(angleDelta(from: p.angle, to: jumpOutboundHeading)) < .pi / 2 { intent.thrust = true }
-            p.entryOverspeed = max(p.entryOverspeed, p.stats.maxSpeed * 4)
-            p.entryOverspeedDecayPerSec = 0        // hold the boost through the launch
-            let streak = min(1 + jumpClock * 12, 9)
-            showJumpStreaks(intensity: CGFloat(min(1, jumpClock / 0.35)), stretch: CGFloat(streak))
-            // Hyperspace-speed outfits (ModType 22) shorten the launch.
-            if jumpClock > (jumpInstant ? 0.18 : 0.45) / jumpSpeed {
-                enterJumpPhase(.flash)
+            if let intensity = frame.streakIntensity {
+                showJumpStreaks(intensity: CGFloat(intensity), stretch: CGFloat(frame.streakStretch))
             }
-
-        case .flash:
-            intent.desiredHeading = jumpOutboundHeading
-            // Ramp the white flash up fast; at its peak commit + swap the system.
-            let t = min(1, jumpClock / 0.14)
-            jumpFlash?.isHidden = false
-            // "Reduce flashing & motion" caps the white-out so the jump doesn't
-            // fully blank the screen.
-            jumpFlash?.alpha = CGFloat(t) * (settings.reduceFlashing ? 0.45 : 1.0)
-            showJumpStreaks(intensity: 1, stretch: 9)
-            if !jumpCommitted, t >= 1 {
+            if let t = frame.flash {
+                // "Reduce flashing & motion" caps the white-out so the jump doesn't
+                // fully blank the screen.
+                jumpFlash?.isHidden = false
+                jumpFlash?.alpha = CGFloat(t) * (settings.reduceFlashing ? 0.45 : 1.0)
+            }
+            if frame.commit {
                 jumpCommitted = true
                 audio?.stopHyperspaceCharge()          // jump commits here — the charge sound stops with it
                 jumpCommit?()                          // app model: spend fuel, advance route, follow pilot, save
@@ -6533,6 +6540,7 @@ final class GameScene: SKScene {
         let hudElapsed = hudClock
         hudClock = 0
         broadcastHailQuotes(elapsed: hudElapsed)
+        onTravelHintTick?(hudElapsed)
         let p = world.player
         hud.speed = Int(p.velocity.length)
         hud.maxSpeed = max(1, Int(p.stats.maxSpeed))

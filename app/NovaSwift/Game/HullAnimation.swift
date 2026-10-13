@@ -58,7 +58,7 @@ struct HullAnim {
     }
 
     /// Whether this hull has more than the single level-flight set to draw.
-    var hasExtraSets: Bool { setCount > 1 && (mode == .banking || mode == .animation) }
+    var hasExtraSets: Bool { setCount > 1 && (mode == .banking || mode == .animation || mode == .folding) }
 
     /// Heading frame (0..<framesPerSet) for a world angle (radians, CCW, +y up).
     /// Computed from the true angle so hulls with more than 36 frames/rotation
@@ -71,14 +71,16 @@ struct HullAnim {
 
     /// Which base sprite set to show. `turnSign`: +1 turning left (CCW), -1 right,
     /// 0 ~straight. `animClock`: seconds accumulated (animation mode only).
-    /// Folding / keyCarried aren't wired to their triggers yet, so they draw the
-    /// level set (set 0) — no worse than today, and ready to extend.
+    /// Folding follows the ship's shared `HullFoldState` (see `foldSet`).
     /// - Parameter carriesKeyShip: whether a `shïp.KeyCarried`-type ship is still
     ///   aboard. Only consulted in `.keyCarried` mode, where the original shows
     ///   the second set while one is.
+    /// - Parameter foldSet: the ship's `HullFoldState.currentSet` (shared engine, 0x00428340's fold
+    ///   branch). Only a `.folding` hull reads it, and it ignores `disabled`.
     func baseSet(turnSign: Int, animClock: Double, disabled: Bool,
-                 carriesKeyShip: Bool = false) -> Int {
+                 carriesKeyShip: Bool = false, foldSet: Int = 0) -> Int {
         guard setCount > 1 else { return 0 }
+        if mode == .folding { return max(0, min(foldSet, setCount - 1)) }
         // A hulk has no attitude control, so it can't bank and its animation is
         // dead: it always draws the level set, whatever it seems to be doing.
         guard !disabled else { return 0 }
@@ -94,7 +96,7 @@ struct HullAnim {
             // IS aboard (`Weapon_HasLoadedLaunchBayAmmo`), set 0 otherwise.
             return carriesKeyShip ? min(1, setCount - 1) : 0
         case .none, .folding:
-            return 0
+            return 0   // .folding returned above
         }
     }
 

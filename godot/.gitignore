@@ -14,3 +14,11 @@ bin/*.exp
 # Godot export output.
 export/
 *.import
+
+# Export signing credentials/keystores written by the Godot editor — never commit.
+export_credentials.cfg
+*.keystore
+# Godot export-template archives (downloaded by the packaging scripts).
+*.tpz
+
+# NOTE: *.gd.uid / *.uid files ARE committed (Godot 4.4+ resource UIDs; keep them with their scripts).

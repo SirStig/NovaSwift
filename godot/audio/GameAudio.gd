@@ -43,6 +43,11 @@ var _ambient: AudioStreamPlayer
 var _ambient_id := -1
 var _was_landed := false
 
+# The quickHyperjump enhancement's charge-up loop (GameAudio.startHyperspaceCharge): snd 128 looped from the
+# start of the turn until the jump commits. The bridge says which snd (hyperspace_charge_loop_sound, -1 = none).
+var _charge: AudioStreamPlayer
+var _charge_id: int = -1
+
 # What the last drain asked each voice to do, for tests and debugging.
 var cues_started := 0
 ## snd ids a cue asked for that the data cannot decode (tests/plugins_load_selfcheck.gd).
@@ -60,12 +65,16 @@ func setup(nova: Object) -> void:
 	_ambient = AudioStreamPlayer.new()
 	_ambient.name = "Ambient"
 	add_child(_ambient)
+	_charge = AudioStreamPlayer.new()
+	_charge.name = "HyperspaceCharge"
+	add_child(_charge)
 
 
 func _process(_delta: float) -> void:
 	if _nova != null:
 		apply(_nova.drain_sound_cues())
 		_track_ambient()
+		_track_charge()
 		if _ambient != null and _ambient.playing:
 			_ambient.volume_db = _db(1.0, false)   # follows the Settings sliders live
 
@@ -91,7 +100,8 @@ func _track_ambient() -> void:
 func start_ambient(sound_id: int) -> void:
 	if _ambient == null:
 		return
-	if not bool(Prefs.get_value("classic", "ambient_sounds")) or muted or sound_id < 0:
+	# The original loads CustSndID only when it is >= 128 (0x00491f30), and when "Ambient Sounds" is on.
+	if not bool(Prefs.get_value("classic", "ambient_sounds")) or muted or sound_id < 128:
 		stop_ambient()
 		return
 	var base: AudioStreamWAV = stream_for(sound_id)
@@ -115,6 +125,47 @@ func stop_ambient() -> void:
 		_ambient.stop()
 
 
+## The charge loop follows the bridge: it starts when a quick hyperjump begins and is cut the frame the jump
+## commits (or the player dies). Mute, or a sound the data cannot decode, = silence.
+func _track_charge() -> void:
+	if _charge == null or not _nova.has_method("hyperspace_charge_loop_sound"):
+		return
+	var want: int = int(_nova.hyperspace_charge_loop_sound())
+	if muted:
+		want = -1
+	if want == _charge_id:
+		if _charge.playing:
+			_charge.volume_db = _db(1.0, false)   # follows the Settings sliders live
+		return
+	if want < 0:
+		stop_charge()
+		return
+	var base: AudioStreamWAV = stream_for(want)
+	if base == null:
+		stop_charge()
+		return
+	var loop: AudioStreamWAV = base.duplicate() as AudioStreamWAV
+	loop.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	loop.loop_begin = 0
+	loop.loop_end = int(float(base.data.size()) / (4.0 if base.stereo else 2.0))
+	_charge_id = want
+	_charge.stream = loop
+	_charge.pitch_scale = 1.0
+	_charge.volume_db = _db(1.0, false)
+	_charge.play()
+
+
+func stop_charge() -> void:
+	_charge_id = -1
+	if _charge != null:
+		_charge.stop()
+
+
+## True while the quickHyperjump charge loop is sounding (tests).
+func charge_playing() -> bool:
+	return _charge != null and _charge.playing
+
+
 ## True while the spaceport loop is sounding (tests).
 func ambient_playing() -> bool:
 	return _ambient != null and _ambient.playing
@@ -123,6 +174,7 @@ func ambient_playing() -> bool:
 ## `AppModel.returnToMainMenu` / game exit: every voice and the loop stop (stopAllLoops + stop(0)).
 func stop_all() -> void:
 	stop_ambient()
+	stop_charge()
 	_was_landed = false
 	if _nova != null and _nova.has_method("sound_stop"):
 		_nova.sound_stop(0)

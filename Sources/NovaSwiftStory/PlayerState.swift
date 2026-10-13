@@ -552,6 +552,12 @@ public struct PlayerState: Codable, Sendable {
     /// `nëbu` ids whose OnExplore has run (once per game, OS-14).
     public var exploredNebulae: Set<Int>? = nil
 
+    /// The deadline each of the 16 mission slots last held (the slot's date in `DAT_005914b8`,
+    /// +6). `Mission_ActivateMissionAtSlot` (0x0043f100) writes it only for a mission with a time
+    /// limit and a slot is never cleared, so a no-time-limit mission accepted into a used slot
+    /// shows the previous occupant's date for `<DL>`. Keyed by slot.
+    public var slotDeadlines: [Int: GameDate]? = nil
+
     /// The original's 16 mission slots (ui_rules B6): activation fails when
     /// every slot is taken.
     public static let missionSlotCount = 16

@@ -147,16 +147,58 @@ public struct PlayerInfoPages {
         }
     }
 
-    /// Cargo: commodities and junk with count words. Empty: "You don't have
-    /// any cargo aboard your ship" (#269), or #268 when the fleet carries
-    /// more than the ship (freighter escorts, 0x0049a540).
+    /// Cargo (page 2, `NovaUi_BuildPlayerSpecialInteractionStrings` 0x0049c050):
+    /// one running sentence, not a list — "Current cargo in your ship (#362 +
+    /// #365, or #366 "in your fleet" when the fleet holds more than the ship):",
+    /// a blank line, then the held types in id order, commodities first and
+    /// junk after, each "<count word> ton(s) of <name>" (the first count word
+    /// capitalised; `Ship_FormatLocalizedCountWord`, STR# 137 words for 1…10,
+    /// digits beyond, the junk's lower-case name), joined by ", " with
+    /// "and" (#392) before the last, ending in "." and a blank line, then the
+    /// free-space footer (#364: "Free cargo space in your fleet:  N tons",
+    /// plus "  (M tons free in your ship)" / "(none free in your ship)" when
+    /// the ship's own share differs). Empty: "You don't have any cargo aboard
+    /// your ship" (#269), or #268 when the fleet carries more than the ship
+    /// (freighter escorts, 0x0049a540).
     public func cargo(shipCapacity: Int = 0, fleetCapacity: Int = 0) -> String {
         let held = player.cargo.filter { $0.value > 0 }.sorted { $0.key < $1.key }
         guard hasCargo, !held.isEmpty else { return text.misc(shipCapacity < fleetCapacity ? 268 : 269) }
-        return held.map { id, tons in
-            let name = Commodity(rawValue: id).map { game.commodityName($0) } ?? game.junk(id)?.name ?? ""
-            return "\(text.countWord(tons)) \(text.misc(tons == 1 ? 1 : 2)) \(text.misc(391)) \(name)"
-        }.joined(separator: "\n")
+        let fleet = shipCapacity < fleetCapacity
+        var out = "\(text.misc(362)) \(text.misc(fleet ? 366 : 365)):\n\n"
+        // Commodities (Commodity ids) come before junk, each in id order.
+        let ordered = held.filter { Commodity(rawValue: $0.key) != nil } + held.filter { Commodity(rawValue: $0.key) == nil }
+        var items: [String] = []
+        for (index, entry) in ordered.enumerated() {
+            let (id, tons) = entry
+            let name = Commodity(rawValue: id).map { game.commodityName($0) } ?? game.junk(id)?.runningTextName ?? ""
+            let count = index == 0 ? text.capitalizedCountWord(tons) : text.localizedCountWord(tons)
+            items.append("\(count) \(text.misc(tons == 1 ? 1 : 2)) \(text.misc(391)) \(name)")
+        }
+        var list = ""
+        for (i, item) in items.enumerated() {
+            list += item
+            if i < items.count - 2 { list += ", " }
+            else if i == items.count - 2 { list += (items.count > 2 ? "," : "") + " \(text.misc(392)) " }
+        }
+        if let first = list.first { list = first.uppercased() + list.dropFirst() }
+        out += list + ".\n\n"
+
+        let used = player.usedCargoSpace
+        let free = max(0, fleetCapacity - used)
+        guard free > 0 else { return out }
+        let tonWord = text.misc(free == 1 ? 1 : 2)
+        if fleet {
+            out += "\(text.misc(364)) \(text.misc(366)):  \(OriginalText.grouped(free)) \(tonWord)"
+            let inShip = max(0, shipCapacity - used)
+            if inShip != free, inShip < 1 {
+                out += "(\(text.misc(336)) \(text.misc(369)))"
+            } else if inShip != free {
+                out += "  (\(OriginalText.grouped(inShip)) \(text.misc(inShip == 1 ? 1 : 2)) \(text.misc(369)))"
+            }
+        } else {
+            out += "\(text.misc(364)): \(OriginalText.grouped(free)) \(tonWord)"
+        }
+        return out
     }
 
     /// Extras: "Current extras for your ship:" (#272), outfits by cost,

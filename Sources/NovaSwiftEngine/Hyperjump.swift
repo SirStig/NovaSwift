@@ -231,6 +231,7 @@ extension World {
         }
         p.entryOverspeed = 0
         p.entryOverspeedDecayPerSec = 0
+        beginPlayerHullLaunch()   // the hull unfolds on arrival (0x0044aa70 jump-fire block)
     }
 }
 

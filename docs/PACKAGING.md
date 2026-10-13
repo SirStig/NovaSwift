@@ -3,7 +3,7 @@
 Milestone 6. Config lives in `godot/export_presets.cfg` (presets **Linux**,
 **Windows**, **macOS**), `godot/NovaSwift.gdextension` (`[libraries]` +
 `[dependencies]`), `scripts/package-linux.sh`, `packaging/linux/`, and the
-`package-*` jobs in `.github/workflows/godot-linux-windows.yml`.
+`scripts/package-{macos,linux,linux-docker}.sh`, `scripts/package-windows.ps1`.
 
 ## What is (never) in the package
 
@@ -26,24 +26,76 @@ Instead `build-gdextension.sh` links with `-rpath $ORIGIN` on Linux and
 (`libswiftCore.so`, `libFoundation*.so`, `libdispatch.so`, `lib_FoundationICU.so`,
 ...) next to the executable. glibc/libstdc++/libgcc are never bundled.
 
-glibc floor: build on Ubuntu 22.04 (glibc 2.35) — CI uses `swift:6.3-jammy`.
+glibc floor: build on Ubuntu 22.04 (glibc 2.35) — the container script uses `swift:6.3-jammy`.
 SteamOS 3 is glibc 2.38+. The script fails if the highest `GLIBC_x` symbol
 needed exceeds 2.38.
 
-## Building a Linux package
+## Building packages (local only)
 
-CI: push a `v*` tag, or Actions -> "Godot layer" -> Run workflow (package = on).
-Artifacts: `NovaSwift-linux-x86_64` (tar.gz), `NovaSwift-windows-x86_64` (zip,
-best effort). On a tag they are attached to a draft GitHub release.
+Nothing here needs CI. `.github/workflows/godot-linux-windows.yml` still exists but is **not
+used** (we do not push tags or dispatch it); treat it as a reference only.
 
-Locally on Linux (needs Swift 6.3, Godot 4.7.2 and its export templates in
-`~/.local/share/godot/export_templates/4.7.2.stable/`):
+Godot export templates (4.7.2, ~1.3 GB download, SHA-512 published in
+`godot-builds/releases/4.7.2-stable/SHA512-SUMS.txt`) are installed selectively into
+`~/Library/Application Support/Godot/export_templates/4.7.2.stable/`: `macos.zip`, `linux_release.x86_64`
+(+ `.arm64`), `windows_release_x86_64(.console).exe`, `version.txt`, `icudt_godot.dat` (~360 MB).
+`macos.zip` was replaced by an arm64-only thin copy (the preset is arm64 and Godot then looks for
+`godot_macos_release.arm64`; `scripts/package-macos.sh` does this automatically if it sees the
+universal one). Debug templates are not installed, so use `--export-release`.
 
-    scripts/package-linux.sh            # -> godot/export/NovaSwift-linux-x86_64.tar.gz
+Note: `godot/project.godot` sets `textures/vram_compression/import_etc2_astc=true`; Godot refuses an
+arm64 macOS export without it.
 
-Export templates are a ~1.3 GB download (`Godot_v4.7.2-stable_export_templates.tpz`);
-CI unpacks only the Linux/Windows templates. The Godot version is pinned in the
-workflow `env` (`GODOT_VERSION`); project floor is 4.6, we ship 4.7.x.
+### macOS (arm64) - built and verified
+
+    scripts/package-macos.sh            # -> godot/export/macos/NovaSwift-macos-arm64.zip
+
+Builds the release bridge, exports the macOS preset, `libNovaSwiftGodot.dylib` + `libSwiftGodot.dylib`
+land in `Contents/Frameworks` (the bridge's `@loader_path` rpath finds its sibling), ad-hoc signs with
+library validation disabled, then runs the exported binary headless and checks the log. Not notarised.
+
+### Linux x86_64 / Steam Deck - via a container
+
+Needs a container runtime. On Apple Silicon (recommended, Rosetta):
+
+    brew install colima docker
+    colima start --vm-type vz --vz-rosetta --cpu 4 --memory 8
+
+(qemu alternative: `brew install lima-additional-guestagents` then `colima start --arch x86_64`;
+much slower. A plain `--arch x86_64` start fails without the extra guest agents.)
+
+    scripts/package-linux-docker.sh     # -> godot/export/NovaSwift-linux-x86_64.tar.gz
+
+Stages: (1) in `swift:6.3-jammy` (`--platform linux/amd64`, glibc 2.35) build the bridge and bundle
+the Swift runtime (`package-linux.sh --libs-only`); (2) on the Mac, `godot --export-release Linux`
+makes the `.pck` + Linux binary (only the `.so` has to be built on Linux); (3) in the container assemble,
+check `ldd` resolution and the glibc <= 2.38 ceiling, and tar. SwiftPM output goes to
+`godot/bridge/.build-linux/` and caches to `.swiftpm-cache/` (both git-ignored). The first build is slow
+(emulated amd64 + SwiftGodot); later ones reuse the caches. On a real Linux box
+`scripts/package-linux.sh` does everything in one go.
+
+### Windows x86_64 - needs a Windows PC
+
+The Swift bridge cannot be cross-compiled from macOS. On a Windows 10/11 x64 machine install: the Swift
+6.x Windows toolchain from swift.org (it installs Visual Studio Build Tools + the Windows SDK), Git, and
+Godot 4.7.2 plus its export templates. Then, in a clone of this repo:
+
+    powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 -Godot C:\path\to\godot.exe
+
+It builds `NovaSwiftGodot.dll`/`SwiftGodot.dll`, exports the Windows preset, copies the Swift runtime
+DLLs beside the exe, smoke-tests headless and writes `godot\export\NovaSwift-windows-x86_64.zip`.
+Unverified (no Windows machine available); expect to fix toolchain details on the first run. The
+Windows `.exe` + `.pck` can be exported from the Mac (`godot --headless --path godot --export-release
+Windows ...`), but Godot aborts at the end because the DLLs are absent, so the script re-exports on Windows.
+Users also need the VC++ redistributable.
+
+### Release signing / auto-update
+
+Archive layouts match the updater: Linux `NovaSwift/` root with `NovaSwift.sh` (exec), `NovaSwift.x86_64`,
+`NovaSwift.pck` plus libs; Windows zip is flat (`NovaSwift.exe`, `NovaSwift.pck`, DLLs). `godot/updater/*` is
+exported in the `.pck`. After building, sign and publish the manifest with
+`scripts/release-sign.sh --version X.Y.Z --asset linux-x86_64=godot/export/NovaSwift-linux-x86_64.tar.gz --asset windows-x86_64=godot/export/NovaSwift-windows-x86_64.zip`
+(see [UPDATER.md](UPDATER.md)). Archives are built with `COPYFILE_DISABLE=1` / inside the container, so no `._*` files.
 
 ## Steam Deck setup
 
@@ -85,12 +137,8 @@ the movies are skipped, as with the original's "QuickTime Movies" preference off
 
 ## Status / caveats
 
-- Verified locally (macOS): export_presets.cfg parses and Godot 4.7.2 reaches the
-  template check. Everything else (Linux bridge build, runtime bundling, export,
-  smoke test) has **not been run**; verify it locally on Linux before relying on it.
-  The CI workflow exists but is not used to verify builds.
-- macOS preset: arm64 only, ad-hoc signed with library validation disabled; the
-  bridge dylib must be arm64. Not notarised.
-- Windows: Swift runtime DLLs copied from the toolchain; users need the VC++
-  redistributable. Unproven toolchain, hence continue-on-error.
+- macOS: built, signed, headless-verified locally (see above). Linux: see STATUS.md for what has been
+  verified. Windows: script written, untested.
+- macOS preset: arm64 only, ad-hoc signed with library validation disabled; not notarised.
+- Windows: users need the VC++ redistributable.
 - The `.desktop` and Steam shortcut are not tested on a Deck.

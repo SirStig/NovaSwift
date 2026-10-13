@@ -196,8 +196,9 @@ public enum HazardOutfits {
         case none
         /// The lethal bomb went off (the ship has taken its fatal damage): show `line`.
         case detonated(line: String, outfitID: Int)
-        /// The nonlethal bomb went off (outfit removed, armor damaged): draw the blast.
-        case nonlethal(outfitID: Int, boomID: Int?)
+        /// The nonlethal bomb went off (outfit removed, armor damaged): draw the blast
+        /// and show `line` ("Your <outfit> has exploded!", #39–#41, 0x190 raw calls).
+        case nonlethal(outfitID: Int, boomID: Int?, line: String)
     }
 
     /// Advance one 30 Hz tick of the fuse. `fuse` is the host's persisted counter (nil = no
@@ -225,11 +226,15 @@ public enum HazardOutfits {
             _ = ship.applyDamage(shield: 1_000_000, armor: 1_000_000, piercing: true)
             return .detonated(line: line, outfitID: outfit.id)
         }
+        let thrown = pilot.outfits[outfit.id] ?? 1
         pilot.outfits[outfit.id] = nil
         let base = Double(game.ship(pilot.shipType)?.armor ?? 0)
         let damage = base + Double(rand(max(1, Int(base * 0.5 + 1))))
         _ = ship.applyDamage(shield: 0, armor: damage, piercing: true)
-        return .nonlethal(outfitID: outfit.id, boomID: value >= 128 ? value - 128 : nil)
+        return .nonlethal(outfitID: outfit.id, boomID: value >= 128 ? value - 128 : nil,
+                          line: OriginalText(game: game).bombExploded(
+                            count: thrown, singular: outfit.lowercaseDisplayName,
+                            plural: outfit.lowercasePluralDisplayName))
     }
 }
 

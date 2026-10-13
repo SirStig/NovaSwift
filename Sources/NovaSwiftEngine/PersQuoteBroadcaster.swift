@@ -11,12 +11,27 @@ import NovaSwiftKit
 /// the distress calls (0x004112c0) wait on, so the two never overlap.
 /// Flags: 0x0020 disabled-only · 0x0010 first threat to the squad · 0x0004
 /// grudge · 0x0008 likes · 0x0400 LinkMission must be offerable · 0x0800 mute
-/// in state 2 · 0x0080 once per ship. (0x1000–0x4000 player-hull gates read an
-/// in-memory shïp field the port has no counterpart for.)
+/// in state 2 · 0x0080 once per ship · 0x1000 / 0x2000 / 0x4000 mute the quote
+/// while the player's hull has `shïp` AiType (InherentAI, in-memory `+0x12`)
+/// 1 / 2 / above 2 (`playerClassAllows`). The announcement (0x00426d10) sounds
+/// snd 154, priority 1, as it shows.
 public final class PersQuoteBroadcaster {
     public static let oneIn = 140
     public static let restSeconds = 45.0
     public static let overlayFrames = 0x1a4
+    /// `Mission_ShowMissionShipAnnouncement` 0x00426d10 plays `DAT_00591570`
+    /// (snd 154, "incoming") at priority 1 as it posts the line.
+    public static let announcementBeep = 154
+
+    /// The përs flag gates that depend on the player's own hull
+    /// (0x00433050): 0x1000 mutes the quote while the player flies an
+    /// AiType-1 hull, 0x2000 an AiType-2 hull, 0x4000 any hull above 2.
+    public static func playerClassAllows(persFlags: UInt16, playerAIType: Int) -> Bool {
+        if persFlags & 0x1000 != 0, playerAIType == 1 { return false }
+        if persFlags & 0x2000 != 0, playerAIType == 2 { return false }
+        if persFlags & 0x4000 != 0, playerAIType > 2 { return false }
+        return true
+    }
 
     private var clock = 0.0
     private var lastQuote: [Int: Double] = [:]
@@ -38,6 +53,7 @@ public final class PersQuoteBroadcaster {
         let calls = elapsed / OriginalClock.rawCallSeconds
         let chance = 1 - pow(Double(Self.oneIn - 1) / Double(Self.oneIn), calls)
         var out: [String] = []
+        let playerAIType = game.ship(world.player.shipTypeID)?.inherentAI ?? 0
         for npc in world.npcs where npc.isAlive {
             guard let pid = npc.personID, let pers = game.pers(pid), pers.hailQuote >= 1,
                   world.canTarget(npc, by: world.player), !world.player.isEffectivelyCloaked else { continue }
@@ -51,6 +67,7 @@ public final class PersQuoteBroadcaster {
             if pers.hailQuoteWhenGrudge, !grudge(pid) { continue }
             if pers.hailQuoteWhenLikes, hostile(npc) { continue }
             if pers.quoteOnce, quoted.contains(npc.entityID) { continue }
+            if !Self.playerClassAllows(persFlags: pers.flags, playerAIType: playerAIType) { continue }
             let rested = clock > (lastQuote[npc.entityID] ?? -.infinity) + Self.restSeconds
             let idle = !barBusy && world.overlayTicks < 1
             guard forced || (idle && rested && roll() < chance) else { continue }
@@ -59,7 +76,7 @@ public final class PersQuoteBroadcaster {
             let quote = game.singleString(pers.hailQuote + 4999) ?? game.stringList(7101)?.string(at: pers.hailQuote)
             guard let quote, !quote.isEmpty else { continue }
             let text = quote.replacingOccurrences(of: "<OSN>", with: pers.name)
-            world.postOverlayMessage(text, frames: Self.overlayFrames)
+            world.postOverlayMessage(text, frames: Self.overlayFrames, beep: Self.announcementBeep)
             quoted.insert(npc.entityID)
             lastQuote[npc.entityID] = clock
             out.append(text)

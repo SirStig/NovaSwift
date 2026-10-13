@@ -7,7 +7,7 @@
 # (STR# 136) with the PICT 135/134 down/up arrows at 5/6, 7 Intro Music, 8 QuickTime Movies,
 # 9 Smoke Trails, 10 Run in a window (hidden: Windows-only), 11 Ship Animations, 12 Engine Glows,
 # 13 Running Lights, 14 Weapon Effects, 15 Key Settings, 17 Parallax Starfield, 19 Ambient Sounds,
-# 20 Hyperspace Effects, 21 Check For Updates, 23 brightness label (STR# 139) with arrows 24/25,
+# 20 Hyperspace Effects, 21 Check For Updates (= Prefs updates/check, the auto-updater's switch), 23 brightness label (STR# 139) with arrows 24/25,
 # 0 OK.
 #
 # Wired: the sound-volume arrows are the Settings master volume (step 0...8 = master 0...1) and
@@ -32,8 +32,10 @@ signal changed
 
 const CHECKS := {1: "share_processor_time", 7: "intro_music", 8: "play_movies", 9: "smoke_trails",
 	11: "ship_animations", 12: "engine_glow", 13: "running_lights", 14: "weapon_effects",
-	17: "parallax_starfield", 19: "ambient_sounds", 21: "check_for_updates"}
+	17: "parallax_starfield", 19: "ambient_sounds"}
 const HYPERSPACE_ITEM := 20
+## "Check For Updates" is the same preference as Settings > Support > Updates (Prefs updates/check).
+const UPDATES_ITEM := 21
 const MAX_VOLUME := 8
 const MAX_BRIGHTNESS := 6
 
@@ -69,6 +71,7 @@ func _build() -> void:
 	for idx in CHECKS:
 		actions[idx] = me._read_checks
 	actions[HYPERSPACE_ITEM] = me._read_checks
+	actions[UPDATES_ITEM] = me._read_checks
 	var step := int(Prefs.get_value("classic", "sound_volume_step"))
 	var bright := int(Prefs.get_value("classic", "brightness_step"))
 	dialog = ClassicDialog.from_ditl(_nova, 4003, {
@@ -82,6 +85,9 @@ func _build() -> void:
 	var hs = dialog.item(HYPERSPACE_ITEM)
 	if hs != null:
 		hs.set_pressed_no_signal(bool(Prefs.get_value("classic", "hyperspace_effects")))
+	var up = dialog.item(UPDATES_ITEM)
+	if up != null:
+		up.set_pressed_no_signal(bool(Prefs.get_value("updates", "check")))
 	_host = ClassicDialog.modal(self, dialog, 0.55)
 	(func(): if is_instance_valid(dialog): dialog.focus_first()).call_deferred()
 
@@ -95,6 +101,9 @@ func _read_checks() -> void:
 	var hs = dialog.item(HYPERSPACE_ITEM)
 	if hs != null:
 		Prefs.set_value("classic", "hyperspace_effects", hs.button_pressed)
+	var up = dialog.item(UPDATES_ITEM)
+	if up != null:
+		Prefs.set_value("updates", "check", up.button_pressed)
 	Prefs.save()
 	changed.emit()
 

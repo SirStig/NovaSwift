@@ -959,7 +959,7 @@ class NovaDebug: RefCounted {
             let rec = h.dbgPilot.registerEscort(shipType: s.shipTypeID, name: name, origin: .captured)
             s.escortRecordID = rec.id
             h.dbgPersistPilot()
-            h.dbgPost("Ship captured — it joins your escorts.")
+            if let g = h.dbgGame { h.dbgPost(OriginalText(game: g).capturedAsEscortLine) }   // #123
             return "Captured \(s.name.isEmpty ? "ship #\(id)" : s.name) as an escort."
         }
         reg("conquer", "Dev-tools instantly dominate a stellar (skips the defense fight).", "conquer <id|selected>") { [unowned self] a in

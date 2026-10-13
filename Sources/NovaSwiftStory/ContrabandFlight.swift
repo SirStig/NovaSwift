@@ -13,17 +13,13 @@ public struct PlayerScanOutcome: Equatable, Sendable {
     public var scannerGovt: Int
     public var scannerName: String
 
-    /// The status-line lines the original-port app posts for this scan.
-    public var messages: [String] {
-        var out: [String] = []
-        if !failedMissionIDs.isEmpty { out.append("Your illicit cargo was detected — mission failed.") }
-        if let r = result, r.foundContraband {
-            if r.warningOnly { out.append("\(scannerName): contraband detected — you are let off with a warning.") }
-            else if r.fine > 0 { out.append("\(scannerName) fined you \(r.fine)cr for carrying contraband.") }
-            if r.smugglingPenalty > 0 { out.append("\(scannerName) logs your smuggling; your standing worsens.") }
-        }
-        return out
-    }
+    /// The status-line lines for this scan, in the original's order
+    /// (`Ship_ScanPlayerForContraband` 0x00401800): STR# 2002 #286 for a
+    /// fail-if-scanned mission (nothing when its Flags hold 0x0400), then the
+    /// detected-contraband sentence for mission cargo, and for junk or an
+    /// outfit (`OriginalText.scanDetected`). The invented "logs your
+    /// smuggling" line is gone: the SmugPenalty flood prints nothing.
+    public var messages: [String] = []
 }
 
 extension ContrabandScan {
@@ -34,9 +30,9 @@ extension ContrabandScan {
     /// `Diplomacy.recordSmuggling` when `outcome.result?.smugglingPenalty > 0`.
     @discardableResult
     public static func scanPlayer(state: inout PlayerState, game: NovaGame, scannerGovt: Int,
-                                  services: GameServices? = nil) -> PlayerScanOutcome {
+                                  services: GameServices? = nil, scannerLabel: String? = nil) -> PlayerScanOutcome {
         var out = PlayerScanOutcome(scannerGovt: scannerGovt,
-                                    scannerName: game.govt(scannerGovt)?.displayName ?? "Patrol")
+                                    scannerName: scannerLabel ?? game.govt(scannerGovt)?.displayName ?? "Patrol")
         let failIDs = state.activeMissions.map(\.missionID).filter { id in
             guard let m = game.mission(id), m.failIfScanned else { return false }
             let cargoType = state.activeMission(id)?.resolvedCargoType ?? m.cargoType
@@ -48,7 +44,36 @@ extension ContrabandScan {
             state = engine.player
             out.failedMissionIDs = failIDs
         }
+        let hidden = failIDs.first.flatMap { game.mission($0)?.invisible } ?? false
         out.result = enforce(on: &state, game: game, govtID: scannerGovt, recordCrime: false)
+        out.messages = scanLines(failed: !failIDs.isEmpty && !hidden, result: out.result, state: state,
+                                 game: game, scanner: out.scannerName)
         return out
+    }
+
+    /// The sentences of one scan (see `PlayerScanOutcome.messages`). `state`
+    /// supplies the pilot's name and the outfit counts.
+    public static func scanLines(failed: Bool, result: ContrabandResult?, state: PlayerState,
+                                 game: NovaGame, scanner: String) -> [String] {
+        let text = OriginalText(game: game)
+        var lines: [String] = []
+        if failed { lines.append(text.misc(286)) }
+        guard let result, result.foundContraband else { return lines }
+        let pilot = state.pilotName
+        let fine = result.fine
+        if !result.smugglingMissions.isEmpty {
+            lines.append(text.scanDetected(scanner: scanner, pilot: pilot, finding: .missionCargo, fine: fine))
+        }
+        if let junkID = result.contrabandCargo.first, let junk = game.junk(junkID) {
+            lines.append(text.scanDetected(scanner: scanner, pilot: pilot,
+                                           finding: .junk(junk.runningTextName), fine: fine))
+        } else if let outfitID = result.contrabandOutfits.first, let outfit = game.outfit(outfitID) {
+            let count = state.outfits[outfitID] ?? 1
+            lines.append(text.scanDetected(
+                scanner: scanner, pilot: pilot,
+                finding: .outfit(singular: outfit.lowercaseDisplayName, plural: outfit.lowercasePluralDisplayName,
+                                 count: count), fine: fine))
+        }
+        return lines
     }
 }

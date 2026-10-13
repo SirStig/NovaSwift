@@ -111,6 +111,8 @@ extension OriginalAI {
             } else if let stellar {
                 rec.jumpTimer = 0
                 let range = (9 - min(Self.turnDeg(ship), 8)) * 8 + 32
+                // 0x00405590: inside the stop box a folding hull starts folding.
+                if Self.inBox(ship.position, stellar.position, range) { ship.fold.foldAtStellar() }
                 if !Self.inBox(ship.position, stellar.position, range) {
                     rec.mode = M.travel
                 } else if !Self.stopped(ship) {

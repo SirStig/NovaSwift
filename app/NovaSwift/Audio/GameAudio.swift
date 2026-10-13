@@ -112,11 +112,13 @@ final class GameAudio: ObservableObject {
         // NovaAudio_UpdateCenteredGainFromPreference 0x0046ab60 does:
         // min(256, step * 8), here relative to the step-8 maximum (64).
         let level = Float(OriginalAudio.masterVolume(preference: settings.soundVolumeStep)) / 64
-        let master = settings.muteAll ? 0 : Float(settings.masterVolume) * min(1, level)
-        engine.masterVolume = master
-        engine.sfxVolume = Float(settings.sfxVolume)
-        // Music level is the original's preference-derived movie volume
-        // (`musicGains`), applied on the player node.
+        // The preference-derived level rides the effects bus, not the shared main
+        // mixer: the music has its own preference-derived movie volume (`musicGains`,
+        // pref × 0x30 then pref × 0x20, applied on the player node), so putting the
+        // level on the mixer too applied it twice — (step/8)² (UI audit, 2026-10-13).
+        // Each sound now sees the original's global volume once, times the sliders.
+        engine.masterVolume = settings.muteAll ? 0 : Float(settings.masterVolume)
+        engine.sfxVolume = Float(settings.sfxVolume) * min(1, level)
         engine.musicVolume = 1
     }
 
@@ -296,11 +298,14 @@ final class GameAudio: ObservableObject {
     func startAmbient(soundID: Int?) {
         // "Ambient Sounds" off: the landed screen plays no spaceport loop (0x00491f30).
         guard settings.ambientSounds else { engine.stopLoop(id: Self.ambientLoopKey); return }
-        guard !settings.muteAll, let soundID, soundID >= 0, let buffer = library.buffer(for: soundID) else {
+        // The original loads CustSndID only when it is >= 128 (0x00491f30); the
+        // Effects slider already rides the effects bus, so the loop itself plays
+        // at full voice volume (it was scaled by Effects twice).
+        guard !settings.muteAll, let soundID, soundID >= 128, let buffer = library.buffer(for: soundID) else {
             engine.stopLoop(id: Self.ambientLoopKey)
             return
         }
-        engine.playLoop(id: Self.ambientLoopKey, buffer: buffer, volume: Float(settings.sfxVolume), pan: 0)
+        engine.playLoop(id: Self.ambientLoopKey, buffer: buffer, volume: 1, pan: 0)
     }
 
     /// Stop the landed-spaceport ambience — called on takeoff.
@@ -311,7 +316,7 @@ final class GameAudio: ObservableObject {
 
     func startHyperspaceCharge() {
         guard !settings.muteAll, let buffer = library.buffer(for: GameEvent.hyperspaceCharge.soundID) else { return }
-        engine.playLoop(id: Self.hyperspaceChargeLoopKey, buffer: buffer, volume: Float(settings.sfxVolume), pan: 0)
+        engine.playLoop(id: Self.hyperspaceChargeLoopKey, buffer: buffer, volume: 1, pan: 0)   // Effects rides the bus
     }
 
     func stopHyperspaceCharge() { engine.stopLoop(id: Self.hyperspaceChargeLoopKey) }

@@ -94,6 +94,7 @@ final class FlightVisuals {
     func advance(world: World, game: NovaGame?, dt: Double, playerThrusting: Bool,
                  renderAngle: (Ship) -> Double, renderPosition: (Ship) -> Vec2) {
         let dt = max(0, min(dt, 0.1))
+        world.shipAnimations = shipAnimations   // folding hulls read the same preference (no-op when unchanged)
         // A continuous (or co-op echoed) beam holds the glow on for as long as it is live.
         for b in world.activeBeams where (b.continuous || b.visualOnly) && usesShipWeaponSprite(b.weaponID, game: game) {
             layers[b.shooterID, default: ShipLayerState()].weaponGlowFlare = 1
@@ -119,7 +120,7 @@ final class FlightVisuals {
             let turn = st.bank.update(angle: ship.angle, dt: dt)
             let heading = cfg.heading(forAngle: angle)
             let set = cfg.baseSet(turnSign: turn, animClock: st.animClock, disabled: disabled,
-                                  carriesKeyShip: ship.carriesKeyShip)
+                                  carriesKeyShip: ship.carriesKeyShip, foldSet: ship.fold.currentSet)
 
             // Murk (0x00438db0): the hull mixes toward the backdrop by distance from the player.
             let fog = isPlayer ? 0 : MurkFog.level(murk: murk, dx: pos.x - origin.x, dy: pos.y - origin.y)

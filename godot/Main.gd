@@ -50,6 +50,8 @@ const AuthenticHUD = preload("res://ui/classic/AuthenticHUD.gd")
 const DevTools = preload("res://debug/DevTools.gd")           # Debug suite (console, tools, bug report)
 const DescMovie = preload("res://ui/DescMovie.gd")             # dësc movies (gate / wormhole entry)
 const FlightRenderer = preload("res://flight/FlightRenderer.gd")   # the world drawn on screen (godot/flight/)
+const UpdaterMode = preload("res://updater/UpdaterMode.gd")        # `-- --updater ...`: this process is the installer
+const UpdaterScene = preload("res://updater/UpdaterScene.gd")     # its progress window (no bridge, no game)
 
 var _dev: Node               # DevTools: debug suite host (always captures the log)
 var _shell: Node             # Shell: menus around the game (see screens/Shell.gd)
@@ -113,6 +115,18 @@ const RADAR_WORLD_RANGE := 4500.0   # matches the Apple app's own client-side ra
 
 
 func _ready() -> void:
+	# Updater mode (godot/updater/, docs/UPDATER.md): the game copied itself aside and started that copy to swap
+	# the install folder. Show only the progress window -- never touch NovaWorld / the GDExtension, which may be
+	# absent or locked in this copy.
+	var updater_opts: Dictionary = UpdaterMode.requested()
+	if not updater_opts.is_empty():
+		$HUD.visible = false
+		var up_layer: CanvasLayer = CanvasLayer.new()
+		add_child(up_layer)
+		var up_scene: Control = UpdaterScene.new()
+		up_layer.add_child(up_scene)
+		up_scene.setup(updater_opts)
+		return
 	if not ClassDB.class_exists("NovaWorld"):
 		push_error("NovaWorld class not found — is godot/bin/ built? See scripts/build-gdextension.sh")
 		return
@@ -226,6 +240,8 @@ func _on_demo_chosen() -> void:
 # keys (map, dialogs, docked UI) handles them first, so this only sees them when
 # nothing else wants them.
 func _unhandled_input(event: InputEvent) -> void:
+	if nova == null:
+		return   # updater mode / bridge missing: no game to drive
 	if event.is_action_pressed("pause_menu") and _can_pause():
 		get_viewport().set_input_as_handled()
 		_shell.open_pause()
@@ -514,7 +530,25 @@ func _push_log(text: String) -> void:
 	_log = [{"text": line, "age": 0.0, "life": life}]
 
 
+# The Land / Map / Jump key names the new-pilot travel hints embed (STR# 2002 #24-28), pushed to the bridge
+# whenever the bindings change.
+var _hint_keys_sig := ""
+
+func _sync_hint_keys() -> void:
+	if nova == null or not nova.has_method("set_hint_key_names"):
+		return
+	var land: String = Controls.first_key_name("land")
+	var map_key: String = Controls.first_key_name("galaxy_map")
+	var jump: String = Controls.first_key_name("hyperjump")
+	var sig: String = land + "|" + map_key + "|" + jump
+	if sig == _hint_keys_sig:
+		return
+	_hint_keys_sig = sig
+	nova.set_hint_key_names(land, map_key, jump)
+
+
 func _drain_events_to_log(delta: float) -> void:
+	_sync_hint_keys()
 	# Message timers run on SIM time: the callers pass 0 while the map / a dialog / the spaceport
 	# holds the sim, and the Settings game speed (and Caps Lock 2x) shortens them as it does the
 	# original's raw-call counters (B4).

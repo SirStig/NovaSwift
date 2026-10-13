@@ -182,6 +182,20 @@ func _process(_delta: float) -> void:
 # While a modal is up it owns navigation: up/down never wander to whatever is
 # under it, left/right step between its buttons, cancel is its own.
 func _input(event: InputEvent) -> void:
+	# Player Info (0x00499c10, dispatch callback 0x0049a3a0): Tab steps to the next page, Shift-Tab the
+	# previous (wrapping through the four), Enter closes. The window owns the keyboard while it is up -- flight
+	# is paused behind it (`blocks_flight`) -- and this runs before GUI focus navigation would eat the Tab.
+	if _info != null and _modal == null and _info_tab != "missions" and event is InputEventKey:
+		var ke: InputEventKey = event as InputEventKey
+		if ke.pressed and not ke.echo:
+			if ke.keycode == KEY_TAB:
+				_cycle_info_tab(-1 if ke.shift_pressed else 1)
+				get_viewport().set_input_as_handled()
+				return
+			if ke.keycode == KEY_ENTER or ke.keycode == KEY_KP_ENTER:
+				close_info()
+				get_viewport().set_input_as_handled()
+				return
 	if _modal == null:
 		return
 	if event.is_action_pressed("ui_up") or event.is_action_pressed("ui_down"):
@@ -491,6 +505,17 @@ func _tab_label(t: String) -> String:
 	if t == "missions":
 		return "Missions"
 	return str(_labels.get(t, t.capitalize()))
+
+
+const _INFO_PAGES := ["general", "cargo", "extras", "honors"]
+
+
+## Tab / Shift-Tab: step `step` pages through General, Cargo, Extras, Honors, wrapping.
+func _cycle_info_tab(step: int) -> void:
+	var i: int = _INFO_PAGES.find(_info_tab)
+	if i < 0:
+		return
+	_switch_tab(_INFO_PAGES[(i + step + _INFO_PAGES.size()) % _INFO_PAGES.size()])
 
 
 func _switch_tab(t: String) -> void:

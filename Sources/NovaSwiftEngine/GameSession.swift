@@ -53,6 +53,7 @@ public enum GameSession {
         let world = World(player: player, tuning: existing?.flightTuning ?? flightTuning, combatTuning: combatTuning)
         world.rng = NovaRandom(seed: seed)
         world.galaxy = galaxy
+        world.beginPlayerHullLaunch()   // takeoff / arrival: a folding hull unfolds (0x00457580)
         world.enhancements = enhancements
         world.diplomacy = galaxy.makeDiplomacy()
         world.systemContext = galaxy.systemContext(for: systemID)

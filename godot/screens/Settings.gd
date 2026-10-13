@@ -47,6 +47,7 @@ const Controls = preload("res://Controls.gd")
 const ControlsEditor = preload("res://screens/controls_editor/ControlsEditor.gd")
 const Prefs = preload("res://Prefs.gd")
 const PilotFiles = preload("res://screens/PilotFiles.gd")
+const UpdateController = preload("res://updater/UpdateController.gd")
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
 const ClassicDialog = preload("res://ui/classic/ClassicDialog.gd")
 const ClassicPreferences = preload("res://screens/ClassicPreferences.gd")
@@ -656,6 +657,7 @@ func _build_support() -> void:
 			_mark_changed()
 			show_page("Support"))
 	_button("Import Data", func(): data_setup_requested.emit(), "square.and.arrow.down")
+	_build_updates()
 	_section("Support", "Builds a report you can share: your description plus the pilot save, the recent game log and a self-test — the state that's hard to describe in a message. None of your imported EV Nova data is included.", "lifepreserver")
 	_button("Report a Bug", func(): get_tree().call_group("nova_devtools", "open_tab", "report"), "ladybug")
 	_button("About NovaSwift", _show_about, "info.circle")
@@ -668,6 +670,20 @@ func _build_support() -> void:
 	if dev.button_pressed:
 		_button("Open Debug Suite", func(): get_tree().call_group("nova_devtools", "open_tab", "console"), "ladybug")
 		_button("Preview Setup Wizard", func(): data_setup_requested.emit(), "sparkles")
+
+
+## Auto-updater switches (godot/updater/, docs/UPDATER.md). Keys: updates/check, updates/beta.
+func _build_updates() -> void:
+	_section("Updates", "NovaSwift looks for a newer release when the main menu opens, at most once a day, and asks before downloading anything. Updates are signed; anything that does not verify is refused. Experimental updates also offers test builds that may be unstable or break saves.", "arrow.clockwise")
+	_check("Check for updates", "updates", "check", true)
+	_check("Experimental updates", "updates", "beta", false)
+	_caption("Also offer test builds that may be unstable or break saves. Back up your pilots. Turning this off while on an experimental build offers a return to the newest stable version.")
+	NC.value_row(_group, "Version", str(ProjectSettings.get_setting("application/config/version", "1.0.0")))
+	NC.value_row(_group, "Last checked", UpdateController.last_check_text())
+	var why: String = UpdateController.disabled_reason()
+	if why != "":
+		_caption(why)
+	_button("Check Now", func(): get_tree().call_group("nova_updater", "check_now"), "arrow.clockwise")
 
 
 ## Apple AboutView: the data's own About text over the NovaSwift header in the generic dësc dialog.

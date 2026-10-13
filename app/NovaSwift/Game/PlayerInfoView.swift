@@ -26,8 +26,15 @@ struct PlayerInfoView: View {
     /// caller can reach it). Nil hides nothing — the button just greys out.
     var onJettison: (() -> Void)?
     var onDone: () -> Void
+    /// The key token bound to "Player Info" (default P): the original closes the
+    /// window on it too (0x0049a3a0). Empty = no extra close key.
+    var closeToken: String = ""
 
     @State private var tab: Tab = .general
+    /// The window takes the keyboard from the flight scene while it is open, so
+    /// Tab / Shift-Tab cycle its pages and Return / Esc / P close it (dispatch
+    /// callback 0x0049a3a0, `NovaUi_RunPlayerSpecialInteractionWindow` 0x00499c10).
+    @FocusState private var keyFocus: Bool
     /// The original confirms a jettison first (STR# 2002 #291).
     @State private var confirmingJettison = false
     enum Tab: CaseIterable { case general, cargo, extras, honors }
@@ -90,11 +97,44 @@ struct PlayerInfoView: View {
                 .ditlPlace(space, d, done)
         }
         .frame(width: frameSize.width, height: frameSize.height, alignment: .topLeading)
+        .focusable()
+        .focusEffectDisabled()
+        .focused($keyFocus)
+        .onAppear {
+            keyFocus = true
+            DispatchQueue.main.async { keyFocus = true }
+        }
+        .onKeyPress(phases: .down) { press in handleKey(press) }
         .cursorCancel(onDone)
         .classicConfirm(isPresented: $confirmingJettison,
                                 prompt: game.stringList(2002)?.string(at: 291) ?? "",
                                 okTitle: graphics.buttonLabel(50, fallback: "Yes"),
                                 cancelTitle: graphics.buttonLabel(51, fallback: "No"), fit: false) { onJettison?() }
+    }
+
+    /// Tab steps to the next page, Shift-Tab the previous, wrapping through the four
+    /// pages; Return, Esc and the Player Info key close (0x0049a3a0).
+    func cyclePage(reverse: Bool) {
+        let all = Tab.allCases
+        let i = all.firstIndex(of: tab) ?? 0
+        tab = all[(i + (reverse ? all.count - 1 : 1)) % all.count]
+    }
+
+    private func handleKey(_ press: KeyPress) -> KeyPress.Result {
+        switch press.key {
+        case .tab:
+            cyclePage(reverse: press.modifiers.contains(.shift))
+            return .handled
+        case .return, .escape:
+            onDone()
+            return .handled
+        default:
+            if !closeToken.isEmpty, press.characters.lowercased() == closeToken {
+                onDone()
+                return .handled
+            }
+            return .ignored
+        }
     }
 
     /// The dialog's own stretchable frame: fixed 40px caps, middle stretched to
