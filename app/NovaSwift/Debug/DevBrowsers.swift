@@ -37,8 +37,8 @@ struct DevShipBrowser: View {
     }
 
     var body: some View {
-        DevBrowserFrame(query: $query, placeholder: "search ships…",
-                        count: filtered.count, noun: "ship") {
+        DevBrowserFrame(query: $query, placeholder: "Search ships…",
+                        count: filtered.count, noun: "ship", symbol: "airplane") {
             ForEach(filtered, id: \.id) { ship in
                 DevBrowserRow(
                     image: graphics?.shipFallbackPicture(ship),
@@ -49,11 +49,13 @@ struct DevShipBrowser: View {
                     expanded: selectedID == ship.id,
                     onTap: { selectedID = selectedID == ship.id ? nil : ship.id }
                 ) {
-                    DevActionChip("Fly this", "ship \(ship.id)", console: console)
+                    DevActionChip("Fly this", "ship \(ship.id)", console: console, symbol: "airplane")
                     DevActionChip("Hostile", "spawn hostile \(ship.id)", console: console,
-                                  destructive: true)
-                    DevActionChip("Escort", "spawn escort \(ship.id)", console: console)
-                    DevActionChip("Neutral", "spawn neutral \(ship.id)", console: console)
+                                  destructive: true, symbol: "scope")
+                    DevActionChip("Escort", "spawn escort \(ship.id)", console: console,
+                                  symbol: "person.2.fill", tint: devConsoleBlue)
+                    DevActionChip("Neutral", "spawn neutral \(ship.id)", console: console,
+                                  symbol: "circle", tint: .white.opacity(0.7))
                 }
             }
         }
@@ -89,8 +91,8 @@ struct DevOutfitBrowser: View {
     }
 
     var body: some View {
-        DevBrowserFrame(query: $query, placeholder: "search outfits…",
-                        count: filtered.count, noun: "outfit") {
+        DevBrowserFrame(query: $query, placeholder: "Search outfits…",
+                        count: filtered.count, noun: "outfit", symbol: "shippingbox.fill") {
             ForEach(filtered, id: \.id) { outfit in
                 let owned = model.pilot.state.outfits[outfit.id] ?? 0
                 DevBrowserRow(
@@ -99,14 +101,15 @@ struct DevOutfitBrowser: View {
                     id: outfit.id,
                     stats: stats(outfit),
                     detail: model.data.game?.descText(outfit.id - 128 + 3000),
-                    badge: owned > 0 ? "×\(owned)" : nil,
+                    badge: owned > 0 ? "×\(owned) owned" : nil,
+                    badgeSymbol: owned > 0 ? "checkmark.circle.fill" : nil,
                     expanded: selectedID == outfit.id,
                     onTap: { selectedID = selectedID == outfit.id ? nil : outfit.id }
                 ) {
-                    DevActionChip("Grant ×1", "outfit add \(outfit.id)", console: console)
-                    DevActionChip("Grant ×5", "outfit add \(outfit.id) 5", console: console)
+                    DevActionChip("Grant ×1", "outfit add \(outfit.id)", console: console, symbol: "plus")
+                    DevActionChip("Grant ×5", "outfit add \(outfit.id) 5", console: console, symbol: "plus")
                     DevActionChip("Remove", "outfit remove \(outfit.id)", console: console,
-                                  destructive: true)
+                                  destructive: true, symbol: "minus")
                 }
             }
         }
@@ -145,8 +148,8 @@ struct DevGovtBrowser: View {
     }
 
     var body: some View {
-        DevBrowserFrame(query: $query, placeholder: "search governments…",
-                        count: filtered.count, noun: "govt") {
+        DevBrowserFrame(query: $query, placeholder: "Search governments…",
+                        count: filtered.count, noun: "government", symbol: "flag.fill") {
             ForEach(filtered, id: \.id) { govt in
                 // The worst reputation the player holds in any of this
                 // government's systems (EC-02).
@@ -162,13 +165,16 @@ struct DevGovtBrowser: View {
                     id: govt.id,
                     stats: "record \(record) · \(govt.allies.count) allies · \(govt.enemies.count) enemies",
                     badge: record == 0 ? nil : (record > 0 ? "friendly" : "hostile"),
+                    badgeColor: record > 0 ? devConsoleGreen : devConsoleRed,
                     expanded: selectedID == govt.id,
                     onTap: { selectedID = selectedID == govt.id ? nil : govt.id }
                 ) {
                     DevActionChip("Hostile here", "relation -30000", console: console,
-                                  destructive: true)
-                    DevActionChip("Neutral here", "relation 0", console: console)
-                    DevActionChip("Friendly here", "relation 30000", console: console)
+                                  destructive: true, symbol: "exclamationmark.triangle.fill")
+                    DevActionChip("Neutral here", "relation 0", console: console,
+                                  symbol: "circle", tint: .white.opacity(0.7))
+                    DevActionChip("Friendly here", "relation 30000", console: console,
+                                  symbol: "checkmark.circle.fill")
                 }
             }
         }
@@ -188,53 +194,27 @@ struct DevBrowserFrame<Content: View>: View {
     let placeholder: String
     let count: Int
     let noun: String
+    var symbol = "list.bullet"
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 8) {
             HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11 * devFontScale))
-                    .foregroundStyle(.secondary)
-                #if os(tvOS)
-                TVCursorTextField(placeholder: placeholder, text: $query)
-                #else
-                TextField(placeholder, text: $query)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12 * devFontScale, design: .monospaced))
-                    .foregroundStyle(.white)
-                    .autocorrectionDisabled()
-                    #if os(iOS)
-                    .textInputAutocapitalization(.never)
-                    #endif
-                #endif
-                if !query.isEmpty {
-                    CursorButton { query = "" } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 11 * devFontScale))
-                            .foregroundStyle(.white.opacity(0.5))
-                    }
-                }
-                Text("\(count)")
-                    .font(.system(size: 10 * devFontScale, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+                DevSearchField(text: $query, placeholder: placeholder)
+                DevPill(text: "\(count)", color: devConsoleGreen, symbol: symbol)
             }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-
-            Rectangle().fill(.white.opacity(0.1)).frame(height: 1)
+            .padding(.horizontal, 12).padding(.top, 10)
 
             ScrollView {
-                LazyVStack(spacing: 4) {
+                LazyVStack(spacing: 6) {
                     content()
                     if count == 0 {
-                        Text("No \(noun) matches.")
-                            .font(.system(size: 11 * devFontScale, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 20)
+                        DevEmptyState(kind: .search, title: "No \(noun) matches",
+                                      hint: "Try a name or an id.")
+                            .padding(.top, 10)
                     }
                 }
-                .padding(8)
+                .padding(.horizontal, 12).padding(.bottom, 12)
             }
         }
     }
@@ -250,6 +230,8 @@ private struct DevBrowserRow<Actions: View>: View {
     let stats: String
     var detail: String?
     var badge: String?
+    var badgeColor: Color = devConsoleGreen
+    var badgeSymbol: String?
     let expanded: Bool
     let onTap: () -> Void
     @ViewBuilder var actions: () -> Actions
@@ -258,25 +240,22 @@ private struct DevBrowserRow<Actions: View>: View {
         VStack(alignment: .leading, spacing: 8) {
             CursorButton(action: onTap) {
                 HStack(spacing: 10) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9 * devFontScale, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .frame(width: 10)
                     thumbnail
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text(title)
-                                .font(.system(size: 12 * devFontScale, weight: .semibold,
-                                              design: .monospaced))
+                                .font(.system(size: 13 * devFontScale, weight: .semibold))
+                                .foregroundStyle(expanded ? devConsoleGreen : .white)
                                 .lineLimit(1)
                             if let badge {
-                                Text(badge)
-                                    .font(.system(size: 8 * devFontScale, weight: .bold,
-                                                  design: .monospaced))
-                                    .padding(.horizontal, 5).padding(.vertical, 2)
-                                    .background(Capsule().fill(devConsoleGreen.opacity(0.25)))
-                                    .foregroundStyle(devConsoleGreen)
+                                DevPill(text: badge, color: badgeColor, symbol: badgeSymbol)
                             }
                             Spacer(minLength: 0)
-                            Text("#\(id)")
-                                .font(.system(size: 9 * devFontScale, design: .monospaced))
-                                .foregroundStyle(.secondary)
+                            DevPill(text: "#\(id)", color: .white.opacity(0.55))
                         }
                         Text(stats)
                             .font(.system(size: 9 * devFontScale, design: .monospaced))
@@ -288,10 +267,11 @@ private struct DevBrowserRow<Actions: View>: View {
             }
 
             if expanded {
+                Rectangle().fill(devHairline).frame(height: 1)
                 if let detail, !detail.isEmpty {
                     Text(detail)
-                        .font(.system(size: 10 * devFontScale, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.65))
+                        .font(.system(size: 11 * devFontScale))
+                        .foregroundStyle(.white.opacity(0.7))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 // Chips wrap onto a second line rather than squeezing: four
@@ -302,10 +282,10 @@ private struct DevBrowserRow<Actions: View>: View {
             }
         }
         .padding(9)
-        .background(RoundedRectangle(cornerRadius: 8)
-            .fill(expanded ? devConsoleGreen.opacity(0.1) : .white.opacity(0.04)))
-        .overlay(RoundedRectangle(cornerRadius: 8)
-            .strokeBorder(expanded ? devConsoleGreen.opacity(0.4) : .white.opacity(0.07)))
+        .background(RoundedRectangle(cornerRadius: 10)
+            .fill(expanded ? devConsoleGreen.opacity(0.07) : .white.opacity(0.04)))
+        .overlay(RoundedRectangle(cornerRadius: 10)
+            .strokeBorder(expanded ? devConsoleGreen.opacity(0.4) : devHairline))
     }
 
     @ViewBuilder private var thumbnail: some View {
@@ -338,27 +318,23 @@ struct DevActionChip: View {
     let command: String
     let console: ConsoleController
     var destructive = false
+    var symbol: String?
+    var tint: Color?
 
     init(_ title: String, _ command: String, console: ConsoleController,
-         destructive: Bool = false) {
+         destructive: Bool = false, symbol: String? = nil, tint: Color? = nil) {
         self.title = title
         self.command = command
         self.console = console
         self.destructive = destructive
+        self.symbol = symbol
+        self.tint = tint
     }
 
     var body: some View {
-        let tint = destructive ? devConsoleRed : devConsoleGreen
-        CursorButton { console.submit(command) } label: {
-            Text(title)
-                .font(.system(size: 10 * devFontScale, weight: .semibold, design: .monospaced))
-                .lineLimit(1).minimumScaleFactor(0.7)
-                .padding(.vertical, 6).padding(.horizontal, 8)
-                .frame(maxWidth: .infinity)
-                .background(RoundedRectangle(cornerRadius: 6).fill(tint.opacity(0.15)))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(tint.opacity(0.5)))
-                .foregroundStyle(tint)
-                .contentShape(Rectangle())
+        DevChip(title: title, symbol: symbol,
+                tint: tint ?? (destructive ? devConsoleRed : devConsoleGreen), expand: true) {
+            console.submit(command)
         }
     }
 }

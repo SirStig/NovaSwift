@@ -14,6 +14,13 @@ struct PluginsView: View {
     enum Tab: String, CaseIterable, Identifiable {
         case browse = "Browse", installed = "Installed", loadOrder = "Load order"
         var id: String { rawValue }
+        var symbol: String {
+            switch self {
+            case .browse: return "icloud.and.arrow.down"
+            case .installed: return "tray.full"
+            case .loadOrder: return "list.number"
+            }
+        }
     }
 
     @State private var tab: Tab = .browse
@@ -56,13 +63,19 @@ struct PluginsView: View {
 
     private var topBar: some View {
         HStack(spacing: 12) {
-            if selected != nil {
+            if let entry = selected {
                 Button { selected = nil } label: { Label("Back", systemImage: "chevron.left") }
                     .novaBorderedButton()
+                Text(entry.name).font(.title2.weight(.bold)).lineLimit(1)
+            } else {
+                Image(systemName: "puzzlepiece.extension.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(pluginAccent)
+                    .frame(width: 38, height: 38)
+                    .background(pluginAccent.opacity(0.18), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                Text("Plugins").font(.title2.weight(.bold)).lineLimit(1)
             }
-            Text(selected?.name ?? "Plugins").font(.title2.weight(.bold)).lineLimit(1)
             Spacer()
-            if model.store.isRefreshing { ProgressView() }
             #if !os(tvOS)
             Button { showingImporter = true } label: { Label("Import", systemImage: "square.and.arrow.down.on.square") }
                 .novaBorderedButton()
@@ -76,13 +89,38 @@ struct PluginsView: View {
         .padding(.horizontal, 20).padding(.vertical, 12)
     }
 
+    /// Icon segmented pill (Browse / Installed / Load order), with the search field alongside on Browse.
     private var tabBar: some View {
-        HStack {
-            NovaSegmentedPicker(selection: $tab, options: Tab.allCases) { $0.rawValue }
-                .frame(maxWidth: 460)
-            Spacer()
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                tabPill
+                Spacer(minLength: 12)
+                if tab == .browse { searchField.frame(maxWidth: 340) }
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                tabPill
+                if tab == .browse { searchField }
+            }
         }
         .padding(.horizontal, 20).padding(.bottom, 8)
+    }
+
+    private var tabPill: some View {
+        HStack(spacing: 4) {
+            ForEach(Tab.allCases) { t in
+                let on = t == tab
+                CursorButton { tab = t } label: {
+                    Label(t.rawValue, systemImage: t.symbol)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(on ? Color.black : Color.primary)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(on ? pluginAccent : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .contentShape(Rectangle())
+                }
+            }
+        }
+        .padding(4)
+        .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     @ViewBuilder private var content: some View {
@@ -92,7 +130,8 @@ struct PluginsView: View {
             switch tab {
             case .browse: browse
             case .installed: InstalledPluginsView(onImport: { showingImporter = true },
-                                                  onOpen: { selected = $0 })
+                                                  onOpen: { selected = $0 },
+                                                  onBrowse: { tab = .browse })
             case .loadOrder: LoadOrderView()
             }
         }
@@ -102,23 +141,31 @@ struct PluginsView: View {
 
     private var results: [PluginCatalogEntry] { model.store.browser.results(filter: filter, query: query) }
 
+    private var showFeatured: Bool { filter == .popular && query.trimmingCharacters(in: .whitespaces).isEmpty }
+    private var featured: [PluginCatalogEntry] {
+        Array(model.store.browser.results(filter: .totalConversions).prefix(4))
+    }
+
     private var browse: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                searchField
                 filterChips
-                if let notice = catalogNotice {
-                    Label(notice, systemImage: "wifi.slash").font(.footnote).foregroundStyle(.secondary)
-                }
-                let updates = model.store.browser.updatesAvailable
-                if !updates.isEmpty && filter != .updates && !model.store.isOffline {
-                    Button { model.store.updateAll(data: model.data) } label: {
-                        Label("Update all (\(updates.count))", systemImage: "arrow.triangle.2.circlepath")
-                    }.novaBorderedButton()
-                }
+                banners
                 if results.isEmpty {
                     emptyState
                 } else {
+                    if showFeatured && !featured.isEmpty {
+                        PluginSectionHeader(symbol: "sparkles", title: "Featured total conversions",
+                                            note: "Whole new games on the Nova engine", tint: pluginTCTint)
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: featuredMinimum), spacing: 16, alignment: .top)],
+                                  spacing: 16) {
+                            ForEach(featured) { entry in
+                                PluginFeaturedCard(entry: entry) { selected = entry }
+                            }
+                        }
+                        PluginSectionHeader(symbol: "square.grid.2x2", title: "All plug-ins",
+                                            note: "\(results.count) plug-ins")
+                    }
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: gridMinimum), spacing: 16, alignment: .top)],
                               spacing: 16) {
                         ForEach(results) { entry in
@@ -132,6 +179,37 @@ struct PluginsView: View {
             .padding(.horizontal, 20).padding(.bottom, 24)
         }
         .cursorScrollable()
+    }
+
+    /// Offline / refreshing / update-all cards.
+    @ViewBuilder private var banners: some View {
+        if let notice = catalogNotice {
+            PluginBanner(symbol: "wifi.slash", tint: .orange, title: "You're offline", message: notice) {
+                Button { Task { await model.store.loadCatalog(force: true) } } label: {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                }.novaBorderedButton()
+            }
+        } else if model.store.isRefreshing {
+            PluginBanner(symbol: "arrow.clockwise", tint: .blue, title: "Refreshing the catalog...", showsSpinner: true)
+        }
+        let updates = model.store.browser.updatesAvailable
+        if !updates.isEmpty && filter != .updates && !model.store.isOffline {
+            PluginBanner(symbol: "arrow.triangle.2.circlepath", tint: .orange,
+                         title: "\(updates.count) update\(updates.count == 1 ? "" : "s") available",
+                         message: updates.prefix(3).map(\.name).joined(separator: ", ") + (updates.count > 3 ? "..." : "")) {
+                Button { model.store.updateAll(data: model.data) } label: {
+                    Label("Update all", systemImage: "arrow.down.circle.fill")
+                }.novaProminentButton()
+            }
+        }
+    }
+
+    private var featuredMinimum: CGFloat {
+        #if os(tvOS)
+        return 560
+        #else
+        return 380
+        #endif
     }
 
     private var gridMinimum: CGFloat {
@@ -152,7 +230,7 @@ struct PluginsView: View {
         #if os(tvOS)
         EmptyView()
         #else
-        HStack {
+        HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
             TextField("Search plug-ins, authors, tags", text: $query)
                 .textFieldStyle(.plain)
@@ -161,10 +239,12 @@ struct PluginsView: View {
             if !query.isEmpty {
                 Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
                     .buttonStyle(.novaPlain).foregroundStyle(.secondary)
+                    .accessibilityLabel("Clear search")
             }
         }
         .padding(10)
         .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.primary.opacity(0.1)))
         #endif
     }
 
@@ -173,12 +253,13 @@ struct PluginsView: View {
             HStack(spacing: 8) {
                 ForEach(PluginFilter.allCases) { f in
                     let count = f == .updates ? model.store.browser.updatesAvailable.count : 0
+                    let on = filter == f
                     Button { filter = f } label: {
-                        Text(count > 0 ? "\(f.title) (\(count))" : f.title)
+                        Label(count > 0 ? "\(f.title) (\(count))" : f.title, systemImage: f.symbolName)
                             .font(.subheadline.weight(.medium))
-                            .padding(.horizontal, 14).padding(.vertical, 8)
-                            .background(filter == f ? Color.accentColor : Color.primary.opacity(0.1), in: Capsule())
-                            .foregroundStyle(filter == f ? Color.white : Color.primary)
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .background(on ? pluginAccent : Color.primary.opacity(0.1), in: Capsule())
+                            .foregroundStyle(on ? Color.black : Color.primary)
                     }
                     .buttonStyle(.novaPlain)
                 }
@@ -188,13 +269,18 @@ struct PluginsView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "puzzlepiece.extension").font(.largeTitle).foregroundStyle(.secondary)
-            Text(filter == .updates ? "Everything is up to date" : "Nothing here").font(.headline)
+        VStack(spacing: 10) {
+            PluginEmptyIllustration()
+            Text(filter == .updates && query.isEmpty ? "Everything is up to date" : "Nothing here").font(.headline)
             Text(query.isEmpty ? "Try a different filter." : "No plug-ins match \u{201C}\(query)\u{201D}.")
                 .font(.subheadline).foregroundStyle(.secondary)
+            if !query.isEmpty || filter != .popular {
+                Button { query = ""; filter = .popular } label: {
+                    Label("Clear search and filters", systemImage: "xmark.circle")
+                }.novaBorderedButton()
+            }
         }
-        .frame(maxWidth: .infinity).padding(.vertical, 50)
+        .frame(maxWidth: .infinity).padding(.vertical, 30)
     }
 
     // MARK: Import

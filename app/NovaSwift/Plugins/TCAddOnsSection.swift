@@ -37,7 +37,7 @@ struct TCAddOnsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Add-ons for \(tc.name)", systemImage: "puzzlepiece.extension.fill").font(.headline)
+            Label("Add-ons for \(tc.name)", systemImage: "puzzlepiece.extension.fill").font(.headline).foregroundStyle(pluginTCTint)
             Text("While \(tc.name) is on, only its own plug-ins load, as in the original. Plug-ins you add here load after them, in this order (later wins) — the same as copying them into the conversion's Plug-Ins folder, without moving any files.")
                 .font(.footnote).foregroundStyle(.secondary)
             if !tc.fileURLs.isEmpty {
@@ -55,8 +55,7 @@ struct TCAddOnsSection: View {
                 ForEach(candidates) { p in candidateRow(p) }
             }
         }
-        .padding(14)
-        .background(Color.indigo.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .pluginCardSurface(tint: pluginTCTint)
         .task(id: tc.id + "|\(model.data.plugins.count)") { await analyse() }
         .novaAlert("Add \(pendingUnlikely?.name ?? "plug-in") anyway?",
                    isPresented: Binding(get: { pendingUnlikely != nil }, set: { if !$0 { pendingUnlikely = nil } }),

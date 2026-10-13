@@ -1312,3 +1312,28 @@ folder"), Report on GitHub and Open Logs Folder.
 Limits: an engine-level failure (a broken *autoload* script such as `ui/PadKeyboard.gd`, or a GDExtension that crashes
 natively) happens before Boot runs and cannot be caught from GDScript. Check:
 `godot --headless --path godot -s res://tests/error_boundary_selfcheck.gd`.
+
+## Plug-in Editor (Godot)
+
+Full-screen editor opened from the main menu's **Plugin Editor** button (`screens/Shell.gd` swaps it in for the menu). The document, undo stack, schemas, galaxy math, story graph and linter are the shared `PluginDocument` behind the `NovaEditor` bridge class (`bridge/Sources/NovaSwiftGodot/Editor.swift`); `godot/editor/` only draws and forwards edits as JSON.
+
+**Files.**
+- `editor/PluginEditor.gd` — the shell. It has a top bar (Close, document name with an *Edited* chip, undo/redo, File menu, Save, validation badge, Test Run), a sidebar (8 tools, then resource types grouped by category with counts and `+changed` chips; empty types are hidden behind the eye toggle) and a status bar.
+- The eight tools: Overview (tiles, changes grouped by type, a getting-started card and recents), Resources (searchable list + inspector), Galaxy Map, Star System, Story & Bits, Validation, Project & Export, Bundle Files.
+- `editor/Inspector.gd` — resource inspector. It shows a header (name you can rename, type/ID/provenance chips, Duplicate / Change ID / Revert / Delete) and a diff card against the base game.
+  - Forms are schema groups shown as collapsible cards with a jump bar. Parallel arrays (weapon / count / ammo) become slot tables.
+  - Reference fields open a searchable resource picker with a jump arrow. Ranged enums open a ranged reference picker. Flags are a checkbox grid that keeps its bitmask between toggles.
+  - Other kinds: STR# as editable rows, dësc with picture picker / movie / flags, a sprite viewer (zoom, frame scrubber, playback), sound with a waveform and playhead, and a lazily built raw-hex card plus a References card.
+- `editor/EditorCanvas.gd` — pan/zoom base (wheel or pinch zooms about the cursor; two-finger scroll, middle/right drag or a drag on empty space pans). Built on it:
+  - `GalaxyCanvas.gd` — select/drag systems; link mode toggles a hyperlink between two clicks, Shift keeps chaining.
+  - `SystemCanvas.gd` — distance rings; drag stellars.
+  - `StoryCanvas.gd` — labelled nodes, edges by kind, search dimming, "only my changes".
+- `editor/Previews.gd` — `GraphicView` and `Waveform`.
+- `editor/EditorTheme.gd` — colours, the editor theme copy, builders (button kinds, icon buttons, cards, chips, empty states, row buttons). It also holds the type → icon/category map and registers editor-only SVG glyphs into the shared `ui/novaswift/NovaSVG.gd` set.
+  - Icons rasterise at the screen's backing scale and display at their logical size through `icon_max_width` / `icon_rect`.
+
+**Edits.** Every control commits one undo step straight away: spin boxes on change, text fields on Return or focus loss, flags and enums on toggle or select. After each edit, `_on_edited()` refreshes the status, the type counts and the selected list row, and starts a debounced lint (0.8 s) that updates the top-bar badge.
+
+**Shortcuts.** ⌘S / ⇧⌘S save / save as · ⌘Z / ⇧⌘Z / ⌘Y undo / redo · ⌘N new resource · ⌘D duplicate · ⌘F find in the current tool · ⌘R test run · ⌘O open · ⌘1–8 tools. Esc first releases a focused text field, then closes the editor (asking when the document is unsaved).
+
+**Check.** `NOVA_DATA_DIR=$PWD/data/base godot --headless --path godot -s res://tests/plugin_editor_selfcheck.gd`. It drives every tool, every inspector kind (forms, text, string list, picture, sprite, sound, raw), an edit, New, Duplicate, the picker and undo.

@@ -50,8 +50,9 @@ const FILTER_TITLES := {"Popular": "Popular plug-ins", "Recent": "Recently updat
 const BUNDLED_CATALOG := "res://data/PluginCatalog.json"
 const KIND_SYMBOL := {"totalConversion": "sparkles", "patch": "hammer", "gameplay": "slider.horizontal.3",
 	"graphics": "photo", "unknown": "puzzlepiece.extension"}
+const PRIMARY_GLYPH := {"arrow.down.circle.fill": "square.and.arrow.down", "checkmark.circle.fill": "checkmark"}
 const CARD_MIN_W := 420.0
-const PAGE_MAX_W := 1000.0
+const PAGE_MAX_W := 1200.0
 
 static var _glyphs_ready := false
 static var _grads := {}
@@ -87,6 +88,7 @@ var _refresh_label: Label
 var _poll := 0.0
 var _scale := 1.0
 var _cols_built := 0
+var _offline := false
 var _icons := {}               # url -> Array[TextureRect] waiting for bytes
 var _import_dialog: FileDialog
 var _delete_confirm := ""      # plug-in id awaiting a second press of Delete
@@ -163,8 +165,7 @@ func setup(nova: Object, start_tab := "Browse") -> void:
 	first_control = null
 	_title_icon = _icon_tile(head, 34, T.AMBER, "puzzlepiece.extension.fill", 0.16)
 	_title = _t(head, "Plug-ins", 24, "bold")
-	_title.clip_text = true
-	_title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	NC.hspacer(head)
 	_refresh_label = _t(head, "Updating catalog...", 12, "regular", T.SECONDARY)
 	_refresh_label.visible = false
@@ -333,11 +334,13 @@ func _btn(parent: Control, text: String, cb: Callable, width := 0, kind := "bord
 		b.custom_minimum_size.x = width
 	if icon != "":
 		var fg: Color = T.WHITE
+		var glyph := icon
 		if kind == "primary":
 			fg = Color(0.05, 0.04, 0.02)
+			glyph = str(PRIMARY_GLYPH.get(icon, icon))   # solid glyphs lose their cut-out on a light fill
 		elif kind == "destructive":
 			fg = T.RED
-		_hi_icon(b, icon, 16, fg)
+		_hi_icon(b, glyph, 16, fg)
 	b.custom_minimum_size.y = 34
 	parent.add_child(b)
 	if first_control == null:
@@ -360,8 +363,7 @@ func _badge(parent: Control, text: String, color: Color = T.SECONDARY, icon := "
 	var h := _hbox(p, 4)
 	if icon != "":
 		_svg(h, icon, 11, color)
-	var l := _t(h, text, 11, "semibold", color)
-	l.clip_text = true
+	_t(h, text, 11, "semibold", color)
 	parent.add_child(p)
 
 
@@ -426,9 +428,8 @@ func _segmented() -> Control:
 		b.button_pressed = tname == tab
 		b.focus_mode = Control.FOCUS_ALL
 		b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-		b.custom_minimum_size = Vector2(124, 0)
-		var pad := Vector2(16, 7)
-		b.add_theme_stylebox_override("normal", T.empty())
+		var pad := Vector2(18, 7)
+		b.add_theme_stylebox_override("normal", T.box(Color(0, 0, 0, 0), 10, Color(0, 0, 0, 0), 0, pad))
 		b.add_theme_stylebox_override("hover", T.box(Color(1, 1, 1, 0.09), 10, Color(0, 0, 0, 0), 0, pad))
 		b.add_theme_stylebox_override("pressed", T.box(T.AMBER, 10, Color(0, 0, 0, 0), 0, pad))
 		b.add_theme_stylebox_override("hover_pressed", T.box(T.AMBER.lightened(0.08), 10, Color(0, 0, 0, 0), 0, pad))
@@ -606,7 +607,7 @@ func _clear() -> void:
 
 
 func _grid_columns() -> int:
-	var w: float = _scroll.size.x if _scroll != null and _scroll.size.x > 100.0 else get_viewport().get_visible_rect().size.x
+	var w: float = _scroll.size.x if _scroll != null and _scroll.size.x > 100.0 else (_root.get_viewport_rect().size.x if _root.is_inside_tree() else 1280.0)
 	w -= 40.0
 	return maxi(1, int((w + 14.0) / (CARD_MIN_W + 14.0)))
 
@@ -641,6 +642,7 @@ func _render(refocus := true) -> void:
 	_title_icon.visible = not in_detail
 	_title.text = "Plug-ins"
 	var cat: Dictionary = _catalog()
+	_offline = bool(cat.offline)
 	for f in FILTERS:
 		var b: Button = _chip_buttons[f]
 		b.set_pressed_no_signal(f == filter)
@@ -662,6 +664,12 @@ func _render(refocus := true) -> void:
 	_refresh_label.visible = bool(cat.refreshing)
 	if refocus:
 		_focus_first()
+		_reset_scroll.call_deferred()
+
+
+func _reset_scroll() -> void:
+	if is_instance_valid(_scroll):
+		_scroll.scroll_vertical = 0
 
 
 func _focus_first() -> void:
@@ -760,6 +768,14 @@ static func _entry_tint(e: Dictionary) -> Color:
 	return Color(0.56, 0.56, 0.58)
 
 
+static func _kind_tint(kind: String) -> Color:
+	match kind:
+		"totalConversion": return T.INDIGO
+		"patch", "graphics": return T.TEAL
+		"gameplay": return T.ORANGE
+	return Color(0.42, 0.5, 0.68)
+
+
 static func _entry_symbol(e: Dictionary) -> String:
 	if e.get("tc", false):
 		return KIND_SYMBOL["totalConversion"]
@@ -811,8 +827,8 @@ func _empty_state(parent: Control, glyph: String, tint: Color, title: String, bo
 	var m := MarginContainer.new()
 	m.add_theme_constant_override("margin_top", 20)
 	m.add_theme_constant_override("margin_bottom", 24)
-	m.add_theme_constant_override("margin_left", 40)
-	m.add_theme_constant_override("margin_right", 40)
+	m.add_theme_constant_override("margin_left", 120)
+	m.add_theme_constant_override("margin_right", 120)
 	m.add_child(v)
 	parent.add_child(m)
 	return v
@@ -842,9 +858,6 @@ func _render_installed() -> void:
 			enabled_n += 1
 	var hdr := _section_header("Installed plug-ins", "externaldrive",
 		"%d installed  -  %d active" % [list.size(), enabled_n] if not list.is_empty() else "")
-	if not list.is_empty():
-		var ib := _btn(hdr, "Import", _open_import, 0, "bordered", "square.and.arrow.down")
-		ib.focus_mode = Control.FOCUS_ALL
 	if not failures.is_empty():
 		var fc := _banner(T.ORANGE, "exclamationmark.triangle.fill", "Failed to load",
 			"These files were skipped when the game data last loaded. The rest of the plug-ins are unaffected.")
@@ -882,7 +895,7 @@ func _installed_row(p: Dictionary, entry) -> void:
 	var h := _hbox(card, 14)
 	if not bool(p.enabled) and not bool(p.canToggle):
 		card.modulate.a = 0.85
-	var tint: Color = _entry_tint(entry) if entry != null else Color(0.5, 0.5, 0.52)
+	var tint: Color = _entry_tint(entry) if entry != null else _kind_tint(str(p.get("kind", "unknown")))
 	var sym: String = _entry_symbol(entry) if entry != null else str(KIND_SYMBOL.get(str(p.get("kind", "unknown")), "puzzlepiece.extension"))
 	_icon(h, str(entry.icon) if entry != null else "", 52, tint, sym)
 	var col := _vbox(h, 4)
@@ -907,6 +920,7 @@ func _installed_row(p: Dictionary, entry) -> void:
 	var files: Array = p.get("files", [])
 	var folder: String = str(p.get("folder", ""))
 	var s := _t(src, "%s  -  %d file%s" % [_short_path(folder), files.size(), "" if files.size() == 1 else "s"], 12, "regular", T.TERTIARY)
+	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	s.clip_text = true
 	s.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	s.tooltip_text = folder
@@ -1241,7 +1255,7 @@ func _name_label(parent: Control, text: String, size: int) -> Label:
 ## control. Pressing the card opens its details.
 func _card(parent: Control, e: Dictionary) -> void:
 	var b := NC.card_button(parent, T.CARD_BG, T.CARD_BORDER, 16, 14)
-	b.custom_minimum_size = Vector2(0, 150)
+	b.custom_minimum_size = Vector2(0, 166)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	b.pressed.connect(_open_detail.bind(str(e.id)))
 	b.tooltip_text = "%s by %s" % [e.name, e.author]
@@ -1412,11 +1426,11 @@ func _action_button(parent: Control, e: Dictionary, compact := false) -> void:
 			label = "Update"
 			icon = "pl.arrows.circlepath"
 			color = T.ORANGE
-			enabled = bool(e.downloadable)
+			enabled = bool(e.downloadable) and not _offline
 		_:
 			label = "Get"
 			icon = "arrow.down.circle.fill"
-			enabled = bool(e.downloadable)
+			enabled = bool(e.downloadable) and not _offline
 	if compact:
 		var pb2 := _pill(parent, label, icon, color, func(): _start_install(id), enabled)
 		pb2.set_meta("fkey", "act:" + id)
@@ -1456,7 +1470,6 @@ func _update_all() -> void:
 func _open_detail(id: String) -> void:
 	detail_id = id
 	_render()
-	_scroll.scroll_vertical = 0
 
 
 func _detail_h2(text: String, glyph: String) -> void:
@@ -1609,8 +1622,6 @@ func _render_detail() -> void:
 	if str(e.recency) != "":
 		_fact_tile(fg, "calendar", "Updated", str(e.recency))
 	_fact_tile(fg, "globe", "Downloads from", str(e.downloadHost) if str(e.downloadHost) != "" else "-")
-	if str(e.license) != "":
-		_fact_tile(fg, "doc.text", "License", str(e.license))
 	if not (e.tags as Array).is_empty():
 		_fact_tile(fg, "pl.layers", "Tags", ", ".join(PackedStringArray((e.tags as Array).map(func(t): return str(t).capitalize()))))
 
@@ -1618,7 +1629,13 @@ func _render_detail() -> void:
 	_detail_h2("About", "book")
 	var ac := NC.card(_content, 16, 16, true)
 	var long_text: String = str(e.description) if str(e.description) != "" else str(e.summary)
-	_note(ac, long_text, 15, Color(1, 1, 1, 0.88))
+	var av := _vbox(ac, 10)
+	_note(av, long_text, 15, Color(1, 1, 1, 0.88))
+	if str(e.license) != "":
+		var lh := _hbox(av, 8)
+		var li := _svg(lh, "doc.text", 13, T.TERTIARY)
+		li.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+		_note(lh, str(e.license), 11, T.TERTIARY)
 
 	# Compatibility
 	_detail_h2("Compatibility", "checkmark.seal.fill")
@@ -1677,7 +1694,7 @@ func _render_order() -> void:
 	var ev := _vbox(eh, 8)
 	ev.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ev.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_t(ev, "Later plug-ins win" if not manual else "You choose the order", 17, "semibold")
+	_t(ev, "Manual order" if manual else "The original order", 17, "semibold")
 	_note(ev, "You choose the order. When two plug-ins change the same thing, the one lower in this list wins. Changes apply next time you start a game." if manual else
 		"This is the original game's order: every plug-in loads, sorted by file name, and when two change the same thing the later one wins. A total conversion replaces the stock scenario while it is switched on.", 13)
 	var mrow := _hbox(ev, 10)

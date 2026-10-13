@@ -32,6 +32,8 @@ enum BugReport {
         /// The same headline the report opens with, shown in the UI so the
         /// reporter can see what they're about to send.
         let summary: String
+        /// File names inside the zip, for the "Report ready" card's pills.
+        var files: [String] = []
     }
 
     /// Build the bundle. Off-main work (log read, zip) is awaited, so call this
@@ -48,11 +50,13 @@ enum BugReport {
 
         let summary = Self.summaryText(note: note, model: model, pilot: pilot, stamp: stamp)
         try Data(summary.utf8).write(to: staging.appendingPathComponent("report.txt"))
+        var files = ["report.txt"]
 
         // The save itself: bits, outfits, hull, system, missions, legal record.
         // This is the single most useful file in the bundle — it's a repro.
         if let json = BugReportText.pilotJSON(pilot.state) {
             try json.write(to: staging.appendingPathComponent("pilot.json"))
+            files.append("pilot.json")
         }
 
         if let game = model.data.game {
@@ -62,11 +66,13 @@ enum BugReport {
                                                 liveHostiles: debug?.scene?.liveHostileCount)
             try Data(BugReportText.diagnostics(sections).utf8)
                 .write(to: staging.appendingPathComponent("diagnostics.txt"))
+            files.append("diagnostics.txt")
         }
 
         let log = await ConsoleLogStore.snapshot()
         try Data(BugReportText.log(log.map { ($0.date, $0.text) }).utf8)
             .write(to: staging.appendingPathComponent("console.log"))
+        files.append("console.log")
 
         // Zip, then park it somewhere the reporter can find it again.
         let zipped = try GameDataArchiver.zip(directory: staging)
@@ -76,7 +82,7 @@ enum BugReport {
         try FileManager.default.moveItem(at: zipped, to: destination)
 
         Log.pilot.notice("BugReport.make: wrote \(destination.lastPathComponent, privacy: .public) (\(destination.fileSizeDescription, privacy: .public))")
-        return Bundle(url: destination, summary: summary)
+        return Bundle(url: destination, summary: summary, files: files)
     }
 
     /// Previously written reports, newest first — so a reporter who dismissed

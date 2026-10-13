@@ -25,10 +25,13 @@ let devFontScale: CGFloat = 1
 enum DevConsoleTab: String, CaseIterable, Identifiable {
     case console = "Console"
     case tools = "Tools"
+    case state = "State"
     case bits = "Bits"
     case ships = "Ships"
     case outfits = "Outfits"
     case govts = "Govts"
+    case checks = "Checks"
+    case report = "Report"
 
     var id: String { rawValue }
 
@@ -36,16 +39,22 @@ enum DevConsoleTab: String, CaseIterable, Identifiable {
         switch self {
         case .console: return "terminal.fill"
         case .tools: return "slider.horizontal.3"
+        case .state: return "person.text.rectangle"
         case .bits: return "switch.2"
         case .ships: return "airplane"
         case .outfits: return "shippingbox.fill"
         case .govts: return "flag.fill"
+        case .checks: return "checklist"
+        case .report: return "ladybug.fill"
         }
     }
 
-    /// The panes that live in the inspector rail (everything but the console
-    /// itself, which is always on screen in the wide layout).
-    static var inspectorCases: [DevConsoleTab] { allCases.filter { $0 != .console } }
+    /// The panes that sit in the right-hand rail beside the console on a wide
+    /// panel. State, Checks and Report are forms/dashboards and take the whole
+    /// width instead (the console is hidden while they show).
+    static var inspectorCases: [DevConsoleTab] { [.tools, .bits, .ships, .outfits, .govts] }
+
+    var isFullWidth: Bool { self == .state || self == .checks || self == .report }
 }
 
 /// The in-game **developer console** — one surface that drops down from the
@@ -80,6 +89,10 @@ struct DevConsoleView: View {
     /// previews) don't have to pass one.
     var onSelectEntity: (DevEntityRef) -> Void = { _ in }
 
+    /// The last inspector-rail pane the user had open, so tapping "Console" in
+    /// the wide layout (or leaving a full-width pane) returns to it.
+    @State private var lastRail: DevConsoleTab = .tools
+
     /// Below this the log and a useful inspector can't share a row.
     private static let wideBreakpoint: CGFloat = 820
 
@@ -87,9 +100,9 @@ struct DevConsoleView: View {
         GeometryReader { geo in
             let wide = geo.size.width >= Self.wideBreakpoint
             VStack(spacing: 0) {
-                header(wide: wide)
+                header(wide: wide, width: geo.size.width)
                 Rectangle().fill(devConsoleGreen.opacity(0.3)).frame(height: 1)
-                content(wide: wide)
+                content(wide: wide, width: geo.size.width)
             }
             .frame(height: panelHeight(in: geo.size))
             .frame(maxWidth: .infinity, alignment: .top)
@@ -103,8 +116,14 @@ struct DevConsoleView: View {
         .ignoresSafeArea(edges: .horizontal)
         .foregroundStyle(.white)
         .transition(.move(edge: .top).combined(with: .opacity))
-        .onAppear { console.log.startPolling() }
+        .onAppear {
+            console.log.startPolling()
+            if DevConsoleTab.inspectorCases.contains(console.tab) { lastRail = console.tab }
+        }
         .onDisappear { console.log.stopPolling() }
+        .onChange(of: console.tab) { _, tab in
+            if DevConsoleTab.inspectorCases.contains(tab) { lastRail = tab }
+        }
         #if !os(tvOS)
         // Escape closes the console from anywhere in it — including while
         // the command-line `TextField` has focus, where `.keyboardShortcut`
@@ -136,17 +155,17 @@ struct DevConsoleView: View {
 
     // MARK: Header
 
-    private func header(wide: Bool) -> some View {
+    private func header(wide: Bool, width: CGFloat) -> some View {
         HStack(spacing: 12) {
-            HStack(spacing: 7) {
+            HStack(spacing: 8) {
                 Image(systemName: "terminal.fill")
-                    .font(.system(size: 12 * devFontScale, weight: .semibold))
+                    .font(.system(size: 13 * devFontScale, weight: .semibold))
                     .foregroundStyle(.black)
-                    .frame(width: 22 * devFontScale, height: 22 * devFontScale)
-                    .background(RoundedRectangle(cornerRadius: 5).fill(devConsoleGreen))
-                if wide {
+                    .frame(width: 26 * devFontScale, height: 26 * devFontScale)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(devConsoleGreen))
+                if width >= 700 {
                     Text("Developer Console")
-                        .font(.system(size: 13 * devFontScale, weight: .bold, design: .monospaced))
+                        .font(.system(size: 15 * devFontScale, weight: .bold, design: .rounded))
                         .foregroundStyle(devConsoleGreen)
                         .lineLimit(1)
                         .fixedSize()
@@ -156,13 +175,19 @@ struct DevConsoleView: View {
             // Live metrics stay in the header on every tab — the numbers you
             // watch continuously shouldn't require being on the tools pane.
             ConsoleHeaderMetrics(debug: debug)
+                .layoutPriority(1)
 
             Spacer(minLength: 8)
 
-            // Wide keeps the console permanently on the left, so only the
-            // inspector panes need tabs.
-            tabBar(cases: wide ? DevConsoleTab.inspectorCases : DevConsoleTab.allCases,
-                   wide: wide)
+            // Every tab is always listed (the console included — in the wide
+            // layout it is the left half and its chip stays lit). Falls back
+            // to a scrolling strip when they can't all fit.
+            ViewThatFits(in: .horizontal) {
+                tabBar(wide: wide, labelsForAll: width >= 1100)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    tabBar(wide: wide, labelsForAll: false)
+                }
+            }
 
             CursorButton(action: onClose) {
                 HStack(spacing: 4) {
@@ -175,8 +200,9 @@ struct DevConsoleView: View {
                         .font(.system(size: 11 * devFontScale, weight: .bold))
                 }
                 .foregroundStyle(.white.opacity(0.8))
-                .padding(.horizontal, 8).padding(.vertical, 6)
-                .background(RoundedRectangle(cornerRadius: 6).fill(.white.opacity(0.07)))
+                .padding(.horizontal, 9).padding(.vertical, 6)
+                .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.07)))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.12)))
                 .contentShape(Rectangle())
             }
             .accessibilityLabel("Close console")
@@ -187,63 +213,91 @@ struct DevConsoleView: View {
 
     /// Cursor-driven segments rather than a SwiftUI `Picker`: a segmented
     /// picker is focusable on tvOS, where this UI deliberately keeps controls
-    /// out of the focus engine (`CursorButton`'s doc comment).
-    private func tabBar(cases: [DevConsoleTab], wide: Bool) -> some View {
-        HStack(spacing: 2) {
-            ForEach(cases) { tab in
-                let selected = activeTab(wide: wide) == tab
-                CursorButton { console.tab = tab } label: {
-                    HStack(spacing: 5) {
+    /// out of the focus engine (`CursorButton`'s doc comment). Icon tabs; the
+    /// selected one (or every one, when there is room) also shows its label.
+    private func tabBar(wide: Bool, labelsForAll: Bool) -> some View {
+        HStack(spacing: 3) {
+            ForEach(DevConsoleTab.allCases) { tab in
+                let selected = isSelected(tab, wide: wide)
+                CursorButton { select(tab, wide: wide) } label: {
+                    HStack(spacing: 6) {
                         Image(systemName: tab.systemImage)
-                            .font(.system(size: 9 * devFontScale))
-                        Text(tab.rawValue)
-                            .font(.system(size: 10 * devFontScale, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 11 * devFontScale, weight: .semibold))
+                        if selected || labelsForAll {
+                            Text(tab.rawValue)
+                                .font(.system(size: 11.5 * devFontScale, weight: .semibold, design: .rounded))
+                                .lineLimit(1)
+                                .fixedSize()
+                        }
                     }
-                    .padding(.horizontal, 9).padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: 6)
-                        .fill(selected ? devConsoleGreen.opacity(0.22) : .white.opacity(0.05)))
-                    .overlay(RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(selected ? devConsoleGreen.opacity(0.65) : .clear))
-                    .foregroundStyle(selected ? devConsoleGreen : .white.opacity(0.65))
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 8)
+                        .fill(selected ? devConsoleGreen.opacity(0.17) : .clear))
+                    .overlay(RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(selected ? devConsoleGreen.opacity(0.6) : .clear))
+                    .foregroundStyle(selected ? devConsoleGreen : .white.opacity(0.6))
                     .contentShape(Rectangle())
                 }
+                .accessibilityLabel(tab.rawValue)
             }
         }
     }
 
-    /// Which tab reads as selected. In the wide layout the console is always
-    /// showing, so a `.console` selection highlights nothing in the rail —
-    /// fall back to the pane the rail is actually rendering.
+    /// Which tab the rail (or the full-width pane) is showing. In the wide
+    /// layout the console is always on screen, so a `.console` selection falls
+    /// back to the last rail pane the user had open.
     private func activeTab(wide: Bool) -> DevConsoleTab {
         guard wide else { return console.tab }
-        return console.tab == .console ? .tools : console.tab
+        return console.tab == .console ? lastRail : console.tab
+    }
+
+    private func isSelected(_ tab: DevConsoleTab, wide: Bool) -> Bool {
+        guard wide else { return console.tab == tab }
+        if tab == .console { return !console.tab.isFullWidth }
+        return activeTab(wide: true) == tab
+    }
+
+    private func select(_ tab: DevConsoleTab, wide: Bool) {
+        if wide, tab == .console {
+            // The console is already on screen unless a full-width pane covers it.
+            if console.tab.isFullWidth { console.tab = lastRail }
+            return
+        }
+        console.tab = tab
     }
 
     // MARK: Content
 
-    @ViewBuilder private func content(wide: Bool) -> some View {
+    @ViewBuilder private func content(wide: Bool, width: CGFloat) -> some View {
         if wide {
-            HStack(spacing: 0) {
-                ConsolePane(console: console, onSelectEntity: onSelectEntity, onClose: onClose)
-                Rectangle().fill(devConsoleGreen.opacity(0.25)).frame(width: 1)
-                inspector(activeTab(wide: true))
-                    .frame(width: 380)
+            if console.tab.isFullWidth {
+                inspector(console.tab, width: width)
+            } else {
+                HStack(spacing: 0) {
+                    ConsolePane(console: console, onSelectEntity: onSelectEntity, onClose: onClose)
+                    Rectangle().fill(devConsoleGreen.opacity(0.25)).frame(width: 1)
+                    inspector(activeTab(wide: true), width: width)
+                        .frame(width: 380)
+                }
             }
         } else if console.tab == .console {
             ConsolePane(console: console, onSelectEntity: onSelectEntity, onClose: onClose)
         } else {
-            inspector(console.tab)
+            inspector(console.tab, width: width)
         }
     }
 
-    @ViewBuilder private func inspector(_ tab: DevConsoleTab) -> some View {
+    @ViewBuilder private func inspector(_ tab: DevConsoleTab, width: CGFloat) -> some View {
         switch tab {
         case .console: ConsolePane(console: console, onSelectEntity: onSelectEntity, onClose: onClose)
         case .tools: DevToolsPane(console: console, debug: debug)
+        case .state: DevStatePane(debug: debug)
         case .bits: DevBitBrowser(console: console)
         case .ships: DevShipBrowser(console: console)
         case .outfits: DevOutfitBrowser(console: console)
         case .govts: DevGovtBrowser(console: console)
+        case .checks: DevChecksPane(console: console, debug: debug, wide: width >= 640)
+        case .report: DevReportPane(debug: debug, wide: width >= 640)
         }
     }
 }
@@ -331,7 +385,7 @@ struct ConsolePane: View {
     /// Brief "Copied" confirmation in the toolbar.
     @State private var copiedFlash = false
 
-    @AppStorage("devConsole.timestamps") private var showTimestamps = false
+    @AppStorage("devConsole.timestamps") private var showTimestamps = true
     @AppStorage("devConsole.follow") private var follow = true
 
     /// A line collapses when it's long enough that showing it in full would
@@ -354,13 +408,17 @@ struct ConsolePane: View {
         let visible = visibleLines
         VStack(spacing: 0) {
             toolbar(visible: visible)
-            Rectangle().fill(devConsoleGreen.opacity(0.2)).frame(height: 1)
             logList(visible)
+                .background(RoundedRectangle(cornerRadius: 10).fill(.black.opacity(0.3)))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(devHairline))
+                .padding(.horizontal, 12)
             if let line = selected {
                 selectionBar(line)
+                    .padding(.top, 4)
             }
-            Rectangle().fill(devConsoleGreen.opacity(0.3)).frame(height: 1)
             suggestions
+            quickRow
             inputBar
         }
         .frame(maxWidth: .infinity)
@@ -419,29 +477,40 @@ struct ConsolePane: View {
         !mutedSeverities.isEmpty || !mutedCategories.isEmpty || !trimmedSearch.isEmpty
     }
 
+    /// Live per-level line counts, shown on the level chips.
+    private var severityCounts: [ConsoleLogStore.Line.Severity: Int] {
+        var counts: [ConsoleLogStore.Line.Severity: Int] = [:]
+        for line in log.lines {
+            if case let .log(severity) = line.kind { counts[severity, default: 0] += 1 }
+        }
+        return counts
+    }
+
     private func toolbar(visible: [ConsoleLogStore.Line]) -> some View {
-        VStack(spacing: 6) {
+        let counts = severityCounts
+        let categories = availableCategories
+        return VStack(spacing: 8) {
             HStack(spacing: 8) {
-                searchField
+                DevSearchField(text: $search, placeholder: "Filter log…")
                 Text(filtersActive ? "\(visible.count) of \(log.lines.count)" : "\(log.lines.count) lines")
-                    .font(.system(size: 9 * devFontScale, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 10 * devFontScale, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.4))
                     .monospacedDigit()
                     .lineLimit(1)
                     .fixedSize()
-                Spacer(minLength: 4)
-                toolButton(showTimestamps ? "clock.fill" : "clock", "Timestamps", active: showTimestamps) {
+                DevIconButton(symbol: showTimestamps ? "clock.fill" : "clock",
+                              help: "Timestamps", active: showTimestamps) {
                     showTimestamps.toggle()
                 }
-                toolButton(follow ? "arrow.down.to.line" : "pause.fill",
-                           follow ? "Following new output" : "Paused", active: follow) {
+                DevIconButton(symbol: follow ? "arrow.down.to.line" : "pause.fill",
+                              help: follow ? "Following new output" : "Paused", active: follow) {
                     follow.toggle()
                 }
-                toolButton(copiedFlash ? "checkmark" : "doc.on.doc", "Copy visible lines",
-                           active: copiedFlash) {
+                DevIconButton(symbol: copiedFlash ? "checkmark" : "doc.on.doc",
+                              help: "Copy visible lines", active: copiedFlash) {
                     copy(visible.map(plainText).joined(separator: "\n"))
                 }
-                toolButton("trash", "Clear", active: false) {
+                DevIconButton(symbol: "trash", help: "Clear", tint: devConsoleRed) {
                     selectedLine = nil
                     expandedLines.removeAll()
                     log.clear()
@@ -450,24 +519,15 @@ struct ConsolePane: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(ConsoleLogStore.Line.Severity.allCases, id: \.self) { severity in
-                        filterChip(severity.displayName, color: severityColor(severity),
-                                   active: !mutedSeverities.contains(severity)) {
+                        DevFilterChip(title: severity.displayName, color: chipColor(severity),
+                                      active: !mutedSeverities.contains(severity),
+                                      count: counts[severity]) {
                             toggle(severity, in: &mutedSeverities)
                         }
                     }
-                    let categories = availableCategories
-                    if !categories.isEmpty {
-                        Rectangle().fill(.white.opacity(0.15)).frame(width: 1, height: 14)
-                        ForEach(categories, id: \.self) { category in
-                            filterChip(category, color: .white,
-                                       active: !mutedCategories.contains(category)) {
-                                toggle(category, in: &mutedCategories)
-                            }
-                        }
-                    }
                     if filtersActive {
-                        Rectangle().fill(.white.opacity(0.15)).frame(width: 1, height: 14)
-                        filterChip("Reset filters", color: devConsoleGreen, active: true) {
+                        DevFilterChip(title: "Reset filters", color: devConsoleGreen, active: true,
+                                      symbol: "arrow.counterclockwise") {
                             mutedSeverities.removeAll()
                             mutedCategories.removeAll()
                             search = ""
@@ -475,69 +535,27 @@ struct ConsolePane: View {
                     }
                 }
             }
-        }
-        .padding(.horizontal, 12).padding(.vertical, 7)
-    }
-
-    private var searchField: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 10 * devFontScale))
-                .foregroundStyle(.secondary)
-            #if os(tvOS)
-            TVCursorTextField(placeholder: "Filter lines", text: $search)
-            #else
-            TextField("Filter lines", text: $search)
-                .textFieldStyle(.plain)
-                .font(.system(size: 11 * devFontScale, design: .monospaced))
-                .autocorrectionDisabled()
-                #if os(iOS)
-                .textInputAutocapitalization(.never)
-                #endif
-            #endif
-            if !search.isEmpty {
-                CursorButton { search = "" } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 10 * devFontScale))
-                        .foregroundStyle(.secondary)
+            if !categories.isEmpty {
+                HStack(spacing: 8) {
+                    DevCaption(text: "Categories")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(categories, id: \.self) { category in
+                                DevFilterChip(title: category, color: devConsoleBlue,
+                                              active: !mutedCategories.contains(category)) {
+                                    toggle(category, in: &mutedCategories)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
-        .padding(.horizontal, 8).padding(.vertical, 5)
-        .frame(maxWidth: 260)
-        .background(RoundedRectangle(cornerRadius: 6).fill(.white.opacity(0.06)))
-        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.white.opacity(0.1)))
-    }
-
-    private func toolButton(_ symbol: String, _ help: String, active: Bool,
-                            action: @escaping () -> Void) -> some View {
-        CursorButton(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 11 * devFontScale, weight: .semibold))
-                .frame(width: 26 * devFontScale, height: 24 * devFontScale)
-                .background(RoundedRectangle(cornerRadius: 6)
-                    .fill(active ? devConsoleGreen.opacity(0.18) : .white.opacity(0.05)))
-                .foregroundStyle(active ? devConsoleGreen : .white.opacity(0.7))
-                .contentShape(Rectangle())
-        }
-        .help(help)
-        .accessibilityLabel(help)
+        .padding(.horizontal, 12).padding(.vertical, 8)
     }
 
     private func toggle<T: Hashable>(_ value: T, in set: inout Set<T>) {
         if !set.insert(value).inserted { set.remove(value) }
-    }
-
-    private func filterChip(_ title: String, color: Color, active: Bool, action: @escaping () -> Void) -> some View {
-        CursorButton(action: action) {
-            Text(title)
-                .font(.system(size: 9 * devFontScale, weight: .semibold, design: .monospaced))
-                .lineLimit(1)
-                .padding(.horizontal, 7).padding(.vertical, 3)
-                .background(Capsule().fill(active ? color.opacity(0.2) : .white.opacity(0.04)))
-                .overlay(Capsule().strokeBorder(active ? color.opacity(0.6) : .white.opacity(0.12)))
-                .foregroundStyle(active ? color : .white.opacity(0.35))
-        }
     }
 
     // MARK: Log list
@@ -545,14 +563,17 @@ struct ConsolePane: View {
     private func logList(_ visible: [ConsoleLogStore.Line]) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 1) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     if log.lines.isEmpty {
-                        emptyState("Streaming \(Log.subsystem). App logs appear here.\nType 'help' or tap a command below to start.")
+                        emptyState("Nothing logged yet",
+                                   "Streaming \(Log.subsystem). Type 'help' or tap a command below to start.",
+                                   kind: .log)
                     } else if visible.isEmpty {
-                        emptyState("No lines match the current filters.")
+                        emptyState("No lines match", "Loosen the level, category or text filter.",
+                                   kind: .search)
                     }
-                    ForEach(visible) { line in
-                        logRow(line)
+                    ForEach(Array(visible.enumerated()), id: \.element.id) { index, line in
+                        logRow(line, index: index)
                     }
                     Color.clear.frame(height: 1).id("console-bottom")
                 }
@@ -589,14 +610,11 @@ struct ConsolePane: View {
         }
     }
 
-    private func emptyState(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 11 * devFontScale, design: .monospaced))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 6).padding(.vertical, 8)
+    private func emptyState(_ title: String, _ hint: String, kind: DevIllustration.Kind) -> some View {
+        DevEmptyState(kind: kind, title: title, hint: hint)
     }
 
-    @ViewBuilder private func logRow(_ line: ConsoleLogStore.Line) -> some View {
+    @ViewBuilder private func logRow(_ line: ConsoleLogStore.Line, index: Int) -> some View {
         let collapsible = isCollapsible(line)
         let expanded = expandedLines.contains(line.id)
         let isSelected = selectedLine == line.id
@@ -608,9 +626,10 @@ struct ConsolePane: View {
                     .monospacedDigit()
                     .fixedSize()
             }
+            levelBadge(for: line)
             VStack(alignment: .leading, spacing: 2) {
                 let text = Text(attributedText(for: line))
-                    .font(.system(size: 11 * devFontScale, design: .monospaced))
+                    .font(.system(size: 11.5 * devFontScale, design: .monospaced))
                     .fontWeight(line.isCritical ? .bold : .regular)
                     .lineLimit(collapsible && !expanded ? 2 : nil)
                     .fixedSize(horizontal: false, vertical: true)
@@ -632,10 +651,12 @@ struct ConsolePane: View {
                 }
             }
         }
-        .padding(.leading, 8).padding(.trailing, 6).padding(.vertical, 2)
-        .background(rowBackground(line, selected: isSelected))
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(rowBackground(line, selected: isSelected, index: index))
         .overlay(alignment: .leading) {
-            Rectangle().fill(color(for: line).opacity(isSelected ? 1 : 0.55)).frame(width: 2)
+            if isSelected {
+                Rectangle().fill(devConsoleGreen).frame(width: 2)
+            }
         }
         .contentShape(Rectangle())
         // Simultaneous so an entity link inside the line still fires.
@@ -647,11 +668,53 @@ struct ConsolePane: View {
         #endif
     }
 
-    private func rowBackground(_ line: ConsoleLogStore.Line, selected: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 3)
+    /// DBG / INF / NTC / WRN / CRT for log lines, RUN for an echoed command,
+    /// ERR for a failed one; plain command output gets an empty slot so the
+    /// message column stays aligned.
+    @ViewBuilder private func levelBadge(for line: ConsoleLogStore.Line) -> some View {
+        let spec = badgeSpec(for: line)
+        Text(spec?.0 ?? " ")
+            .font(.system(size: 8.5 * devFontScale, weight: .bold, design: .monospaced))
+            .foregroundStyle(spec?.1 ?? .clear)
+            .frame(width: 32 * devFontScale)
+            .padding(.vertical, 1.5)
+            .background(RoundedRectangle(cornerRadius: 5).fill((spec?.1 ?? .clear).opacity(0.16)))
+    }
+
+    private func badgeSpec(for line: ConsoleLogStore.Line) -> (String, Color)? {
+        switch line.kind {
+        case let .log(severity):
+            switch severity {
+            case .debug: return ("DBG", chipColor(severity))
+            case .info: return ("INF", chipColor(severity))
+            case .notice: return ("NTC", chipColor(severity))
+            case .error: return ("WRN", chipColor(severity))
+            case .fault: return ("CRT", chipColor(severity))
+            }
+        case .commandEcho: return ("RUN", devConsoleGreen)
+        case .commandError: return ("ERR", devConsoleRed)
+        case .commandOutput: return nil
+        }
+    }
+
+    /// Opaque level colours for chips and badges (the text colours in
+    /// `severityColor` are translucent whites for the quiet levels).
+    private func chipColor(_ severity: ConsoleLogStore.Line.Severity) -> Color {
+        switch severity {
+        case .debug: return Color(white: 0.62)
+        case .info: return Color(white: 0.9)
+        case .notice: return devConsoleBlue
+        case .error: return devConsoleOrange
+        case .fault: return devConsoleRed
+        }
+    }
+
+    private func rowBackground(_ line: ConsoleLogStore.Line, selected: Bool, index: Int) -> some View {
+        RoundedRectangle(cornerRadius: 4)
             .fill(selected ? devConsoleGreen.opacity(0.16)
-                  : line.isCritical ? devConsoleRed.opacity(0.09)
-                  : line.kind.isCommandEcho ? devConsoleGreen.opacity(0.05) : .clear)
+                  : line.isCritical ? devConsoleRed.opacity(0.10)
+                  : line.kind.isCommandEcho ? devConsoleGreen.opacity(0.06)
+                  : index % 2 == 0 ? Color.white.opacity(0.035) : Color.clear)
     }
 
     private func isCollapsible(_ line: ConsoleLogStore.Line) -> Bool {
@@ -876,10 +939,11 @@ struct ConsolePane: View {
         return console.commands[name.lowercased()]
     }
 
-    /// Before anything is typed, the commands people reach for most, so the
-    /// console can be driven entirely by touch.
+    /// The commands people reach for most, always one tap away so the console
+    /// can be driven entirely by touch or pad. Only registered commands show.
     private var quickCommands: [String] {
-        ["help", "history", "clear"].filter { console.commands[$0] != nil }
+        ["help", "history", "clear", "god", "fuel", "heal", "refuel", "fps", "ai", "uidebug"]
+            .filter { console.commands[$0] != nil }
     }
 
     @ViewBuilder private var suggestions: some View {
@@ -897,9 +961,10 @@ struct ConsolePane: View {
                                     .lineLimit(1)
                             }
                             .font(.system(size: 10 * devFontScale, design: .monospaced))
-                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .padding(.horizontal, 9).padding(.vertical, 5)
                             .frame(maxWidth: 320)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(.white.opacity(0.06)))
+                            .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.06)))
+                            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(devHairline))
                             .contentShape(Rectangle())
                         }
                     }
@@ -908,32 +973,46 @@ struct ConsolePane: View {
             }
         } else if let command = currentCommand {
             Text("\(command.usage)  ·  \(command.summary)")
-                .font(.system(size: 10 * devFontScale, design: .monospaced))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 10.5 * devFontScale, design: .monospaced))
+                .foregroundStyle(devConsoleOrange)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12).padding(.top, 6)
-        } else if draft.isEmpty {
-            HStack(spacing: 6) {
-                ForEach(quickCommands, id: \.self) { name in
-                    actionChip(name, "chevron.right") { console.submit(name) }
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 12).padding(.top, 6)
+                .padding(.horizontal, 14).padding(.top, 6)
         }
+    }
+
+    private var quickRow: some View {
+        HStack(spacing: 8) {
+            DevCaption(text: "Quick")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(quickCommands, id: \.self) { name in
+                        CursorButton { console.submit(name) } label: {
+                            Text(name)
+                                .font(.system(size: 10.5 * devFontScale, weight: .medium, design: .monospaced))
+                                .padding(.horizontal, 10).padding(.vertical, 4)
+                                .foregroundStyle(devConsoleGreen)
+                                .background(Capsule().fill(devConsoleGreen.opacity(0.10)))
+                                .overlay(Capsule().strokeBorder(devConsoleGreen.opacity(0.3)))
+                                .contentShape(Capsule())
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 14).padding(.top, 8)
     }
 
     private var inputBar: some View {
         let empty = draft.trimmingCharacters(in: .whitespaces).isEmpty
         return HStack(spacing: 8) {
-            Text(">")
-                .font(.system(size: 13 * devFontScale, weight: .bold, design: .monospaced))
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12 * devFontScale, weight: .heavy))
                 .foregroundStyle(devConsoleGreen)
             #if os(tvOS)
-            TVCursorTextField(placeholder: "command…", text: $draft, onCommit: submit)
+            TVCursorTextField(placeholder: "Type a command…  (try help)", text: $draft, onCommit: submit)
             #else
-            TextField("command…", text: $draft)
+            TextField("Type a command…  (try help)", text: $draft)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13 * devFontScale, design: .monospaced))
                 .foregroundStyle(.white)
@@ -948,17 +1027,35 @@ struct ConsolePane: View {
                 .textInputAutocapitalization(.never)
                 #endif
             #endif
+            #if os(macOS)
+            ViewThatFits(in: .horizontal) {
+                Text("↑↓ history · Tab complete")
+                    .font(.system(size: 10 * devFontScale))
+                    .foregroundStyle(.white.opacity(0.35))
+                    .lineLimit(1)
+                    .fixedSize()
+                Color.clear.frame(width: 0, height: 0)
+            }
+            #endif
             CursorButton(action: submit) {
-                Image(systemName: "return")
-                    .font(.system(size: 12 * devFontScale, weight: .semibold))
-                    .foregroundStyle(empty ? .white.opacity(0.3) : .black)
-                    .frame(width: 30 * devFontScale, height: 24 * devFontScale)
-                    .background(RoundedRectangle(cornerRadius: 6)
-                        .fill(empty ? .white.opacity(0.06) : devConsoleGreen))
-                    .contentShape(Rectangle())
+                HStack(spacing: 6) {
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 11 * devFontScale, weight: .bold))
+                    Text("Run")
+                        .font(.system(size: 12.5 * devFontScale, weight: .bold, design: .rounded))
+                }
+                .foregroundStyle(empty ? .white.opacity(0.35) : Color.black.opacity(0.85))
+                .padding(.horizontal, 14).padding(.vertical, 7)
+                .background(RoundedRectangle(cornerRadius: 9)
+                    .fill(empty ? Color.white.opacity(0.07) : devConsoleGreen))
+                .contentShape(Rectangle())
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
+        .padding(.horizontal, 12).padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 12).fill(.black.opacity(0.4)))
+        .overlay(RoundedRectangle(cornerRadius: 12)
+            .strokeBorder(inputFocused ? devConsoleGreen.opacity(0.85) : Color.white.opacity(0.12), lineWidth: 1.2))
+        .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 10)
     }
 
     /// Tab completion: the single match, or the longest prefix all matches

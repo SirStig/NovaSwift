@@ -24,7 +24,12 @@ struct DebugGameStateView: View {
     private var liveShip: Ship? { debug.scene?.playerShip }
     private var game: NovaGame? { model.data.game }
 
-    var body: some View {
+    /// True when shown as the dev console's State tab rather than as a sheet:
+    /// no Done button, no sheet frame, and the dark scheme is applied by
+    /// environment (the console is already a dark surface).
+    var embedded = false
+
+    private var stack: some View {
         NavigationStack {
             Form {
                 pilotSection
@@ -39,13 +44,31 @@ struct DebugGameStateView: View {
                 spawnSection
             }
             .formStyle(.grouped)
+            #if os(iOS) || os(macOS)
+            .scrollContentBackground(embedded ? .hidden : .automatic)
+            #endif
             .navigationTitle("Game State")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            #if os(iOS)
+            .toolbar(embedded ? .hidden : .automatic, for: .navigationBar)
+            #endif
+            .toolbar {
+                if !embedded {
+                    ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                }
+            }
         }
-        .preferredColorScheme(.dark)
-        #if os(macOS)
-        .frame(minWidth: 480, idealWidth: 560, minHeight: 560, idealHeight: 720, maxHeight: 900)
-        #endif
+    }
+
+    @ViewBuilder var body: some View {
+        if embedded {
+            stack.environment(\.colorScheme, .dark)
+        } else {
+            stack
+                .preferredColorScheme(.dark)
+                #if os(macOS)
+                .frame(minWidth: 480, idealWidth: 560, minHeight: 560, idealHeight: 720, maxHeight: 900)
+                #endif
+        }
     }
 
     // MARK: Pilot — credits / combat rating

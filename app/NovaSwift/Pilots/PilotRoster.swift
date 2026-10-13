@@ -16,8 +16,18 @@ import NovaSwiftStory
 @MainActor
 final class PilotRoster: ObservableObject {
     /// The on-disk store. `var` (not `let`) so `useICloud` can swap it between
-    /// the local and iCloud roots at runtime.
-    private(set) var archive: PilotArchive
+    /// the local and iCloud roots at runtime. Reading it waits out any save still
+    /// writing on `saveQueue`, so a load, list or delete never sees a stale file.
+    private(set) var archive: PilotArchive {
+        get { flushPendingSaves(); return store }
+        set { flushPendingSaves(); store = newValue }
+    }
+    private var store: PilotArchive
+    /// Autosaves write here, off the main thread: loading the existing save,
+    /// writing it plus a backup and re-listing the roster is several file
+    /// operations, and in the iCloud folder each one can block on file
+    /// coordination, which froze the game on landing. Serial, so saves land in order.
+    private static let saveQueue = DispatchQueue(label: "com.novaswift.pilot-saves", qos: .userInitiated)
     /// Every saved pilot, newest-first (mirrors `archive.list()`).
     @Published private(set) var pilots: [PilotSave] = []
     /// Whether the roster is currently backed by iCloud (vs. local storage).
@@ -31,7 +41,7 @@ final class PilotRoster: ObservableObject {
 
     init(archive: PilotArchive? = nil, preferICloud: Bool = false) {
         let resolved = archive ?? PilotArchive.resolveDefault(preferICloud: preferICloud)
-        self.archive = resolved
+        self.store = resolved
         self.isCloudBacked = resolved.location.isCloud
         // Restore the last explicit selection, if any.
         // Instance-scoped so a second local-MP test instance remembers its own
@@ -39,13 +49,24 @@ final class PilotRoster: ObservableObject {
         if let raw = AppInstance.defaults.string(forKey: Self.selectedIDKey) {
             self.selectedID = UUID(uuidString: raw)
         }
+        #if os(macOS)
+        // Quitting must not cut off an autosave still writing on `saveQueue`.
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification,
+                                               object: nil, queue: nil) { _ in
+            PilotRoster.saveQueue.sync {}
+        }
+        #endif
         Log.pilot.debug("PilotRoster.init: archive at \(self.archive.root.path, privacy: .public) (iCloud=\(self.archive.location.isCloud))")
         refresh()
     }
 
     /// Reload the roster from disk.
     func refresh() {
-        pilots = archive.list()
+        apply(archive.list())
+    }
+
+    private func apply(_ listed: [PilotSave]) {
+        pilots = listed
         // Drop a dangling selection whose file no longer exists (deleted pilot).
         if let id = selectedID, !pilots.contains(where: { $0.id == id }) {
             Log.pilot.debug("PilotRoster.refresh: clearing stale selection \(id, privacy: .public)")
@@ -185,8 +206,22 @@ final class PilotRoster: ObservableObject {
     /// landing / hyperjump / manual save / the autosave tick; backs up on the
     /// meaningful events so a stuck or corrupted pilot can be rolled back.
     func persist(id: UUID, state: PlayerState, game: NovaGame?, backup: Bool) {
-        PilotSaves.persist(archive: archive, id: id, state: state, game: game, backup: backup)
-        refresh()
+        let archive = store
+        Self.saveQueue.async {
+            PilotSaves.persist(archive: archive, id: id, state: state, game: game, backup: backup)
+            let listed = archive.list()
+            DispatchQueue.main.async { [weak self] in
+                // A store switch since this save was queued re-lists on its own.
+                guard let self, self.store === archive else { return }
+                self.apply(listed)
+            }
+        }
+    }
+
+    /// Block until every queued save has been written. Called before any other
+    /// read or write of the archive, and when the app leaves the foreground or quits.
+    func flushPendingSaves() {
+        Self.saveQueue.sync {}
     }
 
     // MARK: Manage

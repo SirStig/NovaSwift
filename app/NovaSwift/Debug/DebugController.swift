@@ -57,6 +57,20 @@ final class DebugController: ObservableObject {
     /// sample lands. See `FrameProfiler`.
     @Published var phaseBreakdown: [PerfPhase] = []
 
+    /// Rolling history (newest last, at most `historyCapacity` samples) of fps,
+    /// frame ms and CPU ms — the series behind the Tools pane's sparklines.
+    /// Deliberately not `@Published`: `report` already publishes the scalars
+    /// right alongside, and that is what triggers the redraw that reads these.
+    private(set) var fpsHistory: [Double] = []
+    private(set) var frameMsHistory: [Double] = []
+    private(set) var cpuMsHistory: [Double] = []
+    static let historyCapacity = 60
+
+    private static func push(_ value: Double, into series: inout [Double]) {
+        series.append(value)
+        if series.count > historyCapacity { series.removeFirst(series.count - historyCapacity) }
+    }
+
     /// The worst single-frame spike seen since the last report tick, in ms, or 0
     /// if none crossed the hitch threshold. Spikes are what read as stutter; the
     /// average hides them.
@@ -167,6 +181,9 @@ final class DebugController: ObservableObject {
         self.asteroidCount = asteroids
         self.nodeCount = nodes
         self.phaseBreakdown = phases
+        Self.push(fps, into: &fpsHistory)
+        Self.push(frameMsAvg, into: &frameMsHistory)
+        Self.push(cpuMsAvg, into: &cpuMsHistory)
     }
 
     /// Surface the worst frame spike from the last window (or clear it when the

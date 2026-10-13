@@ -1302,6 +1302,8 @@ struct GameContainerView: View {
             if phase != .active {
                 syncCombatStanding()
                 saveGame(reason: landedSpobID != nil ? .backgroundLanded : .background)
+                // Autosaves write off the main thread; finish before a suspend.
+                if phase == .background { model.roster.flushPendingSaves() }
                 // "Pause when app loses focus": freeze the sim while backgrounded
                 // (unless a modal already owns the pause state).
                 if model.settings.pauseOnFocusLoss { setScenePaused(true, reason: "focus lost") }
@@ -4245,8 +4247,12 @@ struct GameContainerView: View {
         }
         .padding(.leading, 14)
         .padding(.top, 68)   // below the hamburger menu button
-        .opacity(showMenu || console.isPresented ? 0 : 1)
-        .allowsHitTesting(!showMenu && !console.isPresented)
+        // Shown only during live in-flight play: hidden in the pause menu, the
+        // map, the spaceport (landed), hail/boarding/mission panels and while
+        // the console itself is open (`flightControlsVisible`).
+        .opacity(flightControlsVisible && host != nil ? 1 : 0)
+        .allowsHitTesting(flightControlsVisible && host != nil)
+        .animation(.easeOut(duration: 0.15), value: flightControlsVisible)
         .zIndex(15)
         #if !os(tvOS)
         .overlay {

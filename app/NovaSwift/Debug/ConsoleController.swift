@@ -34,6 +34,9 @@ final class ConsoleController: ObservableObject {
     /// terminal button lands on the command line and the metrics chip lands
     /// on the tools.
     @Published var tab: DevConsoleTab = .console
+    /// Which battery the Checks tab shows — set by the Tools pane's
+    /// "Diagnostics" / "Self-Tests" rows before they switch tabs.
+    @Published var checksMode: DevChecksMode = .diagnostics
     let log = ConsoleLogStore()
 
     struct Command {

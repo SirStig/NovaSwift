@@ -537,6 +537,24 @@ final class GameDataController: ObservableObject {
         reload()
     }
 
+    /// Drag-and-drop reorder: moves `id` to `index` (a position in `plugins`) with a single reload.
+    func movePlugin(id: String, toIndex index: Int) {
+        guard let from = plugins.firstIndex(where: { $0.id == id }) else { return }
+        let target = max(0, min(plugins.count - 1, index))
+        var delta = target - from
+        guard delta != 0 else { return }
+        let step = delta > 0 ? 1 : -1
+        var moved = false
+        while delta != 0 {
+            guard PluginSet.move(&plugins, id: id, by: step, manual: manualPluginOrder) else { break }
+            moved = true
+            delta -= step
+        }
+        guard moved else { return }
+        Self.savePluginState(plugins)
+        reload()
+    }
+
     /// One plug-in's persisted enabled flag + position, keyed by
     /// `PluginBundle.id` (stable folder/file name). Array order *is* the
     /// persisted load order.

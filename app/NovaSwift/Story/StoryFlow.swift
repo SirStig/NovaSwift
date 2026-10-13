@@ -9,9 +9,9 @@ extension StoryConnector {
     var tint: Color {
         switch self {
         case .onSuccess, .onAccept, .onComplete: return EVTheme.accent
-        case .onRefuse:                           return .orange
-        case .onFailure, .onAbort:                return .red
-        case .random:                             return Color(red: 0.72, green: 0.55, blue: 0.98)
+        case .onRefuse:                           return Color(red: 1.0, green: 0.6, blue: 0.15)
+        case .onFailure, .onAbort:                return EVTheme.fail
+        case .random:                             return EVTheme.purple
         case .unlocks, .start, .then:             return .gray
         }
     }
@@ -21,10 +21,10 @@ extension StoryConnector {
         switch self {
         case .start, .then:                       return nil
         case .onSuccess, .onAccept, .onComplete:  return "checkmark"
-        case .onRefuse:                           return "arrow.uturn.left"
-        case .onFailure, .onAbort:                return "xmark"
-        case .unlocks:                            return "lock.open"
-        case .random:                             return "dice"
+        case .onRefuse:                           return "arrow.triangle.branch"
+        case .onFailure, .onAbort:                return "xmark.octagon.fill"
+        case .unlocks:                            return "lock.open.fill"
+        case .random:                             return "sparkles"
         }
     }
 }

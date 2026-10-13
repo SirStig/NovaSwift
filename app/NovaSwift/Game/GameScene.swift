@@ -266,7 +266,10 @@ final class GameScene: SKScene {
     /// replace with its own effect layer: the classic ones are pixel-matched
     /// to the classic art, not to the model.
     private func hullHidesOverlay(_ shipTypeID: Int, _ overlay: (ShanRes) -> Int) -> Bool {
-        guard let shan = galaxy?.game.shan(shipTypeID) else { return false }
+        Self.hullHidesOverlay(shipTypeID, overlay, game: galaxy?.game)
+    }
+    private static func hullHidesOverlay(_ shipTypeID: Int, _ overlay: (ShanRes) -> Int, game: NovaGame?) -> Bool {
+        guard let shan = game?.shan(shipTypeID) else { return false }
         return HDGraphics.shared.hidesOverlay(baseSpriteID: shan.baseSpriteID, overlaySpriteID: overlay(shan))
     }
     private var audio: GameAudio?
@@ -4394,6 +4397,13 @@ final class GameScene: SKScene {
         // below; without it, cloaking fades a ship toward invisible as
         // `cloakLevel` rises (harmless — always 0 on an uncloaked ship).
         let screenRevealsCloaked = world.player.cloakScannerFlags & 0x0002 != 0
+        // Hulls getting their first node this frame: build their art together.
+        var unbuilt: [Int] = []
+        for npc in world.npcs where npcNodes[npc.entityID] == nil && npcTextureCache[npc.shipTypeID] == nil
+            && !unbuilt.contains(npc.shipTypeID) {
+            unbuilt.append(npc.shipTypeID)
+        }
+        warmNPCArt(for: unbuilt)
         for npc in world.npcs {
             seen.insert(npc.entityID)
             let node = npcNodes[npc.entityID] ?? makeNPCNode(for: npc)
@@ -5685,24 +5695,94 @@ final class GameScene: SKScene {
     /// and cached (many NPCs share a hull).
     private func npcTextures(for shipTypeID: Int) -> [SKTexture] {
         if let cached = npcTextureCache[shipTypeID] { return cached }
-        var textures: [SKTexture] = []
-        // Full multi-set sheet (banking/animation sets, all headings), not just
-        // the first rotation set — the render selects the live set/heading.
-        if shipTypeID >= 128, let sheet = galaxy?.game.shipSprite(shipTypeID) {
-            textures = SpriteTextures.allFrames(from: sheet)
-        }
+        let textures = Self.npcHullFrames(shipTypeID, game: galaxy?.game)
         npcTextureCache[shipTypeID] = textures
         return textures
+    }
+
+    // The per-layer builders behind the NPC texture caches. Static and free of
+    // scene state (the sprite decode caches and `HDGraphics` are thread-safe), so
+    // `warmNPCArt` can run them for several hulls at once off the main thread.
+
+    private static func npcHullFrames(_ shipTypeID: Int, game: NovaGame?) -> [SKTexture] {
+        // Full multi-set sheet (banking/animation sets, all headings), not just
+        // the first rotation set — the render selects the live set/heading.
+        guard shipTypeID >= 128, let sheet = game?.shipSprite(shipTypeID) else { return [] }
+        return SpriteTextures.allFrames(from: sheet)
+    }
+
+    private static func npcEngineGlowFrames(_ shipTypeID: Int, game: NovaGame?) -> [SKTexture] {
+        guard shipTypeID >= 128, !hullHidesOverlay(shipTypeID, \.engineSpriteID, game: game),
+              let sheet = game?.engineGlowSprite(shipTypeID) else { return [] }
+        return SpriteTextures.allFrames(from: sheet)
+    }
+
+    private static func npcLightFrames(_ shipTypeID: Int, game: NovaGame?, runningLights: Bool) -> [SKTexture] {
+        guard shipTypeID >= 128, runningLights, !hullHidesOverlay(shipTypeID, \.lightSpriteID, game: game),
+              let sheet = game?.lightSprite(shipTypeID) else { return [] }
+        return SpriteTextures.allFrames(from: sheet)
+    }
+
+    private static func npcAltFrames(_ shipTypeID: Int, game: NovaGame?) -> [SKTexture] {
+        guard shipTypeID >= 128, !hullHidesOverlay(shipTypeID, \.altSpriteID, game: game),
+              let sheet = game?.altSprite(shipTypeID) else { return [] }
+        return SpriteTextures.allFrames(from: sheet)
+    }
+
+    private static func npcWeaponGlowFrames(_ shipTypeID: Int, game: NovaGame?, weaponEffects: Bool) -> [SKTexture] {
+        guard shipTypeID >= 128, weaponEffects, !hullHidesOverlay(shipTypeID, \.weaponGlowSpriteID, game: game),
+              let sheet = game?.weaponGlowSprite(shipTypeID) else { return [] }
+        return SpriteTextures.allFrames(from: sheet)
+    }
+
+    private static func npcShieldFrames(_ shipTypeID: Int, game: NovaGame?) -> [SKTexture] {
+        guard shipTypeID >= 128 else { return [] }
+        if let sheet = game?.shieldSprite(shipTypeID) { return SpriteTextures.rotationFrames(from: sheet) }
+        // No classic shield layer: an HD pack's bubble, when it asks for one.
+        if let base = game?.shan(shipTypeID)?.baseSpriteID,
+           let hd = HDGraphics.shared.shieldFrames(baseSpriteID: base) { return hd }
+        return []
+    }
+
+    /// Build every layer of the hulls about to get their first node, all at once
+    /// across cores, straight into the caches. Each hull's sheets → textures was
+    /// done one after another inside `makeNPCNode` on the main thread — a launch
+    /// or jump into a busy system paid for every new hull in series (a 157 ms
+    /// first frame). Nodes still build in `makeNPCNode`; they now hit warm caches.
+    private func warmNPCArt(for shipTypeIDs: [Int]) {
+        guard shipTypeIDs.count > 1 else { return }   // one hull gains nothing from fanning out
+        let game = galaxy?.game
+        let runningLights = settings.runningLights, weaponEffects = settings.weaponEffects
+        typealias Art = (hull: [SKTexture], glow: [SKTexture], light: [SKTexture],
+                         alt: [SKTexture], weaponGlow: [SKTexture], shield: [SKTexture])
+        var built = [Art?](repeating: nil, count: shipTypeIDs.count)
+        let lock = NSLock()
+        DispatchQueue.concurrentPerform(iterations: shipTypeIDs.count) { i in
+            let id = shipTypeIDs[i]
+            let art: Art = (Self.npcHullFrames(id, game: game),
+                            Self.npcEngineGlowFrames(id, game: game),
+                            Self.npcLightFrames(id, game: game, runningLights: runningLights),
+                            Self.npcAltFrames(id, game: game),
+                            Self.npcWeaponGlowFrames(id, game: game, weaponEffects: weaponEffects),
+                            Self.npcShieldFrames(id, game: game))
+            lock.lock(); built[i] = art; lock.unlock()
+        }
+        for (i, id) in shipTypeIDs.enumerated() {
+            guard let art = built[i] else { continue }
+            if npcTextureCache[id] == nil { npcTextureCache[id] = art.hull }
+            if npcEngineGlowCache[id] == nil { npcEngineGlowCache[id] = art.glow }
+            if npcLightCache[id] == nil { npcLightCache[id] = art.light }
+            if npcAltCache[id] == nil { npcAltCache[id] = art.alt }
+            if npcWeaponGlowCache[id] == nil { npcWeaponGlowCache[id] = art.weaponGlow }
+            if npcShieldCache[id] == nil { npcShieldCache[id] = art.shield }
+        }
     }
 
     /// That hull's own authored engine-glow overlay, if it has one — same
     /// per-hull-art principle as `npcTextures`, cached the same way.
     private func npcEngineGlowTextures(for shipTypeID: Int) -> [SKTexture] {
         if let cached = npcEngineGlowCache[shipTypeID] { return cached }
-        var textures: [SKTexture] = []
-        if shipTypeID >= 128, !hullHidesOverlay(shipTypeID, \.engineSpriteID), let sheet = galaxy?.game.engineGlowSprite(shipTypeID) {
-            textures = SpriteTextures.allFrames(from: sheet)
-        }
+        let textures = Self.npcEngineGlowFrames(shipTypeID, game: galaxy?.game)
         npcEngineGlowCache[shipTypeID] = textures
         return textures
     }
@@ -5710,10 +5790,7 @@ final class GameScene: SKScene {
     /// That hull's running-lights overlay, if any — full multi-set sheet, cached.
     private func npcLightTextures(for shipTypeID: Int) -> [SKTexture] {
         if let cached = npcLightCache[shipTypeID] { return cached }
-        var textures: [SKTexture] = []
-        if shipTypeID >= 128, settings.runningLights, !hullHidesOverlay(shipTypeID, \.lightSpriteID), let sheet = galaxy?.game.lightSprite(shipTypeID) {
-            textures = SpriteTextures.allFrames(from: sheet)
-        }
+        let textures = Self.npcLightFrames(shipTypeID, game: galaxy?.game, runningLights: settings.runningLights)
         npcLightCache[shipTypeID] = textures
         return textures
     }
@@ -5722,10 +5799,7 @@ final class GameScene: SKScene {
     /// cached. Stock hulls leave the alt layer unset, so this is usually empty.
     private func npcAltTextures(for shipTypeID: Int) -> [SKTexture] {
         if let cached = npcAltCache[shipTypeID] { return cached }
-        var textures: [SKTexture] = []
-        if shipTypeID >= 128, !hullHidesOverlay(shipTypeID, \.altSpriteID), let sheet = galaxy?.game.altSprite(shipTypeID) {
-            textures = SpriteTextures.allFrames(from: sheet)
-        }
+        let textures = Self.npcAltFrames(shipTypeID, game: galaxy?.game)
         npcAltCache[shipTypeID] = textures
         return textures
     }
@@ -5733,10 +5807,7 @@ final class GameScene: SKScene {
     /// That hull's weapon-glow overlay, if any — full multi-set sheet, cached.
     private func npcWeaponGlowTextures(for shipTypeID: Int) -> [SKTexture] {
         if let cached = npcWeaponGlowCache[shipTypeID] { return cached }
-        var textures: [SKTexture] = []
-        if shipTypeID >= 128, settings.weaponEffects, !hullHidesOverlay(shipTypeID, \.weaponGlowSpriteID), let sheet = galaxy?.game.weaponGlowSprite(shipTypeID) {
-            textures = SpriteTextures.allFrames(from: sheet)
-        }
+        let textures = Self.npcWeaponGlowFrames(shipTypeID, game: galaxy?.game, weaponEffects: settings.weaponEffects)
         npcWeaponGlowCache[shipTypeID] = textures
         return textures
     }
@@ -5746,14 +5817,7 @@ final class GameScene: SKScene {
     /// for stock data (base hulls leave the shän shield layer unset).
     private func npcShieldTextures(for shipTypeID: Int) -> [SKTexture] {
         if let cached = npcShieldCache[shipTypeID] { return cached }
-        var textures: [SKTexture] = []
-        if shipTypeID >= 128, let sheet = galaxy?.game.shieldSprite(shipTypeID) {
-            textures = SpriteTextures.rotationFrames(from: sheet)
-        } else if shipTypeID >= 128, let base = galaxy?.game.shan(shipTypeID)?.baseSpriteID,
-                  let hd = HDGraphics.shared.shieldFrames(baseSpriteID: base) {
-            // No classic shield layer: an HD pack's bubble, when it asks for one.
-            textures = hd
-        }
+        let textures = Self.npcShieldFrames(shipTypeID, game: galaxy?.game)
         npcShieldCache[shipTypeID] = textures
         return textures
     }

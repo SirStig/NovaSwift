@@ -87,7 +87,7 @@ func _init() -> void:
 		"Video": ["Graphics", "Starfield density", "Camera zoom", "Camera view", "Frame rate limit", "Smooth sprite scaling", "HD graphics from plug-ins", "Particle effects", "Engine & weapon glow", "Windows hyperspace look", "Hyperspace effects", "Window", "Fullscreen", "VSync", "Window scale", "Low", "Medium", "High", "Ultra"],
 		"Audio": ["Audio", "Mute all", "Master", "Music", "Effects", "Interface", "Background music", "Test Beep"],
 		"Accessibility": ["Accessibility", "Reduce flashing & motion", "Colorblind mode"],
-		"Support": ["Saved Games", "Saved to", "Support", "Developer", "Report a Bug", "About NovaSwift", "Debug mode", "Change Pilots Folder…", "Import Data"],
+		"Support": ["Saved Games", "Saved to", "Support", "Developer", "Report a Bug…", "About NovaSwift", "Debug mode", "Change Pilots Folder…", "Re-import / Change Game Data…"],
 	}
 	for p in Settings.PAGES:
 		st.show_page(p)

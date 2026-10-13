@@ -303,17 +303,17 @@ extension MissionStatus {
     var symbolName: String {
         switch self {
         case .completed: return "checkmark.circle.fill"
-        case .active:    return "arrowtriangle.right.circle.fill"
-        case .available: return "circle.circle"
+        case .active:    return "target"
+        case .available: return "sparkles"
         case .locked:    return "lock.fill"
         }
     }
     var tint: Color {
         switch self {
-        case .completed: return .green
-        case .active:    return .cyan
-        case .available: return .yellow
-        case .locked:    return .secondary
+        case .completed: return EVTheme.done
+        case .active:    return EVTheme.active
+        case .available: return EVTheme.avail
+        case .locked:    return EVTheme.lock
         }
     }
     var label: String {

@@ -35,6 +35,14 @@ struct DevBitBrowser: View {
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All", held = "Held", orphan = "Orphans"
         var id: String { rawValue }
+
+        var symbol: String {
+            switch self {
+            case .all: return "list.bullet"
+            case .held: return "checkmark.circle.fill"
+            case .orphan: return "questionmark.circle"
+            }
+        }
     }
 
     private var held: Set<Int> { model.pilot.state.setBits }
@@ -61,8 +69,8 @@ struct DevBitBrowser: View {
     var body: some View {
         VStack(spacing: 0) {
             filterBar
-            DevBrowserFrame(query: $query, placeholder: "search bits or mission names…",
-                            count: filtered.count, noun: "bit") {
+            DevBrowserFrame(query: $query, placeholder: "Search bits or mission names…",
+                            count: filtered.count, noun: "bit", symbol: "switch.2") {
                 if indexing {
                     Text("Indexing control bits…")
                         .font(.system(size: 11 * devFontScale, design: .monospaced))
@@ -86,27 +94,15 @@ struct DevBitBrowser: View {
     }
 
     private var filterBar: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             ForEach(Filter.allCases) { f in
-                let on = filter == f
-                CursorButton { filter = f } label: {
-                    Text(f.rawValue)
-                        .font(.system(size: 9 * devFontScale, weight: .semibold, design: .monospaced))
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(RoundedRectangle(cornerRadius: 5)
-                            .fill(on ? devConsoleGreen.opacity(0.22) : .white.opacity(0.05)))
-                        .overlay(RoundedRectangle(cornerRadius: 5)
-                            .strokeBorder(on ? devConsoleGreen.opacity(0.6) : .clear))
-                        .foregroundStyle(on ? devConsoleGreen : .white.opacity(0.6))
-                        .contentShape(Rectangle())
-                }
+                DevFilterChip(title: f.rawValue, color: devConsoleGreen, active: filter == f,
+                              symbol: f.symbol) { filter = f }
             }
-            Spacer()
-            Text("\(held.count) held")
-                .font(.system(size: 9 * devFontScale, design: .monospaced))
-                .foregroundStyle(.secondary)
+            Spacer(minLength: 4)
+            DevPill(text: "\(held.count) held", color: devConsoleGreen)
         }
-        .padding(.horizontal, 12).padding(.top, 8)
+        .padding(.horizontal, 12).padding(.top, 10)
     }
 
 }
@@ -129,18 +125,20 @@ private struct BitRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             CursorButton(action: onTap) {
-                HStack(spacing: 10) {
-                    stateChip
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("bit \(bit)")
-                            .font(.system(size: 12 * devFontScale, weight: .semibold,
-                                          design: .monospaced))
-                        Text(summary)
-                            .font(.system(size: 9 * devFontScale, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.6))
-                            .lineLimit(1)
-                    }
+                HStack(spacing: 8) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9 * devFontScale, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .frame(width: 10)
+                    Text("bit \(bit)")
+                        .font(.system(size: 13 * devFontScale, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(expanded ? devConsoleGreen : .white)
+                    Text(summary)
+                        .font(.system(size: 10 * devFontScale, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .lineLimit(1)
                     Spacer(minLength: 0)
+                    stateChip
                 }
                 .contentShape(Rectangle())
             }
@@ -159,27 +157,25 @@ private struct BitRow: View {
                     }
                 }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 5)], spacing: 5) {
-                    DevActionChip("Set", "bit set \(bit)", console: console)
-                    DevActionChip("Clear", "bit clear \(bit)", console: console, destructive: true)
-                    DevActionChip("Toggle", "bit toggle \(bit)", console: console)
+                    DevActionChip("Set", "bit set \(bit)", console: console, symbol: "checkmark")
+                    DevActionChip("Clear", "bit clear \(bit)", console: console,
+                                  destructive: true, symbol: "xmark")
+                    DevActionChip("Toggle", "bit toggle \(bit)", console: console,
+                                  symbol: "arrow.left.arrow.right", tint: devConsoleOrange)
                 }
             }
         }
         .padding(9)
-        .background(RoundedRectangle(cornerRadius: 8)
-            .fill(expanded ? devConsoleGreen.opacity(0.1) : .white.opacity(0.04)))
-        .overlay(RoundedRectangle(cornerRadius: 8)
-            .strokeBorder(expanded ? devConsoleGreen.opacity(0.4) : .white.opacity(0.07)))
+        .background(RoundedRectangle(cornerRadius: 10)
+            .fill(expanded ? devConsoleGreen.opacity(0.07) : .white.opacity(0.04)))
+        .overlay(RoundedRectangle(cornerRadius: 10)
+            .strokeBorder(expanded ? devConsoleGreen.opacity(0.4) : devHairline))
     }
 
     private var stateChip: some View {
-        Text(isSet ? "SET" : "CLR")
-            .font(.system(size: 9 * devFontScale, weight: .bold, design: .monospaced))
-            .frame(width: 38 * devFontScale)
-            .padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 5)
-                .fill(isSet ? devConsoleGreen.opacity(0.25) : .white.opacity(0.06)))
-            .foregroundStyle(isSet ? devConsoleGreen : .white.opacity(0.45))
+        DevPill(text: isSet ? "set" : "clear",
+                color: isSet ? devConsoleGreen : .white.opacity(0.5),
+                symbol: isSet ? "checkmark.circle.fill" : "circle")
     }
 
     private var summary: String {
@@ -193,28 +189,35 @@ private struct BitRow: View {
 
     @ViewBuilder private func group(_ title: String, _ refs: [NCBReference]) -> some View {
         if !refs.isEmpty {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 9 * devFontScale, weight: .bold, design: .monospaced))
-                    .foregroundStyle(devConsoleGreen.opacity(0.9))
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(title == "TESTED BY" ? devConsoleBlue : devConsoleGreen)
+                        .frame(width: 6, height: 6)
+                    Text(title)
+                        .font(.system(size: 9.5 * devFontScale, weight: .bold, design: .rounded))
+                        .tracking(0.5)
+                        .foregroundStyle(title == "TESTED BY" ? devConsoleBlue : devConsoleGreen)
+                }
                 ForEach(refs) { ref in
-                    Text(line(ref))
-                        .font(.system(size: 9.5 * devFontScale, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.72))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(line(ref))
+                            .font(.system(size: 10 * devFontScale, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.75))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if case let .test(negated) = ref.role {
+                            DevPill(text: negated ? "needs clear" : "needs set",
+                                    color: negated ? devConsoleOrange : devConsoleBlue)
+                        }
+                    }
+                    .padding(.leading, 12)
                 }
             }
         }
     }
 
     private func line(_ ref: NCBReference) -> String {
-        var text = "\(ref.kind) #\(ref.resourceID) \(ref.resourceName) · \(ref.field)"
-        // Polarity is the whole point for a test: whether this gate wants the
-        // bit set or clear decides if holding it helps or blocks you.
-        if case let .test(negated) = ref.role {
-            text += negated ? " (needs clear)" : " (needs set)"
-        }
-        return text
+        "\(ref.kind) #\(ref.resourceID) \(ref.resourceName) · \(ref.field)"
     }
 }
