@@ -126,12 +126,26 @@ final class CursorTargets: ObservableObject {
         if suspensions.contains(reason) { suspensions.remove(reason) }
     }
 
-    /// The highest occupied layer in a host — the only live one.
+    /// Drop everything a view registered (target, blocker, key, host). Called
+    /// from `CursorRegistration.deinit` — the backstop for the times SwiftUI
+    /// tears a view down without ever sending it `onDisappear`.
+    func forget(_ id: UUID) {
+        remove(id)
+        blockers.removeValue(forKey: id)
+        keyActions.removeValue(forKey: id)
+        popHost(id)
+    }
+
+    /// The highest occupied layer in a host — the only live one. Only modal
+    /// blockers count: every layer above 0 exists because a `.cursorModal()`
+    /// put it there, and blockers are the one registration with a balanced
+    /// appear/disappear lifecycle. Letting a stray target or key raise the
+    /// layer meant one leaked registration (a hidden view re-running its body)
+    /// silently made every visible button unpressable while the cursor still
+    /// moved.
     func topLayer(in host: UUID) -> Int {
         var top = 0
-        for t in targets.values where t.host == host { top = max(top, t.layer) }
         for b in blockers.values where b.host == host { top = max(top, b.layer) }
-        for k in keyActions.values where k.host == host { top = max(top, k.layer) }
         return top
     }
 
@@ -237,6 +251,19 @@ extension CGRect {
     }
 }
 
+/// A view's registration identity, tied to the view's *lifetime* rather than
+/// its appear/disappear callbacks: when SwiftUI destroys the view's state —
+/// even on a path that skips `onDisappear` — the deinit clears whatever it
+/// still holds in the registries.
+final class CursorRegistration: ObservableObject {
+    let id = UUID()
+
+    deinit {
+        let id = id
+        Task { @MainActor in CursorTargets.shared.forget(id) }
+    }
+}
+
 // MARK: - Environment (host + layer)
 
 private struct CursorHostKey: EnvironmentKey {
@@ -297,7 +324,12 @@ private struct CursorClickable: ViewModifier {
     let action: () -> Void
     var actionAt: ((CGPoint) -> Void)?
     var drags = true
-    @State private var id = UUID()
+    @StateObject private var registration = CursorRegistration()
+    private var id: UUID { registration.id }
+    /// Only an on-screen view may register: a view kept alive off screen (a
+    /// covered navigation level, an inactive tab) still re-runs layout, and
+    /// re-registering after `onDisappear` leaked a target nobody could see.
+    @State private var onScreen = false
     /// Ambient `.disabled()` must gate the cursor exactly like it gates taps —
     /// a disabled control's frame is deregistered so Ⓐ can't fire its action.
     @Environment(\.isEnabled) private var isEnabled
@@ -326,7 +358,7 @@ private struct CursorClickable: ViewModifier {
                     // captured action fresh. Safe during view updates because the
                     // registry publishes nothing on target mutation.
                     let _ = {
-                        guard isEnabled else { CursorTargets.shared.remove(id); return }
+                        guard isEnabled, onScreen else { CursorTargets.shared.remove(id); return }
                         // Already drawn-space: every ancestor `scaleEffect` and
                         // `offset` (i.e. `novaPlace`) is folded in here by
                         // SwiftUI, and nested scale containers compose. Register
@@ -350,7 +382,11 @@ private struct CursorClickable: ViewModifier {
                                                     host: host, layer: layer)
                     }()
                     Color.clear
-                        .onDisappear { CursorTargets.shared.remove(id) }
+                        .onAppear { onScreen = true }
+                        .onDisappear {
+                            onScreen = false
+                            CursorTargets.shared.remove(id)
+                        }
                 }
             )
             #if os(tvOS)
@@ -383,9 +419,10 @@ extension View {
 private struct CursorModal: ViewModifier {
     @Environment(\.cursorHost) private var host
     @Environment(\.cursorLayer) private var layer
-    @State private var id = UUID()
+    @StateObject private var registration = CursorRegistration()
 
     func body(content: Content) -> some View {
+        let id = registration.id
         content
             .environment(\.cursorLayer, layer + 1)
             .onAppear { CursorTargets.shared.addBlocker(id, host: host, layer: layer + 1) }
@@ -399,21 +436,31 @@ private struct CursorKey: ViewModifier {
     @Environment(\.cursorHost) private var host
     @Environment(\.cursorLayer) private var layer
     @Environment(\.isEnabled) private var isEnabled
-    @State private var id = UUID()
+    @StateObject private var registration = CursorRegistration()
+    /// Gate as in `CursorClickable`: a body re-run after `onDisappear` (a
+    /// hidden screen observing live state) must not resurrect its Ⓑ action.
+    @State private var onScreen = false
 
     func body(content: Content) -> some View {
+        let id = registration.id
         // Re-registered on every update so the captured action stays current;
         // the registry publishes nothing here, so this is safe mid-update.
         let _ = CursorTargets.shared.setKeyAction(id, kind: kind, host: host, layer: layer,
-                                                  action: isEnabled ? action : nil)
-        content.onDisappear { CursorTargets.shared.removeKeyAction(id) }
+                                                  action: isEnabled && onScreen ? action : nil)
+        content
+            .onAppear { onScreen = true }
+            .onDisappear {
+                onScreen = false
+                CursorTargets.shared.removeKeyAction(id)
+            }
     }
 }
 
 private struct CursorHost: ViewModifier {
-    @State private var id = UUID()
+    @StateObject private var registration = CursorRegistration()
 
     func body(content: Content) -> some View {
+        let id = registration.id
         content
             .environment(\.cursorHost, id)
             .environment(\.cursorLayer, 0)
