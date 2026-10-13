@@ -85,6 +85,19 @@ private func leadersCross(_ a: [CGPoint], _ b: [CGPoint]) -> Bool {
     return false
 }
 
+/// Shrink a shell toward a point just above its centre. A normal inset pinches
+/// the grip valley; this scale stays one simple polygon. Distances are millimetres.
+private func insetPath(_ source: Path, dist: CGFloat) -> Path {
+    let bb = source.boundingRect
+    let c = CGPoint(x: bb.midX, y: bb.midY - bb.height * 0.05)
+    let kx = min(0.985, max(0.86, 1 - dist / max(8, bb.width * 0.5)))
+    let ky = min(0.985, max(0.86, 1 - dist / max(8, bb.height * 0.5)))
+    let transform = CGAffineTransform(a: kx, b: 0, c: 0, d: ky,
+                                      tx: (1 - kx) * c.x,
+                                      ty: (c.y - 0.35) - ky * c.y)
+    return source.applying(transform)
+}
+
 /// The drawn controller with Steam-style callouts: the silhouette near the top
 /// of the canvas, every control a cursor-pressable hit target, and an elbow
 /// leader from each control to a label in the left/right margin.
@@ -125,8 +138,12 @@ struct ControllerCanvas: View {
     private func artLayer(_ art: PadArt, bounds b: CGRect, s: CGFloat) -> some View {
         let origin = b.origin
         let bodyShape = ArtPath(source: art.body, scale: s, origin: origin)
+        let caseShape = ArtPath(source: insetPath(art.body, dist: 3.6), scale: s, origin: origin)
+        let lipShape = ArtPath(source: insetPath(art.body, dist: 1.15), scale: s, origin: origin)
+        let inside = art.decor.filter { !$0.spills }
+        let outside = art.decor.filter(\.spills)
         return ZStack(alignment: .topLeading) {
-            // Back to front: triggers, bumpers, body, decor, the rest.
+            // Triggers and bumpers sit behind the shell, so the body covers their lower half.
             ForEach(art.controls.filter(\.isTrigger)) { c in
                 controlView(c, bounds: b, s: s)
             }
@@ -134,22 +151,38 @@ struct ControllerCanvas: View {
                 controlView(c, bounds: b, s: s)
             }
             bodyShape
+                .fill(art.bodyBottom)
+                .overlay(bodyShape.fill(Color.black.opacity(0.35)))
+                .offset(y: 3.4 * s)
+                .allowsHitTesting(false)
+            bodyShape
                 .fill(LinearGradient(colors: [art.bodyTop, art.bodyBottom], startPoint: .top, endPoint: .bottom))
-                .overlay(bodyShape.fill(LinearGradient(colors: [.white.opacity(0.16), .clear],
-                                                       startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.4))))
-                // Inner shadow along the lower edge, then the rim highlight.
-                .overlay(bodyShape.stroke(.black.opacity(0.4), lineWidth: 5 * s).blur(radius: 2.5 * s)
-                    .offset(y: -1.5 * s).clipShape(bodyShape))
-                .overlay(bodyShape.stroke(LinearGradient(colors: [.white.opacity(0.55), .white.opacity(0.04), .black.opacity(0.35)],
-                                                         startPoint: .top, endPoint: .bottom), lineWidth: max(1, 0.5 * s)))
-                .shadow(color: .black.opacity(0.5), radius: 3.5 * s, y: 3 * s)
+                .overlay(bodyShape.stroke(Color.white.opacity(0.28), lineWidth: max(1, 0.9 * s)))
+                .allowsHitTesting(false)
+            caseShape
+                .fill(LinearGradient(colors: [art.caseTop, art.caseBottom], startPoint: .top, endPoint: .bottom))
+                .overlay(caseShape.stroke(Color.black.opacity(0.28), lineWidth: max(0.6, 0.7 * s)))
+                .allowsHitTesting(false)
+            lipShape
+                .stroke(Color.white.opacity(0.16), lineWidth: max(0.5, 0.55 * s))
                 .allowsHitTesting(false)
             ZStack(alignment: .topLeading) {
-                ForEach(art.decor) { decorView($0, bounds: b, s: s) }
+                ForEach(inside) { decorView($0, bounds: b, s: s) }
             }
             .mask(bodyShape)
             .allowsHitTesting(false)
+            ForEach(outside) { decorView($0, bounds: b, s: s) }
+                .allowsHitTesting(false)
             ForEach(art.controls.filter { !$0.isShoulder }) { c in controlView(c, bounds: b, s: s) }
+            // Shoulder names paint after the shell, so the body doesn't slice them.
+            ForEach(art.controls.filter(\.isShoulder)) { c in
+                Text(c.glyph)
+                    .font(.system(size: (c.isTrigger ? 3.4 : 3.2) * s, weight: .bold, design: .rounded))
+                    .foregroundStyle(c.glyphColor)
+                    .rotationEffect(.degrees(c.rotation))
+                    .position(x: (c.center.x - b.minX) * s, y: (c.center.y - b.minY) * s)
+                    .allowsHitTesting(false)
+            }
         }
     }
 
@@ -399,9 +432,9 @@ private struct PadControlView: View {
                 Circle().strokeBorder(LinearGradient(colors: [.white.opacity(0.45), .black.opacity(0.45)],
                                                      startPoint: .top, endPoint: .bottom), lineWidth: line)
                 if let symbol = control.symbol {
-                    Image(systemName: symbol).font(.system(size: w * 0.5, weight: .bold)).foregroundStyle(.white.opacity(0.85))
+                    Image(systemName: symbol).font(.system(size: w * 0.48, weight: .bold)).foregroundStyle(control.glyphColor)
                 } else {
-                    Text(control.glyph).font(.system(size: w * 0.55, weight: .bold, design: .rounded))
+                    Text(control.glyph).font(.system(size: w * 0.62, weight: .bold, design: .rounded))
                         .foregroundStyle(control.glyphColor)
                 }
             }
@@ -418,29 +451,26 @@ private struct PadControlView: View {
                     .foregroundStyle(.white.opacity(0.35))
             }
         case .pill:
+            let cap = control.fill ?? Color(white: 0.22)
             ZStack {
-                Capsule().fill(plastic)
+                Capsule().fill(LinearGradient(colors: [cap, cap.opacity(0.72)], startPoint: .top, endPoint: .bottom))
                 Capsule().strokeBorder(.white.opacity(0.3), lineWidth: line)
                 if let symbol = control.symbol {
-                    Image(systemName: symbol).font(.system(size: h * 0.9, weight: .bold)).foregroundStyle(.white.opacity(0.85))
+                    Image(systemName: symbol).font(.system(size: h * 0.7, weight: .bold)).foregroundStyle(control.glyphColor)
                 }
             }
         case .bumper:
+            let cap = control.fill ?? Color(white: 0.36)
             ZStack {
-                Capsule().fill(plastic)
-                Capsule().strokeBorder(.white.opacity(0.35), lineWidth: line)
-                Text(control.glyph).font(.system(size: h * 0.55, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.85))
+                Capsule().fill(LinearGradient(colors: [cap, cap.opacity(0.72)], startPoint: .top, endPoint: .bottom))
+                Capsule().strokeBorder(Color.white.opacity(0.32), lineWidth: line)
             }
         case .trigger:
-            // Label in the part that peeks above the bumper.
+            let cap = control.fill ?? Color(white: 0.24)
             let shape = rimShape(control, mm: mm)
-            ZStack(alignment: .top) {
-                shape.fill(LinearGradient(colors: [Color(white: 0.30), Color(white: 0.12)], startPoint: .top, endPoint: .bottom))
-                shape.strokeBorder(.white.opacity(0.28), lineWidth: line)
-                Text(control.glyph).font(.system(size: h * 0.2, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .padding(.top, h * 0.07)
+            ZStack {
+                shape.fill(LinearGradient(colors: [cap, cap.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                shape.strokeBorder(Color.white.opacity(0.22), lineWidth: line)
             }
         case .dpadArm(let dir):
             // The cross is one decor plate; the arm only carries its arrow.

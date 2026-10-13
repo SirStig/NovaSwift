@@ -32,7 +32,7 @@ Enhancement and is off unless you turn it on.
 No decompiled code is in this repository. The findings are written up as specs
 with function addresses in [docs/reverse-engineering/](docs/reverse-engineering/README.md).
 
-![How much of the original game's code has been compared with NovaSwift](docs/branding/fidelity-summary.svg?v=8d4b2915)
+![Last comparison draw. The squares are from when every plan item was marked done.](docs/branding/fidelity-summary.svg?v=reopened)
 
 One block is roughly 5% of that part of the original code: compared and
 matching, fixed to match, or (teal) handled differently on purpose, such as the

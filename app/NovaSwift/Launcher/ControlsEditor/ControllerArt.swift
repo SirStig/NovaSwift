@@ -66,6 +66,19 @@ enum PadStyle: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    /// Letter on a face cap. South / east / west / north, with the swapped layout
+    /// exchanged, so the picture matches the pad in hand. Callouts keep `name`.
+    func faceLetter(_ b: PadButton) -> String {
+        let swap = self == .switchPro
+        switch b {
+        case .buttonA: return swap ? "B" : "A"
+        case .buttonB: return swap ? "A" : "B"
+        case .buttonX: return swap ? "Y" : "X"
+        case .buttonY: return swap ? "X" : "Y"
+        default: return ""
+        }
+    }
+
     /// What this family calls the control (callout caption).
     func name(_ b: PadButton) -> String {
         switch (self, b) {
@@ -128,6 +141,8 @@ struct PadDecor: Identifiable {
     var bottom: Color = Color(white: 0.1)
     var label: String?
     var dashed = false
+    /// Drawn outside the shell mask. Grip tabs sit past the outline.
+    var spills = false
 }
 
 /// A greyed callout for something the editor shows but can't bind (back grips,
@@ -141,8 +156,12 @@ struct PadFixedNote: Identifiable {
 
 struct PadArt {
     var body = Path()
+    /// Outer shell, the lip around the top case.
     var bodyTop = Color(white: 0.3)
     var bodyBottom = Color(white: 0.1)
+    /// Lighter top case, inset from the outline.
+    var caseTop = Color(white: 0.42)
+    var caseBottom = Color(white: 0.22)
     var decor: [PadDecor] = []
     var controls: [PadControl] = []
     var notes: [PadFixedNote] = []
@@ -152,7 +171,10 @@ struct PadArt {
         var r = body.boundingRect
         for c in controls { r = r.union(c.frame.insetBy(dx: -2, dy: -2)) }
         for d in decor { r = r.union(d.rect) }
-        return r.insetBy(dx: -2, dy: -2)
+        // Extra room under the outline for the chassis wall.
+        r = r.insetBy(dx: -4, dy: -4)
+        r.size.height += 4
+        return r
     }
 
     // MARK: Body outline
@@ -182,9 +204,10 @@ struct PadArt {
         var nextID = 0
 
         mutating func deco(_ kind: PadDecor.Kind, _ rect: CGRect, top: Color = Color(white: 0.2),
-                           bottom: Color = Color(white: 0.09), label: String? = nil, dashed: Bool = false) {
+                           bottom: Color = Color(white: 0.09), label: String? = nil, dashed: Bool = false,
+                           spills: Bool = false) {
             art.decor.append(PadDecor(id: nextID, kind: kind, rect: rect, top: top, bottom: bottom,
-                                      label: label, dashed: dashed))
+                                      label: label, dashed: dashed, spills: spills))
             nextID += 1
         }
 
@@ -199,9 +222,13 @@ struct PadArt {
                                            size: CGSize(width: r * 1.5, height: r * 1.5), fixedRole: role))
         }
 
+        static let cap = Color(red: 0.20, green: 0.205, blue: 0.22)
+        static let letter = Color(red: 0.94, green: 0.95, blue: 0.97)
+
         /// One cross plate, plus four arm hit-targets that only tint it.
         mutating func dpad(_ c: CGPoint, span: CGFloat) {
-            deco(.cross, square(c, span, span), top: Color(white: 0.38), bottom: Color(white: 0.2))
+            deco(.roundRect(3.2), square(c, span * 1.08, span * 1.08), top: Color(white: 0.05), bottom: Color(white: 0.11))
+            deco(.cross, square(c, span, span), top: Color(white: 0.34), bottom: Color(white: 0.16))
             let t = span * 0.34, len = span / 2 - span * 0.1, off = span * 0.1 + len / 2
             func arm(_ b: PadButton, _ d: PadControl.DpadDir, _ dx: CGFloat, _ dy: CGFloat, vertical: Bool) {
                 art.controls.append(PadControl(button: b, kind: .dpadArm(d),
@@ -214,49 +241,58 @@ struct PadArt {
             arm(.dpadRight, .right, off, 0, vertical: false)
         }
 
-        /// Y top, A bottom, X left, B right (the physical positions
-        /// GameController reports; glyphs follow the family's printing).
-        mutating func face(_ style: PadStyle, _ c: CGPoint, offset: CGFloat, r: CGFloat,
-                           fills: [PadButton: Color], glyphColors: [PadButton: Color]) {
+        /// Y top, A bottom, X left, B right. Caps are one neutral dome; the letter
+        /// is the family's printing (swapped on Switch). No coloured jewels.
+        mutating func face(_ style: PadStyle, _ c: CGPoint, offset: CGFloat, r: CGFloat) {
+            let dish = (offset + r + 2.4) * 2
+            let shade: Double = style == .playstation ? 0.14 : 0.22
+            deco(.circle, square(c, dish, dish), top: Color.black.opacity(shade), bottom: Color.black.opacity(shade))
             let spots: [(PadButton, CGFloat, CGFloat)] = [(.buttonY, 0, -offset), (.buttonA, 0, offset),
                                                           (.buttonX, -offset, 0), (.buttonB, offset, 0)]
             for (b, dx, dy) in spots {
                 art.controls.append(PadControl(button: b, kind: .round, center: CGPoint(x: c.x + dx, y: c.y + dy),
-                                               size: CGSize(width: r * 2, height: r * 2), glyph: style.glyph(b),
-                                               fill: fills[b], glyphColor: glyphColors[b] ?? .white))
+                                               size: CGSize(width: r * 2, height: r * 2), glyph: style.faceLetter(b),
+                                               fill: Self.cap, glyphColor: Self.letter))
             }
         }
 
-        /// Triggers sit behind everything with ~40% showing above the bumper;
-        /// bumpers are long bars along the shoulder, just behind the body's top
-        /// edge and in front of the triggers.
-        mutating func shoulders(_ style: PadStyle, bumperX: CGFloat, bumperY: CGFloat, bumperW: CGFloat,
-                                triggerX: CGFloat, triggerY: CGFloat, triggerW: CGFloat, triggerH: CGFloat, tilt: Double) {
+        /// Bumpers overlap the top edge; triggers sit just behind them. `top` is the
+        /// body's top y. The outer end of each capsule lifts, matching the horn.
+        mutating func shoulders(_ style: PadStyle, bump: (CGFloat, CGFloat), trig: (CGFloat, CGFloat), top: CGFloat) {
+            let light = style == .playstation
+            let tilt: Double = style == .steamDeck ? 2 : 6
+            let bumpFill = light ? Color(red: 0.97, green: 0.97, blue: 0.98) : Color(red: 0.46, green: 0.47, blue: 0.51)
+            let trigFill = light ? Color(red: 0.78, green: 0.80, blue: 0.84) : Color(red: 0.24, green: 0.245, blue: 0.27)
+            let ink = light ? Color(red: 0.16, green: 0.17, blue: 0.19) : Color(red: 0.94, green: 0.95, blue: 0.97)
+            let bumperX = (bump.0 + bump.1) / 2
+            let triggerX = (trig.0 + trig.1) / 2
             for sign: CGFloat in [-1, 1] {
                 let left = sign < 0
                 art.controls.append(PadControl(
                     button: left ? .leftTrigger : .rightTrigger, kind: .trigger,
-                    center: CGPoint(x: sign * triggerX, y: triggerY), size: CGSize(width: triggerW, height: triggerH),
-                    glyph: style.glyph(left ? .leftTrigger : .rightTrigger), rotation: Double(sign) * tilt * 1.2))
+                    center: CGPoint(x: sign * triggerX, y: top - 6.2),
+                    size: CGSize(width: trig.1 - trig.0, height: 12),
+                    glyph: style.glyph(left ? .leftTrigger : .rightTrigger),
+                    fill: trigFill, glyphColor: ink, rotation: -Double(sign) * tilt * 1.2))
                 art.controls.append(PadControl(
                     button: left ? .leftShoulder : .rightShoulder, kind: .bumper,
-                    center: CGPoint(x: sign * bumperX, y: bumperY), size: CGSize(width: bumperW, height: 8),
-                    glyph: style.glyph(left ? .leftShoulder : .rightShoulder), rotation: Double(sign) * tilt))
+                    center: CGPoint(x: sign * bumperX, y: top + 0.4),
+                    size: CGSize(width: bump.1 - bump.0, height: 8.2),
+                    glyph: style.glyph(left ? .leftShoulder : .rightShoulder),
+                    fill: bumpFill, glyphColor: ink, rotation: -Double(sign) * tilt))
             }
         }
 
         mutating func small(_ b: PadButton, _ c: CGPoint, r: CGFloat, symbol: String) {
-            art.controls.append(PadControl(button: b, kind: .round, center: c, size: CGSize(width: r * 2, height: r * 2), symbol: symbol))
+            art.controls.append(PadControl(button: b, kind: .round, center: c, size: CGSize(width: r * 2, height: r * 2),
+                                           symbol: symbol, fill: Self.cap, glyphColor: Self.letter))
         }
 
         mutating func pill(_ b: PadButton, _ c: CGPoint, w: CGFloat, h: CGFloat, symbol: String? = nil) {
-            art.controls.append(PadControl(button: b, kind: .pill, center: c, size: CGSize(width: w, height: h), symbol: symbol))
+            art.controls.append(PadControl(button: b, kind: .pill, center: c, size: CGSize(width: w, height: h),
+                                           symbol: symbol, fill: Self.cap, glyphColor: Self.letter))
         }
     }
-
-    private static let xboxFills: [PadButton: Color] = [
-        .buttonA: Color(red: 0.36, green: 0.76, blue: 0.36), .buttonB: Color(red: 0.86, green: 0.27, blue: 0.27),
-        .buttonX: Color(red: 0.27, green: 0.52, blue: 0.92), .buttonY: Color(red: 0.96, green: 0.80, blue: 0.22)]
 
     static func make(_ style: PadStyle) -> PadArt {
         switch style {
@@ -267,131 +303,145 @@ struct PadArt {
         }
     }
 
-    // MARK: Xbox Series (154 × 106 mm)
+    private enum Shell { case light, graphite, deck }
+
+    private static func paint(_ art: inout PadArt, _ shell: Shell) {
+        switch shell {
+        case .light:
+            art.bodyTop = Color(red: 0.93, green: 0.94, blue: 0.96)
+            art.bodyBottom = Color(red: 0.64, green: 0.66, blue: 0.70)
+            art.caseTop = Color(red: 0.97, green: 0.97, blue: 0.98)
+            art.caseBottom = Color(red: 0.78, green: 0.80, blue: 0.84)
+        case .graphite:
+            art.bodyTop = Color(red: 0.38, green: 0.39, blue: 0.42)
+            art.bodyBottom = Color(red: 0.14, green: 0.145, blue: 0.16)
+            art.caseTop = Color(red: 0.46, green: 0.47, blue: 0.51)
+            art.caseBottom = Color(red: 0.24, green: 0.25, blue: 0.28)
+        case .deck:
+            art.bodyTop = Color(red: 0.32, green: 0.33, blue: 0.36)
+            art.bodyBottom = Color(red: 0.11, green: 0.115, blue: 0.13)
+            art.caseTop = Color(red: 0.40, green: 0.41, blue: 0.44)
+            art.caseBottom = Color(red: 0.22, green: 0.225, blue: 0.25)
+        }
+    }
+
+    // MARK: Xbox
 
     private static func xbox() -> PadArt {
         var b = Builder()
-        b.art.body = symmetricBody(start: pt(0, -47), [
-            (pt(46, -50), pt(14, -48), pt(30, -51)),
-            (pt(72, -33), pt(60, -49), pt(69, -42)),
-            (pt(77, -4), pt(75, -27), pt(78, -16)),
-            (pt(64, 44), pt(76, 18), pt(72, 34)),
-            (pt(50, 53), pt(61, 52), pt(56, 56)),
-            (pt(40, 47), pt(45, 52), pt(41, 51)),
-            (pt(28, 34), pt(38, 40), pt(33, 35)),
-            (pt(0, 30), pt(19, 31), pt(9, 30))])
-        b.art.bodyTop = Color(white: 0.30); b.art.bodyBottom = Color(white: 0.11)
-        b.deco(.circle, b.square(pt(0, -30), 14, 14), top: Color(white: 0.4), bottom: Color(white: 0.14))      // guide
-        b.deco(.circle, b.square(pt(0, -30), 9.5, 9.5), top: Color(white: 0.16), bottom: Color(white: 0.3))
-        b.deco(.roundRect(1.5), b.square(pt(0, -3), 6, 3), top: Color(white: 0.2), bottom: Color(white: 0.1))   // share
-        b.shoulders(.xbox, bumperX: 46, bumperY: -54, bumperW: 38, triggerX: 52, triggerY: -56, triggerW: 24, triggerH: 22, tilt: 7)
-        b.stick(.leftThumbstickButton, pt(-40, -12), r: 11, role: "Steer / Thrust")
-        b.stick(.rightThumbstickButton, pt(20, 14), r: 11, role: "Aim")
-        b.dpad(pt(-20, 14), span: 22)
-        b.face(.xbox, pt(40, -12), offset: 8.5, r: 4.8, fills: xboxFills,
-               glyphColors: [.buttonA: .black, .buttonB: .black, .buttonX: .black, .buttonY: .black])
-        b.small(.buttonOptions, pt(-11, -13), r: 3.5, symbol: "rectangle.on.rectangle")
-        b.small(.buttonMenu, pt(11, -13), r: 3.5, symbol: "line.3.horizontal")
+        b.art.body = symmetricBody(start: pt(0, -40), [
+            (pt(62, -40), pt(22, -40.5), pt(46, -42)),
+            (pt(77, -16), pt(70, -38), pt(78, -28)),
+            (pt(70, 30), pt(78, -4), pt(75, 14)),
+            (pt(48, 56), pt(66, 44), pt(58, 56)),
+            (pt(34, 38), pt(42, 54), pt(38, 46)),
+            (pt(14, 24), pt(30, 32), pt(24, 26)),
+            (pt(0, 22), pt(8, 23), pt(3, 22.5))])
+        paint(&b.art, .graphite)
+        // Plain centre disc with a dark hole. Not a logo.
+        b.deco(.circle, b.square(pt(0, -28), 10, 10), top: Color(red: 0.34, green: 0.345, blue: 0.37), bottom: Color(red: 0.16, green: 0.165, blue: 0.18))
+        b.deco(.circle, b.square(pt(0, -28), 4.4, 4.4), top: Color(red: 0.08, green: 0.08, blue: 0.09), bottom: Color(red: 0.04, green: 0.04, blue: 0.05))
+        b.shoulders(.xbox, bump: (28, 64), trig: (34, 60), top: -40)
+        b.stick(.leftThumbstickButton, pt(-41, -14), r: 13, role: "Steer / Thrust")
+        b.stick(.rightThumbstickButton, pt(19, 11), r: 13, role: "Aim")
+        b.dpad(pt(-19, 11), span: 25)
+        b.face(.xbox, pt(41, -14), offset: 10.5, r: 6)
+        b.small(.buttonOptions, pt(-12.5, -14), r: 3.6, symbol: "rectangle.on.rectangle")
+        b.small(.buttonMenu, pt(12.5, -14), r: 3.6, symbol: "line.3.horizontal")
         return b.art
     }
 
-    // MARK: DualSense (160 × 106 mm)
+    // MARK: PlayStation
 
     private static func playstation() -> PadArt {
         var b = Builder()
-        b.art.body = symmetricBody(start: pt(0, -46), [
-            (pt(46, -49), pt(14, -47), pt(30, -50)),
-            (pt(72, -36), pt(60, -48), pt(69, -42)),
-            (pt(80, -6), pt(77, -28), pt(81, -16)),
-            (pt(66, 46), pt(80, 18), pt(76, 38)),
-            (pt(50, 53), pt(62, 52), pt(56, 56)),
-            (pt(40, 47), pt(45, 52), pt(41, 51)),
-            (pt(30, 35), pt(38, 40), pt(34, 36)),
-            (pt(0, 32), pt(20, 33), pt(10, 32))])
-        b.art.bodyTop = Color(white: 0.96); b.art.bodyBottom = Color(white: 0.68)
-        let dark = (Color(white: 0.20), Color(white: 0.07))
-        b.deco(.roundRect(24), CGRect(x: -34, y: -52, width: 68, height: 82), top: dark.0, bottom: dark.1)
-        // Lightbar hugging the touchpad's edges, then the touchpad itself.
-        b.deco(.roundRect(5), CGRect(x: -26.5, y: -46, width: 53, height: 33), top: Color(red: 0.25, green: 0.5, blue: 1), bottom: Color(red: 0.15, green: 0.3, blue: 0.8))
-        b.deco(.roundRect(4), CGRect(x: -24, y: -44, width: 48, height: 30), top: Color(white: 0.36), bottom: Color(white: 0.2))
-        b.deco(.circle, b.square(pt(0, 6), 8, 8), top: Color(white: 0.5), bottom: Color(white: 0.2))             // PS button
-        b.deco(.roundRect(1), b.square(pt(0, 14), 5, 2), top: Color(white: 0.4), bottom: Color(white: 0.25))      // mute
-        b.shoulders(.playstation, bumperX: 47, bumperY: -53, bumperW: 38, triggerX: 53, triggerY: -55, triggerW: 24, triggerH: 22, tilt: 7)
-        b.stick(.leftThumbstickButton, pt(-22, 16), r: 10.5, role: "Steer / Thrust")
-        b.stick(.rightThumbstickButton, pt(22, 16), r: 10.5, role: "Aim")
-        b.dpad(pt(-46, -14), span: 22)
-        let tints: [PadButton: Color] = [.buttonA: Color(red: 0.45, green: 0.62, blue: 1), .buttonB: Color(red: 1, green: 0.42, blue: 0.42),
-                                         .buttonX: Color(red: 0.96, green: 0.52, blue: 0.82), .buttonY: Color(red: 0.36, green: 0.86, blue: 0.62)]
-        b.face(.playstation, pt(46, -14), offset: 9, r: 5, fills: tints.mapValues { _ in Color(white: 0.16) }, glyphColors: tints)
-        b.pill(.buttonOptions, pt(-30, -36), w: 2.6, h: 7, symbol: nil)
-        b.pill(.buttonMenu, pt(30, -36), w: 2.6, h: 7, symbol: nil)
+        b.art.body = symmetricBody(start: pt(0, -38), [
+            (pt(66, -38), pt(24, -38.5), pt(50, -40)),
+            (pt(80, -14), pt(74, -36), pt(82, -26)),
+            (pt(72, 34), pt(82, -2), pt(78, 16)),
+            (pt(46, 58), pt(66, 48), pt(56, 60)),
+            (pt(32, 42), pt(40, 56), pt(36, 48)),
+            (pt(10, 35), pt(28, 38), pt(20, 36)),
+            (pt(0, 34), pt(5, 34.5), pt(2, 34))])
+        paint(&b.art, .light)
+        b.shoulders(.playstation, bump: (26, 62), trig: (30, 58), top: -38)
+        b.stick(.leftThumbstickButton, pt(-21, 17), r: 12, role: "Steer / Thrust")
+        b.stick(.rightThumbstickButton, pt(21, 17), r: 12, role: "Aim")
+        b.dpad(pt(-41, -8), span: 25)
+        b.face(.playstation, pt(41, -8), offset: 10, r: 5.8)
+        // After the face dish, so the pad stays on top of that circle.
+        b.deco(.roundRect(5.5), CGRect(x: -24, y: -28, width: 48, height: 28),
+               top: Color(red: 0.16, green: 0.17, blue: 0.19), bottom: Color(red: 0.08, green: 0.085, blue: 0.10))
+        b.deco(.circle, b.square(pt(0, 10), 8.4, 8.4), top: Color(red: 0.28, green: 0.29, blue: 0.31), bottom: Color(red: 0.14, green: 0.145, blue: 0.16))
+        b.small(.buttonOptions, pt(-31, -29), r: 3.6, symbol: "rectangle.on.rectangle")
+        b.small(.buttonMenu, pt(31, -29), r: 3.6, symbol: "line.3.horizontal")
         return b.art
     }
 
-    // MARK: Switch Pro (152 × 106 mm)
+    // MARK: Switch Pro
 
     private static func switchPro() -> PadArt {
         var b = Builder()
-        b.art.body = symmetricBody(start: pt(0, -46), [
-            (pt(44, -49), pt(14, -47), pt(29, -50)),
-            (pt(68, -36), pt(57, -48), pt(65, -42)),
-            (pt(76, -6), pt(73, -27), pt(77, -16)),
-            (pt(62, 46), pt(76, 20), pt(72, 38)),
-            (pt(47, 54), pt(58, 54), pt(53, 57)),
-            (pt(38, 47), pt(42, 53), pt(38, 51)),
-            (pt(28, 34), pt(36, 40), pt(31, 35)),
-            (pt(0, 30), pt(18, 31), pt(8, 30))])
-        b.art.bodyTop = Color(white: 0.32); b.art.bodyBottom = Color(white: 0.12)
-        b.deco(.roundRect(1), b.square(pt(-10, -16), 4.5, 4.5), top: Color(white: 0.24), bottom: Color(white: 0.12))   // capture
-        b.deco(.circle, b.square(pt(10, -16), 7, 7), top: Color(white: 0.3), bottom: Color(white: 0.12))                // home
-        b.shoulders(.switchPro, bumperX: 44, bumperY: -53, bumperW: 38, triggerX: 50, triggerY: -55, triggerW: 24, triggerH: 22, tilt: 7)
-        b.stick(.leftThumbstickButton, pt(-42, -14), r: 11, role: "Steer / Thrust")
-        b.stick(.rightThumbstickButton, pt(20, 12), r: 11, role: "Aim")
-        b.dpad(pt(-20, 12), span: 20)
-        // Dark caps with light letters, no coloured rings.
-        let keys: [PadButton] = [.buttonA, .buttonB, .buttonX, .buttonY]
-        b.face(.switchPro, pt(42, -14), offset: 8.5, r: 4.8, fills: Dictionary(uniqueKeysWithValues: keys.map { ($0, Color(white: 0.17)) }),
-               glyphColors: Dictionary(uniqueKeysWithValues: keys.map { ($0, Color(white: 0.92)) }))
-        b.pill(.buttonOptions, pt(-14, -28), w: 6, h: 2.4, symbol: "minus")
-        b.pill(.buttonMenu, pt(14, -28), w: 6, h: 2.4, symbol: "plus")
+        b.art.body = symmetricBody(start: pt(0, -39), [
+            (pt(58, -39), pt(20, -39.5), pt(42, -41)),
+            (pt(74, -16), pt(66, -37), pt(74, -28)),
+            (pt(66, 32), pt(75, -4), pt(72, 14)),
+            (pt(44, 54), pt(60, 46), pt(52, 56)),
+            (pt(30, 36), pt(38, 52), pt(34, 44)),
+            (pt(12, 24), pt(26, 30), pt(20, 26)),
+            (pt(0, 23), pt(6, 23.5), pt(2, 23))])
+        paint(&b.art, .graphite)
+        b.deco(.roundRect(1.6), b.square(pt(-13, -12), 7.5, 7.5),
+               top: Color(red: 0.28, green: 0.285, blue: 0.31), bottom: Color(red: 0.14, green: 0.145, blue: 0.16))
+        b.deco(.circle, b.square(pt(13, -12), 8.4, 8.4), top: Color(red: 0.34, green: 0.345, blue: 0.37), bottom: Color(red: 0.16, green: 0.165, blue: 0.18))
+        b.shoulders(.switchPro, bump: (28, 62), trig: (32, 58), top: -39)
+        b.stick(.leftThumbstickButton, pt(-41, -15), r: 13, role: "Steer / Thrust")
+        b.stick(.rightThumbstickButton, pt(21, 12), r: 13, role: "Aim")
+        b.dpad(pt(-21, 12), span: 24)
+        b.face(.switchPro, pt(41, -15), offset: 10.5, r: 6)
+        b.pill(.buttonOptions, pt(-13, -25), w: 8, h: 3.6, symbol: "minus")
+        b.pill(.buttonMenu, pt(13, -25), w: 8, h: 3.6, symbol: "plus")
         return b.art
     }
 
-    // MARK: Steam Deck (298 × 117 mm)
+    // MARK: Steam Deck
 
     private static func deck() -> PadArt {
         var b = Builder()
-        b.art.body = symmetricBody(start: pt(0, -58), [
-            (pt(110, -58), pt(40, -58.5), pt(80, -58.5)),
-            (pt(149, -20), pt(135, -58), pt(149, -42)),
-            (pt(140, 40), pt(150, 0), pt(148, 25)),
-            (pt(118, 58), pt(136, 52), pt(128, 58)),
-            (pt(98, 50), pt(110, 58), pt(103, 55)),
-            (pt(0, 46), pt(80, 46), pt(40, 46))])
-        b.art.bodyTop = Color(white: 0.28); b.art.bodyBottom = Color(white: 0.09)
-        b.deco(.roundRect(5), CGRect(x: -82, y: -47, width: 164, height: 94), top: Color(white: 0.02), bottom: Color(white: 0.08))   // bezel
-        b.deco(.roundRect(3), CGRect(x: -78, y: -44, width: 156, height: 88), top: Color(red: 0.10, green: 0.17, blue: 0.28), bottom: Color(red: 0.03, green: 0.05, blue: 0.10))
-        // Back tabs (L4/L5, R4/R5) under each grip, greyed.
+        b.art.body = symmetricBody(start: pt(0, -56), [
+            (pt(116, -54), pt(36, -56.5), pt(88, -57)),
+            (pt(148, -26), pt(128, -50), pt(144, -40)),
+            (pt(144, 26), pt(150, -12), pt(148, 8)),
+            (pt(118, 56), pt(140, 40), pt(132, 52)),
+            (pt(94, 47), pt(110, 55), pt(102, 50)),
+            (pt(14, 51), pt(64, 47), pt(32, 50)),
+            (pt(0, 52), pt(6, 51.5), pt(2, 52))])
+        paint(&b.art, .deck)
+        b.deco(.roundRect(7), CGRect(x: -79, y: -54, width: 158, height: 100),
+               top: Color(red: 0.02, green: 0.022, blue: 0.028), bottom: Color(red: 0.02, green: 0.022, blue: 0.028))
+        b.deco(.roundRect(4.5), CGRect(x: -75, y: -50, width: 150, height: 92),
+               top: Color(red: 0.08, green: 0.11, blue: 0.16), bottom: Color(red: 0.015, green: 0.02, blue: 0.035))
+        let grip = Color(red: 0.16, green: 0.165, blue: 0.18)
+        let gripLo = Color(red: 0.10, green: 0.105, blue: 0.12)
         for sign: CGFloat in [-1, 1] {
-            for dx: CGFloat in [-8, 8] {
-                b.deco(.roundRect(1.5), b.square(pt(sign * 124 + dx, 60.5), 10, 4), top: Color(white: 0.22), bottom: Color(white: 0.12), dashed: true)
-            }
-            b.deco(.roundRect(4), b.square(pt(sign * 104, 28), 34, 34), top: Color(white: 0.17), bottom: Color(white: 0.08), label: "pad", dashed: true)   // trackpad
-            b.deco(.roundRect(1.5), b.square(pt(sign * 132, 34), 7, 3), top: Color(white: 0.3), bottom: Color(white: 0.15))   // steam / QAM
+            let pad = pt(sign * 88, 36)
+            b.deco(.circle, b.square(pad, 32.4, 32.4), top: Color.black.opacity(0.35), bottom: Color.black.opacity(0.35))
+            b.deco(.circle, b.square(pad, 30, 30), top: Color(red: 0.07, green: 0.075, blue: 0.09), bottom: Color(red: 0.05, green: 0.052, blue: 0.06))
+            b.deco(.roundRect(2), b.square(pt(sign * 151.5, -10), 5, 16), top: grip, bottom: gripLo, dashed: true, spills: true)
+            b.deco(.roundRect(2), b.square(pt(sign * 151.5, 14), 5, 16), top: grip, bottom: gripLo, dashed: true, spills: true)
         }
-        b.shoulders(.steamDeck, bumperX: 112, bumperY: -62, bumperW: 52, triggerX: 114, triggerY: -66, triggerW: 44, triggerH: 20, tilt: 0)
-        b.stick(.leftThumbstickButton, pt(-104, -30), r: 11, role: "Steer / Thrust")
-        b.stick(.rightThumbstickButton, pt(104, -30), r: 11, role: "Aim")
-        b.dpad(pt(-128, -2), span: 22)
-        let keys: [PadButton] = [.buttonA, .buttonB, .buttonX, .buttonY]
-        b.face(.steamDeck, pt(128, -2), offset: 8, r: 4.5, fills: Dictionary(uniqueKeysWithValues: keys.map { ($0, Color(white: 0.15)) }), glyphColors: xboxFills)
-        b.small(.buttonOptions, pt(-132, -36), r: 3, symbol: "rectangle.on.rectangle")
-        b.small(.buttonMenu, pt(132, -36), r: 3, symbol: "line.3.horizontal")
+        b.shoulders(.steamDeck, bump: (92, 134), trig: (98, 128), top: -56)
+        b.stick(.leftThumbstickButton, pt(-112, -26), r: 12, role: "Steer / Thrust")
+        b.stick(.rightThumbstickButton, pt(112, 6), r: 12, role: "Aim")
+        b.dpad(pt(-112, 8), span: 22)
+        b.face(.steamDeck, pt(112, -26), offset: 9.5, r: 5.5)
+        b.small(.buttonOptions, pt(-89, -14), r: 3.6, symbol: "rectangle.on.rectangle")
+        b.small(.buttonMenu, pt(89, -14), r: 3.6, symbol: "line.3.horizontal")
         b.art.notes = [
-            PadFixedNote(id: "l45", text: "L4 / L5 — set in Steam Input", anchor: pt(-124, 62.5)),
-            PadFixedNote(id: "r45", text: "R4 / R5 — set in Steam Input", anchor: pt(124, 62.5)),
-            PadFixedNote(id: "tpl", text: "Trackpad — Steam Input", anchor: pt(-121, 28)),
-            PadFixedNote(id: "tpr", text: "Trackpad — Steam Input", anchor: pt(121, 28))]
+            PadFixedNote(id: "l45", text: "L4 / L5 — set in Steam Input", anchor: pt(-151.5, 2)),
+            PadFixedNote(id: "r45", text: "R4 / R5 — set in Steam Input", anchor: pt(151.5, 2)),
+            PadFixedNote(id: "tpl", text: "Trackpad — Steam Input", anchor: pt(-103, 36)),
+            PadFixedNote(id: "tpr", text: "Trackpad — Steam Input", anchor: pt(103, 36))]
         return b.art
     }
 }

@@ -3654,8 +3654,10 @@ resources have no effect. Every string fix below reads the resource, never a cop
   pressing arms a 150-tick countdown ("Self-destruct sequence initiated.", #385 #386, 0x28),
   letting go aborts (#385 #387), each 30-tick boundary at ≤ 120 posts "Self-destruct in N
   seconds." (#385 #395 N #389, 0x46), and at ≤ 1 tick the ship blows (shields 0, armor −1, target
-  cleared, "Have a nice day." #390). Not modelled: the cue sounds, hulls docked to the player
-  dying with it, and a touch control for the hold.
+  cleared, "Have a nice day." #390). The countdown beeps (snd 153 on arming, 152 on each
+  second, 151 on abort and blast) go out as `.interfaceBeep`, and both frontends play that
+  through `SoundCues`. Hulls docked to the player (control mode 0x0F, within 16 px) detonate
+  with it. A touch control for the hold was not checked.
 - **Done.** `KeyBindings.defaults` is the original table (Z afterburner, Control secondary, S clear
   secondary, backquote cycle / Shift back / Alt escorts, R / Alt-R, N / Alt-N, 1–4, Alt-Y, H, Return
   dismiss, P Player Info, I mission info); `modernDefaults` is the old table, used by Reset under
