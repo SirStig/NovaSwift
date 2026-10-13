@@ -44,7 +44,7 @@ extension GameAction.Category {
 extension GameAction {
     var tint: Color { category.tint }
 
-    /// A cap-sized name: the full `title` doesn't fit on a 1u key.
+    /// A cap-sized name: at most two lines of seven characters, so it fits a 1u key.
     var shortName: String {
         switch self {
         case .accelerate: return "Thrust"
@@ -60,27 +60,27 @@ extension GameAction {
         case .toggleCloak: return "Cloak"
         case .recallFighters: return "Recall"
         case .eject: return "Eject"
-        case .selfDestruct: return "Destruct"
+        case .selfDestruct: return "Self Dst"
         case .commandEscortAggressive: return "Attack"
         case .commandEscortDefensive: return "Defend"
         case .commandEscortEvasive: return "Evade"
         case .commandEscortHold: return "Hold"
         case .commandEscortFormation: return "Form Up"
         case .commandEscortReturnHangar: return "Hangar"
-        case .openEscorts: return "Escorts"
-        case .targetNearest: return "Nearest"
+        case .openEscorts: return "Escrt"
+        case .targetNearest: return "Near"
         case .targetNext: return "Next Tgt"
         case .targetPrevious: return "Prev Tgt"
-        case .targetEscortNext: return "Escort Tgt"
-        case .nearestHostile: return "Hostile"
+        case .targetEscortNext: return "Esc Tgt"
+        case .nearestHostile: return "Hostl"
         case .clearTarget: return "Clr Tgt"
         case .clearShipTarget: return "Clr Ship"
         case .land: return "Land"
         case .hyperjump: return "Jump"
         case .hyperspaceArm: return "Hyp Dest"
-        case .cycleHyperspaceLink: return "Cycle Dest"
+        case .cycleHyperspaceLink: return "Cyc Dest"
         case .galaxyMap: return "Map"
-        case .autopilot: return "Autopilot"
+        case .autopilot: return "Auto"
         case .hailTarget: return "Hail"
         case .hailStellar: return "Hail Planet"
         case .board: return "Board"
@@ -95,7 +95,7 @@ extension GameAction {
         case .shipInfo: return "Ship Info"
         case .dismissMessage: return "Dismiss"
         case .playerInfo: return "Player"
-        case .missionInfo: return "Missions"
+        case .missionInfo: return "Mission"
         case .cycleCameraView: return "Camera"
         case .cameraZoomIn: return "Zoom +"
         case .cameraZoomOut: return "Zoom −"

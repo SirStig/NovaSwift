@@ -232,14 +232,27 @@ func _draw_radar() -> void:
 	var blink := int(Time.get_ticks_msec() / 250) % 2 == 0
 
 	# Stellars: hollow rings (the original draws worlds as circles).
+	# With an IFF fitted each ring takes RadarIFF.stellarColor's landing-standing colour (grey can't land /
+	# yellow welcome / orange or red refused / green dominated / dark cyan wormhole; 0x00466030);
+	# without one every ring is DimRadar. The selected stellar blinks a white ring (Apple).
 	var bodies: PackedFloat32Array = nova.body_transforms()
+	var stellar_cols: PackedFloat32Array = nova.radar_stellar_colors() if _has_iff else PackedFloat32Array()
+	var sel_id: int = nova.selected_stellar_id()
+	var body_ids: PackedInt32Array = nova.body_ids() if nova.has_method("body_ids") else PackedInt32Array()
 	var i := 0
+	var bi := 0
 	while i + 3 < bodies.size():
 		var off := Vector2(bodies[i] - pw.x, -(bodies[i + 1] - pw.y)) * k
 		if off.length() <= radius:
 			var d := clampf(bodies[i + 2] * k * 2.0, 5.0 * _scale, 14.0 * _scale)
-			draw_arc(c + off, d / 2.0, 0.0, TAU, 20, dim, maxf(1.0, _scale), true)
+			var ring := dim
+			if bi * 3 + 2 < stellar_cols.size():
+				ring = Color(stellar_cols[bi * 3], stellar_cols[bi * 3 + 1], stellar_cols[bi * 3 + 2])
+			draw_arc(c + off, d / 2.0, 0.0, TAU, 20, ring, maxf(1.0, _scale), true)
+			if sel_id >= 0 and bi < body_ids.size() and body_ids[bi] == sel_id and blink:
+				draw_arc(c + off, d / 2.0 + 2.5 * _scale, 0.0, TAU, 20, Color.WHITE, maxf(1.4, _scale), true)
 		i += 4
+		bi += 1
 
 	# Ships: small dots. Without an IFF every contact is DimRadar and only the target blinks
 	# BrightRadar (OS-05); with one, Ship_GetShipRadarColor's classes (grey hulk / red threat /

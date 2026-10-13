@@ -92,6 +92,31 @@ conversion, applied in a deterministic order; later layers override by
 `(type, id)`. Total conversions are treated as mutually exclusive "scenarios"
 (you play *one* TC at a time); small gameplay plug-ins can stack.
 
+**Add-ons for a total conversion (per-TC plug-in list, 2026-10-13).** The original rule: Nova runs
+from a data root `9:`; `nv_WinMain` 0x004d2a80 opens `Nova.rez`, then
+`Resource_ValidateInstallFolders` 0x004bd160 loads `9:Nova Files` (`nv_LoadFilesInFolder` 0x0046f500,
+top-level `.rez` only, directories skipped via `FileEnumerator_NextMatchingExt` 0x004f1d70) and, when
+the registration gate is open, `Nova Plug-Ins` (`FUN_0087265d` 0x0087265d, falling back to `Plug-Ins`).
+A total conversion is run by pointing the data root at *its* folder, so its own `Nova Files` +
+`Plug-Ins` replace the stock ones, only `Nova.rez` is shared, and the user's global plug-ins are
+never seen. Playing EVO Facelift on EV Override therefore meant copying its files into
+`EV Override for Nova/Plug-Ins/`. We keep that rule (global plug-ins are not loaded under a TC) and add
+the same thing without copying: `TCAddOns` (`Sources/NovaSwiftKit/TCAddOns.swift`) keeps, per TC id, an
+ordered list of installed plug-ins (`[tcID: [{id,isEnabled}]]`). Load order: `Nova.rez` -> the TC's
+`Nova Files` -> the TC's own `Plug-Ins` files (flat, by file name, as the original) -> the listed
+add-ons in list order (each add-on's files by name); later wins. `PluginBundle.addOnIDs` carries the
+enabled list into `GameLibrary.resolveLayers`, so merge, fingerprint, graphics catalog and the editor
+all see it. A user who never touches the list gets exactly the original behaviour. Persistence:
+Apple `UserDefaults` key `com.novaswift.plugins.tcaddons.v1`; Godot `plugins-state.json` key `tcAddOns`
+(same JSON). UI: Plug-ins > Installed shows "Add-ons for <TC>" while a TC is on (add / remove /
+enable / reorder, rows under it say "Not loaded under <TC>"). Suggestions (never automatic):
+`TCAddOns.compatibility` (name / folder / read-me mentions the TC's aliases: EVO for EV Override,
+or another installed TC's name -> "made for X") and `TCAddOns.overlap` (records of the plug-in that
+replace TC records by the same name = made for it; by a different name = made for the base game).
+A "Base game?" plug-in asks for a second confirmation but can still be added. Media follows the
+same folders: `TCAddOns.mediaDirectories` (the TC's add-ons, Plug-Ins, Nova Files, then base) feeds
+music, `dësc` movies and the TC's font files (`Sillycon.ttf`).
+
 **⚠ Redistribution caveat (why we don't prebundle today):** community plug-ins
 are free to *download and play*, but *bundling* their data in a shipped app
 needs each author's permission — which is exactly why the catalog above ships

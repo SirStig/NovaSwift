@@ -22,6 +22,7 @@ const ClassicMainMenu = preload("res://ui/classic/ClassicMainMenu.gd")
 const ClassicDialog = preload("res://ui/classic/ClassicDialog.gd")
 const ClassicButton = preload("res://ui/classic/ClassicButton.gd")
 const PilotFiles = preload("res://screens/PilotFiles.gd")
+const DescMovie = preload("res://ui/DescMovie.gd")
 
 signal new_pilot
 signal open_pilot
@@ -174,6 +175,49 @@ func _show_about() -> void:
 	var d = ClassicDialog.desc_dialog(nova, nova.about_nova_text(str(ProjectSettings.get_setting("application/config/version", "1.0.0"))))
 	d.activated.connect(func(_i): _close_about())   # OK press and Esc / B: one close path
 	_about = ClassicDialog.modal(_root, d, 0.6)
+
+
+# X: the Acknowledgements text, dësc 32766 (NovaCommand_DispatchToMode 0x004872a0). A conversion's dësc
+# carries its movie here (EV Classic / EV Override: "EV Haikus.gif"), played with the text.
+func _unhandled_key_input(event: InputEvent) -> void:
+	if classic_menu == null or classic_menu.blocked or _about != null or not (event is InputEventKey):
+		return
+	var k: InputEventKey = event
+	if not k.pressed or k.echo or k.keycode != KEY_X or k.ctrl_pressed or k.alt_pressed or k.meta_pressed:
+		return
+	get_viewport().set_input_as_handled()
+	_show_acknowledgements()
+
+
+func _show_acknowledgements() -> void:
+	var nova: Object = classic_menu.nova if classic_menu != null else _nova
+	if nova == null or nova.classic_desc_text(32766) == "":
+		return
+	classic_menu.blocked = true
+	var clip: Dictionary = DescMovie.lookup(32766)
+	if not clip.is_empty() and not bool(clip.get("after", false)):
+		DescMovie.play(self, clip, _open_acknowledgements)
+	else:
+		_open_acknowledgements()
+
+
+func _open_acknowledgements() -> void:
+	var nova: Object = classic_menu.nova if classic_menu != null else _nova
+	var d = ClassicDialog.desc_dialog(nova, nova.classic_desc_text(32766))
+	d.activated.connect(func(_i): _close_acknowledgements())
+	_about = ClassicDialog.modal(_root, d, 0.6)
+
+
+func _close_acknowledgements() -> void:
+	if _about == null:
+		return
+	var clip: Dictionary = DescMovie.lookup(32766)
+	_close_about()
+	if not clip.is_empty() and bool(clip.get("after", false)):
+		classic_menu.blocked = true
+		DescMovie.play(self, clip, func():
+			classic_menu.blocked = false
+			classic_menu.focus_default.call_deferred())
 
 
 func _close_about() -> void:

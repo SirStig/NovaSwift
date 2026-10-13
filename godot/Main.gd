@@ -328,6 +328,7 @@ func _process(delta: float) -> void:
 	if nova.hyperjump_active():
 		_flight.prewarm_step(3.0)   # the destination's art, uploaded a few ms a frame during the jump
 	_process_hotkeys()
+	_clear_cannot_jump_overlays()
 	_drain_events_to_log(delta)
 	_update_top_label()
 	queue_redraw()
@@ -465,6 +466,25 @@ func _suppress_held() -> void:
 
 func _log_weapon_switch(new_name: String) -> void:
 	pass   # Apple posts nothing on a weapon switch; the readout shows it
+
+
+# FL-23 (0x0044aa70): while a jump engages, a status line still showing one of the cannot-jump overlays
+# (STR# 2002 #42 too close to the centre, #36 tractor beam, #30 well beyond range, #31 nothing out here)
+# is cleared. Returns whether it cleared one.
+var _cannot_jump_texts: Array = []
+
+func _clear_cannot_jump_overlays() -> bool:
+	if _log.is_empty() or not nova.hyperjump_active():
+		return false
+	if _cannot_jump_texts.is_empty():
+		var strs: PackedStringArray = nova.classic_strings(2002)
+		for n in [42, 36, 30, 31]:
+			if n - 1 < strs.size() and strs[n - 1] != "":
+				_cannot_jump_texts.append(strs[n - 1].replace("\r", " ").replace("\n", " "))
+	if _cannot_jump_texts.has(str(_log[0]["text"])):
+		_log.clear()
+		return true
+	return false
 
 
 func _push_log(text: String) -> void:
@@ -714,6 +734,22 @@ func message_rect(vp: Vector2) -> Rect2:
 	return AuthenticHUD.message_rect(vp, h.bar_width(vp), h.ui_scale(vp))
 
 
+## The Classic message font size in px (12 pt x ui_scale) and the pen origin (baseline-left) the line is
+## drawn at: the rect's left edge, its top + the font ascent (DrawPascalStringInFilledRect).
+func message_font_px(vp: Vector2) -> int:
+	if not _classic_hud_on or _classic_hud == null:
+		return MESSAGE_FONT_SIZE
+	return maxi(6, int(round(float(AuthenticHUD.MESSAGE_FONT_DESIGN) * _classic_hud.get_child(0).ui_scale(vp))))
+
+
+func message_text_origin(vp: Vector2) -> Vector2:
+	if not _classic_hud_on or _classic_hud == null:
+		return Vector2(MESSAGE_PAD_LEFT, vp.y - MESSAGE_PAD_BOTTOM)
+	var r: Rect2 = message_rect(vp)
+	var f: Font = _classic_hud.get_child(0).text_font()
+	return Vector2(r.position.x, r.position.y + f.get_ascent(message_font_px(vp)))
+
+
 ## The one-line status message (MessageLogView): bottom-left, 16 px in, 8 px up, clipped
 ## (no ellipsis) at the sidebar + 50 px; fades over its last 0.6 s.
 func _draw_message_log(vp: Vector2) -> void:
@@ -729,12 +765,11 @@ func _draw_message_log(vp: Vector2) -> void:
 		var h = _classic_hud.get_child(0)
 		var r: Rect2 = message_rect(vp)
 		var cfont: Font = h.text_font()
-		var cfs: int = maxi(6, int(round(float(AuthenticHUD.MESSAGE_FONT_DESIGN) * h.ui_scale(vp))))
+		var cfs: int = message_font_px(vp)
 		var ctext := str(entry["text"])
 		while ctext.length() > 0 and cfont.get_string_size(ctext, HORIZONTAL_ALIGNMENT_LEFT, -1, cfs).x > r.size.x:
 			ctext = ctext.substr(0, ctext.length() - 1)   # clipped to the rect, no ellipsis
-		draw_string(cfont, Vector2(r.position.x, r.position.y + cfont.get_ascent(cfs)), ctext,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, cfs, Color.WHITE)
+		draw_string(cfont, message_text_origin(vp), ctext, HORIZONTAL_ALIGNMENT_LEFT, -1, cfs, Color.WHITE)
 		return
 	col.a = clampf((float(entry.get("life", LOG_LIFETIME)) - t) / LOG_FADE, 0.0, 1.0)
 	var font: Font = ht["font"]

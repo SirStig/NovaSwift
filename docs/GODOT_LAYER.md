@@ -1062,7 +1062,7 @@ marshals (`makeConfiguredWorld`, `syncLiveStanding`, `gapsNote` in `NovaWorld.sw
 
 Pilot save keys are the Apple ones (`systemReputation`, `combatRating`, `persGrudges`, `defeatedPers`, `stellarGarrisons`,
 `reinforcementRetriggerDays`, `stellarStrengthLeft`, `escortCategoryOrders`, `strictPlay`), so pilots stay interchangeable.
-Not yet ported (package B/other): HailQuote broadcasts, the arrival/launch status lines. Note: the per-day seed makes the
+(HailQuote broadcasts and the arrival/launch lines: package B below.) Note: the per-day seed makes the
 ambient cast differ per visit (as on Apple); `interactions_selfcheck.gd` now retries its ship/stellar hail instead of
 assuming the first NPC / nav stellar answers.
 
@@ -1070,3 +1070,37 @@ Test: `godot/tests/live_wiring_selfcheck.gd` (kill -> rating, crime -> legal rec
 full hold, përs defeat/grudge across save+reload, `AppearOn` gate, boarded credit loss, garrison/reinforcement/armor across
 a jump and a reload, Strict Play, per-day seed, nonlethal + lethal bombs). The `debug_*` bridge methods it uses are test
 seams only.
+
+## Status line, messages and HUD icons (package B of `GODOT_FIDELITY_GAPS.md`, 2026-10-13)
+
+All wording and rules were already shared Swift (`OriginalText`, `PersQuoteBroadcaster`, `RedAlertCue`, `RadarIFF`); the Apple
+container posted them and the bridge never did. Nothing moved out of `app/`: the bridge now makes the same calls
+(`godot/bridge/Sources/NovaSwiftGodot/StatusLine.swift` + the `// MARK: UI polish` glue in `NovaWorld.swift`).
+
+| Item | Original (text / rule) | Godot |
+|---|---|---|
+| B1 arrival line | sÿst buoy = STR# 1000 (0x1e0 raw calls), else STR# 2002 #43-45 + system + #48 + date + ".", gate #46, wormhole #47, #49 no stellars, #164/#165 abandoned fighters (`OriginalText.arrival`, `NovaGame.systemMessageText`) | `postArrivalLine` at the end of `completeHyperjump` and `transportThroughGate`; the invented "Arrived in X" in `NavScreens.gd` is gone |
+| B2 launch line | STR# 2002 #55-59 + stellar + #60 + date (`OriginalText.launch`); a staged mission `Q` replaces it (snd 154, 0x1f4 raw calls) | `launch()` |
+| B3 HailQuote | pêrs HailQuote = STR# 7101 (or the `STR ` 5000+n override), 1/140 per raw call after 45 s, flags 0x0004/8/10/20/80/400/800, 0x1a4 raw calls (`PersQuoteBroadcaster`, 0x00433050) | `tickHailQuotes(dt:)` each `step`; waits while the frontend line is busy (`set_status_line_busy`) |
+| B4 dismiss / clock | Return = slot 6; timers on raw sim calls | `dismiss_message` (done in the controls pass); the log now ages on SIM time (0 while docked / map / dialog / pause, scaled by `speed_multiplier()`) and each line carries its own length (`status_line_raw_calls(text)` + `hud_message_seconds`): buoy 0x1e0, `Q` 0x1f4, HailQuote 0x1a4, landing 0xfa, too far/fast 0x168, default 0xf0 |
+| B5 `\` cycle | UI-15 | already in `Controls.gd`/`NavScreens.gd` (`cycle_hyperspace_link[_prev]`), asserted by `controls_selfcheck.gd` |
+| B6 icons | cicn 18000+frame blink (top-right, only below volume 2/7, `RedAlertCue.blinkFrame`) and cicn 20000 "x2" (top-left, speed exactly 2x) | `Main._draw_alert_icons`; bridge `red_alert_blink_frame`, `set_alert_low_volume`, `x2_active`. The blink anchors at the right edge of the PLAYFIELD (window minus the sidebar) so the sidebar never hides it |
+| B7 radar stellars | `RadarIFF.stellarColor` (0x00466030) when an IFF is fitted, else DimRadar; selected stellar blinks white | `AuthenticHUD._draw_radar` + bridge `radar_stellar_colors`, `body_ids` |
+| B8 cannot-jump overlays | FL-23 0x0044aa70: #42, #36, #30, #31 are cleared when a jump engages | `Main._clear_cannot_jump_overlays` |
+
+### Message position (the "scanned text is in the wrong place" report)
+
+The one status line is the rect built by `FUN_0087550b` (0x0087550b) and filled by `NovaHud_ShowOverlayMessage` (0x0047e2d0, 12 pt,
+colour DAT_00733b44 = white): left = window left + 25, right = window right - sidebar - 50, bottom = window bottom - 5, top = bottom - 4 - 26
+(all x ui_scale). `DrawContext_DrawPascalStringInFilledRect` (0x004bcd30) puts the pen at (rect.left, rect.top + font ascent), so the text
+HANGS FROM THE TOP of a 30 px rect, ~25 px above the window bottom, not 8 px above it. No drop shadow, no fade (the rect is refilled). Godot's
+Classic HUD now does exactly that (`AuthenticHUD.message_rect`, `Main.message_rect/message_text_origin/message_font_px`); the Nova Swift
+presentation keeps Apple's MessageLogView look (bottom-left, 16 px in, 8 px up, shadow). Scan lines ("... is scanning you", fines, contraband)
+use the same line, so they moved with it.
+
+FLAG for the Apple app (not changed here): `MessageLogView` in `GameContainerView.swift` still uses 16 px / 8 px padding and a 14 pt shadowed face for the
+Classic presentation too; the decomp rect above would move it ~17 px up and 9 px right. The status-line colour/size there should follow the same rect.
+
+Test: `godot/tests/status_line_selfcheck.gd` (rect geometry at three window sizes, arrival/launch/HailQuote text rebuilt from STR# 2002/1000/7101,
+lengths, Return/pause clock, icons, IFF colours, FL-23 clear). Its `debug_arm_hail_quote`, `debug_red_alert_blink`, `debug_give_iff` bridge
+methods are test seams.

@@ -6,6 +6,10 @@
 #   NOVA_PLUGCHECK_NAME  label for the report
 #   NOVA_PLUGCHECK_ENABLE  comma list of bundle ids to switch on under manual order (optional sub-items, TCs);
 #                        empty = the original rule (everything loads) + any total conversion enabled
+#   NOVA_PLUGCHECK_TCADDONS  "<tc id>=<plug-in id>[,<id>...]": put those installed plug-ins on the total conversion's own
+#                        add-on list (the Plugins screen's "Add plug-in to <TC>") instead of staging files in its Plug-Ins
+#   NOVA_PLUGCHECK_MEDIA JSON from `novaswift-extract desc-movies ...`: every dësc movie / font and whether the shared
+#                        Swift resolution finds it; Godot must resolve the same files and be able to play them
 #   NOVA_PLUGCHECK_REF   JSON from `novaswift-extract merged-counts ...` (the shared Swift code Apple uses): the
 #                        per-type counts Godot must reproduce exactly
 #   NOVA_PLUGCHECK_ALL   "1" = run the pilot flow for every chär start scenario (default: the first, quick-start
@@ -24,6 +28,8 @@ const GalaxyMap = preload("res://screens/GalaxyMap.gd")
 const TitleMusic = preload("res://audio/TitleMusic.gd")
 const Movies = preload("res://Movies.gd")
 const StoryScreens = preload("res://screens/StoryScreens.gd")
+const DescMovie = preload("res://ui/DescMovie.gd")
+const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
 
 var ok: bool = true
 var warns: int = 0
@@ -91,6 +97,7 @@ func _run() -> void:
 	_check("load_game (base + discovered plug-ins)", nova.load_game(data))
 	_import_requested()
 	_enable_requested()
+	_tc_addons_requested()
 	_check("reload with the chosen plug-in set", pl.reload())
 	summary["load_ms"] = Time.get_ticks_msec() - t0
 	var list: Array = _j(pl.list())
@@ -139,6 +146,42 @@ func _enable_requested() -> void:
 		if p.total_conversion:
 			_check("select total conversion '%s'" % p.id, pl.set_enabled(p.id, true))
 			break
+
+
+## NOVA_PLUGCHECK_TCADDONS: the per-conversion add-on list, driven through the same bridge calls as the screen.
+func _tc_addons_requested() -> void:
+	var spec: String = OS.get_environment("NOVA_PLUGCHECK_TCADDONS")
+	if spec == "":
+		return
+	var parts: PackedStringArray = spec.split("=", false, 1)
+	var tc: String = parts[0]
+	var info: Variant = _j(pl.tc_addons())
+	_check("the Plugins screen sees '%s' as the selected conversion" % tc, info is Dictionary and str((info as Dictionary).get("tc", "")) == tc)
+	var want: PackedStringArray = parts[1].split(",", false) if parts.size() > 1 else PackedStringArray()
+	for id in want:
+		_check("add '%s' to %s's add-on list" % [id, tc], pl.tc_addon_add(tc, id))
+	info = _j(pl.tc_addons())
+	var listed: Array = []
+	if info is Dictionary:
+		for e in (info as Dictionary).get("list", []):
+			listed.append(str(e.id))
+	_check("the add-on list shows them in order", listed == Array(want), "%s vs %s" % [listed, want])
+	# Suggestions: a plug-in named for the conversion (EVO ... for EV Override) is "recommended".
+	for id in want:
+		var row: Dictionary = {}
+		for e in (info as Dictionary).get("list", []):
+			if str(e.id) == id:
+				row = e
+		if str(id).begins_with("EVO") and tc.contains("Override"):
+			_check("'%s' is marked made-for-this under %s" % [id, tc], str(row.get("compat", "")) == "recommended", str(row))
+	# Global plug-ins that are NOT on the list stay out (original rule).
+	_check("a list change marks the data for reload", pl.needs_reload())
+	# Persistence: the state file carries the lists under tcAddOns (the Apple UserDefaults JSON is the same shape).
+	var sf: String = OS.get_environment("NOVA_PLUGIN_STATE")
+	if sf != "" and FileAccess.file_exists(sf):
+		var st: Variant = _j(FileAccess.get_file_as_string(sf))
+		_check("the lists persist in plugins-state.json under tcAddOns", st is Dictionary and (st as Dictionary).has("tcAddOns")
+			and ((st as Dictionary).tcAddOns as Dictionary).has(tc))
 
 
 # --- 2. parity with the shared Swift merge (novaswift-extract merged-counts) -------------------------
@@ -298,12 +341,100 @@ func _media_search(list: Array) -> void:
 		if Movies.find_movie(m, roots) == "":
 			missing.append("%d:%s" % [id, m])
 	summary["desc_movies"] = named
+	await _media_parity(roots)
 	await _offer_movie_chain()
 	if named > 0:
 		if missing.is_empty():
 			_check("every dësc movie file is found (%d)" % named, true)
 		else:
 			_warn("dësc movies not shipped with this install", str(missing.slice(0, 8)))
+
+
+## NOVA_PLUGCHECK_MEDIA (novaswift-extract desc-movies): Godot resolves the same movie files as the shared Swift code
+## (so the Apple app finds them too), each found clip is playable (converts through ffmpeg: .mov, .mp4, .gif), the
+## plug-in's / conversion's font files are the same, and the data's font name resolves to the shipped font.
+func _media_parity(roots: PackedStringArray) -> void:
+	var path: String = OS.get_environment("NOVA_PLUGCHECK_MEDIA")
+	var imported_zip: bool = OS.get_environment("NOVA_PLUGCHECK_IMPORT").ends_with(".zip")
+	if path == "" or not FileAccess.file_exists(path):
+		if imported_zip:
+			await _imported_media_check()
+		return
+	var ref: Variant = _j(FileAccess.get_file_as_string(path))
+	if not (ref is Dictionary):
+		_check("media reference JSON parses", false, path)
+		return
+	var movies: Array = (ref as Dictionary).get("movies", [])
+	var bad: Array = []
+	var unplayable: Array = []
+	var found_n: int = 0
+	var sample_played: Dictionary = {}
+	Prefs.set_value("classic", "play_movies", true)
+	Movies.cache_root = work.path_join("movies")
+	for m in movies:
+		var name: String = str(m.movie).strip_edges()
+		var godot_path: String = str(pl.find_media(name))
+		var swift_found: bool = bool(m.found)
+		if swift_found != (godot_path != ""):
+			bad.append("%d:%s swift=%s godot=%s" % [int(m.id), name, swift_found, godot_path != ""])
+		if swift_found and godot_path != "" and godot_path.get_file().nocasecmp_to(str(m.path).get_file()) != 0:
+			bad.append("%d:%s different file %s vs %s" % [int(m.id), name, godot_path.get_file(), str(m.path).get_file()])
+		if godot_path != "":
+			found_n += 1
+			if Movies.available() and not sample_played.has(name):
+				sample_played[name] = true
+				var info: Dictionary = Movies.transcode(godot_path)
+				if info.is_empty():
+					unplayable.append(name)
+				else:
+					# DescMovie.lookup is what every text dialog calls.
+					var clip: Dictionary = DescMovie.lookup(int(m.id))
+					if clip.is_empty():
+						unplayable.append("%s (lookup)" % name)
+	summary["media_movies"] = "%d/%d" % [found_n, movies.size()]
+	if not movies.is_empty():
+		_check("Godot resolves the same %d dësc movie files as the shared Swift code (%d found)" % [movies.size(), found_n], bad.is_empty(), str(bad.slice(0, 6)))
+		if Movies.available():
+			_check("every found movie converts and is ready to play (%d distinct clips, mov/mp4/gif)" % sample_played.size(), unplayable.is_empty(), str(unplayable))
+		else:
+			_warn("ffmpeg not installed: dësc movies are skipped (as with QuickTime Movies off)")
+	# Fonts the conversion ships next to its data.
+	var swift_fonts: Array = (ref as Dictionary).get("fontFiles", [])
+	var godot_fonts: Array = _j(pl.font_files())
+	var sf: Array = swift_fonts.map(func(p): return str(p).get_file())
+	var gf: Array = godot_fonts.map(func(p): return str(p).get_file())
+	sf.sort()
+	gf.sort()
+	_check("the conversion's font files match the shared Swift resolution (%s)" % str(gf), sf == gf, "swift=%s godot=%s" % [sf, gf])
+	ClassicTheme.setup(nova)
+	for fname in (ref as Dictionary).get("fontNames", []):
+		var shipped: bool = false
+		for f in gf:
+			if str(f).get_basename().to_lower() in str(fname).to_lower() or str(fname).to_lower() in str(f).to_lower():
+				shipped = true
+		if shipped:
+			var font: Font = ClassicTheme.font_for(str(fname))
+			_check("the data's font '%s' resolves to the shipped font file, not the Arimo substitute" % fname,
+				font != null and font != ClassicTheme.ARIMO and font != ClassicTheme.RUBIK)
+
+
+## An imported zip: every movie the loaded data names for its plug-in is found, i.e. the import extracted the
+## media that only ever lived inside the archive (ARPIA2's gasminer.mov / credits.mov).
+func _imported_media_check() -> void:
+	var missing: Array = []
+	var named: int = 0
+	for id in range(128, 32768):
+		if str(pl.resource_source("dësc", id)) in ["?", ""]:
+			continue
+		var dm: Variant = _j(pl.desc_movie(id))
+		var m: String = str((dm as Dictionary).movie).strip_edges() if dm is Dictionary else ""
+		if m == "":
+			continue
+		named += 1
+		if str(pl.find_media(m)) == "":
+			missing.append("%d:%s" % [id, m])
+	if named > 0:
+		_check("the import extracted every media file the zip's dësc records name (%d)" % named, missing.is_empty(), str(missing))
 
 
 # --- 5. the pilot flow --------------------------------------------------------------------------------

@@ -70,18 +70,16 @@ struct SettingsView: View {
                     .preferredColorScheme(.dark)
             }
         }
-        // `ControlsView` relies on `.navigationTitle`/`.toolbar` for its title and
-        // Done button, which need an actual navigation host to render at all —
-        // `DialogChrome` is a plain card, not a `NavigationStack`, so this can't
-        // be a `NavigationLink` pushed from the Form above (that's what left the
-        // row permanently inert). A sheet supplies its own dismissible container;
-        // wrapping it in a `NavigationStack` here is what makes the title/Done
-        // button actually appear.
-        .sheet(isPresented: $showControls) {
-            NavigationStack { ControlsView() }
-                .frame(minWidth: 480, minHeight: 560)
-                .preferredColorScheme(.dark)
-                .cursorHost()
+        // The Controls editor draws a full keyboard / controller beside its
+        // action list, which needs the whole window — a sheet clipped it — so
+        // it's a full-window overlay with its own title bar and Cancel/Done.
+        .overlay {
+            if showControls {
+                ControlsView(onClose: { showControls = false })
+                    .preferredColorScheme(.dark)
+                    .cursorHost()
+                    .transition(.opacity)
+            }
         }
         .sheet(isPresented: $showBugReport) {
             // No `debug:` here — Settings can be opened from the launcher, where

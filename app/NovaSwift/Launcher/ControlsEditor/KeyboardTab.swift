@@ -22,12 +22,12 @@ struct EditorSplit<Device: View, Side: View>: View {
         GeometryReader { geo in
             if geo.size.width >= 760 {
                 HStack(alignment: .top, spacing: 14) {
-                    device().frame(maxWidth: .infinity, maxHeight: .infinity)
+                    device().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     side().frame(width: 330)
                 }
             } else {
                 VStack(spacing: 10) {
-                    device().frame(height: max(180, geo.size.height * 0.46))
+                    device().frame(height: max(180, geo.size.height * 0.46), alignment: .top)
                     side().frame(maxHeight: .infinity)
                 }
             }
@@ -70,8 +70,10 @@ struct KeyboardTab: View {
                                onHover: { hoveredAction = $0.flatMap { cap in
                                    cap.token(on: layer).flatMap { holders[$0]?.first } } },
                                onTap: onKeyTap)
+                    .aspectRatio((layout.size.width + 0.5) / (layout.size.height + 0.5), contentMode: .fit)
                 offKeyboardStrip(layout: layout)
                 CategoryLegend()
+                Spacer(minLength: 0)
             }
         } side: {
             ActionListPanel(bindingText: { a in
@@ -87,13 +89,45 @@ struct KeyboardTab: View {
     // MARK: Controls
 
     private var controlsBar: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 12) {
-                NovaMenuPicker(title: "Size", selection: Binding(get: { size }, set: { prefs.keyboardSize = $0 }),
-                               options: KeyboardSize.allCases) { $0.title }
-            }
+        HStack(spacing: 16) {
             NovaSegmentedPicker(selection: $layer, options: KeyLayer.allCases) { $0.rawValue }
+                .frame(maxWidth: 320)
+            Spacer(minLength: 8)
+            sizeMenu
         }
+    }
+
+    /// One button reading "Size: Compact ⌄" — a native menu where there is one;
+    /// the cursor (and tvOS) cycles through the presets instead.
+    private var sizeMenu: some View {
+        let chip = HStack(spacing: 6) {
+            Text("Size: \(size.title)").novaFont(.caption, weight: .semibold).foregroundStyle(.white)
+            Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(novaAmber)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 5))
+        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color(white: 0.35)))
+        let cycle = {
+            let all = KeyboardSize.allCases
+            if let i = all.firstIndex(of: size) { prefs.keyboardSize = all[(i + 1) % all.count] }
+        }
+        #if os(tvOS)
+        return chip.cursorClickable(cycle)
+        #else
+        return Menu {
+            ForEach(KeyboardSize.allCases) { option in
+                Button {
+                    prefs.keyboardSize = option
+                } label: {
+                    if option == size { Label(option.title, systemImage: "checkmark") } else { Text(option.title) }
+                }
+            }
+        } label: { chip }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .cursorClickable(cycle)
+        #endif
     }
 
     /// The side panel's top: what to do now, or the selected key's bindings.

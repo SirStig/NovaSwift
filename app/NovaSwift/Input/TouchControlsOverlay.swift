@@ -8,6 +8,43 @@ import UIKit
 /// `GameContainerView`, not reachable through `handleDiscrete`).
 enum MobilePanel { case missions, pilotInfo }
 
+/// Button/spacing sizes from the smaller screen edge: ~0.9× on a landscape
+/// iPhone, up to 1.25× on an iPad, so controls read the same relative size
+/// everywhere. Sized to stay clear on a landscape iPhone's short (~375–430pt)
+/// edge — the whole cockpit (toggle + drive cluster) has to fit in that
+/// height alongside the open middle, so every control is deliberately
+/// compact rather than "as big as comfortably tappable." Shared with the
+/// Controls editor's Touch tab so its preview matches the game exactly.
+struct TouchMetrics {
+    let s: CGFloat
+    init(_ size: CGSize) {
+        let minEdge = min(size.width == 0 ? 430 : size.width, size.height == 0 ? 430 : size.height)
+        s = min(max(minEdge / 430, 0.8), 1.25)
+        // Captions under every cap were half the clutter on a phone, where
+        // the glyphs already say it; they stay on the roomier iPad.
+        captions = minEdge >= 600
+    }
+    let captions: Bool
+    // Visual caps; each control's hit box is 12% larger on every side.
+    var toggle: CGFloat { 40 * s }  // actions open/close
+    var tile: CGFloat { 54 * s }    // action-grid tile
+    var gap: CGFloat { 8 * s }
+    var edge: CGFloat { 12 * s }
+}
+
+extension View {
+    /// Pin a control to a screen corner at an absolute offset (points) from it.
+    /// The frame fills the safe area but has no hit shape, so only the control
+    /// itself captures touches and the open middle stays free for steering.
+    /// `rightInset` (the HUD sidebar) only pushes trailing anchors inward.
+    func touchPlaced(anchor: TouchCorner, x: CGFloat, y: CGFloat, rightInset: CGFloat) -> some View {
+        padding(anchor.isTrailing ? Edge.Set.trailing : Edge.Set.leading,
+                x + (anchor.isTrailing ? rightInset : 0))
+            .padding(anchor.isBottom ? Edge.Set.bottom : Edge.Set.top, y)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: anchor.alignment)
+    }
+}
+
 /// The on-screen "virtual cockpit" for touch play. Deliberately sparse: only the
 /// controls you hold constantly are always visible — **turn on the left, thrust
 /// on the right**, so one thumb steers while the other drives — with target/next/
@@ -19,22 +56,22 @@ enum MobilePanel { case missions, pilotInfo }
 /// tax on every trip. The pause menu (top-left) and the amber Land pill
 /// (bottom-centre, when cleared to land) are the other always-on controls.
 ///
-/// The whole thing is one `VStack` with transparent `Spacer`s, not a stack of
-/// full-screen layers — so only the buttons themselves capture touches and the
-/// open middle stays free for tap/drag-to-fly steering and target taps. Every
-/// hold control has a generous rectangular hit area and recognises
-/// simultaneously with its siblings, so two thumbs register at once and a press
-/// near a button's edge still counts.
+/// Where each control sits comes from the player's `TouchLayout` (edited in
+/// Controls → Touch); its Default preset is the arrangement described above.
+/// Controls are pinned to screen corners by absolute offsets, not stacked, so
+/// only the buttons themselves capture touches and the open middle stays free
+/// for tap/drag-to-fly steering and target taps. Every hold control has a
+/// generous rectangular hit area and recognises simultaneously with its
+/// siblings, so two thumbs register at once and a press near a button's edge
+/// still counts.
 ///
-/// Sizes scale with the smaller screen edge (`Metrics`): compact-but-tappable on
-/// a small iPhone, a bit larger on an iPad — deliberately sized so the whole
-/// drive cluster fits a landscape iPhone's short (~375–430pt) edge with room
-/// to spare, rather than "as big as comfortably tappable." Styling is the EV
-/// Nova HUD idiom — dark caps with a thin amber bevel, amber glyphs on the
-/// action controls, white on the neutral ones.
+/// Sizes scale with the smaller screen edge (`TouchMetrics`) and the layout's
+/// global scale. Styling is the EV Nova HUD idiom — dark caps with a thin amber
+/// bevel, amber glyphs on the action controls, white on the neutral ones.
 struct TouchControlsOverlay: View {
     let input: InputController
     @ObservedObject var hud: GameHUDModel
+    @EnvironmentObject private var model: AppModel
     var viewportSize: CGSize = .zero
     var tapToFly: Bool = false
     var rightInset: CGFloat = 0
@@ -43,32 +80,10 @@ struct TouchControlsOverlay: View {
 
     @State private var menuOpen = false
 
-    /// Button/spacing sizes from the smaller screen edge: ~0.9× on a landscape
-    /// iPhone, up to 1.25× on an iPad, so controls read the same relative size
-    /// everywhere. Sized to stay clear on a landscape iPhone's short (~375–430pt)
-    /// edge — the whole cockpit (toggle + drive cluster) has to fit in that
-    /// height alongside the open middle, so every control is deliberately
-    /// compact rather than "as big as comfortably tappable."
-    private struct Metrics {
-        let s: CGFloat
-        init(_ size: CGSize) {
-            let minEdge = min(size.width == 0 ? 430 : size.width, size.height == 0 ? 430 : size.height)
-            s = min(max(minEdge / 430, 0.8), 1.25)
-            // Captions under every cap were half the clutter on a phone, where
-            // the glyphs already say it; they stay on the roomier iPad.
-            captions = minEdge >= 600
-        }
-        let captions: Bool
-        // Visual caps; each control's hit box is 12% larger on every side.
-        var big: CGFloat { 52 * s }     // fire / thrust / turn
-        var small: CGFloat { 36 * s }   // target / next / afterburner / fire-2nd
-        var toggle: CGFloat { 40 * s }  // actions open/close
-        var tile: CGFloat { 54 * s }    // action-grid tile
-        var gap: CGFloat { 8 * s }
-        var edge: CGFloat { 12 * s }
-    }
-
-    private var m: Metrics { Metrics(viewportSize) }
+    private var m: TouchMetrics { TouchMetrics(viewportSize) }
+    private var layout: TouchLayout { model.touchLayout }
+    /// Points per layout unit: screen metric × the player's global scale.
+    private var u: CGFloat { layout.unit(metric: m.s) }
 
     var body: some View {
         ZStack {
@@ -78,35 +93,24 @@ struct TouchControlsOverlay: View {
                     .onTapGesture { withAnimation(.easeOut(duration: 0.15)) { menuOpen = false } }
             }
 
-            VStack(spacing: 0) {
-                // Top-right: the Actions toggle and, when open, the grid.
-                HStack(alignment: .top) {
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: m.gap) {
-                        HStack(spacing: m.gap) {
-                            quickAction("map.fill", "Map", .galaxyMap)
-                            quickAction("bolt.horizontal.circle.fill", "Jump", .hyperjump)
-                            actionsToggle
-                        }
-                        if menuOpen {
-                            actionGrid
-                                .transition(.scale(scale: 0.9, anchor: .topTrailing).combined(with: .opacity))
-                        }
+            ZStack {
+                ForEach(layout.controls) { c in
+                    if isShown(c) {
+                        controlView(c)
+                            .opacity(layout.opacity)
+                            .touchPlaced(anchor: c.anchor, x: CGFloat(c.x) * u, y: CGFloat(c.y) * u,
+                                         rightInset: rightInset)
                     }
-                    .padding(.trailing, rightInset + m.edge)
-                    .padding(.top, m.edge)
                 }
-
-                Spacer(minLength: 0)   // open middle — free for steering / target taps
-
-                // Bottom: turn (left thumb) · thrust + fire (right thumb).
-                HStack(alignment: .bottom) {
-                    if !tapToFly { turnCluster }
-                    Spacer(minLength: 0)
-                    driveCluster.padding(.trailing, rightInset)
+                // The open middle stays free for steering / target taps: the
+                // grid hangs off the Actions toggle, wherever it was placed.
+                if menuOpen, let t = layout.actionsToggle {
+                    actionGrid
+                        .transition(.scale(scale: 0.9, anchor: t.anchor.unitPoint).combined(with: .opacity))
+                        .touchPlaced(anchor: t.anchor, x: CGFloat(t.x) * u,
+                                     y: CGFloat(t.y) * u + t.boxSize(unit: u).height + m.gap,
+                                     rightInset: rightInset)
                 }
-                .padding(.horizontal, m.edge)
-                .padding(.bottom, m.edge + 4)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -115,160 +119,56 @@ struct TouchControlsOverlay: View {
         .cursorCancel(menuOpen ? { withAnimation(.easeOut(duration: 0.15)) { menuOpen = false } } : nil)
     }
 
-    // MARK: Steering (bottom-left)
-
-    private var turnCluster: some View {
-        HStack(alignment: .bottom, spacing: m.gap) {
-            labeled("Turn Left") {
-                HoldButton(size: m.big, onChange: { input.touch.turnLeft = $0 }) {
-                    NovaControlCap(system: "arrowtriangle.left.fill", size: m.big)
-                }
-            }
-            labeled("Turn Right") {
-                HoldButton(size: m.big, onChange: { input.touch.turnRight = $0 }) {
-                    NovaControlCap(system: "arrowtriangle.right.fill", size: m.big)
-                }
-            }
-        }
+    /// Hidden controls are skipped (the Actions toggle can't be hidden — it's
+    /// the only way to the grid), and tap-to-fly steers by tapping the world, so
+    /// the turn holds go away exactly as the old fixed turn cluster did.
+    private func isShown(_ c: TouchControl) -> Bool {
+        if c.kind == .actionsToggle { return true }
+        if c.hidden { return false }
+        if tapToFly, c.kind == .hold, c.effect == .turnLeft || c.effect == .turnRight { return false }
+        return true
     }
 
-    // MARK: Drive + fire (bottom-right; thrust is the rightmost, outer button)
-
-    /// Two rows, not four: the four secondary holds (target/next/afterburn/
-    /// fire-2nd) sit in one row so the whole cluster fits the short edge of a
-    /// landscape iPhone alongside the open middle and the Actions toggle above
-    /// it — a stack of four rows ran taller than the screen on small phones.
-    private var driveCluster: some View {
-        VStack(alignment: .trailing, spacing: m.gap) {
-            weaponChip
-            // Combat targeting + holds, always visible: locking an enemy,
-            // cycling to the next, burning or firing the secondary must never
-            // mean opening the Actions menu mid-dogfight.
-            HStack(alignment: .bottom, spacing: m.gap * 0.7) {
-                labeled("Target") {
-                    TapButton(size: m.small, onTap: { onDiscrete(.targetNearest) }) {
-                        NovaControlCap(system: "scope", size: m.small, accent: true)
-                    }
-                }
-                labeled("Next") {
-                    TapButton(size: m.small, onTap: { onDiscrete(.targetNext) }) {
-                        NovaControlCap(system: "arrow.triangle.2.circlepath", size: m.small)
-                    }
-                }
-                labeled("Afterburn") {
-                    HoldButton(size: m.small, onChange: { input.touch.afterburner = $0 }) {
-                        NovaControlCap(system: "flame.fill", size: m.small, accent: true)
-                    }
-                }
-                labeled("Fire 2nd") {
-                    HoldButton(size: m.small, onChange: { input.touch.fireSecondary = $0 }) {
-                        NovaControlCap(system: "burst.fill", size: m.small, accent: true)
-                    }
-                }
-            }
-            HStack(alignment: .bottom, spacing: m.gap) {
-                labeled("Fire") {
-                    HoldButton(size: m.big, onChange: { input.touch.firePrimary = $0 }) {
-                        NovaControlCap(system: "bolt.fill", size: m.big, accent: true)
-                    }
-                }
-                labeled("Thrust") {
-                    HoldButton(size: m.big, onChange: { input.touch.thrust = $0 }) {
-                        NovaControlCap(system: "chevron.up.2", size: m.big)
-                    }
-                }
-            }
-        }
-    }
-
-    /// Stack a short caption under a control so each button's job is legible at a
-    /// glance. Captions carry a dark shadow so they stay readable over the
-    /// starfield, and are `.allowsHitTesting(false)` so they never absorb a press
-    /// meant for the cap above them.
     @ViewBuilder
-    private func labeled<Content: View>(_ text: String, @ViewBuilder _ content: () -> Content) -> some View {
-        if !m.captions {
-            content().accessibilityLabel(text)
-        } else {
-            captioned(text, content)
-        }
-    }
-
-    private func captioned<Content: View>(_ text: String, _ content: () -> Content) -> some View {
-        VStack(spacing: 2 * m.s) {
-            content()
-            Text(text)
-                .font(.system(size: 9.5 * m.s, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
-                .shadow(color: .black.opacity(0.85), radius: 1.5, y: 0.5)
-                .lineLimit(1)
-                .fixedSize()
-                .allowsHitTesting(false)
-        }
-    }
-
-    /// Current secondary weapon: tap the chip to cycle forward, tap the small
-    /// leading chevron to go back — the forward direction keeps the large,
-    /// easy-to-hit tap target it always had; reverse is a smaller, secondary
-    /// affordance next to it rather than splitting the chip itself in half.
-    /// The chevron stays visible (disabled, not hidden) with zero/one
-    /// secondaries fitted, since the loadout can change mid-flight (buy an
-    /// outfit, get boarded) and a control that pops in and out is worse than
-    /// one that's just briefly unusable.
-    private var weaponChip: some View {
-        HStack(spacing: 3) {
-            Button { onDiscrete(.selectSecondaryPrev) } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 10 * m.s, weight: .bold))
-                    .foregroundStyle(hud.hasSecondary ? novaAmber : Color(white: 0.4))
-                    .frame(width: 18 * m.s, height: 20 * m.s)
-                    .contentShape(Rectangle())
+    private func controlView(_ c: TouchControl) -> some View {
+        let size = c.capSize(unit: u)
+        switch c.kind {
+        case .hold:
+            HoldButton(size: size, onChange: { down in
+                if let e = c.effect { e.apply(to: &input.touch, down: down) }
+            }) {
+                TouchControlVisual(control: c, size: size, unit: u, captions: m.captions)
             }
-            .buttonStyle(.novaPlain)
-            .disabled(!hud.hasSecondary)
-
-            Button { onDiscrete(.selectSecondaryNext) } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 11 * m.s, weight: .bold))
-                    Text(hud.weaponName.isEmpty ? "No 2nd weapon" : hud.weaponName)
-                        .font(.system(size: 11 * m.s, weight: .semibold))
-                        .lineLimit(1).minimumScaleFactor(0.65)
-                }
-                .foregroundStyle(novaAmber)
-                .padding(.horizontal, 8 * m.s).padding(.vertical, 4 * m.s)
-                .frame(maxWidth: 150 * m.s)
+        case .tap:
+            TapButton(size: size, onTap: { if let a = c.action { onDiscrete(a) } }) {
+                TouchControlVisual(control: c, size: size, unit: u, captions: m.captions)
             }
-            .buttonStyle(.novaPlain)
-        }
-        .padding(.leading, 2 * m.s)
-        .novaControlPanel(corner: 7 * m.s)
-    }
-
-    // MARK: Actions menu (top-right)
-
-    /// Map and Jump are the two occasional controls players reach for most —
-    /// plotting a course and then engaging it is the loop that gets you
-    /// anywhere — so they sit out on the deck beside the Actions toggle rather
-    /// than two taps deep inside the grid. They stay in `actionItems` too: the
-    /// grid is the complete list, this is the shortcut.
-    private func quickAction(_ system: String, _ label: String, _ action: GameAction) -> some View {
-        labeled(label) {
-            TapButton(size: m.toggle, onTap: { onDiscrete(action) }) {
-                NovaControlCap(system: system, size: m.toggle, accent: true, glyphScale: 0.42)
-            }
-        }
-    }
-
-    private var actionsToggle: some View {
-        labeled(menuOpen ? "Close" : "Actions") {
-            TapButton(size: m.toggle,
+        case .actionsToggle:
+            let t = toggleControl(c)
+            TapButton(size: size,
                       onTap: { withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { menuOpen.toggle() } }) {
-                NovaControlCap(system: menuOpen ? "xmark" : "square.grid.2x2.fill",
-                               size: m.toggle, accent: !menuOpen, glyphScale: 0.42)
+                TouchControlVisual(control: t, size: size, unit: u, captions: m.captions)
             }
+        case .weaponChip:
+            WeaponChipView(name: hud.weaponName, hasSecondary: hud.hasSecondary, s: m.s,
+                           onPrev: { onDiscrete(.selectSecondaryPrev) },
+                           onNext: { onDiscrete(.selectSecondaryNext) })
+                .scaleEffect(CGFloat(layout.scale * c.size), anchor: c.anchor.unitPoint)
         }
     }
+
+    /// The toggle's face follows the grid: ✕ "Close" while open, else its own.
+    private func toggleControl(_ c: TouchControl) -> TouchControl {
+        var t = c
+        if menuOpen {
+            t.icon = "xmark"
+            t.caption = "Close"
+            t.accent = false
+        }
+        return t
+    }
+
+    // MARK: Actions menu (top-right by default)
 
     /// The action tiles, in reading order. Kept as data so the grid can lay all
     /// of them out at a definite height (row count derives from `.count`).
@@ -345,9 +245,87 @@ struct TouchControlsOverlay: View {
     }
 }
 
+
+/// A cap plus its caption: the glyph disc, and (roomy screens only) a short
+/// label hung below it. The caption is an overlay, not layout, so a control's
+/// box is always cap + hit padding. Captions carry a dark shadow so they stay
+/// readable over the starfield and never absorb a press meant for the cap.
+/// Shared by the flight overlay and the Controls editor's preview.
+struct TouchControlVisual: View {
+    let control: TouchControl
+    let size: CGFloat
+    let unit: CGFloat
+    let captions: Bool
+
+    var body: some View {
+        NovaControlCap(system: control.icon, size: size, accent: control.accent,
+                       glyphScale: control.cap.glyphScale)
+            .overlay(alignment: .top) {
+                if captions {
+                    Text(control.caption)
+                        .font(.system(size: 9.5 * unit, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .shadow(color: .black.opacity(0.85), radius: 1.5, y: 0.5)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .allowsHitTesting(false)
+                        .offset(y: size + 2 * unit)
+                }
+            }
+            .accessibilityLabel(control.caption)
+    }
+}
+
+/// Current secondary weapon: tap the chip to cycle forward, tap the small
+/// leading chevron to go back — the forward direction keeps the large,
+/// easy-to-hit tap target it always had; reverse is a smaller, secondary
+/// affordance next to it rather than splitting the chip itself in half.
+/// The chevron stays visible (disabled, not hidden) with zero/one
+/// secondaries fitted, since the loadout can change mid-flight (buy an
+/// outfit, get boarded) and a control that pops in and out is worse than
+/// one that's just briefly unusable.
+struct WeaponChipView: View {
+    let name: String
+    let hasSecondary: Bool
+    /// The screen metric (`TouchMetrics.s`).
+    let s: CGFloat
+    var onPrev: () -> Void = {}
+    var onNext: () -> Void = {}
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Button(action: onPrev) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 10 * s, weight: .bold))
+                    .foregroundStyle(hasSecondary ? novaAmber : Color(white: 0.4))
+                    .frame(width: 18 * s, height: 20 * s)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.novaPlain)
+            .disabled(!hasSecondary)
+
+            Button(action: onNext) {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 11 * s, weight: .bold))
+                    Text(name.isEmpty ? "No 2nd weapon" : name)
+                        .font(.system(size: 11 * s, weight: .semibold))
+                        .lineLimit(1).minimumScaleFactor(0.65)
+                }
+                .foregroundStyle(novaAmber)
+                .padding(.horizontal, 8 * s).padding(.vertical, 4 * s)
+                .frame(maxWidth: 150 * s)
+            }
+            .buttonStyle(.novaPlain)
+        }
+        .padding(.leading, 2 * s)
+        .novaControlPanel(corner: 7 * s)
+    }
+}
+
 /// A round EV Nova control cap: a dark translucent disc with a thin amber (or
 /// white) bevel and a centred glyph.
-private struct NovaControlCap: View {
+struct NovaControlCap: View {
     let system: String
     let size: CGFloat
     var accent: Bool = false

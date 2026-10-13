@@ -17,6 +17,7 @@ extends CanvasLayer
 const Controls = preload("res://Controls.gd")
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
 const ShellUI = preload("res://screens/ShellUI.gd")
+const DescMovie = preload("res://ui/DescMovie.gd")
 
 signal finished
 
@@ -26,6 +27,9 @@ const TEXT_ID := 9000   # the text page's id in Apple's page list
 var pages: Array = []        # [{pict: int, delay: float}] and a last {pict: -1, text: true} page
 var index := 0
 var intro_text := ""
+var intro_desc := -1         # the intro text's dësc id: its movie (EV Intro.mp4 / Override Intro.mp4) plays with the text
+var _movie_up := false       # a dësc movie is on screen: the pages wait
+var _movie_shown := false
 
 var _nova: Object
 var _root: Control
@@ -45,7 +49,8 @@ func setup(nova: Object, scenario_id: int) -> bool:
 	for s in info.get("slides", []):
 		pages.append({"pict": int(s["pict"]), "delay": float(s["duration"])})
 	intro_text = str(info.get("text", ""))
-	if intro_text != "":
+	intro_desc = int(info.get("desc", -1))
+	if intro_text != "" or not DescMovie.lookup(intro_desc).is_empty():
 		pages.append({"pict": -1, "delay": 0.0, "text": true})   # text page: manual advance
 	if pages.is_empty():
 		return false
@@ -120,6 +125,14 @@ func _show_page(fade: bool) -> void:
 			r.offset_bottom = -20
 			r.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			content.add_child(r)
+	if bool(page.get("text", false)) and not _movie_shown:
+		# IntroCinematic_Run 0x0048adc0 shows this dësc through the generic text dialog, which plays its
+		# movie before the text unless the Flags put it after.
+		_movie_shown = true
+		var clip: Dictionary = DescMovie.lookup(intro_desc)
+		if not clip.is_empty() and not bool(clip.get("after", false)):
+			_movie_up = true
+			DescMovie.play(self, clip, func(): _movie_up = false)
 	_skip.text = "Begin" if is_last_page() else "Skip"
 	_caption.text = ("A: Continue    B: Skip" if Controls.pad_connected()
 			else "Click or press Enter to continue    Esc to skip")
@@ -170,12 +183,12 @@ func _process(delta: float) -> void:
 
 ## Next page (a tap / the delay running out); past the last page the sequence finishes.
 func advance(beep := true) -> void:
-	if _done:
+	if _done or _movie_up:
 		return
 	if beep:
 		_nova.sound_beep(1)
 	if index >= pages.size() - 1:
-		_finish()
+		_leave()
 		return
 	index += 1
 	_show_page(true)
@@ -183,9 +196,22 @@ func advance(beep := true) -> void:
 
 ## Skip the rest (Ⓑ / Esc / the corner button).
 func skip() -> void:
-	if _done:
+	if _done or _movie_up:
 		return
 	_nova.sound_beep(1)
+	_leave()
+
+
+## Finish, after the text's movie when the dësc Flags put it last.
+func _leave() -> void:
+	if bool(current_page().get("text", false)):
+		var clip: Dictionary = DescMovie.lookup(intro_desc)
+		if not clip.is_empty() and bool(clip.get("after", false)):
+			_movie_up = true
+			DescMovie.play(self, clip, func():
+				_movie_up = false
+				_finish())
+			return
 	_finish()
 
 
@@ -195,7 +221,7 @@ func _finish() -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if _done:
+	if _done or _movie_up:
 		return
 	if event.is_action_pressed("ui_cancel"):
 		get_viewport().set_input_as_handled()

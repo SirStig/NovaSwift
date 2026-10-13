@@ -34,6 +34,9 @@ struct SpaceportView: View {
     // mainSpaceport (on landing) and the Trade/Shipyard/Outfitter screens. (The
     // Bar and Mission BBS build their own engines for their own AvailLocations.)
     @StateObject private var services = AppGameServices()
+    /// The stellar's own `dësc` movie, played as the player docks (`Stellar_RunDockAndLaunchSequence`
+    /// 0x00455e10 -> `Ui_LoadDescAndPlayMovie` 0x0049e3c0 with the spöb's dësc id).
+    @StateObject private var landingMovie = DescMoviePlayback()
     @State private var engine: StoryEngine?
     @State private var rolledLanding = false
     /// Re-arms the shops' idle offer poll (see `pollShopOffers`).
@@ -103,6 +106,7 @@ struct SpaceportView: View {
             // Briefings, refusals and other story texts raised here, one
             // dialog each, in order.
             StoryTextOverlay(services: services)
+            DescMovieOverlay(playback: landingMovie)
         }
         // Ⓑ on the hub is Leave; an open window or offer above takes it first.
         .cursorCancel(depart)
@@ -121,6 +125,7 @@ struct SpaceportView: View {
             // A `Q` fired by a mission accepted here closes whatever screen
             // is open; its message waits for the launch.
             services.onCloseSpaceportScreen = { screen = .hub }
+            landingMovie.begin(descID: spob.id, data: appModel.data, always: true)
             rollLandingOffer()
             // Stellar_RunDockAndLaunchSequence 0x00455e10: at a stellar whose
             // runtime flag 0x20 is set (uninhabited) the auto-refuel is skipped

@@ -46,7 +46,7 @@ version matrix in [`../docs/GODOT_LAYER.md`](../docs/GODOT_LAYER.md).
 
 ```bash
 # 1 · build the native bridge into godot/bin/
-scripts/build-gdextension.sh          # from the repo root (debug; add 'release' for release)
+scripts/build-gdextension.sh          # from the repo root (release by default; pass 'debug' for a debug build)
 
 # 2 · open this folder in Godot 4.2+ and press Play (F5),
 #     or run headless-less from the CLI:

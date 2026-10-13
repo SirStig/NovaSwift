@@ -63,6 +63,10 @@ var _poll := 0.0
 var _icons := {}               # url -> Array[TextureRect] waiting for bytes
 var _import_dialog: FileDialog
 var _delete_confirm := ""      # plug-in id awaiting a second press of Delete
+var _tc_add_open := false      # the "add plug-in to <conversion>" candidate list is expanded
+var _tc_add_confirm := ""      # base-game-only candidate awaiting a second press ("Add anyway?")
+var _tc_analysed := ""         # conversion whose record-overlap check was started this session
+var _tc_was_analysing := false
 
 
 func setup(nova: Object, start_tab := "Browse") -> void:
@@ -372,6 +376,7 @@ func _render_installed() -> void:
 		_note(fv, "These files were skipped when the game data last loaded. The rest of the plug-ins are unaffected.", 12)
 		for f in failures:
 			_note(fv, "%s  (in %s)\n%s" % [f.file, f.plugin, f.message], 12, T.ORANGE)
+	_render_tc_addons()
 	if list.is_empty():
 		var es := _empty_state(_content, "No plug-ins installed", "Browse the catalog to install one, or import your own .rez, .ndat or .zip files.\nPlug-ins in your game's \"Nova Plug-ins\" folder and in " + st.installDir + " are found automatically.")
 		var hb := HBoxContainer.new()
@@ -448,9 +453,166 @@ func _installed_row(p: Dictionary, entry) -> void:
 		if first_control == null:
 			first_control = tg
 	else:
-		var auto := NC.label(h, "Loads automatically" if p.enabled else "Not loaded", "caption", "regular", T.SECONDARY)
+		var auto := NC.label(h, _auto_label(p), "caption", "regular", T.SECONDARY)
 		auto.add_theme_font_override("font", T.system())
 		auto.add_theme_font_size_override("font_size", 12)
+
+
+## "Add-ons for <total conversion>": the selected conversion's own plug-in list (shared `TCAddOns`).
+## The original runs a conversion with only its own Plug-Ins folder; this is "copy a plug-in into that
+## folder" without copying: listed plug-ins load after the conversion's own, in this order (later wins).
+func _render_tc_addons() -> void:
+	if not _pl.has_method("tc_addons"):
+		return
+	var raw: Variant = JSON.parse_string(_pl.tc_addons())
+	if not (raw is Dictionary) or (raw as Dictionary).is_empty():
+		return
+	var info: Dictionary = raw
+	var tc_id: String = str(info.get("tc", ""))
+	var tc_name: String = str(info.get("name", tc_id))
+	if _tc_analysed != tc_id:
+		_tc_analysed = tc_id
+		_pl.tc_addons_analyze()
+	var card := NC.card(_content, 14, 12)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 8)
+	card.add_child(v)
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 8)
+	v.add_child(head)
+	NC.icon_rect(head, "puzzlepiece.extension.fill", 18, T.INDIGO)
+	var hl := NC.label(head, "Add-ons for %s" % tc_name, "body", "semibold")
+	hl.add_theme_font_override("font", T.system("semibold"))
+	_note(v, "While %s is on, only its own plug-ins load, as in the original. Plug-ins you add here load after them, in this order (later wins): the same as copying them into the conversion's Plug-Ins folder, without moving any files." % tc_name, 12)
+	var own: Array = info.get("own", [])
+	if not own.is_empty():
+		var names: PackedStringArray = []
+		for f in own:
+			names.append(str(f).get_basename())
+		names.sort()
+		_note(v, "Built in: " + ", ".join(names), 12, T.TERTIARY)
+	var list: Array = info.get("list", [])
+	for i in list.size():
+		var e: Dictionary = list[i]
+		var h := HBoxContainer.new()
+		h.add_theme_constant_override("separation", 8)
+		v.add_child(h)
+		var num := NC.label(h, str(i + 1), "caption", "semibold", T.SECONDARY)
+		num.custom_minimum_size.x = 22
+		var col := VBoxContainer.new()
+		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		h.add_child(col)
+		var nm := NC.label(col, str(e.get("name", e.get("id", ""))), "body", "semibold")
+		nm.add_theme_font_override("font", T.system("semibold"))
+		nm.clip_text = true
+		var meta := HBoxContainer.new()
+		meta.add_theme_constant_override("separation", 6)
+		col.add_child(meta)
+		if not bool(e.get("installed", true)):
+			_badge(meta, "Not installed", T.RED)
+		_tc_compat_badge(meta, e)
+		var id: String = str(e.get("id", ""))
+		var up := NC.icon_button("chevron.up", func(): _tc_move(tc_id, id, -1), T.SECONDARY, 30, 14)
+		up.disabled = i == 0
+		up.tooltip_text = "Move up"
+		h.add_child(up)
+		var dn := NC.icon_button("chevron.down", func(): _tc_move(tc_id, id, 1), T.SECONDARY, 30, 14)
+		dn.disabled = i == list.size() - 1
+		dn.tooltip_text = "Move down"
+		h.add_child(dn)
+		var rm := NC.icon_button("minus.circle", func(): _tc_remove(tc_id, id), T.RED, 30, 16)
+		rm.tooltip_text = "Remove from %s" % tc_name
+		h.add_child(rm)
+		var tg := NC.toggle(h, "", bool(e.get("enabled", true)), func(on: bool): _tc_enable(tc_id, id, on))
+		tg.text = ""
+		tg.custom_minimum_size = Vector2(20, 24)
+		tg.tooltip_text = "Enabled"
+		if first_control == null:
+			first_control = tg
+	var cands: Array = info.get("candidates", [])
+	var toggle_cb: Callable = _tc_toggle_candidates
+	_btn(v, "Hide installed plug-ins" if _tc_add_open else "Add plug-in to %s" % tc_name, toggle_cb, 0,
+		"bordered", "chevron.up.circle" if _tc_add_open else "plus.circle")
+	if _tc_add_open:
+		if cands.is_empty():
+			_note(v, "No other plug-ins installed.", 12)
+		for c in cands:
+			var cd: Dictionary = c
+			var ch := HBoxContainer.new()
+			ch.add_theme_constant_override("separation", 8)
+			v.add_child(ch)
+			var ccol := VBoxContainer.new()
+			ccol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			ch.add_child(ccol)
+			var cn := NC.label(ccol, str(cd.get("name", "")), "body", "semibold")
+			cn.add_theme_font_override("font", T.system("semibold"))
+			cn.clip_text = true
+			var cm := HBoxContainer.new()
+			cm.add_theme_constant_override("separation", 6)
+			ccol.add_child(cm)
+			_tc_compat_badge(cm, cd)
+			var cid: String = str(cd.get("id", ""))
+			var unlikely: bool = str(cd.get("compat", "")) == "unlikely"
+			if unlikely and _tc_add_confirm == cid:
+				_note(ccol, "Made for the base game or another conversion: %s. Press again to add it anyway." % str(cd.get("reason", "")), 12, T.ORANGE)
+				_btn(ch, "Add anyway", _tc_add.bind(tc_id, cid), 0, "destructive")
+			else:
+				_btn(ch, "Add", _tc_try_add.bind(tc_id, cid, unlikely), 0)
+
+
+func _tc_compat_badge(parent: Control, e: Dictionary) -> void:
+	var k: String = str(e.get("compat", "neutral"))
+	var reason: String = str(e.get("reason", ""))
+	if k == "recommended":
+		_badge(parent, "Made for this" if reason == "" else "Suggested", T.GREEN, "checkmark.seal.fill")
+	elif k == "unlikely":
+		_badge(parent, "Base game?", T.ORANGE, "exclamationmark.triangle.fill")
+	if reason != "":
+		_note(parent, reason, 11, T.TERTIARY)
+
+
+func _tc_toggle_candidates() -> void:
+	_tc_add_open = not _tc_add_open
+	_render()
+
+
+## A plug-in that looks made for the base game needs a second press ("warn, allow override").
+func _tc_try_add(tc: String, id: String, unlikely: bool) -> void:
+	if unlikely:
+		_tc_add_confirm = id
+		_render()
+	else:
+		_tc_add(tc, id)
+
+
+func _tc_add(tc: String, id: String) -> void:
+	_tc_add_confirm = ""
+	_pl.tc_addon_add(tc, id)
+	_render()
+
+
+func _tc_remove(tc: String, id: String) -> void:
+	_pl.tc_addon_remove(tc, id)
+	_render()
+
+
+func _tc_move(tc: String, id: String, offset: int) -> void:
+	_pl.tc_addon_move(tc, id, offset)
+	_render()
+
+
+func _tc_enable(tc: String, id: String, on: bool) -> void:
+	_pl.tc_addon_set_enabled(tc, id, on)
+	_render()
+
+
+## Under a total conversion the original ignores global plug-ins (add them to the conversion's list above).
+func _auto_label(p: Dictionary) -> String:
+	if not p.total_conversion and _pl.has_method("tc_addons"):
+		var raw: Variant = JSON.parse_string(_pl.tc_addons())
+		if raw is Dictionary and not (raw as Dictionary).is_empty():
+			return "Not loaded under %s" % str((raw as Dictionary).get("name", "the conversion"))
+	return "Loads automatically" if p.enabled else "Not loaded"
 
 
 func _toggle(id: String, on: bool) -> void:
@@ -928,6 +1090,12 @@ func _process(delta: float) -> void:
 		_try_icon(url)
 	if _busy_apply:
 		return
+	if tab == "Installed" and detail_id == "" and _tc_analysed != "" and _pl.has_method("tc_addons"):
+		var ti: Variant = JSON.parse_string(_pl.tc_addons())
+		var now_analysing: bool = ti is Dictionary and bool((ti as Dictionary).get("analysing", false))
+		if _tc_was_analysing and not now_analysing and _tc_add_open:
+			_render()   # record-overlap suggestions arrived
+		_tc_was_analysing = now_analysing
 	var cat := _catalog()
 	var working := false
 	for e in cat.entries:

@@ -471,7 +471,8 @@ public struct DescRes: Sendable {
         let movieStart = trailerStart + 2
         let name = cstr(d, d.distance(from: d.startIndex, to: movieStart),
                         min(32, d.distance(from: movieStart, to: d.endIndex)))
-        movieFilename = name.isEmpty ? nil : name
+        // A name of only control bytes / blanks (a few dësc records have a stray 0x01 here) names no file.
+        movieFilename = name.trimmingCharacters(in: .controlCharacters.union(.whitespaces)).isEmpty ? nil : name
     }
 }
 

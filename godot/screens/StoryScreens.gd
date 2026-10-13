@@ -32,6 +32,7 @@ const CS = preload("res://ui/classic/ClassicScreen.gd")
 const Prefs = preload("res://Prefs.gd")
 const Movies = preload("res://Movies.gd")
 const MoviePlayer = preload("res://ui/MoviePlayer.gd")
+const DescMovie = preload("res://ui/DescMovie.gd")
 
 const COL_AMBER := Color(1.0, 0.82, 0.4)
 const COL_DIM := Color(0.62, 0.66, 0.74)
@@ -52,6 +53,7 @@ var _tex := {}                    # PICT id -> Texture2D (or null)
 var _labels := {}
 var _movie_shown_id: int = -1     # mission whose dësc movie already played for the pending offer
 var _movie_playing: bool = false
+var _text_movie_done: bool = false   # the head story text's dësc movie already played (before-text kind)
 
 
 func setup(world) -> void:
@@ -247,6 +249,14 @@ func _open_text() -> void:
 	if not (t is Dictionary) or t.is_empty():
 		nova.story_text_dismiss()
 		return
+	# The text's dësc movie (completion / failure / refusal / briefing texts: Ui_RunTravelSelectionDialog
+	# 0x004982a0) plays before the text unless its Flags put it after.
+	if not _text_movie_done:
+		var clip: Dictionary = DescMovie.lookup(int(t.get("desc", -1)))
+		if not clip.is_empty() and not bool(clip.get("after", false)):
+			_text_movie_done = true
+			_play_movie(clip.info, _open_text)
+			return
 	if ClassicTheme.classic("dialogs"):
 		_open_text_classic(t)
 		return
@@ -263,9 +273,19 @@ func _open_text() -> void:
 
 
 func _dismiss_text() -> void:
-	nova.story_text_dismiss()
+	var t = _json(nova.story_text_info())
+	var clip: Dictionary = DescMovie.lookup(int(t.get("desc", -1))) if (t is Dictionary and not t.is_empty()) else {}
 	nova.sound_beep(3)
 	_close_modal()
+	if not clip.is_empty() and bool(clip.get("after", false)):
+		_play_movie(clip.info, _finish_text)   # Flags 0x0001: the movie follows the text
+	else:
+		_finish_text()
+
+
+func _finish_text() -> void:
+	_text_movie_done = false
+	nova.story_text_dismiss()
 
 
 # MARK: Mission offer --------------------------------------------------------

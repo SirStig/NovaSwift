@@ -7,23 +7,33 @@ import SwiftUI
 /// the head of that queue and OK moves on to the next.
 struct StoryTextOverlay: View {
     @ObservedObject var services: AppGameServices
+    @EnvironmentObject private var model: AppModel
+    /// The shown text's `dësc` movie (before the text, or after OK per the dësc Flags).
+    @StateObject private var movie = DescMoviePlayback()
 
     var body: some View {
         if let story = services.storyText {
+            let descID = services.storyDescID
             ZStack {
                 Color.black.opacity(0.5).ignoresSafeArea()
                 NovaDialog(title: story.title.isEmpty ? "Mission" : story.title,
                            width: 480,
                            buttons: [NovaDialogButton(title: "OK", isDefault: true) {
-                               services.storyText = nil
+                               movie.finish(descID: descID, data: model.data) { services.storyText = nil }
                            }]) {
                     Text(story.text)
                         .novaFont(.body)
                         .foregroundStyle(.white)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                DescMovieOverlay(playback: movie)
             }
             .transition(.opacity)
+            .onAppear { movie.begin(descID: descID, data: model.data) }
+            .onChange(of: services.storyQueue.count) { _, _ in
+                // The next queued text (its own dësc) starts its movie.
+                if services.storyText != nil { movie.begin(descID: services.storyDescID, data: model.data) }
+            }
         }
     }
 }

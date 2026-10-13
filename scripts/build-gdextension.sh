@@ -6,11 +6,15 @@
 # Requires a Swift toolchain (swift.org) on PATH. Works on Linux, macOS, and
 # Windows (Git Bash / MSYS with the Swift toolchain). See docs/GODOT_LAYER.md.
 #
-#   scripts/build-gdextension.sh [debug|release]   (default: debug)
+#   scripts/build-gdextension.sh [release|debug]   (default: release)
+#
+# Release is the default: a Swift debug build runs the engine (AI, collision, the readbacks) an order of
+# magnitude slower than release, which is what made flight feel laggy. Pass `debug` only to step through
+# the bridge in a debugger. The macOS ad-hoc codesign and Linux $ORIGIN rpath below apply to both.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-CONFIG="${1:-debug}"
+CONFIG="${1:-release}"
 BRIDGE_DIR="godot/bridge"
 OUT_DIR="godot/bin"
 mkdir -p "$OUT_DIR"

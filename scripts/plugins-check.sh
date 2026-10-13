@@ -68,6 +68,8 @@ stage_entry() {   # stage_entry <name relative to data/plugins, or unz/...> <plu
 }
 
 # name | entries (+ separated) | enable ids (comma, manual order; empty = original rule + first TC)
+#      | per-TC add-ons "<TC id>=<id>[,<id>...]" (installed plug-ins put on the conversion's own list, NOT staged
+#        into its Plug-Ins folder: the shared TCAddOns list both apps persist)
 SCENARIOS=(
   "BASE (no plug-in)||"
   "ARPIA2|ARPIA2|"
@@ -81,6 +83,9 @@ SCENARIOS=(
   "EVO Facelift 1.0.7|EVO Facelift 1.0.7|"
   "EV Override + Facelift (TC plug-ins)|EV Override for Nova<-EVO Facelift 1.0.7|"
   "EV Override + Facelift + Extras|EV Override for Nova<-EVO Facelift 1.0.7<-EVO Extras/For use with EVO Facelift|"
+  "EV Override + Facelift (per-TC list)|EV Override for Nova+EVO Facelift 1.0.7||EV Override for Nova=EVO Facelift 1.0.7"
+  "EV Override + Facelift + Extras (per-TC list)|EV Override for Nova+EVO Facelift 1.0.7+EVO Extras||EV Override for Nova=EVO Facelift 1.0.7,EVO Extras/For use with EVO Facelift"
+  "EV Override, global plug-ins not on its list|EV Override for Nova+EVO Facelift 1.0.7|"
   "Femme Fatale (TC)|Femme Fatale|"
   "Polycon EV (TC)|Polycon EV|"
   "Preambles & Walkthrough|Preambles & Walkthrough|"
@@ -94,7 +99,7 @@ SCENARIOS=(
 IMPORT_SRC_DIR="$PLUG"
 rows=(); fails=0
 for sc in "${SCENARIOS[@]}"; do
-  IFS='|' read -r name entries enable <<<"$sc"
+  IFS='|' read -r name entries enable tcadd <<<"$sc"
   if [ -n "$FILTER" ] && [[ "$name" != *"$FILTER"* ]]; then continue; fi
   slug="$(echo "$name" | tr -c 'A-Za-z0-9\n' '_')"
   sd="$WORK/stage/$slug"; mkdir -p "$sd/plugins" "$sd/home" "$sd/pilots" "$sd/user"
@@ -105,12 +110,17 @@ for sc in "${SCENARIOS[@]}"; do
   # 1. reference: the shared Swift merge Apple uses
   ref="$sd/ref.json"
   ref_args=("$DATA" "$sd/plugins"); [ -n "$enable" ] && ref_args+=("$enable")
-  "$EXTRACT" merged-counts "${ref_args[@]}" >"$ref" 2>"$sd/ref.err" || echo '{}' >"$ref"
+  tcids=""; [ -n "$tcadd" ] && tcids="${tcadd#*=}"
+  NOVASWIFT_TC_ADDONS="$tcids" "$EXTRACT" merged-counts "${ref_args[@]}" >"$ref" 2>"$sd/ref.err" || echo '{}' >"$ref"
+  # media reference: every dësc movie / TC font and whether the shared Swift resolution finds the file
+  media="$sd/media.json"
+  NOVASWIFT_TC_ADDONS="$tcids" "$EXTRACT" desc-movies "${ref_args[@]}" >"$media" 2>"$sd/media.err" || echo '{}' >"$media"
   # 2. Godot
   log="$WORK/logs/$slug.log"
   NOVA_DATA_DIR="$DATA" NOVA_PLUGINS_DIR="$sd/plugins" NOVA_PLUGIN_HOME="$sd/home" \
   NOVA_PLUGIN_STATE="$sd/home/plugins-state.json" NOVA_PLUGIN_OFFLINE=1 NOVA_PILOTS_DIR="$sd/pilots" \
   NOVA_PLUGCHECK_NAME="$name" NOVA_PLUGCHECK_WORK="$sd/user" NOVA_PLUGCHECK_ENABLE="$enable" NOVA_PLUGCHECK_REF="$ref" \
+  NOVA_PLUGCHECK_TCADDONS="$tcadd" NOVA_PLUGCHECK_MEDIA="$media" \
   NOVA_PLUGCHECK_ALL="${PLUGCHECK_ALL:-0}" NOVA_PLUGCHECK_NOFLOW="${PLUGCHECK_NOFLOW:-0}" \
     godot --headless --path godot -s res://tests/plugins_load_selfcheck.gd >"$log" 2>&1
   rc=$?

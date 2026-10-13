@@ -14,17 +14,30 @@ struct DescTextDialog: View {
     let text: String
     /// The `dësc` graphic (PICT id); < 128 or nil = text only.
     var graphicID: Int? = nil
+    /// The `dësc` this text came from. Its movie (if any) plays with the text as the original does
+    /// (`Ui_RunTravelSelectionDialog` 0x004982a0): before it, or after OK when the Flags say so.
+    var descID: Int? = nil
     let onClose: () -> Void
 
     @State private var textHeight: CGFloat = 0
+    @StateObject private var movie = DescMoviePlayback()
+
+    private func close() { movie.finish(descID: descID, data: model.data, then: onClose) }
 
     var body: some View {
+        content
+            .overlay { DescMovieOverlay(playback: movie) }
+            .onAppear { movie.begin(descID: descID, data: model.data) }
+            .onChange(of: text) { _, _ in movie.begin(descID: descID, data: model.data) }
+    }
+
+    @ViewBuilder private var content: some View {
         if !model.settings.modernDialogs, let graphics = model.uiGraphics, let game = model.data.game,
            let layout = authenticLayout(game: game) {
             authentic(graphics: graphics, layout: layout)
         } else {
             NovaDialog(title: title.isEmpty ? "Mission" : title, width: 480,
-                       buttons: [NovaDialogButton(title: "OK", isDefault: true) { onClose() }]) {
+                       buttons: [NovaDialogButton(title: "OK", isDefault: true) { close() }]) {
                 Text(text)
                     .novaFont(.body)
                     .foregroundStyle(.white)
@@ -72,7 +85,7 @@ struct DescTextDialog: View {
                 }
                 textItem(layout.text, height: layout.text.height - shrink)
                 NovaButton(graphics: graphics, title: "OK",
-                           width: max(0, layout.ok.width - 26)) { onClose() }
+                           width: max(0, layout.ok.width - 26)) { close() }
                     .novaDialogKey(isDefault: true, isCancel: false)
                     .offset(x: layout.ok.minX, y: layout.ok.minY - shrink)
             }

@@ -79,11 +79,13 @@ struct ClassicPreferencesView: View {
                     .transition(.opacity)
             }
         }
-        .sheet(isPresented: $showMoreKeys) {
-            NavigationStack { ControlsView() }
-                .frame(minWidth: 480, minHeight: 560)
-                .preferredColorScheme(.dark)
-                .cursorHost()
+        .overlay {
+            if showMoreKeys {
+                ControlsView(onClose: { showMoreKeys = false })
+                    .preferredColorScheme(.dark)
+                    .cursorHost()
+                    .transition(.opacity)
+            }
         }
     }
 }

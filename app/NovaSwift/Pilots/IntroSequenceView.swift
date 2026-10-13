@@ -14,15 +14,22 @@ struct IntroSequenceView: View {
     private struct Page: Identifiable { let id: Int; let pictID: Int?; let delay: Double }
 
     @State private var index = 0
+    /// The intro text's `dësc` movie (EV Classic's `EV Intro.mp4`, EV Override's `Override Intro.mp4`):
+    /// `IntroCinematic_Run` 0x0048adc0 shows that dësc through the generic text dialog, which plays it.
+    @StateObject private var movie = DescMoviePlayback()
 
     private var pages: [Page] {
         var p = scenario.introSlides.enumerated().map { i, s in
             Page(id: i, pictID: s.pictID, delay: s.duration)
         }
-        if scenario.introTextID != nil, !introText.isEmpty {
+        if scenario.introTextID != nil, !introText.isEmpty || hasIntroMovie {
             p.append(Page(id: 9_000, pictID: nil, delay: 0))   // text page (manual advance)
         }
         return p
+    }
+
+    private var hasIntroMovie: Bool {
+        DescMoviePlayback.clip(for: scenario.introTextID, data: model.data) != nil
     }
 
     private var introText: String {
@@ -38,13 +45,14 @@ struct IntroSequenceView: View {
                     .transition(.opacity)
             }
             skipButton
+            DescMovieOverlay(playback: movie)
         }
         .novaResponsive()
         .contentShape(Rectangle())
         .onTapGesture { advance() }
         // Menu advances like a tap; Ⓑ skips like the Skip button.
         .cursorDefault { advance() }
-        .cursorCancel { model.audio.play(.uiSelect); onFinish() }
+        .cursorCancel { model.audio.play(.uiSelect); leave() }
         .animation(.easeInOut(duration: 0.4), value: index)
         // Auto-advance picture pages after their delay; text waits for a tap.
         .task(id: index) {
@@ -74,6 +82,7 @@ struct IntroSequenceView: View {
                     .frame(maxWidth: 640)
             }
             .cursorScrollable()
+            .onAppear { movie.begin(descID: scenario.introTextID, data: model.data) }
         }
     }
 
@@ -83,7 +92,7 @@ struct IntroSequenceView: View {
             HStack {
                 Spacer()
                 Button(isLastPage ? "Begin" : "Skip") {
-                    model.audio.play(.uiSelect); onFinish()
+                    model.audio.play(.uiSelect); leave()
                 }
                 .buttonStyle(.novaPlain)
                 .novaFont(.button)
@@ -104,8 +113,16 @@ struct IntroSequenceView: View {
 
     private func advance() {
         model.audio.play(.uiSelect)
-        if index >= pages.count - 1 { onFinish() }
+        if movie.isPlaying { return }
+        if index >= pages.count - 1 { leave() }
         else { index += 1 }
+    }
+
+    /// Leaves the intro, after the text's movie when its Flags put it last.
+    private func leave() {
+        if movie.isPlaying { return }
+        let text = pages.last.map { $0.pictID == nil } ?? false
+        if text { movie.finish(descID: scenario.introTextID, data: model.data, then: onFinish) } else { onFinish() }
     }
 
     private func pict(_ id: Int) -> CGImage? {

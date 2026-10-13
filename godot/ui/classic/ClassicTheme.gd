@@ -47,6 +47,7 @@ static func setup(nova: Object) -> void:
 	if _nova != nova:
 		reset()
 	_nova = nova
+	_refresh_tc_fonts()
 
 
 static func reset() -> void:
@@ -139,9 +140,46 @@ static func show_focus(c: Control) -> bool:
 
 # --- fonts ---------------------------------------------------------------------
 
-## The font for an original font name (cölr / ïntf): Charcoal -> Rubik, else Arimo.
+## The font for an original font name (cölr / ïntf): Charcoal -> Rubik, else Arimo. A font file the
+## selected total conversion ships (EV Classic / EV Override: Sillycon.ttf, named "Sillycon Plain" by
+## their ïntf) wins when its family or file name matches.
 static func font_for(original_name: String) -> Font:
-	return RUBIK if original_name.strip_edges().to_lower() == "charcoal" else ARIMO
+	var key: String = original_name.strip_edges().to_lower()
+	if _tc_fonts.has(key):
+		return _tc_fonts[key]
+	return RUBIK if key == "charcoal" else ARIMO
+
+
+## Fonts registered from the conversion's folders: lower-case family / "family style" / file stem -> Font.
+static var _tc_fonts: Dictionary = {}
+static var _tc_fonts_sig: String = ""
+
+
+## (Re)register the selected conversion's font files (NovaPlugins.font_files); cheap when unchanged.
+static func _refresh_tc_fonts() -> void:
+	if _nova == null or not ClassDB.class_exists("NovaPlugins"):
+		return
+	var pl: Object = ClassDB.instantiate("NovaPlugins")
+	if pl == null or not pl.has_method("font_files"):
+		return
+	var sig: String = str(pl.font_files())
+	if sig == _tc_fonts_sig:
+		return
+	_tc_fonts_sig = sig
+	_tc_fonts = {}
+	var arr: Variant = JSON.parse_string(sig)
+	if not (arr is Array):
+		return
+	for p in arr:
+		var path: String = str(p)
+		var ff := FontFile.new()
+		if ff.load_dynamic_font(path) != OK:
+			continue
+		var fam: String = ff.get_font_name().strip_edges().to_lower()
+		var style: String = ff.get_font_style_name().strip_edges().to_lower()
+		for k in [fam, (fam + " " + style).strip_edges(), path.get_file().get_basename().to_lower()]:
+			if str(k) != "":
+				_tc_fonts[str(k)] = ff
 
 
 static func body_font() -> Font:

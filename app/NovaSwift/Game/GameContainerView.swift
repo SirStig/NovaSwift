@@ -1156,7 +1156,8 @@ struct GameContainerView: View {
                         Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity)
                         DescTextDialog(title: story.title, text: story.text,
                                        graphicID: flightMissionServices.storyDescID
-                                           .flatMap { host.game?.desc($0)?.pictureID }) {
+                                           .flatMap { host.game?.desc($0)?.pictureID },
+                                       descID: flightMissionServices.storyDescID) {
                             flightMissionServices.storyText = nil
                         }
                         .transition(.opacity)

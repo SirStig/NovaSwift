@@ -12,7 +12,10 @@ import AppKit
 /// and any MFi / Xbox / PlayStation controller.
 struct ControlsView: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    /// Closes the editor. It's presented as a full-window overlay (the drawn
+    /// keyboard and pad need the room a sheet doesn't give), so the host owns
+    /// dismissal rather than a navigation/sheet environment.
+    var onClose: () -> Void
     /// Keyboard rows armed for capture (the next key press binds it).
     @State private var capturing: GameAction?
     @State private var padCapturing: GameAction?
@@ -46,26 +49,16 @@ struct ControlsView: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            // Cursor-pressable (a system segmented Picker isn't) — and this is
-            // the controller-remapping screen, so a pad has to be able to reach it.
-            NovaSegmentedPicker(selection: $tab, options: Array(EditorTab.allCases)) { $0.rawValue }
+            header
             content.frame(maxWidth: .infinity, maxHeight: .infinity)
             footer
         }
-        .padding(14)
-        #if os(macOS)
-        .frame(minWidth: 940, minHeight: 640)
-        #endif
-        .cursorCancel(padCapturing == nil ? { draft = nil; dismiss() } : nil)
+        .padding(.horizontal, 20).padding(.vertical, 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(white: 0.07).ignoresSafeArea())
+        .cursorCancel(padCapturing == nil ? { cancel() } : nil)
         .cursorDefault(padCapturing == nil ? { commitKeys() } : nil)
         .novaResponsive()
-        .navigationTitle("Controls")
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { draft = nil; dismiss() }
-            }
-            ToolbarItem(placement: .confirmationAction) { Button("Done") { commitKeys() } }
-        }
         .focusable()
         .focused($rootFocus)
         .onAppear { if draft == nil { draft = model.bindings } }
@@ -114,7 +107,7 @@ struct ControlsView: View {
                           onButtonTap: padButtonTapped, onActionTap: padActionTapped, onUnbind: unbindPad)
         #if os(iOS)
         case .touch:
-            Text("Touch — coming next").novaFont(.body).foregroundStyle(.secondary)
+            TouchTab()
         #endif
         }
     }
@@ -130,14 +123,27 @@ struct ControlsView: View {
                     .novaFont(.caption).foregroundStyle(.red)
             }
             Spacer()
-            if pad != nil {
-                // The toolbar's Cancel/Done are system chrome the controller
-                // cursor can't press — mirror them here for pad players
-                // (Ⓑ = Cancel and Menu = Done work anywhere on this screen too).
-                CursorButton { draft = nil; dismiss() } label: { EditorChip(text: "Cancel") }
-                CursorButton { commitKeys() } label: { EditorChip(text: "Done", highlighted: true) }
-            }
         }
+    }
+
+    /// Title, device tabs and Cancel/Done in one bar. Everything is a
+    /// `CursorButton`/`NovaSegmentedPicker` (system chrome isn't cursor-
+    /// pressable, and this is the controller-remapping screen); Ⓑ = Cancel and
+    /// Menu = Done work anywhere on the screen too.
+    private var header: some View {
+        HStack(spacing: 16) {
+            Text("Controls").novaFont(.title, weight: .bold).foregroundStyle(novaAmber)
+            NovaSegmentedPicker(selection: $tab, options: Array(EditorTab.allCases)) { $0.rawValue }
+                .frame(maxWidth: 420)
+            Spacer(minLength: 12)
+            CursorButton { cancel() } label: { EditorChip(text: "Cancel") }
+            CursorButton { commitKeys() } label: { EditorChip(text: "Done", highlighted: true) }
+        }
+    }
+
+    private func cancel() {
+        draft = nil
+        onClose()
     }
 
     private func resetToDefaults() {
@@ -152,7 +158,9 @@ struct ControlsView: View {
             model.padBindings.resetToDefaults()
             model.commitPadBindings()
         #if os(iOS)
-        case .touch: break
+        case .touch:
+            model.touchLayout = .default
+            model.commitTouchLayout()
         #endif
         }
     }
@@ -217,7 +225,7 @@ struct ControlsView: View {
             return
         }
         if let draft { model.bindings = draft; model.commitBindings() }
-        dismiss()
+        onClose()
     }
 
     private func beep() {

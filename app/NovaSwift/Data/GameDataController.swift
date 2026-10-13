@@ -159,7 +159,7 @@ final class GameDataController: ObservableObject {
         NovaFontAvailability.reset()
     }
 
-    private nonisolated static func registerFont(at url: URL) {
+    nonisolated static func registerFont(at url: URL) {
         var error: Unmanaged<CFError>?
         let ok = CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error)
         if !ok, let error {
@@ -403,6 +403,11 @@ final class GameDataController: ObservableObject {
         }
         Log.data.info("reload: using base data at \(baseDir.path, privacy: .public)")
         Self.registerFonts(from: baseDir)
+        // A total conversion's own font (EV Classic / EV Override ship Sillycon.ttf; their ïntf names
+        // "Sillycon Plain"): register it so the HUD's `ïntf.statusFont` resolves, as the original
+        // finds it installed beside the conversion.
+        for url in TCAddOns.fontFiles(in: mediaDirectories()) { Self.registerFont(at: url) }
+        NovaFontAvailability.reset()
         return (baseDir, GameLibrary.discoverResourceFiles(in: baseDir))
     }
 

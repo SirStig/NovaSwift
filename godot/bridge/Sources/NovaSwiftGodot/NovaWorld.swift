@@ -1982,11 +1982,11 @@ class NovaWorld: Node2D {
     /// (shown `duration` s each) and the intro `dësc` text. Both empty when it has none.
     @Callable(autoSnakeCase: true) func pilotIntro(scenarioID: Int) -> String {
         guard let game, let sc = game.selectableScenarios().first(where: { $0.id == scenarioID }) else {
-            return "{\"slides\":[],\"text\":\"\"}"
+            return "{\"slides\":[],\"text\":\"\",\"desc\":-1}"
         }
         let text = sc.introTextID.map { game.descText($0) } ?? ""
         return Self.json(["slides": sc.introSlides.map { ["pict": $0.pictID, "duration": $0.duration] as [String: Any] },
-                          "text": text])
+                          "text": text, "desc": sc.introTextID ?? -1] as [String: Any])
     }
 
     /// Settings > Saved Games > Frequent autosave.
@@ -3563,11 +3563,12 @@ class NovaWorld: Node2D {
     /// A story text is waiting (a briefing, completion text, refusal, …).
     @Callable(autoSnakeCase: true) func storyTextPending() -> Bool { !storyState.services.texts.isEmpty }
 
-    /// The head text as JSON `{title, text, pict}` (`pict` = the `dësc`'s PICT id or -1).
+    /// The head text as JSON `{title, text, pict, desc}` (`pict` = the `dësc`'s PICT id or -1; `desc` = its dësc id or -1,
+    /// whose movie the frontend plays with the text).
     @Callable(autoSnakeCase: true) func storyTextInfo() -> String {
         guard let t = storyState.services.texts.first else { return "{}" }
         let pict = t.descID.flatMap { game?.desc($0)?.pictureID }.flatMap { game?.hasPICT($0) == true ? $0 : nil } ?? -1
-        return Self.json(["title": t.title, "text": t.text, "pict": pict] as [String: Any])
+        return Self.json(["title": t.title, "text": t.text, "pict": pict, "desc": t.descID ?? -1] as [String: Any])
     }
 
     /// OK on the head text.
@@ -4598,6 +4599,12 @@ class NovaWorld: Node2D {
         return makeWorld(systemID: currentSystemID ?? -1)
     }
 
+    @Callable(autoSnakeCase: true) func debugGiveIff() -> Bool {
+        guard let game, let o = game.outfits().first(where: { $0.has(.iff) }) else { return false }
+        pilot.grantOutfit(o.id)
+        return makeWorld(systemID: currentSystemID ?? -1)
+    }
+
     /// `[{pers, mission, onBoard, deactivate, leave}]` — përs that offer a LinkMission.
     @Callable(autoSnakeCase: true) func debugPersOffers() -> String {
         guard let game else { return "[]" }
@@ -5464,7 +5471,7 @@ class NovaWorld: Node2D {
     /// force the 1-in-140 roll, and return the text its broadcast will show ("" = no such pêrs).
     @Callable(autoSnakeCase: true) func debugArmHailQuote() -> String {
         guard let world, let game, let npc = world.npcs.first(where: { $0.isAlive }) else { return "" }
-        let gates = 0x0020 | 0x0010 | 0x0004 | 0x0008 | 0x0400 | 0x0800 | 0x0080
+        let gates: UInt16 = 0x0020 | 0x0010 | 0x0004 | 0x0008 | 0x0400 | 0x0800 | 0x0080
         for id in 128..<1000 {
             guard let pers = game.pers(id), pers.hailQuote >= 1, pers.flags & gates == 0, !pers.hailQuoteWhenDisabled,
                   let quote = game.singleString(pers.hailQuote + 4999) ?? game.stringList(7101)?.string(at: pers.hailQuote),
@@ -5477,6 +5484,12 @@ class NovaWorld: Node2D {
             return quote.replacingOccurrences(of: "<OSN>", with: pers.name)
         }
         return ""
+    }
+
+    /// Test seam (status_line_selfcheck): a threat appears while the volume is low, so the Red Alert
+    /// blink indicator starts (the same `RedAlertCue.advance` the per-frame tick runs).
+    @Callable(autoSnakeCase: true) func debugRedAlertBlink() {
+        _ = sound.redAlert.advance(rawCalls: 61, lowVolume: true, inEscapePod: false, threat: { true })
     }
 
     /// The raw-call display length of a line the bridge posted with a non-default duration, popped
@@ -5493,6 +5506,11 @@ class NovaWorld: Node2D {
 
     /// The Red Alert blink frame (cicn 18000 + this) while the indicator runs, else -1 (B6).
     @Callable(autoSnakeCase: true) func redAlertBlinkFrame() -> Int { sound.redAlert.blinkFrame ?? -1 }
+
+    /// The spöb id of each stellar body, SAME order as `body_transforms()`.
+    @Callable(autoSnakeCase: true) func bodyIds() -> PackedInt32Array {
+        PackedInt32Array((world?.systemContext.bodies ?? []).map { Int32($0.id) })
+    }
 
     /// Per stellar body, SAME order as `body_transforms()`: `[r, g, b]` (0...1) of the radar ring
     /// when an IFF is fitted (`RadarIFF.stellarColor`, 0x00466030); empty without one (B7).

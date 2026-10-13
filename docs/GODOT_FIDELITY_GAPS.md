@@ -51,21 +51,21 @@ already flow through `drain_*_messages`). Tests: extend `godot/tests/gameplay_ga
 | A7 | Strict Play pilot: exact speeds instead of the 1.5x/2/3 non-strict scale (FL-03); per-day world seed | DONE (2026-10-13, `WorldPilotLink`; see GODOT_LAYER.md "Live-world wiring") | bridge leaves `world.strictPlay` false for every pilot and `GameSession.makeWorld` always uses the fixed seed `0x5EED_1234` (Apple passes `currentWorldSeed(systemID:)` from day) so ambient traffic is identical every visit |
 | A8 | Landing/departure bookkeeping the Apple container does at `depart()`: `onMissionAuxShipsArrived` budget decrement, `recordMunitions` on launch, `warnStrandedFighters` | DONE (2026-10-13, `WorldPilotLink`; see GODOT_LAYER.md "Live-world wiring") | `Munitions.record` is called on save only (`NovaWorld.swift:2274`); verify aux-ship budget decrement and the "N fighters abandoned" accounting |
 
-### Package B. Status line, messages, keys (what the player reads and presses)  [S-M]
+### Package B. Status line, messages, keys (what the player reads and presses)  [DONE 2026-10-13]
 
 Files: `godot/Main.gd`, `godot/Controls.gd`, `godot/ui/classic/AuthenticHUD.gd`, `godot/Prefs.gd` (key table only), bridge `NovaWorld.swift` in
 `Flight travel` / `Landing` / `completeHyperjump` / `launch` regions, `UIPolish.swift`. Do not touch flight/*.gd (package F).
 
 | # | Original behaviour | Status | Concrete gap |
 |---|---|---|---|
-| B1 | Arrival line after every jump/gate: sÿst buoy (STR# 1000, UI-12) else "Arriving in the X system on <date>." (#43-48, gate/wormhole #46/#47, #49 "No stellar objects present.", abandoned-fighter clause) | MISSING | `completeHyperjump` only sets `nav.arrivedIn`; `OriginalText.arrival` and `game.systemMessageText` are never called. Apple `postArrivalLine` (`GameContainerView.swift:1858`) |
-| B2 | Launch line "Launching from X on <date>." (#55-60) | MISSING | `launch()` forwards a staged `Q` quote only; `OriginalText.launch` never called (Apple `postLaunchLine`, :1887) |
-| B3 | HailQuote broadcasts: pêrs/ships speak on the status line (1/140 per call after ~45 s, gated by pêrs flags; on turning hostile; on ambush) | MISSING | no `broadcastContextProvider` / `GameScene.broadcastHailQuotes` port |
-| B4 | Return dismisses the message (slot 6); empty post clears it; message timers run on sim time and freeze while paused | PARTIAL | no `dismiss_message` action in `Controls.gd`; `Main.gd` ages `_log` by wall clock |
-| B5 | `\` / Shift-`\` cycles the travel destination without opening the map (UI-15); Tab/`\` cycle adjacent systems on the map | MISSING | no binding (also see D) |
-| B6 | Red-alert blink icon (cicn 18000+frame, top-right) while threatened; x2 speed icon (cicn 20000) | MISSING | `RedAlertCue` drives sound only; `x2_active()` is exported but no GDScript reads it |
-| B7 | Radar stellar colours by landing standing when an IFF is fitted (RadarIFF.stellarColor) | PARTIAL | `AuthenticHUD._draw_radar` draws every stellar as a dim ring |
-| B8 | Jump refusal overlays #30/#31/#36/#42 auto-clear when a jump becomes legal (FL-23) | PARTIAL | refusal text is produced; clear-on-legal not done |
+| B1 | Arrival line after every jump/gate: sÿst buoy (STR# 1000, UI-12) else "Arriving in the X system on <date>." (#43-48, gate/wormhole #46/#47, #49 "No stellar objects present.", abandoned-fighter clause) | DONE (2026-10-13, see GODOT_LAYER.md "Status line, messages and HUD icons") | `completeHyperjump` only sets `nav.arrivedIn`; `OriginalText.arrival` and `game.systemMessageText` are never called. Apple `postArrivalLine` (`GameContainerView.swift:1858`) |
+| B2 | Launch line "Launching from X on <date>." (#55-60) | DONE (2026-10-13, see GODOT_LAYER.md "Status line, messages and HUD icons") | `launch()` forwards a staged `Q` quote only; `OriginalText.launch` never called (Apple `postLaunchLine`, :1887) |
+| B3 | HailQuote broadcasts: pêrs/ships speak on the status line (1/140 per call after ~45 s, gated by pêrs flags; on turning hostile; on ambush) | DONE (2026-10-13, see GODOT_LAYER.md "Status line, messages and HUD icons") | no `broadcastContextProvider` / `GameScene.broadcastHailQuotes` port |
+| B4 | Return dismisses the message (slot 6); empty post clears it; message timers run on sim time and freeze while paused | DONE (2026-10-13, see GODOT_LAYER.md "Status line, messages and HUD icons") | no `dismiss_message` action in `Controls.gd`; `Main.gd` ages `_log` by wall clock |
+| B5 | `\` / Shift-`\` cycles the travel destination without opening the map (UI-15); Tab/`\` cycle adjacent systems on the map | DONE (2026-10-13, see GODOT_LAYER.md "Status line, messages and HUD icons") | no binding (also see D) |
+| B6 | Red-alert blink icon (cicn 18000+frame, top-right) while threatened; x2 speed icon (cicn 20000) | DONE (2026-10-13, see GODOT_LAYER.md "Status line, messages and HUD icons") | `RedAlertCue` drives sound only; `x2_active()` is exported but no GDScript reads it |
+| B7 | Radar stellar colours by landing standing when an IFF is fitted (RadarIFF.stellarColor) | DONE (2026-10-13, see GODOT_LAYER.md "Status line, messages and HUD icons") | `AuthenticHUD._draw_radar` draws every stellar as a dim ring |
+| B8 | Jump refusal overlays #30/#31/#36/#42 auto-clear when a jump becomes legal (FL-23) | DONE (2026-10-13, see GODOT_LAYER.md "Status line, messages and HUD icons") | refusal text is produced; clear-on-legal not done |
 
 ### Package C. Preferences, Key Settings dialog, ambient sound  [S-M]
 

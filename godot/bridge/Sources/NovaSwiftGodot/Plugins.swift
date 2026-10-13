@@ -604,37 +604,35 @@ class NovaPlugins: RefCounted {
     /// `Ui_PlayMovieFileModal`): "Nova Plug-ins" before "Nova Files".
     @Callable(autoSnakeCase: true) func mediaDirs() -> String {
         let rt = PluginRuntime.shared
-        var out: [String] = []
-        func add(_ u: URL?) {
-            guard let p = u?.path, !p.isEmpty, !out.contains(p) else { return }
-            out.append(p)
-        }
-        let active = rt.plugins.filter(\.isEnabled)
-        if let tc = active.last(where: \.isTotalConversion) {
-            // The conversion's add-ons (later in the list wins, so search them first).
-            for id in tc.addOnIDs.reversed() {
-                if let p = active.first(where: { $0.id == id }) ?? rt.plugins.first(where: { $0.id == id }) {
-                    for u in p.allFileURLs { add(u.deletingLastPathComponent()) }
-                    add(p.folderURL)
-                }
-            }
-            for u in tc.fileURLs { add(u.deletingLastPathComponent()) }
-            for u in tc.novaFilesURLs { add(u.deletingLastPathComponent()) }
-        } else {
-            for p in active.reversed() {
-                for u in p.allFileURLs { add(u.deletingLastPathComponent()) }
-                add(p.folderURL)
-            }
-        }
-        add(rt.baseDir)
-        return Self.json(out)
+        return Self.json(TCAddOns.mediaDirectories(plugins: rt.plugins, baseDir: rt.baseDir).all.map(\.path))
+    }
+
+    /// Font files (`.ttf` / `.otf`) the selected total conversion (and its add-ons) ships next to its
+    /// data, as JSON `[path]`; the frontend registers them (the data's `ïntf` names "Sillycon Plain").
+    @Callable(autoSnakeCase: true) func fontFiles() -> String {
+        let rt = PluginRuntime.shared
+        return Self.json(TCAddOns.fontFiles(in: TCAddOns.mediaDirectories(plugins: rt.plugins, baseDir: rt.baseDir)).map(\.path))
+    }
+
+    /// The font family names the loaded data asks for (`ïntf` status fonts), JSON `[name]`.
+    @Callable(autoSnakeCase: true) func referencedFontNames() -> String {
+        Self.json(host?.dbgGame?.referencedFontNames ?? [])
+    }
+
+    /// The first file called `name` in the media folders ("" = none), flat in priority order then nested.
+    @Callable(autoSnakeCase: true) func findMedia(name: String) -> String {
+        let rt = PluginRuntime.shared
+        return TCAddOns.findMedia(named: name, in: TCAddOns.mediaDirectories(plugins: rt.plugins, baseDir: rt.baseDir))?.path ?? ""
     }
 
     /// The movie file a `dësc` record names ("" = none), plus whether it plays after the text:
     /// `{movie, after}`. The Apple app plays it with the mission offer (`MissionBoardView`).
     @Callable(autoSnakeCase: true) func descMovie(id: Int) -> String {
-        guard let d = host?.dbgGame?.desc(id), let m = d.movieFilename else { return Self.json(["movie": "", "after": false] as [String: Any]) }
-        return Self.json(["movie": m, "after": d.moviePlaysAfterText] as [String: Any])
+        guard let d = host?.dbgGame?.desc(id), let m = d.movieFilename?.trimmingCharacters(in: .whitespaces), !m.isEmpty else {
+            return Self.json(["movie": "", "after": false, "double": false, "fill": false] as [String: Any])
+        }
+        return Self.json(["movie": m, "after": d.moviePlaysAfterText, "double": d.movieDoubleSize,
+                          "fill": d.movieFillsScreen] as [String: Any])
     }
 
     // MARK: Per-conversion add-ons (shared `TCAddOns`; the JSON in `plugins-state.json` under `tcAddOns`)

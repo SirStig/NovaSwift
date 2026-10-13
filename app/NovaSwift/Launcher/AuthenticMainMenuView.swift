@@ -301,7 +301,7 @@ struct AuthenticMainMenuView: View {
                     // port's About is under Settings > Support.
                     if let game = model.data.game, let desc = game.desc(32767) {
                         DescTextDialog(title: "", text: AboutNovaText.text(game: game),
-                                       graphicID: desc.pictureID, onClose: { sheet = nil })
+                                       graphicID: desc.pictureID, descID: 32767, onClose: { sheet = nil })
                     } else {
                         AboutView(onClose: { sheet = nil })
                     }
@@ -621,20 +621,10 @@ struct AuthenticMainMenuView: View {
 
     /// dësc 0x7ffe shown in the story-text reader.
     @ViewBuilder private var acknowledgements: some View {
-        ZStack {
-            Color.black.opacity(0.5).ignoresSafeArea()
-            NovaDialog(title: "", width: 480,
-                       buttons: [NovaDialogButton(title: "OK", isDefault: true) { sheet = nil }]) {
-                ScrollView {
-                    Text(model.data.game?.descText(32766) ?? "")
-                        .novaFont(.body)
-                        .foregroundStyle(.white)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .cursorScrollable()
-                .frame(maxHeight: 360)
-            }
-        }
+        // dësc 32766 carries the conversion's own movie (EV Classic: "EV Haikus.gif"), played with the text.
+        DescTextDialog(title: "", text: model.data.game?.descText(32766) ?? "",
+                       graphicID: model.data.game?.desc(32766)?.pictureID, descID: 32766,
+                       onClose: { sheet = nil })
     }
 
     /// The settled button under a point in global space, if any.

@@ -299,7 +299,9 @@ func draw_add(ci: CanvasItem) -> void:
 		var t2: float = p["age"] / p["life"]
 		var c2: Color = p["color"]
 		c2.a = p["alpha0"] * (1.0 - t2)
-		ci.draw_circle(r.w2l(p["pos"]), maxf(lerpf(p["size0"], p["size1"], t2) * 0.5, 0.5), c2)
+		var rad2: float = maxf(lerpf(p["size0"], p["size1"], t2) * 0.5, 0.5)
+		var at2: Vector2 = r.w2l(p["pos"])
+		ci.draw_rect(Rect2(at2.x - rad2, at2.y - rad2, rad2 * 2.0, rad2 * 2.0), c2)   # a quad, not a tessellated fan
 	for g in rings:
 		var t3: float = g["age"] / 0.3
 		ci.draw_arc(r.w2l(g["pos"]), 14.0 * (1.0 + t3), 0.0, TAU, 24, Color(0.6, 0.8, 1.0, 0.9 * (1.0 - t3)), 2.0, true)
@@ -324,4 +326,6 @@ func draw_normal(ci: CanvasItem) -> void:
 		else:
 			var t: float = p["age"] / p["life"]
 			c.a = p["alpha0"] * (1.0 - t)
-			ci.draw_circle(r.w2l(p["pos"]), maxf(lerpf(p["size0"], p["size1"], t) * 0.5, 0.5), c)
+			var rad: float = maxf(lerpf(p["size0"], p["size1"], t) * 0.5, 0.5)
+			var at: Vector2 = r.w2l(p["pos"])
+			ci.draw_rect(Rect2(at.x - rad, at.y - rad, rad * 2.0, rad * 2.0), c)

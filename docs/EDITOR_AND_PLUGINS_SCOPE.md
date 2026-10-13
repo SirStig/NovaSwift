@@ -47,6 +47,10 @@ Three deliverables, launchable from the launcher's **"Editor"** entry (a peer of
 3. **Save-game (pilot) editing** — open a `.plt`/pilot resource fork, decrypt it, edit
    cash/ship/outfits/legal-standing/mission-bits, re-encrypt, write it back.
 
+   *Update 2026-10-13:* each total conversion now has its own add-on list (`TCAddOns`, see
+   `docs/MOBILE_AND_PLUGINS.md` "Add-ons for a total conversion"); the editor's merge inputs see it
+   through `PluginBundle.addOnIDs`, so editing/testing EV Override with EVO Facelift needs no file copying.
+
 Design principle: the editor edits the **same `ResourceCollection` model the engine plays**,
 so "edit → preview in-engine" is cheap and authentic. No separate data model for the editor.
 

@@ -23,6 +23,7 @@ const BarScreens = preload("res://screens/BarScreens.gd")   # Hire Escort, Gambl
 const StoryGuide = preload("res://screens/StoryGuide.gd")
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
 const SpaceportClassic = preload("res://screens/SpaceportClassic.gd")   # the original-UI look
+const DescMovie = preload("res://ui/DescMovie.gd")   # the stellar's own dësc movie, played as the player docks
 
 const PANEL_SIZE := Vector2(1180, 660)
 const COL_DIM := Color(0.62, 0.66, 0.74)
@@ -125,9 +126,21 @@ func open() -> void:
 	_modern_center.visible = not _classic()
 	_story_labels = JSON.parse_string(_nova.story_labels()) if _nova.has_game() else {}
 	_show_hub()
-	# The main spaceport makes one lane offer as the player lands (0x00448670):
-	# simply touching down can hand over a mission. Its dialog is StoryScreens'.
-	if _nova.has_game():
+	# Docking plays the stellar's dësc movie first (Stellar_RunDockAndLaunchSequence 0x00455e10 ->
+	# Ui_LoadDescAndPlayMovie 0x0049e3c0, whatever the Flags say about "after the text").
+	var clip: Dictionary = {}
+	if _nova.has_game() and _info is Dictionary:
+		clip = DescMovie.lookup(int(_info.get("id", -1)))
+	if clip.is_empty():
+		_roll_landing_offer()
+	else:
+		DescMovie.play(self, clip, _roll_landing_offer)
+
+
+## The main spaceport makes one lane offer as the player lands (0x00448670):
+## simply touching down can hand over a mission. Its dialog is StoryScreens'.
+func _roll_landing_offer() -> void:
+	if _nova.has_game() and visible:
 		_nova.offer_roll("spaceport")
 
 

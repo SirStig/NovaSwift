@@ -33,24 +33,28 @@ struct KeyboardCanvas: View {
 
     var body: some View {
         GeometryReader { geo in
-            let margin: CGFloat = 10
-            let unit = max(8, min((geo.size.width - margin * 2) / layout.size.width,
-                                  (geo.size.height - margin * 2) / layout.size.height, 140))
-            let boardW = layout.size.width * unit, boardH = layout.size.height * unit
+            // The board's panel is a quarter-unit larger on every side; fit that
+            // whole panel and pin it to the top so nothing floats in empty space.
+            let unit = max(8, min(geo.size.width / (layout.size.width + 0.5),
+                                  geo.size.height / (layout.size.height + 0.5), 140))
+            let panelW = (layout.size.width + 0.5) * unit, panelH = (layout.size.height + 0.5) * unit
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: unit * 0.35, style: .continuous)
                     .fill(LinearGradient(colors: [Color(white: 0.11), Color(white: 0.06)],
                                          startPoint: .top, endPoint: .bottom))
                     .overlay(RoundedRectangle(cornerRadius: unit * 0.35, style: .continuous)
                         .strokeBorder(.white.opacity(0.08)))
-                    .frame(width: boardW + unit * 0.5, height: boardH + unit * 0.5)
-                    .offset(x: -unit * 0.25, y: -unit * 0.25)
-                ForEach(layout.keys) { cap in
-                    capView(cap, unit: unit)
+                    .frame(width: panelW, height: panelH)
+                ZStack(alignment: .topLeading) {
+                    ForEach(layout.keys) { cap in
+                        capView(cap, unit: unit)
+                    }
                 }
+                .frame(width: layout.size.width * unit, height: layout.size.height * unit, alignment: .topLeading)
+                .offset(x: unit * 0.25, y: unit * 0.25)
             }
-            .frame(width: boardW, height: boardH, alignment: .topLeading)
-            .position(x: geo.size.width / 2, y: geo.size.height / 2)
+            .frame(width: panelW, height: panelH, alignment: .topLeading)
+            .position(x: geo.size.width / 2, y: panelH / 2)
         }
     }
 
@@ -117,7 +121,7 @@ private struct KeyCapView: View {
                 hatch.clipShape(shape).padding(unit * 0.07)
             }
             legendAndName
-                .padding(EdgeInsets(top: unit * 0.1, leading: unit * 0.13, bottom: unit * 0.17, trailing: unit * 0.13))
+                .padding(EdgeInsets(top: unit * 0.07, leading: unit * 0.08, bottom: unit * 0.13, trailing: unit * 0.06))
             if locked {
                 Image(systemName: "lock.fill")
                     .font(.system(size: unit * 0.15)).foregroundStyle(.white.opacity(0.5))
@@ -139,7 +143,7 @@ private struct KeyCapView: View {
         }
         .padding(unit * 0.05)
         .opacity(cap.isBindable ? (layerAvailable ? 1 : 0.45) : 0.4)
-        .help(locked ? "The original reserves this key (the Escort Commands group keys 1–4, Caps Lock and F1–F5 can't be captured), so it keeps its fixed role." : "")
+        .help(locked ? "The original reserves this key (the Escort Commands group keys 1–4, Caps Lock and F1–F5 can't be captured), so it keeps its fixed role." : (cap.frame.height < 0.9 ? (action?.title ?? "") : ""))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("\(cap.legend.isEmpty ? "Space" : cap.legend), \(action?.title ?? "unbound")"))
         .onAppear { updatePulse() }
@@ -173,24 +177,38 @@ private struct KeyCapView: View {
         }
     }
 
-    /// Key legend top-left (small), bound action name centred (auto-shrinking, 2 lines).
+    /// One name size for the whole board (derived from the unit), so "Menu" and
+    /// "Fire 2" read alike. Names live below a reserved legend band and never
+    /// share pixels with the legend; half-height keys drop the name and keep
+    /// legend + tint (the full title is in the tooltip).
     private var legendAndName: some View {
-        ZStack {
-            Text(cap.legend)
-                .font(.system(size: unit * (cap.legend.count > 2 ? 0.19 : 0.25), weight: .medium, design: .rounded))
-                .foregroundStyle(.white.opacity(action == nil ? 0.8 : 0.6))
-                .lineLimit(1).minimumScaleFactor(0.5)
-                .frame(maxWidth: .infinity, maxHeight: .infinity,
-                       alignment: action == nil && cap.legend.count <= 2 ? .center : .topLeading)
-            if let action {
-                Text(actions.count > 1 ? action.shortName + " +" : action.shortName)
-                    .font(.system(size: unit * 0.22, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2).minimumScaleFactor(0.45)
-                    .shadow(color: .black.opacity(0.6), radius: 1, y: 1)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                    .padding(.top, unit * 0.14)
+        let faceH = cap.frame.height * unit - unit * 0.15
+        let half = cap.frame.height < 0.9
+        return Group {
+            if let action, !half {
+                VStack(spacing: 0) {
+                    Text(cap.legend)
+                        .font(.system(size: min(unit * 0.19, faceH * 0.24), weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(height: faceH * 0.30, alignment: .topLeading)
+                    Text(action.shortName)
+                        .font(.system(size: max(8, unit * 0.165), weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .shadow(color: .black.opacity(0.6), radius: 1, y: 1)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                }
+            } else {
+                Text(cap.legend)
+                    .font(.system(size: half ? max(9, unit * 0.24) : unit * (cap.legend.count > 2 ? 0.19 : 0.25),
+                                  weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(action == nil ? 0.8 : 0.95))
+                    .lineLimit(1).minimumScaleFactor(0.5)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity,
+                           alignment: action == nil && cap.legend.count <= 2 ? .center : .topLeading)
             }
         }
     }

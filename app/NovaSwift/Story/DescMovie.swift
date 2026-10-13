@@ -22,7 +22,6 @@ final class DescMoviePlayback: ObservableObject {
     @Published private(set) var gif: URL?
     @Published private(set) var clip: Clip?
     private var then: (() -> Void)?
-    private var playedAfter: Set<Int> = []
 
     var isPlaying: Bool { player != nil || gif != nil }
 
@@ -36,15 +35,16 @@ final class DescMoviePlayback: ObservableObject {
     }
 
     /// Plays a before-text movie as the text opens; an after-text movie waits for `finish`.
-    func begin(descID: Int?, data: GameDataController, then: (() -> Void)? = nil) {
-        guard let c = Self.clip(for: descID, data: data), !c.afterText else { then?(); return }
+    /// `always`: play whatever the Flags say about "after the text" (docking, `FUN_0049e3c0`, plays at once).
+    func begin(descID: Int?, data: GameDataController, always: Bool = false, then: (() -> Void)? = nil) {
+        guard let c = Self.clip(for: descID, data: data), always || !c.afterText else { then?(); return }
         start(c, then: then)
     }
 
     /// Runs `action` once the text is closed, after its movie when the dësc puts the movie last.
     func finish(descID: Int?, data: GameDataController, then action: @escaping () -> Void) {
         if isPlaying { return }
-        if let c = Self.clip(for: descID, data: data), c.afterText, playedAfter.insert(c.descID).inserted {
+        if let c = Self.clip(for: descID, data: data), c.afterText {
             start(c, then: action)
         } else {
             action()

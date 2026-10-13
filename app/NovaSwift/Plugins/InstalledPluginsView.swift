@@ -62,6 +62,7 @@ struct InstalledPluginsView: View {
                     }
                     .frame(maxWidth: .infinity).padding(.vertical, 50)
                 } else {
+                    if let tc = TCAddOns.selectedTC(model.data.plugins) { TCAddOnsSection(tc: tc) }
                     ForEach(model.data.plugins.filter { !$0.isOptional }) { row($0) }
                     let optional = model.data.plugins.filter(\.isOptional)
                     if !optional.isEmpty {
@@ -143,6 +144,9 @@ struct InstalledPluginsView: View {
                                                 set: { model.data.setPlugin(bundle.id, enabled: $0) }))
                     .labelsHidden()
                     .cursorClickable { model.data.setPlugin(bundle.id, enabled: !bundle.isEnabled) }
+            } else if let tc = TCAddOns.selectedTC(model.data.plugins), !bundle.isTotalConversion {
+                // Original rule: a conversion ignores global plug-ins; add it to the conversion's list above.
+                Text("Not loaded under \(tc.name)").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
             } else {
                 Text("Loads automatically").font(.caption).foregroundStyle(.secondary)
             }
