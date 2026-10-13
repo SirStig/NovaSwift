@@ -1,10 +1,16 @@
 # Godot Layer — Linux / Windows support
 
-**In progress.** The foundation, a runnable vertical slice, and the flight
-renderer are in. Verified on-toolchain (macOS, Swift 6.3 + Godot 4.7): the bridge
-builds clean, a headless run loads real EV Nova data, builds a system, and steps
-the simulation without errors. Linux and Windows themselves are still unverified
-— CI is what will catch platform-specific gaps.
+**In progress.** The frontend plays a pilot from the main menu through flight,
+landing, the spaceport, missions, the map and saving. Verified on-toolchain (macOS,
+Swift 6.3 + Godot 4.7): the bridge builds, headless self-checks load real EV Nova
+data and step the simulation, and all 13 catalog plug-ins load. Linux, Windows and
+the Steam Deck have not been built or run, and flight visuals have not been checked
+on a real GPU. Some 2026-10-13 work is written but not yet built or tested; each
+such section below says so.
+
+This file describes how the layer is built. What is done, written-but-untested and
+open is tracked in [GODOT_FIDELITY_GAPS.md](GODOT_FIDELITY_GAPS.md), summarised in
+[STATUS.md](STATUS.md#linux-and-windows). Where this file and those disagree, they win.
 
 ## Version matrix
 
@@ -356,8 +362,8 @@ CI `package-*` jobs, Steam Deck setup).
    850²/d² distance law, mono) is the shared `SoundVoiceBoard` — a separate
    `drain_sound_cues` returns per-voice commands for 16 `AudioStreamPlayer`s, so
    `drain_events`/`drain_effects` are untouched. Beeps play on the pilot menu and
-   galaxy map; no music (the Apple app only plays the title-menu track, and this
-   frontend has no main menu). Headless check: `godot/tests/audio_selfcheck.gd`.
+   galaxy map (title-menu music and the rest of the sound pass came later; see
+   "Sound sites" in GODOT_FIDELITY_GAPS.md). Headless check: `godot/tests/audio_selfcheck.gd`.
    The staggered NPC death-burst sounds are in (`DeathBurstSounds`). Not yet: a
    volume UI (`GameAudio.master_volume`/`sfx_volume`/`ui_volume` exist), beeps
    on the flight target keys, and the Apple app still keeps its own copy of the
@@ -431,7 +437,7 @@ CI `package-*` jobs, Steam Deck setup).
    the Apple app now calls; `HyperjumpCommit.apply` takes optional services.
    Headless checks: `tests/story_selfcheck.gd` (accept a BBS delivery, jump, land,
    pay + text, calendar advance) and `tests/story_menu_check.gd` (offer modal
-   owns input, BBS/bar/info focus). Gambling, hire escort, jettison and in-flight `pêrs` offers are wired through the same helpers as the Apple app. The gambling reset still diverges (EC-26). Still to wire as frontend work: mission-offer `dësc` movies.
+   owns input, BBS/bar/info focus). Gambling, hire escort, jettison and in-flight `pêrs` offers are wired through the same helpers as the Apple app. The gambling reset still diverges (EC-26). Mission-offer `dësc` movies are wired (see "Total-conversion add-ons").
 6. **Packaging** — Godot export presets + CD for Linux/Windows artifacts.
 
 ## Non-goals
@@ -741,6 +747,8 @@ PNG previews through `tests/UiCompose.gd`); `spaceport_menu_check` / `story_menu
 * Selfcheck: `godot/tests/ui_polish_selfcheck.gd` (also counts engine errors with an `OS.add_logger` logger).
 
 ### Galaxy map: borders, mission marks, Tab cycle, gate-entry movie (2026-10-13)
+
+**Written, not yet built or tested** (Godot and the matching Apple edits). The Tab / `\` map cycle is an inference: the original handlers are not decompiled on their own.
 
 * **Show / Hide Borders** (D1): the original's political overlay, built by the shared `PoliticalOverlay`
   (`Sources/NovaSwiftKit/PoliticalOverlay.swift`; new `discs(...)`, `build(...)`, `allied`, `rgba(game:)`, so Apple and Godot use one

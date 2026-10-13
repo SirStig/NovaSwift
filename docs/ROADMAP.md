@@ -10,8 +10,10 @@ What's next, roughly in order. For what already works, see
 [FIDELITY_PLAN.md](reverse-engineering/FIDELITY_PLAN.md) has 179 items. 163 are done. 16 are open after a later read of the executable: OS-06, EC-04, EC-05, EC-07, EC-09, EC-10, EC-11, EC-12, EC-25, EC-26, OS-08, AI-44, UI-06, MS-19, EC-27, EC-28. What's left:
 
 - Those 16 items. [STATUS.md](STATUS.md) lists them.
-- The deferred pieces listed in STATUS.md (hint chain, Player Info Tab cycling,
-  map key cycling, gate hold for mission ships, jump-engage countdown).
+- The deferred pieces listed in STATUS.md (status-line sentences and hint chain,
+  Player Info Tab cycling, target-cycling order and AI-state filter, gate hold for
+  mission ships, jump-engage countdown), and the Apple-app differences listed
+  under Known gaps there.
 - The plan's open questions: run the remaining routines in the emulator
   (perishable cargo decay, the legal-record flood split, outfitter cancel and
   the day flag, bar re-offer timing) and the static reads (engine glow states,
@@ -65,7 +67,7 @@ Left:
 
 ### Godot frontend for Linux and Windows
 
-The frontend calls the shared engine. Remaining frontend work is the still-open wiring in [GODOT_FIDELITY_GAPS.md](GODOT_FIDELITY_GAPS.md) and packaged Linux and Windows builds. It does not block the Apple builds. See [GODOT_LAYER.md](GODOT_LAYER.md).
+The frontend calls the shared engine and plays through on macOS. What remains, in order: build and test the work that is written but not yet built (gate movies, map borders and markers, sound parity, brightness, About picture), the still-open wiring in [GODOT_FIDELITY_GAPS.md](GODOT_FIDELITY_GAPS.md), then first Linux, Windows and Steam Deck builds, verified locally. It does not block the Apple builds. The state table is in [STATUS.md](STATUS.md#linux-and-windows); the design is in [GODOT_LAYER.md](GODOT_LAYER.md).
 
 ### Multiplayer
 

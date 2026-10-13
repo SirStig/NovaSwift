@@ -65,7 +65,7 @@ enum Haptics {
     private static weak var engineController: GCController?
 
     private static func controllerEngine() -> CHHapticEngine? {
-        guard let controller = GCController.current, controller.haptics != nil else { return nil }
+        guard let controller = GCController.active, controller.haptics != nil else { return nil }
         if let cachedEngine, engineController === controller { return cachedEngine }
         guard let engine = controller.haptics?.createEngine(withLocality: .default) else { return nil }
         engine.resetHandler = { cachedEngine = nil }

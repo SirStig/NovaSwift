@@ -1,6 +1,36 @@
 import Foundation
 import GameController
 import NovaSwiftEngine
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
+
+extension GCController {
+    /// The pad to read: `current`, else any connected extended gamepad.
+    /// tvOS nils out `current` while the app is backgrounded and doesn't
+    /// restore it on return until the pad is touched (and no DidConnect fires
+    /// for a pad that never disconnected), so `current` alone left the
+    /// "Connect a Game Controller" gate stuck up after every resume.
+    static var active: GCController? {
+        if let c = current, c.extendedGamepad != nil { return c }
+        return controllers().first { $0.extendedGamepad != nil } ?? current
+    }
+
+    /// Every notification after which `active` may have changed: connect /
+    /// disconnect, current-pad switches, and the app returning to foreground.
+    static var activeChangeNotifications: [Notification.Name] {
+        var names: [Notification.Name] = [.GCControllerDidConnect, .GCControllerDidDisconnect,
+                                          .GCControllerDidBecomeCurrent, .GCControllerDidStopBeingCurrent]
+        #if canImport(UIKit)
+        names += [UIApplication.didBecomeActiveNotification, UIApplication.willEnterForegroundNotification]
+        #elseif canImport(AppKit)
+        names.append(NSApplication.didBecomeActiveNotification)
+        #endif
+        return names
+    }
+}
 
 /// Reads a connected MFi / Xbox / PlayStation controller and feeds the shared
 /// `InputController`. Twin-stick style: left stick = turn + thrust (fixed),
@@ -43,18 +73,16 @@ final class GameControllerInput {
 
     init(input: InputController) {
         self.input = input
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(changed),
-            name: .GCControllerDidConnect, object: nil)
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(changed),
-            name: .GCControllerDidDisconnect, object: nil)
+        for name in GCController.activeChangeNotifications {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(changed), name: name, object: nil)
+        }
         GCController.startWirelessControllerDiscovery {}
         changed()
     }
 
     @objc private func changed() {
-        let current = GCController.current
+        let current = GCController.active
         isConnected = current?.extendedGamepad != nil
         controllerName = isConnected ? current?.vendorName : nil
         // A newly paired pad re-runs the "flight took the pad" setup on the
@@ -73,7 +101,7 @@ final class GameControllerInput {
     var headingOffset: Double = 0
 
     func poll() {
-        guard let pad = GCController.current?.extendedGamepad else { return }
+        guard let pad = GCController.active?.extendedGamepad else { return }
         var c = ControlIntent()
 
         // A menu/dialog owns the pad: the sticks drive the UI cursor, not the
@@ -147,7 +175,7 @@ final class GameControllerInput {
     /// engine to push against), released to a free pull whenever a menu owns
     /// the pad so clicking through UI feels normal. No-op on other pads.
     private func setAdaptiveTriggers(flying: Bool) {
-        guard let dualSense = GCController.current?.extendedGamepad as? GCDualSenseGamepad else { return }
+        guard let dualSense = GCController.active?.extendedGamepad as? GCDualSenseGamepad else { return }
         for trigger in [dualSense.leftTrigger, dualSense.rightTrigger] {
             if flying {
                 trigger.setModeFeedbackWithStartPosition(0.15, resistiveStrength: 0.35)

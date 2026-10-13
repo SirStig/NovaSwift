@@ -655,7 +655,7 @@
     {
      "name": "Linux and Windows CI",
      "status": "partial",
-     "where": "workflow exists; Linux and Windows builds not verified yet"
+     "where": "workflow exists but is not used for verification; Linux and Windows builds are not verified"
     },
     {
      "name": "Flight with real-data sprites",
@@ -674,36 +674,43 @@
     },
     {
      "name": "Trade center",
-     "status": "partial",
-     "where": "buy/sell work; placeholder screen"
+     "status": "done",
+     "where": "godot/screens/SpaceportClassic.gd"
     },
     {
      "name": "Hyperjump and galaxy map",
-     "status": "planned"
+     "status": "partial",
+     "where": "jump and map work, tested on macOS; borders, mission markers, Tab/backslash cycling and gate-entry movies are written, not yet built or tested"
     },
     {
      "name": "Outfitter, shipyard, bar, missions",
-     "status": "planned"
+     "status": "done",
+     "where": "godot/screens/SpaceportClassic.gd, StoryScreens.gd"
     },
     {
      "name": "Sound",
-     "status": "planned"
+     "status": "partial",
+     "where": "plays through the shared voice list; parity fixes, ambient loop and brightness are written, not yet built or tested; title music from .mov is silent"
     },
     {
      "name": "Saving and loading pilots",
-     "status": "planned"
+     "status": "done",
+     "where": "godot/screens/PilotMenu.gd"
     },
     {
      "name": "Story runtime",
-     "status": "planned"
+     "status": "done",
+     "where": "godot/bridge Story.swift, StoryScreens.gd"
     },
     {
      "name": "Gamepad input",
-     "status": "planned"
+     "status": "done",
+     "where": "godot/Controls.gd"
     },
     {
      "name": "Packaged builds",
-     "status": "planned"
+     "status": "partial",
+     "where": "export presets and package-linux.sh exist; no Linux, Windows or Steam Deck build has been run"
     }
    ]
   },

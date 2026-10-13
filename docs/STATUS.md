@@ -13,14 +13,22 @@ die with the original's consequences. Plug-ins and total conversions load in the
 original's order.
 
 Gameplay has been checked against the original executable, system by system.
-Original behaviour is the default. The Linux/Windows frontend is partway done.
+After a later re-read, 16 of the plan's 179 items are open again (see below).
+Original behaviour is the default. The Linux/Windows frontend plays through on
+macOS and is partway done; its status table is under
+[Linux and Windows](#linux-and-windows).
+
+Where each kind of fact lives: plan items and open questions in
+[FIDELITY_PLAN.md](reverse-engineering/FIDELITY_PLAN.md); frontend gaps in the
+Godot port in [GODOT_FIDELITY_GAPS.md](GODOT_FIDELITY_GAPS.md). This page
+summarises both, and its counts are the ones the README and the website quote.
 
 ## How fidelity was checked
 
 The Windows executable of EV Nova CE (3,199 functions) was decompiled to
 pseudo-C. Each function was assigned to a subsystem (flight, weapons, AI and so
 on) from its name, the strings and resource types it touches, and its callers
-and callees. 718 of them are gameplay code.
+and callees. 718 were first tagged as gameplay code; the grid below counts 697 in gameplay groups once drawing and debug plumbing is split out.
 
 We then compared NovaSwift with that code area by area and wrote down every
 difference as an item in
@@ -46,13 +54,30 @@ The plan has 179 items in eight areas. 163 are done. 16 are open: a later read o
 
 Open: OS-06, EC-04, EC-05, EC-07, EC-09, EC-10, EC-11, EC-12, EC-25, EC-26, OS-08, AI-44, UI-06, MS-19, EC-27, EC-28. The first paragraph under an open heading is the current gap. An older Done paragraph under the same heading is historical.
 
-A few done items leave a small piece for later:
+A few done items leave a small piece for later. These are the same on the Apple
+app and the Godot frontend, because both call the shared engine:
 
-- UI-11: the original's new-pilot hint chain (overlaps NovaSwift's tutorial hints).
-- UI-13: Tab cycling in Player Info, and count words for junk cargo.
-- UI-15: map Tab/backslash cycling. (Caps Lock 2× mode is done: `GameSpeedRules`, `CapsLockState`.)
+- UI-11: about 20 status-line sentences the original does not print in those
+  situations (contraband, plunder "Took N credits", siphoned fuel, transferred
+  rounds, domination, defender scrambles, escort losses, "You are being scanned",
+  the wormhole prompt, "Your ship has been destroyed"), and the original's
+  new-pilot hint chain (STR# 2002 #22-31; overlaps NovaSwift's tutorial hints).
+- UI-13: Tab / Shift-Tab page cycling in Player Info, and count words for junk cargo.
+- UI-07: target cycling has no AI-state 0x15 filter, and a freed target slot is
+  reused instead of keeping spawn order.
+- UI-15: the map's Tab/backslash cycle is written from an inference. The two
+  handlers sit inside the 0x004a3aa0 loop and are not decompiled on their own.
 - AI-12: holding a mission ship at a gate.
 - FL-23: the jump-engage countdown and the cannot-jump message auto-clear.
+
+Not gaps, checked against the code on 2026-10-13: Caps Lock 2× mode
+(`GameSpeedRules`, `CapsLockState`, matches the frame loop at 0x00417600), the
+self-destruct cue sounds (arm 153, per-second 152, abort and blast 151), tractor
+pull including a heavier ship holding a lighter one, and combat chatter (escort
+acknowledgement, new target, target died, hull Flags2 0x0010 mute). Two things are
+still unread: the `përs` HailQuote broadcast gates (flags 0x0400 and 0x0800, the
+player-class gates, the ambush trigger), and eight smaller decompile questions
+listed in the plan's "Reopened" section.
 
 The plan also keeps a short list of open questions (mostly small constants that
 still need an emulator run) and decisions for the maintainer, such as default
@@ -63,7 +88,7 @@ short formulas and constants, with the original function's address.
 
 ## The function grid
 
-![One square per function in the original executable](branding/progress-blocks.svg?v=cad12035)
+![One square per function in the original executable](branding/progress-blocks.svg?v=67e937bb)
 
 One square per function in the EV Nova CE executable, grouped by subsystem.
 
@@ -77,9 +102,22 @@ One square per function in the EV Nova CE executable, grouped by subsystem.
 | Outline | Gameplay code whose role is still unknown. |
 | Dark grey | Nothing to port: C runtime, QuickTime, image and audio libraries, networking, blitters, Windows glue, the shareware nag, plus drawing and debug plumbing found during checking. |
 
-The counts below are from the last time the grid was drawn, when every plan item was marked done. The later re-read reopened the 16 items above, and the squares have not been redrawn, so green still includes functions whose items are open again. `site/assets/progress.json` is that same picture and has not been regenerated.
+The grid was redrawn after the 16 items were reopened. Rule, reproducible with
+`python3 scripts/reopen-progress.py`: a function that was green, is cited by at
+least one plan item, and is cited by no item marked **DONE** is amber. The 16 open
+items are the ones whose heading is not **DONE** in the plan. Functions confirmed
+by the line-by-line comparison (no citing item) stay green.
 
-651 green, 33 teal (done differently by design), 0 red, 0 blue, 2,515 dark grey (3,199 total). Of the 697 gameplay functions, 519 were marked matching, 24 done differently by design (NovaSwift's own save format, input layer, frame loop, and SwiftUI lists and dialogs), and 154 drawing or debug plumbing.
+3,199 functions: 638 green, 33 teal (done differently by design), 13 amber, 0 red,
+0 blue, 2,515 dark grey. Of the 697 gameplay functions, 506 are green, 24 teal
+(NovaSwift's own save format, input layer, frame loop, and SwiftUI lists and
+dialogs), 13 amber, and 154 drawing or debug plumbing. The 13 amber functions are
+the ones only OS-06, EC-07, EC-09, EC-12, EC-26, MS-19 and UI-06 cite. The other
+open items cite functions that other, finished items also cite, so those squares
+stay green: green means "matched when compared", and an open item can concern only
+one slice of a function. The tooltips list each square's citing items, taken from
+the plan as it stood at the last full redraw; a few may name an item that no longer
+lists that address.
 
 ## Original bugs and quirks
 
@@ -94,12 +132,17 @@ most useful feedback.
 A function is checked in one of two ways: a completed item in
 FIDELITY_PLAN.md cites its address, or a line-by-line comparison of its
 decompiled code against NovaSwift found it matching or found a difference that
-has since been fixed. A function cited by an open item is not settled. Its square can still be green, because the grid has not been redrawn.
+has since been fixed. A function cited only by open items is amber, not green.
 
-The grid is regenerated by a script that reads the function map, the addresses
-cited in FIDELITY_PLAN.md and the line-by-line comparison results. It writes
-[progress-blocks.svg](branding/progress-blocks.svg?v=cad12035) for this page and
-`site/assets/progress.json` for the website's interactive version. The site
+The grid is drawn from the function map, the addresses cited in
+FIDELITY_PLAN.md and the line-by-line comparison results. Those are read by a
+generator in the private reverse-engineering workspace (it needs the decompiled
+export, which is not in this repository). It writes
+[progress-blocks.svg](branding/progress-blocks.svg?v=67e937bb) for this page and
+`site/assets/progress.json` for the website's interactive version. In this
+repository, `scripts/reopen-progress.py` applies the amber rule to that data,
+recomputes every count, and redraws the grid and the summary chart. Run it after
+the generator, because the generator has no amber state for open items. The site
 shows each function's name, address, size, subsystem and citing items.
 
 ## Enhancements
@@ -125,19 +168,19 @@ costing a day.
 
 ## Beyond the original
 
-![NovaSwift's own features](branding/feature-blocks.svg?v=cdfa3ddd)
+![NovaSwift's own features](branding/feature-blocks.svg?v=39e4d242)
 
 NovaSwift's own features, one square per task: green done, amber partly done,
-outline planned. Currently 119 done, 15 partly done, 44 planned. The list is kept
+outline planned. Currently 138 done, 19 partly done, 27 planned. The list is kept
 by hand in `site/assets/features.json`, with a pointer to the code for each
 task. After editing it, run `python3 scripts/render-progress.py` to redraw
-[feature-blocks.svg](branding/feature-blocks.svg?v=cdfa3ddd) and the summary graphic.
+[feature-blocks.svg](branding/feature-blocks.svg?v=39e4d242) and the summary graphic.
 
 Partly done, in short: the public online lobby list and iCloud game-data upload
 need the CloudKit schema promoted to Production; multiplayer host migration
 rebuilds the world rather than handing over; the `carryEncounter` session rule
-is not used yet; no plug-ins ship inside the app; the Godot trade center has a
-placeholder screen, and its Linux and Windows builds are not verified yet. Multiplayer has not yet
+is not used yet; no plug-ins ship inside the app; the Godot port's Linux and Windows builds
+are not verified yet (table below). Multiplayer has not yet
 been played end to end on two real devices. The plug-in importer can't open
 StuffIt archives that use the newer compression methods, and most catalog
 entries have no icon yet. Classic Mac pilot import still needs testing against
@@ -171,15 +214,33 @@ None of these change the game's rules:
 
 ## Linux and Windows
 
-The Godot frontend ([GODOT_LAYER.md](GODOT_LAYER.md)) runs the same engine and calls the same Swift helpers as the Apple app. Flight, landing, the spaceport, the map and the story screens are wired. Where those helpers still differ from the executable, the open plan items apply on both frontends (EC-04, EC-05, EC-25, OS-06, EC-26, OS-08, UI-06). Frontend wiring that is still open is in [GODOT_FIDELITY_GAPS.md](GODOT_FIDELITY_GAPS.md). It has been built and run on macOS; the Linux and Windows builds are not verified yet.
+The Godot frontend ([GODOT_LAYER.md](GODOT_LAYER.md)) runs the same engine and calls the same Swift helpers as the Apple app, so wherever a helper still differs from the executable, the open plan items apply on both frontends (EC-04, EC-05, EC-25, OS-06, EC-26, OS-08, UI-06). This section is only about frontend wiring. The row-by-row list is [GODOT_FIDELITY_GAPS.md](GODOT_FIDELITY_GAPS.md).
+
+Everything has been built and run on macOS only. No Linux, Windows or Steam Deck build has been made or run, and no flight visual has been checked on a real GPU.
+
+| Subsystem | State |
+|---|---|
+| Flight, HUD, radar, targeting, landing, spaceport, story runtime, pilots, gamepad | Done, run on macOS |
+| Live-world wiring (combat rating, scooping, përs spawn gating, pirates boarding the player, defence persistence, bombs, Strict Play) | Done and self-checked (package A) |
+| Status line, messages, HUD icons | Done and self-checked (package B) |
+| Controls and targeting checklist, performance (release bridge, sprite cache and prewarm, asteroid layout) | Done |
+| Plug-ins: all 13 catalog plug-ins load with the same counts as the shared merge and pass `scripts/plugins-check.sh` | Done |
+| Total-conversion add-on lists, `dësc` movies, intro movie and GIF, total-conversion fonts, bar race movies | Done, in both apps |
+| Hypergate and wormhole entry movies | Written, not yet built or tested (both apps) |
+| Galaxy map: borders, mission markers, Tab and backslash link cycle | Written, not yet built or tested. The cycle is an inference (handlers not decompiled) |
+| Sound-parity fixes, spaceport ambient loop, brightness veil | Written, not yet built or tested |
+| About-dialog picture | Written, not yet built or tested |
+| Key Settings dialog (DITL 4002), title music from a `.mov`, murk fog, NPC warp-effect check, sound items S12, S25, S26 | Open |
+| Linux, Windows and Steam Deck builds; flight visuals on a real GPU | Not verified |
 
 ## Known gaps
 
 - The 16 open plan items listed above.
-- The deferred pieces listed above (UI-11, UI-13, UI-15's map cycling, AI-12, FL-23).
+- The deferred pieces listed above (UI-11, UI-13, UI-07, UI-15's map cycling, AI-12, FL-23).
 - Open questions in §6 of the fidelity plan.
 - Ships with `shän` flag 0x0002 do not fold and unfold for hyperspace or
   landing.
+- Apple app, found against the decompile and not yet fixed: the Classic status-message rectangle (ours is 16/8 px with a 14 pt shadow; the original is left + 25, bottom - 5, 30 px, 12 pt white, no shadow); title music is scaled by the volume step twice (step/8 squared); the ambient and quick-hyperjump loops are scaled by the Effects slider twice; the ambient check is `>= 0` where the original requires `>= 128`. The newest total-conversion and gate-movie edits in the Apple app have not been compiled yet.
 - Mission BBS and offer windows lack the original's map, Player Info and
   text-scroll keys.
 - Presentation defaults that differ from the original (ship bar position,

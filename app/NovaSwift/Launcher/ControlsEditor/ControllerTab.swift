@@ -17,7 +17,7 @@ struct ControllerTab: View {
     let onActionTap: (GameAction) -> Void
     let onUnbind: (GameAction) -> Void
 
-    private var detected: PadStyle? { pad == nil ? nil : PadStyle.detect(GCController.current) }
+    private var detected: PadStyle? { pad == nil ? nil : PadStyle.detect(GCController.active) }
     private var style: PadStyle { prefs.padStyle ?? detected ?? .xbox }
 
     /// Flown with the left stick; never rebindable (thrust/reverse may also take a button).

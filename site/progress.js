@@ -117,7 +117,7 @@
     d.statuses.forEach(function (s) { label[s.key] = s.label; });
     function toGroup(g) {
       var note = g.f.length + " functions";
-      if (INTERNAL.indexOf(g.title) < 0 && g.f.length - g.counts.library > 0) note += " · " + g.pct + "% done";
+      if (INTERNAL.indexOf(g.title) < 0 && g.f.length - g.counts.library > 0) note += " · " + (g.counts.done + g.counts.replaced) + " of " + (g.f.length - g.counts.library) + " matched";
       return {
         title: g.title,
         note: note,

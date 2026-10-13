@@ -427,3 +427,10 @@ details.grid-card[open] > summary { margin-bottom: var(--s2); }
   .btn, .legend .key { transition: none; }
   .btn-primary:active, .btn-ghost:active { transform: none; }
 }
+
+/* status table (progress page) */
+.status-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+.status-table th, .status-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.status-table th { color: var(--muted); font-weight: 600; font-size: 0.85rem; }
+.status-table td:last-child { white-space: nowrap; color: var(--bone); }
+@media (max-width: 640px) { .status-table td:last-child { white-space: normal; } }

@@ -287,7 +287,7 @@ struct ControlsView: View {
 
     private var pad: GCExtendedGamepad? {
         _ = padGeneration   // re-read when a controller (dis)connects
-        return GCController.current?.extendedGamepad
+        return GCController.active?.extendedGamepad
     }
 
     private func pollPressed() async {
@@ -361,6 +361,6 @@ struct ControlsView: View {
     private func endPadCapture() {
         CursorTargets.shared.resume("pad-capture")
         padCapturing = nil
-        GCController.current?.extendedGamepad?.valueChangedHandler = nil
+        GCController.active?.extendedGamepad?.valueChangedHandler = nil
     }
 }

@@ -4,7 +4,13 @@ This file lists behaviour the original game has that the Godot frontend does not
 
 The shared helpers still diverge on EC-04 and EC-05 (gate and wormhole clearance and the fee), EC-25 (a bribe is one approach), OS-06 (wormhole exit draw), EC-26 (the bar's previous winner resets when the bar opens), OS-08 (bomb fuse reseed) and UI-06 (which body Land picks). Godot follows those helpers.
 
-Packages A and B are wired. Frontend work that is still open is in packages C, E and F: the Key Settings dialog, a few stored preferences, mission-offer movies, murk, and on-device shader checks.
+This file is the single list of Godot frontend gaps; [STATUS.md](STATUS.md#linux-and-windows) carries the summary table. Status words used in the rows:
+
+* **DONE**: wired, and built and run on macOS (headless self-checks where the package names one).
+* **WRITTEN, NOT BUILT**: the code is in the tree but has not been compiled or run. Treat it as unverified until someone builds it. This applies to: the hypergate and wormhole entry movies (both apps), D1-D4 (galaxy map borders, mission markers, Tab and backslash cycle), the sound-parity fixes, the ambient loop and the brightness veil (C2, C3, and the rows marked FIXED in the sound table), and the About-dialog picture (C6).
+* **PARTIAL / MISSING / OPEN / UNVERIFIED**: as written in the row.
+
+Packages A and B are wired and self-checked. Frontend work that is still open: the Key Settings dialog (C1), title music from a `.mov` (C5), murk (F1), the NPC warp effect check (F2), sound items S12, S25 and S26, on-GPU shader checks (F3), and building and running on Linux, Windows and the Steam Deck. Nothing else in this file is known to be missing.
 
 ---
 
@@ -57,9 +63,10 @@ Do not touch `Controls.gd` rebind storage (use `Controls.overrides`).
 | # | Original behaviour | Status | Concrete gap |
 |---|---|---|---|
 | C1 | Key Settings dialog (DLOG 4002, the 34-cell key table, "NovaPrefs_ResetKeyBindings" defaults button) | MISSING | `ClassicPreferences.gd` emits `key_settings` which opens the NovaSwift Controls page; DITL 4002 is not drawn (Apple `ClassicKeySettingsView.swift`) |
-| C2 | Brightness arrows (STR# 139, 0-6) change screen gamma | DONE (2026-10-13, `ui/BrightnessVeil.gd`, added by `Main.gd`) | black veil below step 3, white (additive) above, gamma = step x 10 + 70 %, as Apple `RootView.brightnessVeil` |
-| C3 | Ambient Sounds: the landed spaceport plays the spöb's `AmbientSound` loop; off = silence (0x00491f30) | DONE (2026-10-13, `GameAudio.gd` `start_ambient`/`stop_ambient`, bridge `landed_ambient_sound()`) | follows the docked state, honours the Ambient Sounds pref, mute and the Settings sliders; stopped on takeoff and on returning to the menu |
+| C2 | Brightness arrows (STR# 139, 0-6) change screen gamma | WRITTEN, NOT BUILT (2026-10-13, `ui/BrightnessVeil.gd`, added by `Main.gd`) | black veil below step 3, white (additive) above, gamma = step x 10 + 70 %, as Apple `RootView.brightnessVeil` |
+| C3 | Ambient Sounds: the landed spaceport plays the spöb's `AmbientSound` loop; off = silence (0x00491f30) | WRITTEN, NOT BUILT (2026-10-13, `GameAudio.gd` `start_ambient`/`stop_ambient`, bridge `landed_ambient_sound()`) | follows the docked state, honours the Ambient Sounds pref, mute and the Settings sliders; stopped on takeoff and on returning to the menu |
 | C4 | Preferences that are stored but have no effect: Share Processor Time (no counterpart needed), Ship Animations (applied via `set_flight_options`), Check For Updates (N/A) | PARTIAL | only document; low value |
+| C6 | About dialog shows the original's picture | WRITTEN, NOT BUILT (2026-10-13) | |
 | C5 | Title music from `.mov` (Nova Files names it as `.mov`) | PARTIAL | `TitleMusic.gd` is silent for `.mov` unless the movies package converts audio |
 
 ### Package D. Galaxy map fidelity (original map window)  [S-M]
@@ -69,10 +76,10 @@ Files: `godot/screens/GalaxyMap.gd`, `godot/screens/NavScreens.gd`, `godot/scree
 
 | # | Original behaviour | Status | Concrete gap |
 |---|---|---|---|
-| D1 | Show/Hide Borders political overlay, persisted (STR# 150 #56/#57) | DONE (2026-10-13, see GODOT_LAYER.md "Galaxy map: borders, mission marks, Tab cycle") | bridge `nav_borders` builds the shared `PoliticalOverlay`; `[map] show_borders`; DITL 2000 item 8 button + `B` key |
-| D2 | Mission-target cicn markers on the map and their fog exception | DONE (2026-10-13) | bridge `nav_mission_targets`; cicn 15000 16 px up-left, fogged targets drawn and pickable |
-| D3 | Map Tab / `\` adjacent-destination cycling (0x004a74f0 / 0x004a7710) | DONE (2026-10-13, both apps) | Godot `GalaxyMap.cycle_link` + bridge `nav_cycle_link`; `map_extend` moved Tab -> E. Apple: `handleDiscrete` intercepts the cycle / target-next keys while the map is open (Tab itself has no classic Apple binding). The two handlers are not decompiled (inside the 0x004a3aa0 loop), so the behaviour mirrors the in-flight `\` step (0x0044b120) |
-| D4 | Floating-map frame border and help line | DONE (2026-10-13) | `RouteMiniMap.gd` frame is the cölr FloatingMap colour; the original draws no help line under the Classic frame (already absent) |
+| D1 | Show/Hide Borders political overlay, persisted (STR# 150 #56/#57) | WRITTEN, NOT BUILT (2026-10-13, see GODOT_LAYER.md "Galaxy map: borders, mission marks, Tab cycle") | bridge `nav_borders` builds the shared `PoliticalOverlay`; `[map] show_borders`; DITL 2000 item 8 button + `B` key |
+| D2 | Mission-target cicn markers on the map and their fog exception | WRITTEN, NOT BUILT (2026-10-13) | bridge `nav_mission_targets`; cicn 15000 16 px up-left, fogged targets drawn and pickable |
+| D3 | Map Tab / `\` adjacent-destination cycling (0x004a74f0 / 0x004a7710) | WRITTEN, NOT BUILT (2026-10-13, both apps) | Godot `GalaxyMap.cycle_link` + bridge `nav_cycle_link`; `map_extend` moved Tab -> E. Apple: `handleDiscrete` intercepts the cycle / target-next keys while the map is open (Tab itself has no classic Apple binding). The two handlers are not decompiled (inside the 0x004a3aa0 loop), so the behaviour mirrors the in-flight `\` step (0x0044b120) |
+| D4 | Floating-map frame border and help line | WRITTEN, NOT BUILT (2026-10-13) | `RouteMiniMap.gd` frame is the cölr FloatingMap colour; the original draws no help line under the Classic frame (already absent) |
 | D5 | Legal Status (#326) and Goods/Services panels honour exploration levels 1/2 (UI-04) | DONE | `_draw_side` already gates every block on `classic_map_info.level` (Unknown / no Goods until level 2) |
 | D6 | In-flight `\` destination cycle | DONE (with B5) | `cycle_hyperspace_link` actions + bridge `cycle_hyperspace_link` |
 
@@ -85,7 +92,7 @@ movie), `godot/screens/Spaceport.gd` (BBS offer hook, small), `godot/audio/Title
 | # | Original behaviour | Status | Concrete gap |
 |---|---|---|---|
 | E1 | Race betting plays `Race 1..4.mov` | DONE (per coordinator, 2026-10-13) | wired via `Movies`/`MoviePlayer`; only re-verify the no-ffmpeg fallback |
-| E2 | Mission-offer `dësc` movies (not wired yet; confirmed) (a mission's offer/completion text carries a movie filename; Apple `MissionBoardView.playMovie`) | MISSING | no movie hook in `StoryScreens.gd` offer dialog |
+| E2 | Mission-offer `dësc` movies (a mission's offer/completion text carries a movie filename; Apple `MissionBoardView.playMovie`) | DONE (2026-10-13, both apps; see "Plug-in loading gaps" below) | story texts, docking, intro text and acknowledgements play their `dësc` movie |
 | E3 | `playMovies` pref gates all of the above | PARTIAL | read in `BarScreens.gd` only |
 
 ### Package F. Flight render remainder and on-device verification  [S-M]
@@ -105,8 +112,11 @@ no-FX path). Do not touch HUD files.
 
 - C1 Key Settings dialog (DLOG 4002) is not drawn.
 - C4 and C5: a few stored preferences, and title music from a `.mov`, are partial.
-- E2 mission-offer `dësc` movies are not hooked up. E3 `playMovies` is read from the bar only.
+- E3 `playMovies` gating: it was read from the bar only when this row was written; re-check now that `dësc` movies exist.
 - F1 murk is a star tint only. F2 hyperjump NPC warp nodes are partial. F3 shader output is not checked on a real GPU.
+- Sound S12 (enhancement not ported), S25 and S26 (map cycle sound; silent J with auto-route).
+- Written but not built or tested: see the status words at the top.
+- Linux, Windows and Steam Deck builds have not been made or run.
 
 ## Deferred: ENHANCEMENT gaps (NovaSwift-only; not original)
 
@@ -154,7 +164,7 @@ All 13 downloaded plug-ins load with exactly the shared-Swift resource counts an
 is the same in the Apple app unless noted:
 
 * **dësc movies (DONE 2026-10-13, both apps)**: story texts, docking, intro text, acknowledgements (see GODOT_LAYER "Total-conversion add-ons").
-  **Hypergate / wormhole entry movie (DONE 2026-10-13, both apps)**: `Stellar_EnterHypergate` 0x00456480 / `Stellar_EnterWormhole`
+  **Hypergate / wormhole entry movie (WRITTEN, NOT BUILT, 2026-10-13, both apps)**: `Stellar_EnterHypergate` 0x00456480 / `Stellar_EnterWormhole`
   0x00456ca0 call `FUN_0049e3c0(travelSelection + 0x80)` before the transport: the dësc whose id is the chosen destination sÿst
   (hypergate) or the wormhole's own spöb (wormhole); movie only, no text, modal and skippable, off with the QuickTime pref
   (`DAT_005914d3`); shared `GateTravelMovie` (see GODOT_LAYER "Galaxy map"). Godot needs ffmpeg for movies.
@@ -178,7 +188,7 @@ cues as `[{id, priority, onlyWhenSilent, interface, rate, x?, y?}]`). Beeps: 150
 select/back, 153 = beep4 denied, 154 = beep5 incoming. Priorities: beep 1, turret 3, NPC weapon 4, player weapon 5/6, explosion 6, red alert 5,
 airlock/cloak 8, menu 10, klaxxon/chatter 0xF, warp out/shutters 0x32, warp up 32000.
 
-Status key: MATCH (already identical), FIXED (was MISSING/DIFFERENT/EXTRA, now matches), OPEN (not changed, reason given).
+Status key: MATCH (already identical), FIXED (was MISSING/DIFFERENT/EXTRA; the fix is written but **not yet built or run**, and neither has `sound_parity_selfcheck.gd`), OPEN (not changed, reason given).
 
 | # | Site (Apple call / original function) | snd, priority, rules | Godot | Status |
 |---|---|---|---|---|
@@ -235,7 +245,7 @@ Status key: MATCH (already identical), FIXED (was MISSING/DIFFERENT/EXTRA, now m
 Counts (49 rows): 30 MATCH, 16 FIXED, 3 OPEN. Fixed by original category: MISSING 5 (S5 S16 S43 S44 S46), DIFFERENT 6 (S30 S39 S40 S41 S42 S45),
 EXTRA 5 groups (S31 S32 S33 = 17 explicit call sites removed; S34 S35 = two dialog defaults).
 
-### Apple vs original (findings; Apple not changed unless stated)
+### Apple vs original (findings; Apple not changed unless stated; summarised in [STATUS.md](STATUS.md) under Known gaps)
 
 1. **Music is scaled by the sound-volume step twice** in Apple: the main mixer already applies `masterVolume x step/8` and `GameAudio.musicGains`
    then sets the track to `step x 0x20/256` (= step/8) again, so the track plays at (step/8)². The original applies it once. Godot plays the
@@ -245,10 +255,11 @@ EXTRA 5 groups (S31 S32 S33 = 17 explicit call sites removed; S34 S35 = two dial
 3. **Ambient loop flag**: the original's landed loop only re-allocates its voice from the 0x00491f30 tick when spöb Flags2 bit 0x0010 ("Loop
    ambient sound") is *clear* (`Audio_AllocateVoiceSlot(&DAT_00591ab4)` on event 5); Apple always loops. The exact retrigger cadence of event 5 was
    not traced, so both frontends loop gaplessly.
-4. Apple's ambient check is `soundID >= 0`; the original loads it only when `CustSndID >= 128` and the pref is on. No shipped spöb has 0-127.
-5. Apple's `.launch` event exists but is never played; the original launch is silent too (verified: `Stellar_RunDockAndLaunchSequence`
+4. Classic status-message rectangle: Apple draws it 16/8 px in from the corner with a 14 pt shadow; the original is left + 25, bottom - 5, 30 px high, 12 pt white, no shadow. Godot's Classic HUD follows the original (GODOT_LAYER.md, "Message position").
+5. Apple's ambient check is `soundID >= 0`; the original loads it only when `CustSndID >= 128` and the pref is on. No shipped spöb has 0-127.
+6. Apple's `.launch` event exists but is never played; the original launch is silent too (verified: `Stellar_RunDockAndLaunchSequence`
    sounds only the uninhabited snd 151).
-6. Mission-computer, news, plunder, hail and flight-key beeps match their decomp call sites (see the table); no Apple deviation found there.
+7. Mission-computer, news, plunder, hail and flight-key beeps match their decomp call sites (see the table); no Apple deviation found there.
 
 ### Code touched by this pass (other agents: re-read before editing)
 

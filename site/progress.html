@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
 
-  <link rel="stylesheet" href="styles.css?v=12" />
+  <link rel="stylesheet" href="styles.css?v=13" />
 </head>
 <body>
   <div class="space-bg" aria-hidden="true"></div>
@@ -56,7 +56,7 @@
     <div class="wrap">
       <div class="head">
         <h2>Every function in the original, one square each.</h2>
-        <p>Green: compared with NovaSwift and matching at the last draw (some after a fix). Teal: done differently on purpose, like saves and controls. That draw was made when every plan item was marked done. Sixteen items were reopened after it, and these squares have not been redrawn, so green still includes functions those items cite. Hover or tap a square for its name, address and status. The current list is in <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/STATUS.md" target="_blank" rel="noopener">STATUS.md</a>.</p>
+        <p>Green: compared with NovaSwift and matching, some after a fix. Teal: done differently on purpose, like saves and controls. Amber: found to differ, fix in progress; these are the functions that only the 16 open plan items cite. Hover or tap a square for its name, address and status. The current list of open items is in <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/STATUS.md" target="_blank" rel="noopener">STATUS.md</a>.</p>
       </div>
       <div class="grid-card">
         <div id="grid-exe" class="grid-exe"><p class="grid-note">Loading…</p></div>
@@ -67,10 +67,37 @@
     <div class="wrap">
       <div class="head">
         <h2>NovaSwift's own features, one square per task.</h2>
-        <p>Linux and Windows run through a Godot frontend on the same Swift engine.</p>
+        <p>Things the original never had. The Godot frontend for Linux and Windows is in its own table below.</p>
       </div>
       <div class="grid-card">
         <div id="grid-features"><p class="grid-note">Loading…</p></div>
+      </div>
+    </div>
+  </section>
+  <section class="section" id="godot">
+    <div class="wrap">
+      <div class="head">
+        <h2>Linux and Windows (Godot frontend).</h2>
+        <p>It runs the same Swift engine as the Apple app, so open fidelity items apply to both. Everything below has been built and run on macOS only. No Linux, Windows or Steam Deck build has been made or run. Source: <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/GODOT_FIDELITY_GAPS.md" target="_blank" rel="noopener">GODOT_FIDELITY_GAPS.md</a>.</p>
+      </div>
+      <div class="grid-card">
+        <table class="status-table">
+          <thead><tr><th>Subsystem</th><th>State</th></tr></thead>
+          <tbody>
+            <tr><td>Flight, HUD, radar, targeting, landing, spaceport, story runtime, pilots, gamepad</td><td>Done, run on macOS</td></tr>
+            <tr><td>Live-world wiring (combat rating, scooping, spawn gating, pirates boarding, bombs, Strict Play)</td><td>Done, self-checked</td></tr>
+            <tr><td>Status line, messages, HUD icons</td><td>Done, self-checked</td></tr>
+            <tr><td>Controls, targeting checklist, performance</td><td>Done</td></tr>
+            <tr><td>Plug-ins: all 13 catalog plug-ins load</td><td>Done</td></tr>
+            <tr><td>Total-conversion add-ons, <i>dësc</i> movies, intro and GIF, fonts, race movies</td><td>Done, in both apps</td></tr>
+            <tr><td>Hypergate and wormhole entry movies</td><td>Written, not yet built or tested</td></tr>
+            <tr><td>Galaxy map borders, mission markers, Tab and backslash cycle</td><td>Written, not yet built or tested</td></tr>
+            <tr><td>Sound-parity fixes, ambient loop, brightness</td><td>Written, not yet built or tested</td></tr>
+            <tr><td>About-dialog picture</td><td>Written, not yet built or tested</td></tr>
+            <tr><td>Key Settings dialog, title music from a .mov, murk fog, NPC warp effect, a few sound items</td><td>Open</td></tr>
+            <tr><td>Linux, Windows and Steam Deck builds; flight visuals on a real GPU</td><td>Not verified</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </section>
@@ -112,6 +139,6 @@
   </footer>
 
   <script src="starfield.js?v=2"></script>
-  <script src="progress.js?v=2"></script>
+  <script src="progress.js?v=3"></script>
 </body>
 </html>

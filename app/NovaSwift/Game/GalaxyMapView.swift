@@ -258,7 +258,7 @@ struct GalaxyMapView: View {
     /// and a pad is connected). Panning and picking go through the cursor.
     private func pollControllerZoom() async {
         while !Task.isCancelled {
-            if let padDevice = GCController.current?.extendedGamepad,
+            if let padDevice = GCController.active?.extendedGamepad,
                !CursorTargets.shared.suppressed, CursorTargets.shared.suspensions.isEmpty {
                 let zoomIn = Double(padDevice.rightTrigger.value)
                 let zoomOut = Double(padDevice.leftTrigger.value)

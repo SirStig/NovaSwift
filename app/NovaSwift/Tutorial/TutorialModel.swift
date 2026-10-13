@@ -61,7 +61,7 @@ enum TutorialCourse {
     /// someone holding a pad should be told pad buttons; otherwise the bound key.
     private static func key(_ tutorialAction: TutorialAction, _ b: KeyBindings) -> String {
         let action = gameAction(tutorialAction)
-        if let pad = GCController.current?.extendedGamepad,
+        if let pad = GCController.active?.extendedGamepad,
            let button = PadBindings.load().button(for: action) {
             return button.displayName(on: pad)
         }
@@ -69,7 +69,7 @@ enum TutorialCourse {
     }
 
     /// True when instructions should speak "controller" (a pad is connected).
-    private static var padConnected: Bool { GCController.current?.extendedGamepad != nil }
+    private static var padConnected: Bool { GCController.active?.extendedGamepad != nil }
 }
 
 /// Drives the tutorial's step machine. The container feeds it observed goals and

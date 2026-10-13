@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
 
-  <link rel="stylesheet" href="styles.css?v=12" />
+  <link rel="stylesheet" href="styles.css?v=13" />
 </head>
 <body>
   <div class="space-bg" aria-hidden="true"></div>
@@ -76,14 +76,14 @@
     <div class="wrap split">
       <div class="split-copy">
         <h2>Checked against the original code.</h2>
-        <p>The original Windows executable was taken apart, function by function, and the gameplay systems were rebuilt against it: flight, combat, the NPC AI, the economy, missions and the star map. Sixteen plan items were reopened after the chart below was drawn. The current list is in <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/STATUS.md" target="_blank" rel="noopener">STATUS.md</a>.</p>
+        <p>The original Windows executable was taken apart, function by function, and the gameplay systems were rebuilt against it: flight, combat, the NPC AI, the economy, missions and the star map. 16 of the 179 plan items are open after a later re-read of the executable. The list is in <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/STATUS.md" target="_blank" rel="noopener">STATUS.md</a>.</p>
         <p>Original behaviour is the default. Anything that changes the rules is an optional Enhancement, off until you turn it on.</p>
         <p class="links"><a href="progress.html">Progress by function</a><a href="https://github.com/SirStig/NovaSwift/blob/main/docs/reverse-engineering/README.md" target="_blank" rel="noopener">Reverse-engineering notes</a></p>
       </div>
       <figure class="chart">
-        <img src="assets/fidelity-summary.svg?v=reopened" width="640" height="500" loading="lazy"
-             alt="Last comparison draw. Each row is one part of the original code. The squares were filled when every plan item was marked done, and have not been redrawn." />
-        <figcaption>Each block is about 5% of one part of the original code. This is the last draw, from when every plan item was marked done. Sixteen items were reopened after that, and the squares have not been redrawn.</figcaption>
+        <img src="assets/fidelity-summary.svg?v=b3c8d114" width="640" height="500" loading="lazy"
+             alt="Functions compared and matching, one row per part of the original code. Green is matching, teal is done differently on purpose, amber is a difference with the fix in progress." />
+        <figcaption>Each block is about 5% of one part of the original code. Green matches, teal is done differently on purpose, amber differs and is being fixed. The number at the end of a row is matching functions out of those to port.</figcaption>
       </figure>
     </div>
   </section>

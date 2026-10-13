@@ -87,7 +87,8 @@ the movies are skipped, as with the original's "QuickTime Movies" preference off
 
 - Verified locally (macOS): export_presets.cfg parses and Godot 4.7.2 reaches the
   template check. Everything else (Linux bridge build, runtime bundling, export,
-  smoke test) is **CI-only until first run**; the Godot URLs were checked to resolve.
+  smoke test) has **not been run**; verify it locally on Linux before relying on it.
+  The CI workflow exists but is not used to verify builds.
 - macOS preset: arm64 only, ad-hoc signed with library validation disabled; the
   bridge dylib must be arm64. Not notarised.
 - Windows: Swift runtime DLLs copied from the toolchain; users need the VC++

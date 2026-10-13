@@ -14,20 +14,19 @@ final class PadState: ObservableObject {
     var isConnected: Bool { pad != nil }
 
     private init() {
-        NotificationCenter.default.addObserver(forName: .GCControllerDidConnect, object: nil,
-                                               queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refresh() }
-        }
-        NotificationCenter.default.addObserver(forName: .GCControllerDidDisconnect, object: nil,
-                                               queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refresh() }
+        for name in GCController.activeChangeNotifications {
+            NotificationCenter.default.addObserver(forName: name, object: nil,
+                                                   queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refresh() }
+            }
         }
         refresh()
     }
 
     private func refresh() {
-        pad = GCController.current?.extendedGamepad
-        vendorName = GCController.current?.vendorName
+        let active = GCController.active
+        pad = active?.extendedGamepad
+        vendorName = active?.vendorName
     }
 
     /// "Ⓐ"-style hint text for an action on the current pad — the connected

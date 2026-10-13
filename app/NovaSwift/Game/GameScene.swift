@@ -699,7 +699,7 @@ final class GameScene: SKScene {
     private func landControlLabel() -> String {
         if let ci = controllerInput, ci.isConnected,
            let button = ci.bindings.button(for: .land),
-           let pad = GCController.current?.extendedGamepad {
+           let pad = GCController.active?.extendedGamepad {
             return button.displayName(on: pad)
         }
         return landKeyLabel

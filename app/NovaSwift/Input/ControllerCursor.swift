@@ -748,7 +748,7 @@ struct ControllerCursorOverlay: View {
         // Buttons already down when the loop starts (Ⓐ still held from firing
         // as a dialog popped up, Menu still held from opening the menu) must
         // be released before they count — no phantom press on activation.
-        let pad0 = GCController.current?.extendedGamepad
+        let pad0 = GCController.active?.extendedGamepad
         var wasA = pad0?.buttonA.isPressed ?? false
         var wasB = pad0?.buttonB.isPressed ?? false
         var wasMenu = pad0?.buttonMenu.isPressed ?? false
@@ -761,7 +761,7 @@ struct ControllerCursorOverlay: View {
 
         while !Task.isCancelled {
             tick += 1
-            if let pad = GCController.current?.extendedGamepad, var p = position {
+            if let pad = GCController.active?.extendedGamepad, var p = position {
                 let dz = max(0.1, model.settings.stickDeadzone)
                 var acted = false
 

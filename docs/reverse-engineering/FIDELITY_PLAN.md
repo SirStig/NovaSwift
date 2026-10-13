@@ -91,9 +91,40 @@ EC-28 (chart, paint, amnesty and Flags 0x0010 for the visit).
 Q-OS-02 is settled: the hypergate and wormhole branch adds no day. Q-EC-14 is settled:
 the modifier wager is `min(credits, 10000)`.
 
-Not recorded as gaps, because those routines were not re-read: a stale `<DL>` date
-after a timed mission, carrier-jump recovery beyond the question already in Q-OS-04,
-and whether a tractor refusal uses STR# 2002 #36. Q-OS-04 stays open.
+**Rule for the function grid.** The grid ([STATUS.md](../STATUS.md)) colours a function
+amber ("differs, fix in progress") when it is cited by at least one item above and by no
+**DONE** item. Run `python3 scripts/reopen-progress.py` after changing a heading; it reads the
+`####` headings in this file.
+
+**Checked against the code (2026-10-13), both frontends.** Real gaps, all deferred slices of
+items that are otherwise done, not new items:
+
+- About 20 invented status-line sentences that the original never prints in these
+  situations (contraband, plunder "Took N credits", siphoned fuel, transferred rounds,
+  salvaged, domination, defender scrambles, escort losses, "You are being scanned", the
+  wormhole prompt, "Your ship has been destroyed"). Deferred slice of UI-11.
+- The new-pilot hint chain, STR# 2002 #22-31 (UI-11, deferred).
+- Player Info Tab / Shift-Tab page cycling (UI-13, deferred).
+- Folding hulls (`shän` Flags 0x0002): `HullAnim.baseSet` returns set 0 (kept quirk below).
+- Targeting (UI-07): no AI-state 0x15 filter, and a freed target slot is reused instead of
+  keeping spawn order.
+- `përs` HailQuote broadcast gates (`përs` flags 0x0400 and 0x0800, the player-class gates,
+  the ambush trigger) are not verified against the executable. Combat chatter itself is
+  (escort acknowledgement, new target 1 in 3, target died, hull Flags2 0x0010 mute); the
+  remaining gates are part of Q-AI-13.
+
+**Found already done** (the docs were behind): the self-destruct cue sounds (arm 153,
+per-second 152, abort and blast 151; `World.stepSelfDestruct`), and tractor-beam pull,
+including a heavier ship holding a lighter one (`World.applyBeamLock`).
+Caps Lock 2x is done and is not a gap: the original's frame loop (0x00417600) sets its x2 flag
+from the Caps Lock toggle, which is what `GameSpeedRules.x2Flag` does.
+
+**Decompile questions not yet read** (nothing recorded as a gap until they are): miners
+turning hostile after an assistance request (0x0047e470); `OnShipDone` text suppression when
+the mission is aborted (0x00443c60); the carrier escort's weapon-1 range (Q1); the order of an
+escort's `chär` Initial Record; a stale `<DL>` slot date after a timed mission; carrier-jump
+recovery beyond Q-OS-04; whether a tractor refusal prints STR# 2002 #36 (0x0044eed5); the
+`përs` HailQuote gates above. Q-OS-04 stays open.
 
 ---
 
@@ -3665,7 +3696,7 @@ resources have no effect. Every string fix below reads the resource, never a cop
   saved settings but no saved bindings is pinned to the old table; actions added since a map was
   saved only take a default key nothing else holds. iOS/tvOS cannot see a bare Control, so there the
   secondary stays on Return. **Clash:** Control-arrow is a reserved macOS Spaces shortcut (decision 3).
-  **Deferred:** the map's Tab/backslash adjacent cycle and in-flight backslash destination cycle.
+  **Done 2026-10-13:** the in-flight backslash destination cycle (0x0044b120) and the map's Tab/backslash adjacent cycle. The map handlers (0x004a74f0 / 0x004a7710) sit inside the 0x004a3aa0 loop and are not decompiled on their own, so the map cycle mirrors the in-flight step; that part is an inference.
 - **Done (Caps Lock 2× mode, 2026-10-10).** The Caps Lock toggle state (`CapsLockState`: macOS
   `NSEvent.modifierFlags`, iOS the `KeyPress` modifiers of the last hardware-keyboard event) sets the
   original's x2 flag (`DAT_00596d34`, 0x00417600 ~11248) through `GameSpeedRules.x2Flag`, including the

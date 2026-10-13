@@ -32,12 +32,15 @@ Enhancement and is off unless you turn it on.
 No decompiled code is in this repository. The findings are written up as specs
 with function addresses in [docs/reverse-engineering/](docs/reverse-engineering/README.md).
 
-![Last comparison draw. The squares are from when every plan item was marked done.](docs/branding/fidelity-summary.svg?v=reopened)
+![Functions compared and matching, by part of the original. Amber squares are functions only an open plan item cites.](docs/branding/fidelity-summary.svg?v=b3c8d114)
 
 One block is roughly 5% of that part of the original code: compared and
-matching, fixed to match, or (teal) handled differently on purpose, such as the
-save format and controls. This tracks how much has been checked, not how
-finished the game is. The picture was drawn when every plan item was marked done. A later re-read reopened items listed in [docs/STATUS.md](docs/STATUS.md), and the squares have not been redrawn. NovaSwift is in beta and has bugs. If something plays
+matching or fixed to match (green), handled differently on purpose, such as the
+save format and controls (teal), or found to differ with the fix in progress
+(amber). The number at the end of a row is matching functions out of the
+functions to port, not a progress percentage. This tracks how much has been
+checked, not how finished the game is. 16 of the 179 plan items are open; they
+are listed in [docs/STATUS.md](docs/STATUS.md). NovaSwift is in beta and has bugs. If something plays
 differently from the original, please
 [open a fidelity issue](https://github.com/SirStig/NovaSwift/issues/new/choose).
 The function-by-function view is in [docs/STATUS.md](docs/STATUS.md) and on the
@@ -46,7 +49,7 @@ The function-by-function view is in [docs/STATUS.md](docs/STATUS.md) and on the
 <details>
 <summary>Features beyond the original, and parts of the original that aren't needed</summary>
 
-![NovaSwift's own features](docs/branding/features-summary.svg?v=editor1)
+![NovaSwift's own features](docs/branding/features-summary.svg?v=292e29b2)
 
 ![Parts of the original NovaSwift doesn't need](docs/branding/not-needed-summary.svg?v=0f518ead)
 
@@ -159,10 +162,12 @@ open app/NovaSwift.xcodeproj    # pick a target and Run
 The data layer, simulation and story runtime are portable Swift. Only the UI
 and rendering use SwiftUI and SpriteKit. The Godot 4 frontend, bridged with
 [SwiftGodot](https://github.com/migueldeicaza/SwiftGodot), runs the same
-`World.step` as the Apple build. It currently flies a ship on the real flight
-model, renders ships, planets, shots, beams, asteroids and explosions, and has
-a HUD, radar, targeting, landing and the trade center. Sound, the galaxy map,
-the rest of the spaceport, saving and the story runtime are still to come. See
+`World.step` as the Apple build. On macOS it plays a pilot through flight,
+combat, landing, the spaceport, missions, the galaxy map, sound, saving and the
+story runtime, and loads all 13 catalog plug-ins. Linux, Windows and Steam Deck
+builds have not been made or run yet, and some recent work is written but not yet
+built or tested. The per-subsystem table is in
+[docs/STATUS.md](docs/STATUS.md#linux-and-windows); the design is in
 [GODOT_LAYER.md](docs/GODOT_LAYER.md).
 
 ## Repository layout
