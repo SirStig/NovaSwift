@@ -1,6 +1,5 @@
 import NovaSwiftKit
 import NovaSwiftEngine
-import NovaSwiftStory
 
 /// Whether a mission/story-gated outfit or ship can be shown/bought at the
 /// current spaceport, per the Nova Bible's `Availability`/`Require`/
@@ -8,7 +7,7 @@ import NovaSwiftStory
 /// gating (`NovaEconomy.sells(techLevel:at:)`), which fully hides an item —
 /// the Bible's default here is "shown, greyed, unpurchasable" instead; full
 /// hiding only happens when the item opts into it (`hidesWhenLocked`).
-enum LockState: Equatable {
+public enum LockState: Equatable, Sendable {
     case available
     /// Still shown, but Buy is disabled — the Bible's default treatment.
     case locked
@@ -26,7 +25,7 @@ extension NovaGame {
     /// engine agree on what the player has unlocked (an active-rank Contribute
     /// used to unlock nothing here — a rank-gated hull/outfit stayed locked in
     /// the shipyard even after the player earned the rank).
-    func contributedBits(pilot: PlayerState) -> UInt64 {
+    public func contributedBits(pilot: PlayerState) -> UInt64 {
         var bits: UInt64 = ship(pilot.shipType)?.contribute ?? 0
         for (outfitID, qty) in pilot.outfits where qty > 0 {
             bits |= outfit(outfitID)?.contribute ?? 0
@@ -61,7 +60,7 @@ extension NovaGame {
     }
 
     /// Lock state for an outfit at a given spöb (needs `RequireGovt` scoping).
-    func lockState(for item: OutfRes, pilot: PlayerState, at spob: SpobRes, diplomacy: Diplomacy) -> LockState {
+    public func lockState(for item: OutfRes, pilot: PlayerState, at spob: SpobRes, diplomacy: Diplomacy) -> LockState {
         // Note: `ignoresRequirements` (Bible `Flags` 0x0800) is sell-side only
         // ("can be sold anywhere, regardless of tech level, requirements, or
         // mission bits") — it does not waive the buy-side Require/Availability
@@ -74,19 +73,19 @@ extension NovaGame {
     }
 
     /// The outfit's Availability test (`oütf.AvailBits`).
-    func outfitAvailabilityPasses(_ item: OutfRes, pilot: PlayerState) -> Bool {
+    public func outfitAvailabilityPasses(_ item: OutfRes, pilot: PlayerState) -> Bool {
         NCBTest(item.availBits).evaluate(pilot)
     }
 
     /// The outfit's Require test: its `RequireGovt` scope and Require bits.
-    func outfitRequirePasses(_ item: OutfRes, pilot: PlayerState, at spob: SpobRes, diplomacy: Diplomacy) -> Bool {
+    public func outfitRequirePasses(_ item: OutfRes, pilot: PlayerState, at spob: SpobRes, diplomacy: Diplomacy) -> Bool {
         requireGovtApplies(item.requireGovt, at: spob, diplomacy: diplomacy)
             && (item.require & contributedBits(pilot: pilot)) == item.require
     }
 
     /// Lock state for a ship class (no documented `RequireGovt` for ships —
     /// the Bible's shïp section never mentions govt-scoped requirements).
-    func lockState(for item: ShipRes, pilot: PlayerState) -> LockState {
+    public func lockState(for item: ShipRes, pilot: PlayerState) -> LockState {
         if pilot.shipType == item.id { return .available }
         let availOK = NCBTest(item.availBits).evaluate(pilot)
         let requireOK = (item.require & contributedBits(pilot: pilot)) == item.require

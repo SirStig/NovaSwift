@@ -15,11 +15,14 @@ name: Godot layer (Linux/Windows)
 on:
   push:
     branches: [main]
+    tags: ["v*", "godot-v*"]
     paths:
       - "Sources/**"
       - "godot/**"
       - "Package.swift"
       - "scripts/build-gdextension.sh"
+      - "scripts/package-linux.sh"
+      - "packaging/**"
       - ".github/workflows/godot-linux-windows.yml"
   pull_request:
     paths:
@@ -29,9 +32,20 @@ on:
       - "scripts/build-gdextension.sh"
       - ".github/workflows/godot-linux-windows.yml"
   workflow_dispatch:
+    inputs:
+      package:
+        description: "Also build the downloadable Linux/Windows packages"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
+
+env:
+  # Must match the Godot the project is developed against (docs/GODOT_LAYER.md
+  # version matrix; project.godot says 4.6 is the FLOOR, we ship 4.7.x).
+  GODOT_VERSION: "4.7.2"
+  GODOT_RELEASE: "stable"
 
 # Every job pins Swift 6.3, the toolchain this code is developed against and the
 # minimum SwiftGodot's `main` requires. The jobs previously ran 5.10, which no
@@ -98,3 +112,128 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build the NovaSwiftGodot bridge
         run: scripts/build-gdextension.sh release
+
+  # ---------------------------------------------------------------------------
+  # Distributable builds. Run on version tags and on manual dispatch (package
+  # input, default on). Output: downloadable artifacts (and, on a tag, files on
+  # the GitHub release). No EV Nova data is ever packaged.
+  # ---------------------------------------------------------------------------
+
+  # Linux x86_64 for Steam Deck. Built inside jammy (glibc 2.35) so the result
+  # runs on SteamOS 3 (glibc 2.38+). The Swift runtime ships beside the .so.
+  package-linux:
+    name: Package Linux x86_64 (Steam Deck)
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.package)
+    runs-on: ubuntu-latest
+    container: swift:6.3-jammy
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: apt-get update && apt-get install -y --no-install-recommends unzip curl ca-certificates binutils patchelf
+      - name: Cache Godot + export templates
+        uses: actions/cache@v4
+        with:
+          path: ~/godot-dl
+          key: godot-${{ env.GODOT_VERSION }}-linux-templates-v1
+      - name: Install Godot (headless editor) + Linux/Windows export templates
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-${GODOT_RELEASE}"
+          mkdir -p ~/godot-dl && cd ~/godot-dl
+          [ -f godot.zip ] || curl -fsSL -o godot.zip "$base/Godot_v${GODOT_VERSION}-${GODOT_RELEASE}_linux.x86_64.zip"
+          [ -f templates.tpz ] || curl -fsSL -o templates.tpz "$base/Godot_v${GODOT_VERSION}-${GODOT_RELEASE}_export_templates.tpz"
+          unzip -oq godot.zip
+          install -m 755 "Godot_v${GODOT_VERSION}-${GODOT_RELEASE}_linux.x86_64" /usr/local/bin/godot
+          # The .tpz is ~1.3 GB (all platforms); only unpack what we export.
+          tdir=~/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_RELEASE}
+          mkdir -p "$tdir"
+          unzip -oqj templates.tpz 'templates/version.txt' 'templates/linux_*' 'templates/windows_*' -d "$tdir"
+          ls "$tdir"
+          godot --version
+      - name: Build, export, package
+        run: scripts/package-linux.sh
+      - name: Smoke test the exported build (extension must load, no data needed)
+        run: |
+          cd godot/export/linux
+          timeout 60 ./NovaSwift.x86_64 --headless --quit-after 30 2>&1 | tee smoke.log || true
+          if grep -Ei "can't open dynamic library|failed to load|GDExtension.*error" smoke.log; then
+            echo "extension failed to load"; exit 1
+          fi
+          rm -f smoke.log
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NovaSwift-linux-x86_64
+          path: godot/export/NovaSwift-linux-x86_64.tar.gz
+          if-no-files-found: error
+
+  # Windows x86_64. Best effort: the Windows bridge build is still informational
+  # (continue-on-error) until it is proven on a real toolchain.
+  package-windows:
+    name: Package Windows x86_64 (best effort)
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.package)
+    runs-on: windows-2022
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Swift toolchain
+        uses: compnerd/gha-setup-swift@main
+        with:
+          branch: swift-6.3.3-release
+          tag: 6.3.3-RELEASE
+      - name: Build the bridge
+        shell: bash
+        run: scripts/build-gdextension.sh release
+      - name: Install Godot + Windows export templates
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-${GODOT_RELEASE}"
+          mkdir -p ../godot-dl && cd ../godot-dl
+          curl -fsSL -o godot.zip "$base/Godot_v${GODOT_VERSION}-${GODOT_RELEASE}_win64.exe.zip"
+          curl -fsSL -o templates.tpz "$base/Godot_v${GODOT_VERSION}-${GODOT_RELEASE}_export_templates.tpz"
+          unzip -oq godot.zip
+          tdir="$APPDATA/Godot/export_templates/${GODOT_VERSION}.${GODOT_RELEASE}"
+          mkdir -p "$tdir"
+          unzip -oqj templates.tpz 'templates/version.txt' 'templates/windows_*' -d "$tdir"
+      - name: Export and bundle the Swift runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          godot="$(cd ../godot-dl && pwd)/Godot_v${GODOT_VERSION}-${GODOT_RELEASE}_win64_console.exe"
+          out=godot/export/windows
+          mkdir -p "$out"
+          "$godot" --headless --path godot --import || true
+          "$godot" --headless --path godot --export-release "Windows" "$PWD/$out/NovaSwift.exe"
+          cp -f godot/bin/*.dll "$out/"
+          # Swift runtime DLLs (swiftCore, Foundation, ...) from the toolchain.
+          rt="$(dirname "$(find "/c/Program Files/Swift" -iname swiftCore.dll | head -1)")"
+          echo "Swift runtime dir: $rt"
+          cp -f "$rt"/*.dll "$out/"
+          printf 'NOVA Swift (Windows). No game data included: set the EV Nova data folder in-game (Game Data).\r\nRequires the Microsoft Visual C++ Redistributable (x64).\r\n' > "$out/README.txt"
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path godot/export/windows/* -DestinationPath godot/export/NovaSwift-windows-x86_64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NovaSwift-windows-x86_64
+          path: godot/export/NovaSwift-windows-x86_64.zip
+          if-no-files-found: error
+
+  # On a version tag, attach the packages to the GitHub release.
+  publish:
+    name: Attach to release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [package-linux, package-windows]
+    # package-windows is best effort: publish whatever succeeded.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**/*
+          draft: true

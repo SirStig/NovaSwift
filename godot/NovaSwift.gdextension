@@ -25,3 +25,19 @@ windows.release.x86_64 = "res://bin/NovaSwiftGodot.dll"
 
 macos.debug = "res://bin/libNovaSwiftGodot.dylib"
 macos.release = "res://bin/libNovaSwiftGodot.dylib"
+
+; Files that must sit next to the exported native library. Godot copies these
+; into the same directory as the executable (value "" = that directory).
+; libNovaSwiftGodot links SwiftGodot dynamically, so it must ship with it. The
+; Swift *runtime* libs (libswiftCore.so, libFoundation*.so ...) are added by
+; scripts/package-linux.sh — they differ per toolchain, so are not listed here.
+[dependencies]
+
+linux.debug.x86_64 = { "res://bin/libSwiftGodot.so": "" }
+linux.release.x86_64 = { "res://bin/libSwiftGodot.so": "" }
+
+windows.debug.x86_64 = { "res://bin/SwiftGodot.dll": "" }
+windows.release.x86_64 = { "res://bin/SwiftGodot.dll": "" }
+
+macos.debug = { "res://bin/libSwiftGodot.dylib": "" }
+macos.release = { "res://bin/libSwiftGodot.dylib": "" }

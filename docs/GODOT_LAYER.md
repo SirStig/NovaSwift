@@ -225,6 +225,25 @@ explosion happened here, this big, playing this `bööm`", and how that reads on
 screen is presentation. Anything past that belongs in the engine, where the
 Apple app inherits it too.
 
+### In-flight interactions (hail · board/plunder · escorts)
+
+`godot/screens/Interactions.gd` + NovaWorld's `// MARK: Interactions` section.
+All rules are shared Swift, extracted from the Apple `GameContainerView`/`GameScene`
+(which still carry their own copies; nothing under `app/` was changed):
+`FlightComm` (ship hail + stellar comm: `OriginalComms`, `StellarComm`,
+`PaymentWindow`, `PersEncounter`; STR# 150/2002/3000/3001/3002 strings, bribes,
+Request Assistance / Beg For Mercy, Demand Tribute / Release, domination
+persisted through `StoryEngine`), `FlightPlunder` (board range, loot buttons,
+panic self-destruct, `World.resolveCapture` odds, Use as Escort / Take Command)
+and `FlightEscorts` (`EscortCommandPanel`, group orders, Release, roster respawn
+and loss). The frontend pauses the sim while a dialog is up. Keys (Controls.gd):
+Y hail (Alt-Y nearest stellar), B board, F/V/C/Alt-C escort attack/hold/formation/
+return, plus X defend and G panel because the original D/E are taken by the
+port's WASD / Q-E layout; pad D-pad ← hail, → board. Known gaps: `pêrs`
+LinkMission offers from a hail/board are not presented; the Escorts window has no
+Upgrade/Sell (shipyard marks); Godot has no planet selection, so the nearest
+stellar stands in for the selected planet; landing is not gated on a bribe yet.
+
 ## Cross-platform status of the core
 
 An audit of `NovaSwiftKit` + `NovaSwiftEngine` (the two libraries the bridge
@@ -269,7 +288,8 @@ allowed to run — the workflow is back on push/PR now that it can pass.
 
 Godot **export templates** turn `godot/` + the platform library into shippable
 `.x86_64` (Linux) and `.exe` (Windows) builds; wiring the export presets into CD
-is a follow-up once the frontend is fleshed out.
+is described in [`PACKAGING.md`](PACKAGING.md) (presets, `scripts/package-linux.sh`,
+CI `package-*` jobs, Steam Deck setup).
 
 ## Milestones
 
@@ -285,9 +305,22 @@ is a follow-up once the frontend is fleshed out.
    indexed by heading, spinning strips animated), beams as a core→corona
    gradient, `röid` rocks, `bööm` explosion animations, impact sparks and
    asteroid debris, engine-glow exhaust, the cloak dissolve, the ionization
-   tint, and the system's own `sÿst.BkgndColor`.* **Sound is the one thing
-   still open here** — `drain_events` carries the event names and
-   `drain_effects` the positions, so the hook exists; nothing plays them yet.
+   tint, and the system's own `sÿst.BkgndColor`.* **Sound works**
+   (`NovaWorld`'s "Audio" section, `godot/audio/GameAudio.gd`): `sound_info`/
+   `sound_pcm` hand over the decoded `snd ` as 16-bit mono PCM (cached as an
+   `AudioStreamWAV` per id); the event → sound table (weapon fire per wëap
+   rules, bööm explosions, cloak, docking, chatter, Warp up/out, Red Alert,
+   Klaxxon, the interface beeps) is the shared `SoundCues`, and the original's
+   16-voice list (priority ranking, 8 audible, stacking guards, the 200 px /
+   850²/d² distance law, mono) is the shared `SoundVoiceBoard` — a separate
+   `drain_sound_cues` returns per-voice commands for 16 `AudioStreamPlayer`s, so
+   `drain_events`/`drain_effects` are untouched. Beeps play on the pilot menu and
+   galaxy map; no music (the Apple app only plays the title-menu track, and this
+   frontend has no main menu). Headless check: `godot/tests/audio_selfcheck.gd`.
+   Not yet: the staggered NPC death-burst sounds (one bang per `shipDying`), a
+   volume UI (`GameAudio.master_volume`/`sfx_volume`/`ui_volume` exist), beeps
+   on the flight target keys, and the Apple app still keeps its own copy of the
+   event table in `GameScene`.
 4. **Screens** — galaxy map, landing, spaceport (trade/outfit/shipyard), pilot
    save/load — GDScript `Control` UI over the same engine/story calls the Apple
    app makes. **Landing/launch done and confirmed on-toolchain** (`canLandNow`/
@@ -298,9 +331,47 @@ is a follow-up once the frontend is fleshed out.
    Apple-only `PilotStore` into the portable `PilotEconomy`
    (`Sources/NovaSwiftStory/PilotEconomy.swift`), so `PilotStore` is now a thin
    `ObservableObject` wrapper and the bridge calls the same code rather than
-   reimplementing it. **Trade Center works** on that basis (real prices,
-   credits, cargo capacity, buy/sell); outfitter, shipyard, bar and mission BBS
-   are still to build, and the pilot is still in-memory only — no save/load.
+   reimplementing it. **The spaceport works** (`godot/screens/Spaceport.gd`
+   over NovaWorld's "Spaceport (outfitter/shipyard)" section): the landing screen
+   (the spöb's landing PICT — decoded portably by `PICT.decode`, with the PICT-id
+   rules in `NovaGame.landscapePictID`/`outfitPictID`/`shipPictID` — its `dësc`
+   text, and only the services its flags offer), Trade Center (`tradeRows`:
+   reputation/domination scale, disasters, junk rows; click = 10 t, typed
+   quantity prompt), Outfitter and Shipyard (+ Ship Info), Recharge, Leave. The
+   rule decisions the Apple views used to own — outfitter/shipyard stock, sell-only
+   listings, Buy enablement, `LockState`, rank-scaled net price, refuel and the
+   auto-refueller — moved into shared `SpaceportShops`/`ItemLocking`
+   (`NovaSwiftStory`) and the Apple views now call them. Fuel is now the pilot's
+   real tank across land/launch (refuelling is paid), and a visit's days
+   (+1 launch, +1 outfitter trade, +4 ship purchase) tick on launch. Bar, Mission
+   BBS and escort hiring are still to build. **Galaxy map + hyperjump work** (`NovaWorld`'s
+   "Navigation & hyperjump" section, `godot/screens/GalaxyMap.gd`,
+   `HyperjumpFx.gd`, `NavScreens.gd`): fog-of-war systems coloured by
+   government, links, the original's click/Shift+click route rules (plus the
+   opt-in auto-route enhancement), fuel/multi-jump from `PilotEconomy`, and the
+   engine's own `PlayerHyperjump` maneuver followed by an in-place world rebuild
+   that carries the player's ship (fuel/damage/cargo) and marks the destination
+   explored. The portable pieces were lifted out of the Apple `NavigationModel`/
+   `GameScene`/`GovernmentPalette` into `StarMapNavigator` (+ `World.
+   hyperspaceRefusal`), `GovernmentMapPalette` and `HyperjumpCommit` (the pilot
+   side of an arrival), which the Apple app now calls too. Gamepad: stick cursor
+   with snapping, D-pad next-system, A plot, Y add hop, B close. Not yet:
+   hypergate/wormhole links on the map, the nebula art, system search, escorts
+   and mission ships following a jump, jump sounds and the reduced-flashing
+   option. **Pilot save/load works** (`NovaWorld`'s "Pilots & saves"
+   section + `godot/screens/PilotMenu.gd`): the bridge reads and writes the very
+   same `<uuid>.evpilot` files as the Apple app through `PilotArchive`, and the
+   create/persist/prepare-for-play/migrate steps were lifted out of the Apple-only
+   `PilotRoster`/`AppModel`/`PilotStore` into the portable `PilotSaves`
+   (`Sources/NovaSwiftStory/PilotSaves.swift`; `PilotNames` moved alongside). A
+   startup screen lists pilots, creates one from a `chär` scenario (name via
+   keyboard or the dice button), loads or deletes (with confirm), fully on
+   keyboard and gamepad via Godot focus navigation. Saves follow the original's
+   cadence (`PilotSaveReason`): on creation and on launch (docked at that
+   stellar, so a reload lifts off from it) and on quit; the in-flight
+   `frequentAutosave` enhancement and Strict Play permadeath are not wired.
+   `godot/tests/pilot_selfcheck.gd` exercises create → save → list → load →
+   delete headlessly.
 5. **Story runtime** — bring `NovaSwiftStory` across for missions/crons/NCB.
 6. **Packaging** — Godot export presets + CD for Linux/Windows artifacts.
 
@@ -312,3 +383,32 @@ is a follow-up once the frontend is fleshed out.
   layer only renders and drives it.
 - Still BYO-data. The Godot build reads the player's own EV Nova data exactly
   like every other NOVA Swift build; no game content is bundled.
+
+
+## App shell (main menu, settings, pause, data setup)
+
+`godot/screens/Shell.gd` owns the screens around the game and the flow between
+them; `Main.gd` only asks `in_menu()` / `is_paused()` and reacts to
+`pilot_chosen` / `demo_chosen`. Flow: **no data** -> `DataSetup` (folder picker via
+Godot's non-native `FileDialog`, rescan, *Run Demo*) -> **main menu** -> `PilotMenu`
+(New / Open, Back returns to the menu). **Pause** (`pause_menu` action: Esc / pad
+Start, polled by Main only in plain flight, so the map, dialogs and docked UI keep
+Esc/B) offers Resume, Settings, Save & Quit to Menu (`pilot_save_now`) and Quit
+(`pilot_autosave`). Original fidelity: no hover sounds; confirm beep snd 150 only.
+
+- **Settings** persist in `user://settings.cfg` via `Prefs.gd` (`[audio]`,
+  `[video]`, `[input] deadzone`, `[data] dir`, `[keys]` rebinds). Volumes go into
+  `GameAudio`'s existing `master/sfx/ui/muted`; `Controls.stick_deadzone` is the
+  runtime dead zone; rebinds live in `Controls.overrides`, which `Controls.register()`
+  layers over `BINDINGS` (so startup is `Prefs.load_all()` then `register()`).
+  Rebinding captures the next key / pad button; a binding held by another action
+  in the same group (Flight / Docked / Galaxy map) is swapped, as the Apple
+  `PadBindings` does. Analog axes are fixed.
+- **Title music**: the bridge exposes `title_music_name()` (STR# 130 #2); the
+  frontend searches `Nova Plug-ins` then `Nova Files` for the bare name, `.mov`,
+  `.mp3` (the order of `OriginalAudio.musicCandidates`) and plays an `.mp3` with
+  `AudioStreamMP3` over the main menu only. `.mov` or no file = silence.
+- **Display**: stretch aspect is `expand` so a 1280x800 Steam Deck screen gets the
+  extra height instead of bars (the HUD and screens lay out from the viewport rect).
+- Not done: game speed (`GameSpeedRules` is not bridged), Plugins, About, the
+  authentic (cölr/PICT) main menu art, per-pad glyph names beyond Xbox layout.

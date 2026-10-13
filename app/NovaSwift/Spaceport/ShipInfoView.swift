@@ -1,5 +1,6 @@
 import SwiftUI
 import NovaSwiftKit
+import NovaSwiftStory
 
 /// EV Nova's **detailed ship-info dialog** — the screen the Shipyard's "Info"
 /// button opens (Nova Bible: the "detailed ship info dialog").
@@ -162,7 +163,7 @@ struct ShipInfoView: View {
     }
 
     private func classDescription(_ s: ShipRes) -> String {
-        game.descText(13000 + s.id - 128)
+        SpaceportShops.classDescription(s, game: game)
     }
 
     // MARK: - Modern card (Nova Swift)
@@ -288,22 +289,7 @@ struct ShipInfoView: View {
         return nil
     }
 
-    private func standardWeapons(_ s: ShipRes) -> [String] {
-        aggregate(s.weapons.map { (id: $0.id, count: $0.count) }) { game.weapon($0)?.name.novaDisplayName }
-    }
+    private func standardWeapons(_ s: ShipRes) -> [String] { SpaceportShops.standardWeapons(s, game: game) }
 
-    private func standardOutfits(_ s: ShipRes) -> [String] {
-        aggregate(s.outfits.map { (id: $0.id, count: $0.count) }) { game.outfit($0)?.displayName }
-    }
-
-    /// Sum counts per id, resolve each to a name, and format "N × name" (or just
-    /// "name" for a single unit), ordered by id for a stable list.
-    private func aggregate(_ items: [(id: Int, count: Int)], name: (Int) -> String?) -> [String] {
-        var counts: [Int: Int] = [:]
-        for item in items where item.count > 0 { counts[item.id, default: 0] += item.count }
-        return counts.sorted { $0.key < $1.key }.map { id, n in
-            let label = name(id) ?? "#\(id)"
-            return n > 1 ? "\(n) × \(label)" : label
-        }
-    }
+    private func standardOutfits(_ s: ShipRes) -> [String] { SpaceportShops.standardOutfits(s, game: game) }
 }

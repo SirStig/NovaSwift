@@ -125,13 +125,9 @@ final class PilotRoster: ObservableObject {
     @discardableResult
     func create(name: String, isMale: Bool, strictPlay: Bool = false, scenario: CharRes, game: NovaGame,
                 nickname: String = "", shipName: String? = nil) -> PilotSave {
-        var player = PilotFactory.make(name: name, isMale: isMale, scenario: scenario, game: game,
-                                       nickname: nickname, shipName: shipName)
-        player.strictPlay = strictPlay
-        var save = PilotSave(displayName: name.isEmpty ? "Captain" : name,
-                             scenarioName: scenario.displayName,
-                             player: player, game: game,
-                             dataFingerprint: Self.fingerprint(for: game))
+        var save = PilotSaves.makeNew(name: name, isMale: isMale, strictPlay: strictPlay,
+                                      scenario: scenario, game: game,
+                                      nickname: nickname, shipName: shipName)
         do {
             save = try archive.save(save, backup: false)
             Log.pilot.notice("PilotRoster.create: created pilot \(save.id, privacy: .public) \"\(save.displayName, privacy: .public)\"")
@@ -189,30 +185,7 @@ final class PilotRoster: ObservableObject {
     /// landing / hyperjump / manual save / the autosave tick; backs up on the
     /// meaningful events so a stuck or corrupted pilot can be rolled back.
     func persist(id: UUID, state: PlayerState, game: NovaGame?, backup: Bool) {
-        // Prefer to update the existing on-disk save so its metadata (name,
-        // createdAt, scenario, pilotGroupID) is preserved. If it can't be loaded
-        // — missing after a botched write, or corrupt — DON'T drop the autosave;
-        // reconstruct a fresh save from the live state under the same id so the
-        // player's progress is still written somewhere. Losing the metadata is
-        // strictly better than losing the whole session's play.
-        var save: PilotSave
-        if let existing = try? archive.load(id: id) {
-            save = existing
-            save.player = state
-        } else {
-            Log.pilot.error("PilotRoster.persist: pilot \(id, privacy: .public) not loadable; reconstructing from live state so progress isn't lost")
-            save = PilotSave(id: id,
-                             displayName: state.pilotName.isEmpty ? "Captain" : state.pilotName,
-                             scenarioName: "", player: state, game: game,
-                             dataFingerprint: game.map(Self.fingerprint(for:)) ?? "")
-        }
-        save.refreshSnapshot(game: game)
-        do {
-            _ = try archive.save(save, backup: backup)
-            Log.pilot.debug("PilotRoster.persist: persisted pilot \(id, privacy: .public) (backup=\(backup))")
-        } catch {
-            Log.pilot.error("PilotRoster.persist: failed to save pilot \(id, privacy: .public): \(String(describing: error), privacy: .public)")
-        }
+        PilotSaves.persist(archive: archive, id: id, state: state, game: game, backup: backup)
         refresh()
     }
 
@@ -311,7 +284,7 @@ final class PilotRoster: ObservableObject {
     /// A coarse fingerprint of the loaded data set, so a save records which data
     /// produced it (a full-parity check is a later concern).
     static func fingerprint(for game: NovaGame) -> String {
-        "ships:\(game.ships().count) syst:\(game.systems().count) char:\(game.characters().count)"
+        PilotSaves.fingerprint(for: game)
     }
 
     // MARK: Save slots (many independent saves, one pilot identity)

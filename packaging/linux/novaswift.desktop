@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=NOVA Swift
+Comment=EV Nova engine port (bring your own EV Nova data)
+Exec=sh -c 'cd "$(dirname "$(readlink -f "%k")")" && exec ./NovaSwift.sh'
+Icon=novaswift
+Terminal=false
+Categories=Game;

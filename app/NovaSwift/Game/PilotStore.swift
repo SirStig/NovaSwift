@@ -101,21 +101,7 @@ final class PilotStore: ObservableObject {
     /// `PilotEconomy.migrateHullFittings`.
     func migrateIfNeeded(game: NovaGame) {
         guard started else { return }
-        // Pilots saved under the old per-government legal record get one
-        // reputation per system seeded from it (EC-02).
-        let reputationMigrated = state.migrateLegalRecordIfNeeded(game: game)
-        let fittingsMigrated = PilotEconomy.migrateHullFittings(&state, game: game)
-        // Pilot load runs the twin bookkeeping (0x004cb260 → 0x00432470,
-        // 0x00448090): shared twin discovery, and a pilot saved in a system
-        // that is now hidden moves to its visible twin.
-        let story = StoryEngine(game: game, player: state)
-        story.refreshSystemState()
-        let systemMigrated = story.player.currentSystem != state.currentSystem
-            || story.player.exploredSystems != state.exploredSystems
-            || story.player.landedSystems != state.landedSystems
-            || story.player.chartedSystems != state.chartedSystems
-        if systemMigrated { state = story.player }
-        guard reputationMigrated || fittingsMigrated || systemMigrated else { return }
+        guard PilotSaves.migrate(&state, game: game) else { return }
         save()
     }
 

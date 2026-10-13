@@ -29,6 +29,13 @@ fi
 # still builds and is still type-checked normally.
 SWIFT_FLAGS=(-Xswiftc -no-verify-emitted-module-interface)
 
+# Linux: make the shipped .so find its siblings (libSwiftGodot.so and the Swift
+# runtime libs scripts/package-linux.sh copies in) relative to itself, so the
+# package works on a machine with no Swift installed.
+if [ "$(uname -s)" = "Linux" ]; then
+  SWIFT_FLAGS+=(-Xlinker -rpath -Xlinker '$ORIGIN')
+fi
+
 echo "→ swift version:"; swift --version | sed 's/^/    /'
 echo "→ building NovaSwiftGodot ($CONFIG) in $BRIDGE_DIR …"
 swift build --package-path "$BRIDGE_DIR" -c "$CONFIG" "${SWIFT_FLAGS[@]}"
@@ -73,5 +80,13 @@ for f in \
     echo "✓ copied $base → $OUT_DIR/"
   fi
 done
+
+# macOS: overwriting a loaded/previously-signed dylib in place can leave a stale
+# code signature, and the kernel then SIGKILLs Godot on dlopen (exit 137).
+# Re-sign ad hoc so a rebuilt bridge always loads.
+if [ "$(uname)" = "Darwin" ] && command -v codesign >/dev/null 2>&1; then
+  codesign --force --sign - "$OUT_DIR"/*.dylib
+  echo "✓ ad-hoc signed $OUT_DIR/*.dylib"
+fi
 
 echo "Done. Open godot/ in Godot 4.2+ (or run the exported build) to play the slice."

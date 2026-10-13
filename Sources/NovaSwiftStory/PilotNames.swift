@@ -4,7 +4,7 @@ import Foundation
 /// dice button on the new-pilot dialog and the pad keyboard's suggestion
 /// chips both draw from here. Names aim for EV Nova's register: ordinary
 /// human first names against slightly space-opera surnames.
-enum PilotNames {
+public enum PilotNames {
     private static let first = [
         "Ace", "Adrian", "Alexis", "Aria", "Barnabas", "Cassia", "Cole",
         "Dana", "Dax", "Elena", "Ezra", "Farley", "Gideon", "Harper",
@@ -29,7 +29,7 @@ enum PilotNames {
         "Slipstream", "Spectre", "Vortex",
     ]
 
-    static func random() -> String {
+    public static func random() -> String {
         if Int.random(in: 0..<5) == 0,
            let sign = callsigns.randomElement(), let surname = last.randomElement() {
             return "\"\(sign)\" \(surname)"
@@ -41,7 +41,7 @@ enum PilotNames {
     }
 
     /// A batch of distinct suggestions (for the pad keyboard's chips).
-    static func suggestions(_ count: Int = 4) -> [String] {
+    public static func suggestions(_ count: Int = 4) -> [String] {
         var seen = Set<String>()
         while seen.count < count { seen.insert(random()) }
         return Array(seen)

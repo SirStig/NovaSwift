@@ -26,18 +26,33 @@
 # hands back render-interpolated poses, so this script just forwards the display
 # delta and draws whatever comes out. See NovaWorld.step.
 #
-# Controls: arrows/WASD fly, Shift burn, Space fire primary, Ctrl fire secondary,
-# Tab nearest-hostile target, Backspace clear target, Q/E cycle secondary weapon,
-# L land/launch. Docked: up/down select a commodity row, B buy 1 ton, S sell 1 ton.
-# See docs/GODOT_LAYER.md.
+# Controls: every input is an InputMap action registered by Controls.gd with both
+# a keyboard key and a gamepad binding (Steam Deck / any SDL pad) — see that file
+# for the full table. Keyboard: arrows/WASD fly, Shift burn, Space/Ctrl fire,
+# Tab target, Backspace clear, Q/E cycle secondary, L land/launch; docked UI is
+# screens/Spaceport.gd. Pad: left stick fly, right stick aim, A/B fire, D-pad ↓ land.
 
 extends Node2D
 
+const Controls = preload("res://Controls.gd")
+const Prefs = preload("res://Prefs.gd")                      # user://settings.cfg
+const Shell = preload("res://screens/Shell.gd")              # main menu, settings, pause, data setup
+const NavScreens = preload("res://screens/NavScreens.gd")   # galaxy map + hyperjump
+const Interactions = preload("res://screens/Interactions.gd")   # hail, board/plunder, escorts
+const GameAudio = preload("res://audio/GameAudio.gd")          # snd playback (voice pool)
+const StoryScreens = preload("res://screens/StoryScreens.gd") # story texts, mission offers, Player/Mission Info
+const Spaceport = preload("res://screens/Spaceport.gd")     # landing, trade, outfitter, shipyard
+
+var _shell: Node             # Shell: menus around the game (see screens/Shell.gd)
+
 var nova                     # NovaWorld (from the NovaSwiftGodot GDExtension)
 var _has_data := false
+var _nav: Node               # NavScreens: galaxy map screen + hyperjump visual
+var _interact: Node          # Interactions: hail / plunder / escort dialogs
+var _audio: Node             # GameAudio: drains the bridge's sound cues every frame
 
-# Trade Center: selected commodity row while docked.
-var _trade_selected := 0
+var _story: Node            # StoryScreens: story text / offer dialogs, Player + Mission Info
+var _spaceport: Node         # Spaceport: the whole docked UI
 
 # Decoded-sprite cache, keyed by Vector2i(kind, id) — see SPRITE_* below. Each
 # entry is { tex, fw, fh, cols, frames, rate } or null for "this resource has no
@@ -48,8 +63,9 @@ var _stars_near: PackedVector2Array
 var _stars_far: PackedVector2Array
 var _field := Vector2(4096, 4096)
 
-# Edge-triggered keys (Tab/Q/E/Backspace act once per press, not held).
-var _keys_down_last := {}
+# Actions that must be released before they count again — set on a screen
+# change so the button that launched you (pad B) doesn't also fire a missile.
+var _suppressed := {}
 
 # Rolling message log: [{text, age}], newest first, oldest fades out.
 var _log: Array = []
@@ -158,27 +174,117 @@ func _ready() -> void:
 	if not ClassDB.class_exists("NovaWorld"):
 		push_error("NovaWorld class not found — is godot/bin/ built? See scripts/build-gdextension.sh")
 		return
+	Prefs.load_all()      # rebinds + dead zone must be in before register()
+	Controls.register()
+	Prefs.apply_video()
 	nova = ClassDB.instantiate("NovaWorld")
 	add_child(nova)
+	_audio = GameAudio.new()
+	add_child(_audio)
+	_audio.setup(nova)
+	Prefs.apply_audio(_audio)
+
+	_nav = NavScreens.new()
+	add_child(_nav)
+	_nav.setup(nova)
+	_nav.log_message.connect(_push_log)
+	_nav.screen_closed.connect(_suppress_held)
+	_nav.arrived.connect(func(_n): _fx.clear(); _refresh_background())
+
+	_interact = Interactions.new()
+	add_child(_interact)
+	_interact.setup(nova)
+	_interact.log_message.connect(_push_log)
+	_interact.screen_closed.connect(_suppress_held)
+
+	_spaceport = Spaceport.new()
+	add_child(_spaceport)
+	_spaceport.setup(nova)
+	_spaceport.launch_requested.connect(_on_launch)
+
+	_story = StoryScreens.new()   # after the spaceport: its dialogs sit above and take input first
+	add_child(_story)
+	_story.setup(nova)
+	_story.log_message.connect(_push_log)
+	_story.screen_closed.connect(_suppress_held)
+	_story.close_spaceport_screen.connect(_spaceport.story_close_screen)
+	_story.forced_launch.connect(_on_launch)
+	get_viewport().size_changed.connect(_sync_story_view)
+	_sync_story_view()
+
+	_shell = Shell.new()
+	add_child(_shell)
+	_shell.setup(nova, _audio)
+	_shell.data_loaded.connect(func(_dir): _has_data = true)
+	_shell.pilot_chosen.connect(_on_pilot_chosen)
+	_shell.demo_chosen.connect(_on_demo_chosen)
+	_shell.resumed.connect(_suppress_held)
+	_shell.player_info_requested.connect(func(): _story.open_info("general"))
 
 	_start_world()
 	_seed_starfield()
+	_nav.run_selftest_if_requested()
+
+
+# The observe goal counts a mission ship as seen only inside the visible play area.
+func _sync_story_view() -> void:
+	var sz := get_viewport_rect().size
+	nova.set_story_view_size(sz.x, sz.y)
 
 
 func _start_world() -> void:
-	var data_dir := OS.get_environment("NOVA_DATA_DIR")
-	if data_dir == "":
-		# The repo's git-ignored data dir, where players drop their own EV Nova data.
-		data_dir = ProjectSettings.globalize_path("res://") + "../data/base"
+	# Dev/CI shortcuts skip the shell: throwaway pilot (never saved) or the demo.
+	if OS.get_environment("NOVA_SKIP_PILOT_MENU") != "" or OS.get_environment("NOVA_DEMO") != "":
+		var data_dir: String = Prefs.find_data(nova)
+		if data_dir != "":
+			_has_data = true
+			print("NOVA Swift: loaded data from ", data_dir)
+			nova.make_world(-1)
+		else:
+			nova.make_demo_world()
+			_has_data = false
+			print("NOVA Swift: no data found — running demo world")
+		_refresh_background()
+		return
+	# Otherwise the shell shows the main menu (or the data-setup screen first);
+	# the world isn't built until a pilot is chosen or the demo is picked.
+	_shell.start()
 
-	if nova.load_game(data_dir) and nova.make_world(-1):
-		_has_data = true
-		print("NOVA Swift: loaded data from ", data_dir)
-	else:
+
+func _on_pilot_chosen() -> void:
+	if not nova.make_world(-1):
 		nova.make_demo_world()
 		_has_data = false
-		print("NOVA Swift: no data at ", data_dir, " — running demo world")
+	_suppress_held()
 	_refresh_background()
+
+
+func _on_demo_chosen() -> void:
+	nova.make_demo_world()
+	_has_data = false
+	_suppress_held()
+	_refresh_background()
+
+
+# Esc / Start in plain flight opens the pause menu. Every screen that uses those
+# keys (map, dialogs, docked UI) handles them first, so this only sees them when
+# nothing else wants them.
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("pause_menu") and _can_pause():
+		get_viewport().set_input_as_handled()
+		_shell.open_pause()
+
+
+func _can_pause() -> bool:
+	return nova != null and _shell != null and not _shell.in_menu() and not _shell.is_paused() \
+		and not nova.is_landed() and not _spaceport.is_open() \
+		and not _nav.blocks_flight() and not _interact.blocks_flight() and not nova.story_blocks_flight()
+
+
+# Quitting is an original save point only while landed (the launch tail runs).
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST and nova != null and _shell != null and not _shell.in_menu() and _has_data:
+		nova.pilot_autosave("backgroundLanded" if nova.is_landed() else "background")
 
 
 # The system's own sÿst.BkgndColor. Re-read whenever the world is rebuilt, not
@@ -207,6 +313,16 @@ func _seed_starfield() -> void:
 func _process(delta: float) -> void:
 	if nova == null:
 		return
+	if _shell.in_menu():
+		$HUD.visible = false
+		return
+	if _shell.is_paused():
+		return   # pause menu up: the sim, HUD and last frame stay frozen
+
+	# A suppressed action becomes live again once it's been let go.
+	for action in _suppressed.keys():
+		if not Input.is_action_pressed(action):
+			_suppressed.erase(action)
 
 	var hud: Label = $HUD
 	if nova.is_landed():
@@ -216,23 +332,25 @@ func _process(delta: float) -> void:
 		# flight HUD label is a Control child, so it draws *over* this script's
 		# _draw output and has to be hidden explicitly.
 		hud.visible = false
-		_process_trade_hotkeys()
-		_on_key_pressed(KEY_L, func(): _on_launch())
+		if not _spaceport.is_open():
+			_spaceport.open()   # screens/Spaceport.gd owns input while docked
 		_drain_events_to_log(delta)
 		queue_redraw()
 		return
 
+	if _spaceport.is_open():
+		_spaceport.close()
 	hud.visible = true
 
-	var left := Input.is_key_pressed(KEY_LEFT) or Input.is_key_pressed(KEY_A)
-	var right := Input.is_key_pressed(KEY_RIGHT) or Input.is_key_pressed(KEY_D)
-	var thrust := Input.is_key_pressed(KEY_UP) or Input.is_key_pressed(KEY_W)
-	var reverse := Input.is_key_pressed(KEY_DOWN) or Input.is_key_pressed(KEY_S)
-	var afterburner := Input.is_key_pressed(KEY_SHIFT)
-	var fire_primary := Input.is_key_pressed(KEY_SPACE)
-	var fire_secondary := Input.is_key_pressed(KEY_CTRL)
+	if _nav.blocks_flight() or _interact.blocks_flight() or _story.blocks_flight():   # map / hail / plunder dialog up: sim paused
+		_drain_events_to_log(delta)
+		queue_redraw()
+		return
 
-	nova.set_intent(left, right, thrust, reverse, afterburner, fire_primary, fire_secondary)
+	nova.set_intent(_held("turn_left"), _held("turn_right"), _held("thrust"), _held("reverse"),
+		_held("afterburner"), _held("fire_primary"), _held("fire_secondary"))
+	var aim: float = Controls.aim_heading()
+	nova.set_aim_heading(not is_nan(aim), 0.0 if is_nan(aim) else aim)
 	nova.step(delta)
 
 	_snapshot_frame()
@@ -259,6 +377,7 @@ func _snapshot_frame() -> void:
 
 func _on_launch() -> void:
 	if nova.launch():
+		_suppress_held()
 		_fx.clear()
 		_refresh_background()
 		_push_log("Launched")
@@ -273,57 +392,63 @@ func _update_top_label() -> void:
 	hud.text = "NOVA Swift — Godot · %s%s · ships %d\n" % [
 			mode, ("  ·  " + ship_name) if ship_name != "" else "", nova.ship_count(),
 		] \
-		+ "arrows/WASD fly · Shift burn · Space fire · Ctrl secondary · Tab target · Q/E switch weapon · L land"
+		+ ("L-stick fly · R-stick aim · A/B fire · X/Y target · LB/RB weapon · L3 burn · D-pad ↓ land"
+			if Controls.pad_connected() else
+			"arrows/WASD fly · Shift burn · Space fire · Ctrl secondary · Tab target · Q/E switch weapon · L land")
 
 
-# Tab / Backspace / Q / E fire once per keypress, not once per held frame — poll
-# manually since the project has no InputMap actions defined for them.
+# Discrete actions fire once per press, not once per held frame.
 func _process_hotkeys() -> void:
-	_on_key_pressed(KEY_TAB, func(): nova.select_nearest_target(true))
-	_on_key_pressed(KEY_BACKSPACE, func(): nova.clear_player_target())
-	_on_key_pressed(KEY_Q, func(): _log_weapon_switch(nova.cycle_secondary_weapon(false)))
-	_on_key_pressed(KEY_E, func(): _log_weapon_switch(nova.cycle_secondary_weapon(true)))
-	_on_key_pressed(KEY_L, func(): _on_land())
+	# Target keys sound as the original does (0x0044b120): a new target snd 152,
+	# nothing found snd 153, re-picking the current one silent; clearing snd 150.
+	if Input.is_action_just_pressed("target_nearest"):
+		_beep_for_target(nova.player_target_id(), nova.select_nearest_target(false))
+	if Input.is_action_just_pressed("target_nearest_hostile"):
+		_beep_for_target(nova.player_target_id(), nova.select_nearest_target(true))
+	if Input.is_action_just_pressed("clear_target"):
+		nova.sound_beep(1)
+		nova.clear_player_target()
+	if Input.is_action_just_pressed("secondary_prev"):
+		_log_weapon_switch(nova.cycle_secondary_weapon(false))
+	if Input.is_action_just_pressed("secondary_next"):
+		_log_weapon_switch(nova.cycle_secondary_weapon(true))
+	if Input.is_action_just_pressed("land"):
+		_on_land()
+	_nav.process_hotkeys()   # M map, J hyperjump
+	_interact.process_hotkeys()   # Y hail, B board, escort panel + orders
+	_story.process_hotkeys()      # P Player Info, I Mission Info
+
+
+func _beep_for_target(was: int, found: int) -> void:
+	if found < 0:
+		nova.sound_beep(4)
+	elif found != was:
+		nova.sound_beep(3)
 
 
 func _on_land() -> void:
 	var spob_name: String = nova.nearest_landable_name()
 	if nova.attempt_land():
-		_trade_selected = 0
+		_suppress_held()
 		_fx.clear()
 		_push_log("Docked at " + spob_name)
 
 
-func _process_trade_hotkeys() -> void:
-	var n: int = nova.commodity_count()
-	if n <= 0:
-		return
-	_trade_selected = clampi(_trade_selected, 0, n - 1)
-	_on_key_pressed(KEY_UP, func(): _trade_selected = clampi(_trade_selected - 1, 0, n - 1))
-	_on_key_pressed(KEY_DOWN, func(): _trade_selected = clampi(_trade_selected + 1, 0, n - 1))
-	_on_key_pressed(KEY_B, func(): _on_trade_buy())
-	_on_key_pressed(KEY_S, func(): _on_trade_sell())
+# Held this frame, unless still suppressed from before a screen change.
+func _held(action: String) -> bool:
+	return Input.is_action_pressed(action) and not _suppressed.has(action)
 
 
-func _on_trade_buy() -> void:
-	var goods: String = nova.commodity_name(_trade_selected)
-	var bought: int = nova.buy_commodity(_trade_selected, 1)
-	if bought > 0:
-		_push_log("Bought 1 ton " + goods)
+func _pressed(action: String) -> bool:
+	return Input.is_action_just_pressed(action) and not _suppressed.has(action)
 
 
-func _on_trade_sell() -> void:
-	var goods: String = nova.commodity_name(_trade_selected)
-	var sold: int = nova.sell_commodity(_trade_selected, 1)
-	if sold > 0:
-		_push_log("Sold 1 ton " + goods)
-
-
-func _on_key_pressed(key: Key, action: Callable) -> void:
-	var down := Input.is_key_pressed(key)
-	if down and not _keys_down_last.get(key, false):
-		action.call()
-	_keys_down_last[key] = down
+# On land/launch, everything currently held must be let go before it acts on the
+# new screen (pad A is both "fire" and "buy"; B both "launch" and "missile").
+func _suppress_held() -> void:
+	for action in Controls.BINDINGS:
+		if Input.is_action_pressed(action):
+			_suppressed[action] = true
 
 
 func _log_weapon_switch(new_name: String) -> void:
@@ -425,15 +550,13 @@ func _boom_frame_seconds(rate: int) -> float:
 
 
 func _draw() -> void:
-	if nova == null:
+	if nova == null or _shell.in_menu():
 		return
 
 	var vp := get_viewport_rect().size
 
 	if nova.is_landed():
-		_draw_spaceport_placeholder(vp)
-		_draw_message_log(vp)
-		return
+		return   # the Spaceport screen (a CanvasLayer) draws everything
 
 	# The system's own background, not a hardcoded near-black — Nova's nebula
 	# systems are visibly tinted and clearing wrong loses that entirely.
@@ -915,42 +1038,3 @@ func _draw_land_prompt(vp: Vector2) -> void:
 	var w := ThemeDB.fallback_font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE).x
 	draw_string(ThemeDB.fallback_font, pos - Vector2(w * 0.5, 0), text,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE, col)
-
-
-# Docked screen: a bare-bones Trade Center (real prices/credits/cargo via the
-# bridge's PilotEconomy-backed calls) — the first working spaceport screen.
-# Outfitter/shipyard/bar/mission-BBS are still open milestone-4 work; see
-# docs/GODOT_LAYER.md.
-func _draw_spaceport_placeholder(vp: Vector2) -> void:
-	draw_rect(Rect2(Vector2.ZERO, vp), Color(0.05, 0.05, 0.08, 1.0))
-	var origin := Vector2(60, 70)
-	draw_string(ThemeDB.fallback_font, origin, "Trade Center",
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(0.85, 0.9, 1.0, 1.0))
-
-	var credits: int = nova.player_credits()
-	var free: int = nova.cargo_free_tons()
-	var cap: int = nova.cargo_capacity_tons()
-	draw_string(ThemeDB.fallback_font, origin + Vector2(0, 28),
-		"%d credits · cargo %d/%d tons free" % [credits, free, cap],
-		HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE, Color(0.75, 0.8, 0.85, 0.9))
-
-	var n: int = nova.commodity_count()
-	var row_y := origin.y + 70
-	if n <= 0:
-		draw_string(ThemeDB.fallback_font, Vector2(origin.x, row_y), "No commodity exchange here.",
-			HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE, Color(0.6, 0.6, 0.65, 0.9))
-	for i in n:
-		var goods: String = nova.commodity_name(i)
-		var price: int = nova.commodity_price(i)
-		var held: int = nova.commodity_held(i)
-		var selected := i == _trade_selected
-		var col := Color(1.0, 0.95, 0.7, 1.0) if selected else Color(0.8, 0.85, 0.9, 0.85)
-		var prefix := "> " if selected else "  "
-		draw_string(ThemeDB.fallback_font, Vector2(origin.x, row_y),
-			"%s%-16s %5d cr/ton   held %d" % [prefix, goods, price, held],
-			HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE, col)
-		row_y += 22
-
-	draw_string(ThemeDB.fallback_font, Vector2(origin.x, row_y + 20),
-		"up/down select · B buy 1 ton · S sell 1 ton · L launch",
-		HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE - 1, Color(0.6, 0.65, 0.7, 0.85))

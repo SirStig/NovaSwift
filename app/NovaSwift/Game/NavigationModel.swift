@@ -2,18 +2,6 @@ import SwiftUI
 import NovaSwiftKit
 import NovaSwiftEngine
 
-/// How much the player currently knows about a system, for map fog-of-war.
-enum SystemVisibility {
-    /// Never seen, not adjacent to anywhere explored, not charted — not drawn.
-    case unknown
-    /// Not visited, but revealed by an owned map/chart outfit: real name + faction.
-    case chartered
-    /// Not visited, but linked to a system the player has been to: dim, unnamed.
-    case adjacent
-    /// Physically visited: full detail.
-    case explored
-}
-
 /// Tracks the player's location in the galaxy and handles hyperspace jumps along
 /// `sÿst` links. Drives the galaxy map. As in EV Nova, a click on the map arms a
 /// jump to one linked system and Shift+click builds a longer route hop by hop
@@ -67,21 +55,17 @@ final class NavigationModel: ObservableObject {
     /// `systemNeighbors`, each resolved to the first visible member of its
     /// twin group (`System_ResolveVisibleSystemForTravel` 0x0046b920, D-7): a
     /// link to a hidden system leads to its visible twin, or nowhere.
-    private func visibleNeighbors(_ id: Int) -> [Int] {
-        guard let game else { return [] }
-        var out: [Int] = []
-        for n in game.systemNeighbors(id) {
-            let r = visibilityKnown ? game.visibleTwin(of: n, hidden: hiddenSystems)
-                                    : (hiddenSystems.contains(n) ? nil : n)
-            if let r, r != id, !out.contains(r) { out.append(r) }
-        }
-        return out
+    private func visibleNeighbors(_ id: Int) -> [Int] { navigator?.visibleNeighbors(id) ?? [] }
+
+    /// The shared (portable) routing rules over the current game + visibility.
+    private var navigator: StarMapNavigator? {
+        game.map { StarMapNavigator(game: $0, hidden: hiddenSystems, visibilityKnown: visibilityKnown) }
     }
 
     /// The first visible member of `id`'s twin group, or nil (0x0046b920).
     func resolveVisible(_ id: Int) -> Int? {
-        guard let game else { return hiddenSystems.contains(id) ? nil : id }
-        return game.visibleTwin(of: id, hidden: hiddenSystems)
+        guard let navigator else { return hiddenSystems.contains(id) ? nil : id }
+        return navigator.resolveVisible(id)
     }
 
     /// D-1: hops whose system went hidden swap to their visible twin, or cut
@@ -129,7 +113,7 @@ final class NavigationModel: ObservableObject {
     }
 
     func canJump(to id: Int) -> Bool {
-        (game?.systemNeighbors(currentSystemID).contains(id) ?? false) || visibleNeighbors(currentSystemID).contains(id)
+        navigator?.canJump(from: currentSystemID, to: id) ?? false
     }
 
     var destinationID: Int? { route.last }
@@ -258,10 +242,7 @@ final class NavigationModel: ObservableObject {
     /// purchased/granted map outfit has revealed (`oütf` ModType 16 — a scoped
     /// reveal recorded at acquisition, NOT the whole galaxy).
     func visibility(of id: Int, explored: Set<Int>, adjacent: Set<Int>, charted: Set<Int>) -> SystemVisibility {
-        if explored.contains(id) { return .explored }
-        if charted.contains(id) { return .chartered }
-        if adjacent.contains(id) { return .adjacent }
-        return .unknown
+        StarMapNavigator.visibility(of: id, explored: explored, adjacent: adjacent, charted: charted)
     }
 
     /// Jump directly to a linked system (clears any plotted course that doesn't
@@ -290,32 +271,5 @@ final class NavigationModel: ObservableObject {
     }
 
     /// Breadth-first fewest-jumps path (excluding `from`, ending at `to`).
-    private func shortestPath(from: Int, to: Int) -> [Int]? {
-        guard let game else { return nil }
-        var cameFrom: [Int: Int] = [:]
-        var frontier = [from]
-        var visited: Set<Int> = [from]
-        while !frontier.isEmpty {
-            var next: [Int] = []
-            for id in frontier {
-                guard game.system(id) != nil else { continue }
-                for link in visibleNeighbors(id) where !visited.contains(link) {
-                    visited.insert(link)
-                    cameFrom[link] = id
-                    if link == to {
-                        var path = [to]
-                        var cursor = id
-                        while cursor != from {
-                            path.append(cursor)
-                            cursor = cameFrom[cursor]!
-                        }
-                        return path.reversed()
-                    }
-                    next.append(link)
-                }
-            }
-            frontier = next
-        }
-        return nil
-    }
+    private func shortestPath(from: Int, to: Int) -> [Int]? { navigator?.shortestPath(from: from, to: to) }
 }

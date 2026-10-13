@@ -202,6 +202,18 @@ public enum SndDecoder {
 // MARK: - WAV export (for the CLI / debugging)
 
 public extension NovaSound {
+    /// The samples as signed 16-bit little-endian mono PCM bytes (what a WAV
+    /// `data` chunk or a Godot `AudioStreamWAV` FORMAT_16_BITS holds).
+    func pcm16LE() -> [UInt8] {
+        var out = [UInt8]()
+        out.reserveCapacity(samples.count * 2)
+        for s in samples {
+            let v = UInt16(bitPattern: Int16(max(-1, min(1, s)) * 32767))
+            out.append(UInt8(v & 0xFF)); out.append(UInt8(v >> 8))
+        }
+        return out
+    }
+
     /// Encode as a 16-bit mono PCM WAV file.
     func wavData() -> Data {
         let rate = UInt32(sampleRate.rounded())

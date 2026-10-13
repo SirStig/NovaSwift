@@ -393,15 +393,9 @@ struct SpaceportView: View {
     /// docking: the same 1 credit a unit as the Recharge button, buying as many
     /// whole units as the credits cover, with no waiver at a dominated world.
     private func autoRecharge() {
-        guard hasAutoRecharger, let maxFuel,
-              let fill = LandedServices.refuel(fuel: currentFuel, capacity: Int(maxFuel),
-                                               credits: pilot.state.credits,
-                                               dominated: false, uninhabited: false),
-              fill.fuel > currentFuel else { return }
-        pilot.state.credits -= fill.cost
-        pilot.state.fuel = fill.fuel
+        guard let cost = SpaceportShops.autoRecharge(&pilot.state, spob: spob, galaxy: galaxy) else { return }
         onLiveSync()
-        Log.spaceport.debug("Auto-recharger filled fuel to \(fill.fuel, privacy: .public) at spöb \(spob.id, privacy: .public) for \(fill.cost, privacy: .public)cr")
+        Log.spaceport.debug("Auto-recharger filled fuel at spöb \(spob.id, privacy: .public) for \(cost, privacy: .public)cr")
     }
 
     /// The DITL #1000 item each slot is: left column items 10/9/6, right column
@@ -442,18 +436,13 @@ struct SpaceportView: View {
     /// uninhabited stellar; otherwise whole fuel units at 1 credit each, as
     /// many as the credits cover, or a free top-up at a dominated stellar.
     private func rechargeShip() {
-        guard let maxFuel else {
+        guard maxFuel != nil else {
             Log.spaceport.error("Recharge tapped at spöb \(spob.id, privacy: .public) but no loadout for ship \(pilot.state.shipType, privacy: .public) — no-op")
             return
         }
-        guard let fill = LandedServices.refuel(fuel: currentFuel, capacity: Int(maxFuel),
-                                               credits: pilot.state.credits,
-                                               dominated: pilot.state.hasDominated(spob.id),
-                                               uninhabited: spob.isUninhabited) else { return }
-        pilot.state.credits -= fill.cost
-        pilot.state.fuel = fill.fuel
+        guard let cost = SpaceportShops.recharge(&pilot.state, spob: spob, galaxy: galaxy) else { return }
         onLiveSync()
-        Log.spaceport.debug("Recharged fuel to \(fill.fuel, privacy: .public) at spöb \(spob.id, privacy: .public) for \(fill.cost, privacy: .public)cr")
+        Log.spaceport.debug("Recharged fuel at spöb \(spob.id, privacy: .public) for \(cost, privacy: .public)cr")
     }
 
     /// Leaving the spaceport window resets the lane-offer context

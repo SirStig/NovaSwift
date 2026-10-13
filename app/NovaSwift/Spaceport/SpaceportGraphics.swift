@@ -16,7 +16,7 @@ final class SpaceportGraphics {
     private var cache: [Int: CGImage] = [:]
     private var missed: Set<Int> = []
     private var shipFallbackCache: [Int: CGImage?] = [:]
-    private var baseHullCache: [Int: Int?] = [:]
+    private var shipPictIDCache: [Int: Int?] = [:]
 
     init(game: NovaGame) {
         self.game = game
@@ -155,14 +155,12 @@ final class SpaceportGraphics {
 
     /// A planet's landing landscape PICT (10000-range), if it defines one.
     func landscape(for spob: SpobRes) -> CGImage? {
-        // CustPicID when >= 128, else Graphic + 10000 (0x0048e970).
-        let id = spob.landingPictID >= 128 && spob.landingPictID != 0xFFFF ? spob.landingPictID : spob.graphicRaw + 10000
-        return pict(id)
+        pict(game.landscapePictID(for: spob))
     }
 
     /// An outfit's outfitter picture (`pictID = id − 128 + 6000`).
     func outfitPicture(_ outfit: OutfRes) -> CGImage? {
-        pict(outfit.id - 128 + 6000)
+        pict(game.outfitPictID(outfit))
     }
 
     /// A ship's shipyard display picture (`pictID = id − 128 + 5000`) — a large,
@@ -176,8 +174,7 @@ final class SpaceportGraphics {
     /// the base hull's picture, found by display name — a used Valkyrie (#371)
     /// borrows the Valkyrie's (#137 → PICT 5009).
     func shipPicture(_ ship: ShipRes) -> CGImage? {
-        let pictID: Int? = pict(ship.id - 128 + 5000) != nil ? ship.id - 128 + 5000
-            : baseHull(for: ship).map { $0 - 128 + 5000 }
+        let pictID = shipPictID(ship)
         let classic = pictID.flatMap { pict($0) }
         // A graphics pack's model hull: its portrait in place of the classic
         // art, on that art's government-coloured backdrop (on black without one).
@@ -191,21 +188,16 @@ final class SpaceportGraphics {
         return classic
     }
 
-    /// The id of the lowest-numbered ship sharing `ship`'s display name that owns
-    /// shipyard art. Nil when `ship` *is* that ship, or nothing matches.
-    private func baseHull(for ship: ShipRes) -> Int? {
-        if let cached = baseHullCache[ship.id] { return cached }
-        let target = ship.displayName
-        let base = game.ships()
-            .filter { $0.id != ship.id && $0.displayName == target }
-            .sorted { $0.id < $1.id }
-            .first { pict($0.id - 128 + 5000) != nil }?
-            .id
-        if base == nil {
-            Log.spaceport.error("No shipyard art for ship \(ship.id, privacy: .public) (\(ship.name, privacy: .public)) and no base hull named \"\(target, privacy: .public)\" has any either")
+    /// The shipyard art's PICT id for `ship` (`NovaGame.shipPictID`), memoised —
+    /// the lookup scans every hull when a variant borrows its base hull's art.
+    private func shipPictID(_ ship: ShipRes) -> Int? {
+        if let cached = shipPictIDCache[ship.id] { return cached }
+        let id = game.shipPictID(for: ship)
+        if id == nil {
+            Log.spaceport.error("No shipyard art for ship \(ship.id, privacy: .public) (\(ship.name, privacy: .public)) and no base hull named \"\(ship.displayName, privacy: .public)\" has any either")
         }
-        baseHullCache[ship.id] = .some(base)
-        return base
+        shipPictIDCache[ship.id] = .some(id)
+        return id
     }
 
     /// The small in-flight sprite's frame 0, standing in for a ship's shipyard

@@ -2,6 +2,7 @@ import SwiftUI
 import GameController
 import CoreText
 import NovaSwiftKit
+import NovaSwiftEngine
 import NovaSwiftStory
 
 /// The galaxy map, in the spirit of EV Nova's: systems plotted at their real

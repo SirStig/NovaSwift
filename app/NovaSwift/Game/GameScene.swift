@@ -5651,29 +5651,23 @@ final class GameScene: SKScene {
     /// adds the player-facing nudge) and by the HUD each tick to gray out the
     /// destination readout while the player is still too close to fly.
     var isClearOfNoJumpZone: Bool {
-        guard let w = world else { return true }
-        // `Stellar_ComputeTravelRangeSq` 0x00465610: the zone applies only when
-        // the system has a stellar that isn't a hypergate or wormhole (inhabited
-        // or not), and it's measured from the system's origin, not its centroid:
-        // refused while x² + y² ≤ r².
-        guard w.systemContext.bodies.contains(where: { !$0.isGate }) else { return true }
-        let p = w.player.position
-        return p.x * p.x + p.y * p.y > hyperspaceNoJumpRadius * hyperspaceNoJumpRadius
+        // `Stellar_ComputeTravelRangeSq` 0x00465610 (see `World.isClearOfNoJumpZone`).
+        world?.isClearOfNoJumpZone(radius: hyperspaceNoJumpRadius) ?? true
     }
 
     /// True when the player is clear of the no-jump zone and may jump. Too close,
     /// it posts the original's "fly further out" nudge and returns false so the
     /// caller refuses the jump.
     func canEnterHyperspace() -> Bool {
-        guard world?.player.isAlive != false else { return false }   // a wreck doesn't jump
-        guard world?.playerInEscapePod != true else { return false } // nor does a drifting pod
-        // A disabled ship can't engage — a silent refusal (0x0044c1a3; FL-04).
-        guard world?.player.disabled != true else { return false }
-        // A tractor-beam lock on another ship holds it in place (0x00415b80).
-        if let p = world?.player, let lock = p.velocityMatchTargetID, lock != p.entityID { return false }
-        if isClearOfNoJumpZone {
+        guard let w = world else { return false }
+        switch w.hyperspaceRefusal(noJumpRadius: hyperspaceNoJumpRadius) {
+        case nil:
             clearCannotJumpOverlays()
             return true
+        case .silent?:
+            return false     // wreck, escape pod, disabled ship or tractor lock (FL-04)
+        case .tooCloseToCentre?:
+            break
         }
         // "Can't initiate hyperspace jump - not yet far enough away from system
         // center." (STR# 2002 #42).

@@ -24,9 +24,10 @@ config/icon="res://icon.png"
 window/size/viewport_width=1280
 window/size/viewport_height=720
 window/stretch/mode="canvas_items"
-; Keep the 16:9 frame's proportions when the window is resized — the HUD lays
-; itself out off the viewport rect, so a stretched aspect would skew it.
-window/stretch/aspect="keep"
+; Expand: a 16:10 screen (Steam Deck, 1280x800) gets the extra height instead of
+; letterbox bars. The HUD and every screen lay themselves out off the viewport
+; rect / anchors, so they follow the larger area.
+window/stretch/aspect="expand"
 
 [rendering]
 

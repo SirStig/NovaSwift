@@ -380,10 +380,7 @@ struct OutfitterView: View {
     private var stock: [OutfRes] { outfitList(owned: pilot.state.outfits) }
 
     private func outfitList(owned: [Int: Int]) -> [OutfRes] {
-        game.outfitList(at: spob, day: pilot.state.date.julianDay, owned: owned,
-                        availabilityPasses: { game.outfitAvailabilityPasses($0, pilot: pilot.state) },
-                        requirePasses: { game.outfitRequirePasses($0, pilot: pilot.state, at: spob,
-                                                                  diplomacy: diplomacy) })
+        SpaceportShops.outfitList(game: game, spob: spob, state: pilot.state, diplomacy: diplomacy, owned: owned)
     }
 
     /// Units of `o` owned when the outfitter opened.
@@ -391,8 +388,7 @@ struct OutfitterView: View {
 
     /// Outfits listed for sell-back only — they can be sold here but never bought.
     private var sellOnlyIDs: Set<Int> {
-        let forSale = Set(outfitList(owned: [:]).map(\.id))
-        return Set(stock.map(\.id)).subtracting(forSale)
+        SpaceportShops.outfitSellOnlyIDs(game: game, spob: spob, state: pilot.state, diplomacy: diplomacy)
     }
     private var selected: OutfRes? {
         stock.first { $0.id == selectedID } ?? stock.first
@@ -591,10 +587,10 @@ struct OutfitterView: View {
         let o = selected
         // A sell-only listing (this port buys anything, but doesn't stock this
         // item) can never be bought here, however affordable it is.
+        let sellOnly = sellOnlyIDs
         let canBuy = o.map {
-            !sellOnlyIDs.contains($0.id)
-                && pilot.canBuyOutfit($0, galaxy: galaxy)
-                && lockState(for: $0) == .available
+            SpaceportShops.canBuyOutfit($0, game: game, galaxy: galaxy, spob: spob, state: pilot.state,
+                                        diplomacy: diplomacy, sellOnly: sellOnly)
         } ?? false
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buy, fallback: "Buy"),
                    width: 73, enabled: canBuy,
@@ -663,18 +659,7 @@ struct ShipyardView: View {
     /// (Bible `shïp.Flags3` 0x0100/0x0200) dropped when the player doesn't
     /// meet their Availability/Require and don't already fly one.
     private var stock: [ShipRes] {
-        let day = pilot.state.date.julianDay
-        let state = pilot.state
-        guard spob.hasShipyard else { return [] }
-        return game.shipyardList(
-            at: spob, hire: false,
-            stocked: { s in
-                NovaGame.stocked(buyRandom: s.buyRandom,
-                                 roll: NovaGame.dailyStockRoll(day: day, itemID: s.id, salt: 1,
-                                                               redraw: state.stockRerollCount(shipType: s.id, hire: false, day: day)))
-            },
-            availabilityPasses: { NCBTest($0.availBits).evaluate(state) },
-            requirePasses: { ($0.require & game.contributedBits(pilot: state)) == $0.require })
+        SpaceportShops.shipyardList(game: game, spob: spob, state: pilot.state)
     }
     /// The net price of `s` here: its price after the tech markdown, rank
     /// scale and rounding, less the trade-in (EC-09).
@@ -817,7 +802,7 @@ struct ShipyardView: View {
     /// themselves ("…not far from being consigned to the junk heap"), which is
     /// why the tile only ever shows the plain class name.
     private func classDescription(_ s: ShipRes) -> String {
-        game.descText(13000 + s.id - 128)
+        SpaceportShops.classDescription(s, game: game)
     }
 
     // Wrapped in a ScrollView (like the Outfitter's) so the class description —
@@ -876,8 +861,7 @@ struct ShipyardView: View {
     @ViewBuilder private func buttons(_ space: NovaSpace, _ d: DITLPlacement) -> some View {
         let s = selected
         let canBuy = s.map {
-            $0.id != pilot.state.shipType && pilot.state.credits >= netPrice($0)
-                && lockState(for: $0) == .available
+            SpaceportShops.canBuyShip($0, game: game, galaxy: galaxy, spob: spob, state: pilot.state)
         } ?? false
         // DITL #1004 item 9 (253,289)-(342,314), 89×25 — the "Info" button (STR#
         // 150 index 48), which the original shipyard sits left of Buy Ship/Done to
