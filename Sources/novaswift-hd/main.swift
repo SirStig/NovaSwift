@@ -4,6 +4,7 @@ import Foundation
 import NovaSwiftKit
 import NovaSwiftHD
 import SceneKit
+import Metal
 
 func fail(_ s: String) -> Never {
     FileHandle.standardError.write(Data("error: \(s)\n".utf8)); exit(1)
@@ -608,6 +609,46 @@ case "bench":
             print("  textures ≤\(px): cap \(cap) ms, store \(store) ms, reload \(reload) ms, render diff \(Preview.meanDifference(reference, img).map { String(format: "%.2f", $0) } ?? "n/a")")
         }
         cache.removeAll()
+    }
+
+case "shared":
+    // shared <model.usdz> — a hull drawn in a shared LiveHullLayer must match
+    // the same hull drawn on its own stage (mean difference, 0–255).
+    guard args.count >= 2 else { usage() }
+    let src = GraphicsAssetSource.file(URL(fileURLWithPath: args[1]))
+    guard let model = try? ModelLoader.load(src), let device = MTLCreateSystemDefaultDevice() else { fail("unreadable") }
+    let renderer = SCNRenderer(device: device, options: nil)
+    func snap(_ scene: SCNScene, _ pov: SCNNode, _ size: CGSize) -> CGImage? {
+        renderer.scene = scene; renderer.pointOfView = pov
+        let image = renderer.snapshot(atTime: 0, with: size, antialiasingMode: .multisampling4X)
+        var rect = CGRect(origin: .zero, size: size)
+        return image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+    }
+    let cal = LiveHullCalibration(orthographicScale: 1.25, lightScale: 1.3)
+    let h = 240.0
+    for (heading, bank) in [(0.0, 0.0), (1.1, 0.6), (3.9, -1.0)] {
+        let alone = LiveHull(template: model, descriptor: GraphicsEnhancement(kind: .model), calibration: cal,
+                             overlayLayers: [], size: CGSize(width: h, height: h), simpleLighting: false, shareable: false)
+        alone.update(heading: heading, bank: bank, dt: 1)
+        let ref = snap(alone.stage.scene, alone.stage.camera, CGSize(width: h, height: h))
+        let layer = LiveHullLayer(simpleLighting: false)
+        layer.setViewport(CGSize(width: 800, height: 600))
+        let a = LiveHull(template: model, descriptor: GraphicsEnhancement(kind: .model), calibration: cal,
+                         overlayLayers: [], size: CGSize(width: h, height: h), simpleLighting: false)
+        let b = LiveHull(template: model, descriptor: GraphicsEnhancement(kind: .model), calibration: cal,
+                         overlayLayers: [], size: CGSize(width: h, height: h), simpleLighting: false)
+        guard a.isShared else { fail("hull wasn't shareable") }
+        layer.add(a); layer.add(b)
+        a.update(heading: heading, bank: bank, dt: 1); b.update(heading: 2, bank: 0, dt: 1)
+        layer.place(a, at: CGPoint(x: 100, y: -50), opacity: 1, depth: 3)
+        layer.place(b, at: CGPoint(x: -250, y: 150), opacity: 1, depth: 1)
+        guard let full = snap(layer.scene, layer.camera, CGSize(width: 800, height: 600)),
+              let crop = full.cropping(to: CGRect(x: 400 + 100 - h / 2, y: 300 + 50 - h / 2, width: h, height: h)) else { fail("render failed") }
+        print("heading \(heading) bank \(bank): diff \(Preview.meanDifference(ref, crop).map { String(format: "%.2f", $0) } ?? "n/a")")
+        if args.count > 2 {
+            Preview.write(ref!, to: URL(fileURLWithPath: args[2]).appendingPathComponent("alone_\(heading).png"))
+            Preview.write(full, to: URL(fileURLWithPath: args[2]).appendingPathComponent("shared_\(heading).png"))
+        }
     }
 
 default:

@@ -303,6 +303,10 @@ final class GameScene: SKScene {
     private var liveBudget = LiveHullBudget(ceiling: HDGraphics.liveCeiling)
     private var liveInUse = 0
     private var liveBuiltThisFrame = 0
+    /// Shared live 3D: one layer (one SceneKit render) per draw band, keyed
+    /// by the band's z × 100, and the hulls to place in them this frame.
+    private var liveLayers: [Int: LiveHullLayer] = [:]
+    private var livePlacements: [(hull: LiveHull, sprite: SKSpriteNode, opacity: CGFloat)] = []
     private var debrisPodFrames: [SKTexture]?
     private var rotationTextures: [SKTexture] = []
     private var placeholder: SKShapeNode?
@@ -1615,7 +1619,7 @@ final class GameScene: SKScene {
             liveBudget.frame(seconds: rawFrame, target: settings.frameRateCap.fps.map { 1 / Double($0) },
                              inUse: liveInUse)
         }
-        liveInUse = 0; liveBuiltThisFrame = 0
+        liveInUse = 0; liveBuiltThisFrame = 0; livePlacements.removeAll(keepingCapacity: true)
 
         // Game-speed option: scale the *simulation* timestep (not the real frame
         // delta used for perf/diagnostics above). `x1` is exactly real-time —
@@ -1883,6 +1887,7 @@ final class GameScene: SKScene {
         lap("player.sprite")
 
         cameraNode.position = shakenCameraPosition(scenePos, dt: dt)
+        layoutLiveLayers()
         updateStarfield(cameraAt: scenePos)
         updateMurkFog()
         lap("camera+bg")
@@ -4049,6 +4054,7 @@ final class GameScene: SKScene {
         if let current = live {
             guard room else { dropLiveHull(&live, sprite: sprite); return nil }
             liveInUse += 1
+            if current.isShared, let sprite { livePlacements.append((current, sprite, opacity)) }
             return current
         }
         guard room, let base, let sprite, liveBuiltThisFrame < Self.liveBuildsPerFrame else { return nil }
@@ -4056,9 +4062,13 @@ final class GameScene: SKScene {
         guard retry <= 0 else { return nil }
         // nil while the model loads (or for a hull with no model): ask again shortly.
         guard let made = HDGraphics.shared.makeLiveHull(baseSpriteID: base) else { retry = 0.5; return nil }
-        made.node.zPosition = sprite.zPosition
-        made.node.alpha = opacity
-        container.addChild(made.node)
+        if made.isShared {
+            livePlacements.append((made, sprite, opacity))   // its layer is picked in `layoutLiveLayers`
+        } else {
+            made.node.zPosition = sprite.zPosition
+            made.node.alpha = opacity
+            container.addChild(made.node)
+        }
         sprite.isHidden = true
         live = made
         liveInUse += 1
@@ -4068,7 +4078,7 @@ final class GameScene: SKScene {
 
     private func dropLiveHull(_ live: inout LiveHull?, sprite: SKSpriteNode?) {
         guard let current = live else { return }
-        current.node.removeFromParent()
+        if current.isShared { current.detach() } else { current.node.removeFromParent() }
         live = nil
         sprite?.isHidden = false
     }
@@ -4076,6 +4086,65 @@ final class GameScene: SKScene {
     private func dropAllLiveHulls() {
         dropLiveHull(&shipLive, sprite: shipSprite)
         for (_, n) in npcNodes { dropLiveHull(&n.live, sprite: n.sprite) }
+        for layer in liveLayers.values { layer.removeAll(); layer.node.removeFromParent() }
+        liveLayers = [:]   // rebuilt with the current lighting setting as hulls return
+    }
+
+    /// Place this frame's shared live hulls: each goes into the layer for its
+    /// sprite's draw band (its global z, as the sprite would have drawn), at
+    /// the sprite's place on screen, as opaque as the sprite would be. A
+    /// layer is one render however many hulls it holds, and covers only the
+    /// box around its hulls (clipped to the screen), so it never draws more
+    /// pixels than separate hulls would. Hulls not placed this frame leave it.
+    private func layoutLiveLayers() {
+        guard !liveLayers.isEmpty || !livePlacements.isEmpty else { return }
+        let visible = CGRect(x: cameraNode.position.x - size.width * cameraZoom / 2,
+                             y: cameraNode.position.y - size.height * cameraZoom / 2,
+                             width: size.width * cameraZoom, height: size.height * cameraZoom)
+        struct Entry { let hull: LiveHull; let at: CGPoint; let alpha: CGFloat; let slot: Int }
+        var bands: [Int: [Entry]] = [:]
+        var boxes: [Int: CGRect] = [:]
+        for p in livePlacements {
+            // Global z, alpha and visibility through the sprite's ancestors.
+            var z = p.sprite.zPosition, alpha = p.opacity, hidden = false
+            var n: SKNode? = p.sprite.parent
+            while let cur = n, cur !== self {
+                z += cur.zPosition; alpha *= cur.alpha; hidden = hidden || cur.isHidden
+                n = cur.parent
+            }
+            guard n === self, !hidden, alpha > 0.001 else { continue }   // gone, or not drawn
+            let band = Int((z * 100).rounded())
+            let at = p.sprite.convert(CGPoint.zero, to: self)
+            // Banking sweeps the model a little past its frame: pad by a quarter.
+            let half = max(p.hull.size.width, p.hull.size.height) * 0.625
+            let rect = CGRect(x: at.x - half, y: at.y - half, width: half * 2, height: half * 2)
+            guard rect.intersects(visible) else { continue }
+            boxes[band] = boxes[band].map { $0.union(rect) } ?? rect
+            // The first placed (the player's hull, then NPCs in turn) is in front.
+            bands[band, default: []].append(Entry(hull: p.hull, at: at, alpha: alpha, slot: bands[band]?.count ?? 0))
+        }
+        for layer in liveLayers.values { layer.beginFrame() }
+        for (band, entries) in bands {
+            guard let box = boxes[band]?.intersection(visible), !box.isNull, box.width >= 1, box.height >= 1 else { continue }
+            let layer = liveLayers[band] ?? {
+                let made = LiveHullLayer(simpleLighting: settings.liveLighting == .simple)
+                made.node.zPosition = CGFloat(band) / 100
+                addChild(made.node)
+                liveLayers[band] = made
+                return made
+            }()
+            layer.node.position = CGPoint(x: box.midX, y: box.midY)
+            layer.setViewport(box.size)
+            for e in entries {
+                layer.add(e.hull)
+                layer.place(e.hull, at: CGPoint(x: e.at.x - box.midX, y: e.at.y - box.midY),
+                            opacity: e.alpha, depth: LiveHullLayer.maxDepthSlots - e.slot)
+            }
+        }
+        for layer in liveLayers.values {
+            layer.endFrame()
+            layer.node.isHidden = layer.isEmpty
+        }
     }
 
     /// A live hull banks only where its classic sheets do (shän banking
