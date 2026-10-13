@@ -172,7 +172,9 @@ func _show_about() -> void:
 	if classic_menu != null:
 		classic_menu.blocked = true
 	# AboutNovaText: the NovaSwift header over dësc 32767, in the generic dësc dialog.
-	var d = ClassicDialog.desc_dialog(nova, nova.about_nova_text(str(ProjectSettings.get_setting("application/config/version", "1.0.0"))))
+	# The picture variant when dësc 32767 has a Graphic (Apple DescTextDialog graphicID:).
+	var pict: int = int(nova.classic_desc_graphic(32767)) if nova.has_method("classic_desc_graphic") else -1
+	var d = ClassicDialog.desc_dialog(nova, nova.about_nova_text(str(ProjectSettings.get_setting("application/config/version", "1.0.0"))), pict)
 	d.activated.connect(func(_i): _close_about())   # OK press and Esc / B: one close path
 	_about = ClassicDialog.modal(_root, d, 0.6)
 
@@ -203,7 +205,8 @@ func _show_acknowledgements() -> void:
 
 func _open_acknowledgements() -> void:
 	var nova: Object = classic_menu.nova if classic_menu != null else _nova
-	var d = ClassicDialog.desc_dialog(nova, nova.classic_desc_text(32766))
+	var pict: int = int(nova.classic_desc_graphic(32766)) if nova.has_method("classic_desc_graphic") else -1
+	var d = ClassicDialog.desc_dialog(nova, nova.classic_desc_text(32766), pict)
 	d.activated.connect(func(_i): _close_acknowledgements())
 	_about = ClassicDialog.modal(_root, d, 0.6)
 

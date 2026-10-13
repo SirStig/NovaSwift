@@ -215,15 +215,13 @@ D5 (exploration-level panels), F2 (NPC warp effects). No further Godot-only gaps
 All 13 downloaded plug-ins load with exactly the shared-Swift resource counts and play a pilot start to a jump without errors. What is left
 is the same in the Apple app unless noted:
 
-* **dësc movies only play with mission offers.** The original plays a dësc's movie wherever that dësc is shown (completion / refusal / story
-  texts, news); Apple and Godot only do it for the offer dialog. The Frozen Heart's 43 clips (Alana, KT, TD, Mail, Ring, Van Roth, Zoraides ...)
-  are mostly on other texts, so none of them play. Godot also needs ffmpeg for `.mov` (no QuickTime decoder).
-* **Intro movies / GIFs are not played**: EV Classic's `EV Intro.mp4`, EV Override's `Override Intro.mp4`, `EV Haikus.gif` (Apple plays the GIF
-  inside the offer dialog only; Godot has no GIF player).
-* **Plug-in fonts** (`Sillycon.ttf` in the TC folders) are not registered by either frontend.
-* **Data quirks, identical everywhere**: ARPIA2 `shïp 464` has no shän; Polycon `röid` 135/139/142/143 have no spïn; base `dësc` 338 names
-  `flyby.qt`. The harness reports them as warnings.
-* **Facelift on Override needs the TC's Plug-Ins folder**: global plug-ins do not apply under a total conversion (original rule, shared
-  `resolveLayers`), so EVO Facelift only affects EV Override when its files are inside `EV Override for Nova/Plug-Ins/`. The harness stages it that way.
+* **dësc movies (DONE 2026-10-13, both apps)**: story texts, docking, intro text, acknowledgements (see GODOT_LAYER "Total-conversion add-ons").
+  Still missing: the movie played on entering a hypergate / wormhole (`Stellar_EnterHypergate` 0x00456480 / `Stellar_EnterWormhole`
+  0x00456ca0 -> `FUN_0049e3c0`), which lives in flight code owned by other work (Main.gd / GameContainerView). Godot needs ffmpeg for movies.
+  Base `dësc` 338 names `flyby.qt`, which is not in the user's base data (the original also finds nothing).
+* **Intro movies / GIF (DONE)**: they are dësc 20000 (chär intro text) and 32766 (X key), not separate launch screens.
+* **Plug-in fonts (DONE)**: registered from the TC folder in both apps.
+* **Facelift on Override (DONE)**: per-TC add-on list; the old "stage it into Plug-Ins" is no longer needed. Global plug-ins still don't load under a TC.
+* Graphics-only (HD pack) plug-ins on a TC's list are not ranked as layers (they have no files); add-ons with `.rez` files are.
 * Headless runs print Godot "This control can't grab focus" warnings from `ui/classic/ClassicDialog.gd:598` (`focus_first`); not plug-in
   related (the BASE run prints them too) and filtered by the script.

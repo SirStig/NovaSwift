@@ -55,6 +55,15 @@ func _step(n: int) -> void:
 		nova.step(1.0 / 30.0)
 
 
+func _revive_if_dead() -> void:
+	if nova.player_is_alive():
+		return
+	print("  (player destroyed by its own splash; rebuilding the system)")
+	nova.make_world(nova.nav_current_system())
+	main._suppress_held()
+	_step(5)
+
+
 func _run() -> void:
 	await process_frame
 	Controls.layout = Controls.LAYOUT_ORIGINAL
@@ -250,6 +259,9 @@ func _run() -> void:
 	var ammo_clear: int = nova.secondary_weapon_ammo()
 	_check("after S nothing is selected", nova.secondary_weapon_name() == "")
 	print("  after clear: '", nova.secondary_weapon_name(), "' ammo ", ammo_clear)
+	# A rocket that hits a nearby asteroid splashes the player at full damage (original A7,
+	# 0x00436ff0), which can destroy a stationary test ship; rebuild the system if it did.
+	_revive_if_dead()
 
 	# --- primaries
 	Input.action_press("fire_primary")
@@ -262,6 +274,7 @@ func _run() -> void:
 	Input.action_release("fire_primary")
 	_check("Space fires the primaries", saw_shot)
 
+	_revive_if_dead()
 	# --- flight keys
 	var v0: Vector2 = nova.player_velocity()
 	var a0: float = nova.player_angle()

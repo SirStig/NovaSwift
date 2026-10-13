@@ -38,6 +38,9 @@ final class PluginRuntime: @unchecked Sendable {
     /// `"<tc>|<plugin>"` -> record-overlap verdict (filled by `tcAnalyze`, in the background).
     private var tcOverlap: [String: TCAddOns.Compatibility] = [:]
     private var tcAnalysing = false
+    /// The world that last loaded game data (set by `NovaWorld.loadGame`), so a `NovaPlugins` handle that
+    /// was never `attach`ed (screens create their own) still answers `desc_movie` / `referenced_font_names`.
+    weak var world: NovaWorld?
     private(set) var failures: [PluginLoadFailure] = []
     private(set) var baseDir: URL?
     private var extraDirs: [URL] = []
@@ -501,10 +504,11 @@ final class PluginRuntime: @unchecked Sendable {
 @Godot
 class NovaPlugins: RefCounted {
 
-    private weak var host: NovaWorld?
+    private weak var attached: NovaWorld?
+    private var host: NovaWorld? { attached ?? PluginRuntime.shared.world }
 
     /// Point at the live `NovaWorld` (needed by `reload`). Idempotent.
-    @Callable(autoSnakeCase: true) func attach(world: NovaWorld) { host = world }
+    @Callable(autoSnakeCase: true) func attach(world: NovaWorld) { attached = world; PluginRuntime.shared.world = world }
 
     // MARK: Installed plug-ins
 

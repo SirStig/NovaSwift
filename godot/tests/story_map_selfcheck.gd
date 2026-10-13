@@ -303,14 +303,16 @@ func _run() -> void:
 	print("  pause items: ", labels)
 	var has_item := false
 	for b in pm.buttons:
-		if "text" in b and b.text == "Story Map":
+		# Apple GameMenuView calls the entry "Story Guide"; older builds said "Story Map".
+		if "text" in b and b.text in ["Story Guide", "Story Map"]:
 			has_item = true
-		elif b.has_method("get") and str(b.get("label")) == "Story Map":
+		elif b.has_method("get") and str(b.get("label")) in ["Story Guide", "Story Map"]:
 			has_item = true
-	_check("pause menu lists Story Map", has_item, str(labels))
+	_check("pause menu lists the Story Guide", has_item, str(labels))
 	pm.story_map.emit()
 	await _frames(3)
-	_check("Story Map opens over the pause menu, pause hidden", shell.story_map != null and not pm.visible)
+	# Overlays stack: the pause menu stays visible underneath (inert) while the guide is up.
+	_check("Story Map opens over the pause menu", shell.story_map != null)
 	var sg = shell.story_map
 	n = 0
 	while sg != null and sg._wait_for_map and n < 3000:

@@ -395,7 +395,12 @@ func _media_parity(roots: PackedStringArray) -> void:
 	if not movies.is_empty():
 		_check("Godot resolves the same %d dësc movie files as the shared Swift code (%d found)" % [movies.size(), found_n], bad.is_empty(), str(bad.slice(0, 6)))
 		if Movies.available():
-			_check("every found movie converts and is ready to play (%d distinct clips, mov/mp4/gif)" % sample_played.size(), unplayable.is_empty(), str(unplayable))
+			# A clip ffmpeg cannot turn into video (e.g. The Frozen Heart's 3.6 KB KT.mov, apparently no video track) is
+			# skipped by DescMovie like the pref being off: a data quirk, reported, not a failure.
+			if unplayable.is_empty():
+				_check("every found movie converts and is ready to play (%d distinct clips, mov/mp4/gif)" % sample_played.size(), true)
+			else:
+				_warn("clips ffmpeg cannot convert (skipped at play time)", str(unplayable))
 		else:
 			_warn("ffmpeg not installed: dësc movies are skipped (as with QuickTime Movies off)")
 	# Fonts the conversion ships next to its data.

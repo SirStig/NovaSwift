@@ -674,7 +674,8 @@ func _build_support() -> void:
 func _show_about() -> void:
 	var version := str(ProjectSettings.get_setting("application/config/version", "1.0.0"))
 	if ClassicTheme.has_data() and _nova != null and _nova.has_method("about_nova_text"):
-		var d = ClassicDialog.desc_dialog(_nova, _nova.about_nova_text(version))
+		var pict: int = int(_nova.classic_desc_graphic(32767)) if _nova.has_method("classic_desc_graphic") else -1
+		var d = ClassicDialog.desc_dialog(_nova, _nova.about_nova_text(version), pict)
 		var host: Control = ClassicDialog.modal(self, d, 0.6)
 		d.activated.connect(func(_i): if is_instance_valid(host): host.queue_free())
 	else:

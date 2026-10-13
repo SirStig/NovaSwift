@@ -86,7 +86,14 @@ func _run() -> void:
 	var s1000: PackedStringArray = nova.classic_strings(1000)
 	_check("STR# 2002 present", s2002.size() > 60)
 	_drain()
+	nova.nav_refresh()
 	var from_sys: int = nova.nav_current_system()
+	var rows: PackedFloat32Array = nova.nav_systems()
+	var stride: int = nova.nav_stride()
+	for ri in range(0, rows.size() - stride + 1, stride):
+		var cand := int(rows[ri])
+		if cand != from_sys and nova.nav_plot_course(cand):
+			break
 	var arrived := false
 	var tries := 0
 	while tries < 3000 and not arrived:
@@ -111,6 +118,8 @@ func _run() -> void:
 		if str(m).find(s2002[47]) >= 0 or str(m).begins_with(s2002[42]) or str(m).begins_with(s2002[43]) or str(m).begins_with(s2002[44]):
 			arrival_line = str(m)
 	var sysname: String = nova.nav_system_name(to_sys)
+	if msgs.is_empty():
+		msgs = [""]
 	if arrival_line != "":
 		var lead_ok := false
 		for lead in [42, 43, 44]:   # STR# 2002 #43-45 (1-based) = indices 42-44
@@ -138,6 +147,15 @@ func _run() -> void:
 		main._push_log(s2002[n - 1])
 		_check("#%d stays while no jump is engaged" % n, not main._clear_cannot_jump_overlays() and not main._log.is_empty())
 	main._push_log(s2002[41])
+	# Plot a fresh course from wherever B1 left us (the first jump may have used the route up).
+	nova.nav_refresh()
+	var here: int = nova.nav_current_system()
+	var rows8: PackedFloat32Array = nova.nav_systems()
+	var stride8: int = nova.nav_stride()
+	for ri in range(0, rows8.size() - stride8 + 1, stride8):
+		var cand8 := int(rows8[ri])
+		if cand8 != here and nova.nav_plot_course(cand8):
+			break
 	var engaged := false
 	tries = 0
 	while tries < 3000 and not engaged:
@@ -189,12 +207,13 @@ func _run() -> void:
 		_step(3)
 		var got: Array = _drain()
 		_check("the quote is broadcast on the status line, STR# 7101 text", got.has(quote), "%s | %s" % [quote, str(got)])
-		_check("a quote runs 0x1a4 raw calls", nova.status_line_raw_calls(quote) == 0x1a4)
+		# status_line_raw_calls pops the pending length, so let Main's own push consume it below
+		# rather than asking for it twice.
 		# Seconds from raw calls (hud_message_seconds): 0x1a4 = 420 calls vs the default 0xf0 = 240
 		var def_s: float = nova.hud_message_seconds(0)
 		_check("0x1a4 raw calls last 420/240 of the default 0xf0", absf(nova.hud_message_seconds(0x1a4) - def_s * 420.0 / 240.0) < 0.001)
 		main._push_log(quote)
-		_check("the log entry lives for its own length", absf(float(main._log[0]["life"]) - def_s * 420.0 / 240.0) < 0.001, str(main._log))
+		_check("the quote's log entry lives 0x1a4 raw calls (its own length)", absf(float(main._log[0]["life"]) - def_s * 420.0 / 240.0) < 0.001, str(main._log))
 		# Busy line: the broadcaster waits (a second ship must not talk over the first).
 		nova.set_status_line_busy(true)
 		var q2: String = nova.debug_arm_hail_quote()

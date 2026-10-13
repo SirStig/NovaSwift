@@ -215,6 +215,7 @@ class NovaWorld: Node2D {
     func loadGame(baseDir: String) -> Bool {
         // Base data + the enabled plug-ins (Nova Plug-ins folder / user plug-in folder), merged in
         // load order exactly as the Apple app does — see Plugins.swift. Empty/missing base is rejected.
+        PluginRuntime.shared.world = self   // fresh NovaPlugins handles (dësc movies, fonts) read the loaded game through it
         guard let collection = PluginRuntime.shared.loadMerged(baseDir: URL(fileURLWithPath: baseDir)) else { return false }
         let g = PerfSupport.makeGame(collection, baseDir: URL(fileURLWithPath: baseDir))   // + the decoded-sprite disk cache
         self.game = g
@@ -5271,6 +5272,13 @@ class NovaWorld: Node2D {
 
     /// `dësc` `id` text (About Nova = 32767, Acknowledgements = 32766).
     @Callable(autoSnakeCase: true) func classicDescText(id: Int) -> String { game?.descText(id) ?? "" }
+
+    /// `dësc` `id`'s Graphic PICT, or -1 when it has none / the PICT is missing (the dësc dialog's
+    /// picture variant, as Apple's `DescTextDialog(graphicID:)`).
+    @Callable(autoSnakeCase: true) func classicDescGraphic(id: Int) -> Int {
+        guard let pict = game?.desc(id)?.pictureID, game?.hasPICT(pict) == true else { return -1 }
+        return pict
+    }
 
     /// Play `snd ` `id` as a menu sound (the main-menu click 600/601, shutter 602/603).
     @Callable(autoSnakeCase: true) func soundMenu(id: Int) {

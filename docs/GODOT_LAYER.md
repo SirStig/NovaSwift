@@ -836,6 +836,27 @@ Godot loads plug-ins exactly like the Apple app; the rules are shared code.
 * `NOVA_PLUGIN_OFFLINE=1` stops the catalog from touching the network (CI, self-checks).
 * Check: `NOVA_PLUGIN_OFFLINE=1 NOVA_DATA_DIR=$PWD/data/base godot --headless --path godot -s res://tests/plugins_selfcheck.gd`.
 
+### Total-conversion add-ons, dësc movies, intro/GIF, fonts (2026-10-13)
+
+* **Per-TC add-on list** (shared `Sources/NovaSwiftKit/TCAddOns.swift`, same as Apple): bridge `NovaPlugins.tc_addons()` (selected TC,
+  its own plug-in files, `list`, `candidates` with `compat` recommended/neutral/unlikely), `tc_addon_add/remove/set_enabled/move`,
+  `tc_addons_analyze()` (background record-overlap check). Persisted in `plugins-state.json` under `tcAddOns` (`{tcID: [{id,isEnabled}]}`,
+  the Apple UserDefaults JSON). `Plugins.gd` Installed tab shows "Add-ons for <TC>"; a "Base game?" candidate needs a second press.
+  Load order: Nova.rez, TC Nova Files, TC Plug-Ins (flat), add-ons in list order. Original rule unchanged without a list.
+* **dësc movies everywhere the original plays them** (`Ui_LoadDescAndPlayMovie` 0x0049e3c0 / `Ui_RunTravelSelectionDialog` 0x004982a0 with
+  param_3 = 1): `ui/DescMovie.gd` (`lookup`, `play`; Flags 1 after text, 2 double size, 4 fill screen; clips <= 12 MB convert on the spot).
+  Wired: story texts (briefing / completion / failure / refusal / ship-done: `StoryScreens._open_text` via `story_text_info().desc`),
+  docking (`Spaceport.open`, the stellar's own dësc), the new-pilot intro text (`IntroSequence`, `pilot_intro().desc`: `EV Intro.mp4` /
+  `Override Intro.mp4`, dësc 20000, flags 4), main-menu X = Acknowledgements dësc 32766 (`EV Haikus.gif`). Ship/outfit info dësc do NOT
+  play movies in the original (param_3 = 0). `.gif`/`.mp4`/`.mov`/`.qt` all go through `Movies.gd` (ffmpeg).
+  `NovaPlugins.desc_movie` now works on a fresh handle (`PluginRuntime.world`, set by `loadGame`); before, only an attached handle answered.
+* **Media folders** are the shared `TCAddOns.mediaDirectories` (`media_dirs`, `find_media`): TC add-ons, TC Plug-Ins, TC Nova Files, base.
+  Imported zips extract every file (ARPIA2's `gasminer.mov` / `credits.mov` land in its `Plug-Ins`), checked by the harness.
+* **TC fonts**: `font_files()` lists `.ttf/.otf` beside the TC's `Nova Files` (Sillycon.ttf); `ClassicTheme.font_for` registers them (key = family,
+  "family style", file stem) so `ïntf.statusFont` "Sillycon Plain" resolves.
+* **Harness**: scenarios "EV Override + Facelift (per-TC list)" (+ Extras) use `NOVA_PLUGCHECK_TCADDONS` instead of staging files and must match
+  `merged-counts` with `NOVASWIFT_TC_ADDONS`; `novaswift-extract desc-movies` gives the media/font reference (`NOVA_PLUGCHECK_MEDIA`).
+
 ### Real plug-in verification (2026-10-13): `scripts/plugins-check.sh`
 
 `scripts/plugins-check.sh [filter]` stages each plug-in of `data/plugins/` in a scratch folder (symlinks only; `data/`, the user's pilots,

@@ -132,4 +132,54 @@ final class TCAddOnTests: XCTestCase {
         XCTAssertEqual(TCAddOns.overlap(of: bundle("diff"), in: tcRes).key, "unlikely")
         XCTAssertEqual(TCAddOns.overlap(of: bundle("new"), in: tcRes).key, "neutral")
     }
+
+    func testMediaFoldersFollowTheConversionAndItsAddOns() throws {
+        let (_, plugins) = try fixture()
+        try Data("x".utf8).write(to: root.appendingPathComponent("tcs/EV Override for Nova/Nova Files/Intro.mp4"))
+        try Data("x".utf8).write(to: root.appendingPathComponent("tcs/EV Override for Nova/Sillycon.ttf"))
+        try Data("x".utf8).write(to: root.appendingPathComponent("tcs/EV Override for Nova/Plug-Ins/Plug.mov"))
+        try Data("x".utf8).write(to: root.appendingPathComponent("tcs/EVO Facelift/Facelift.mov"))
+        try Data("x".utf8).write(to: root.appendingPathComponent("tcs/Stray.mov"))
+        let base = root.appendingPathComponent("base")
+        var lists: TCAddOns.Lists = [:]
+        // No conversion: plug-in folders of the enabled plug-ins, then the base data.
+        var p = PluginSet.arrange(discovered: plugins, persisted: [], manual: false)
+        var m = TCAddOns.mediaDirectories(plugins: p, baseDir: base)
+        XCTAssertNotNil(TCAddOns.findMedia(named: "facelift.MOV", in: m), "case-insensitive, enabled plug-in folder")
+        XCTAssertTrue(TCAddOns.fontFiles(in: m).isEmpty)
+
+        // Conversion without add-ons: its own folders only; the global plug-in's movie is not visible.
+        PluginSet.setEnabled(&p, id: "EV Override for Nova", enabled: true, manual: false)
+        p = PluginSet.arrange(discovered: p, persisted: PluginSet.persistedState(of: p), manual: false, tcAddOns: lists)
+        m = TCAddOns.mediaDirectories(plugins: p, baseDir: base)
+        XCTAssertNotNil(TCAddOns.findMedia(named: "Intro.mp4", in: m))
+        XCTAssertNotNil(TCAddOns.findMedia(named: "Plug.mov", in: m))
+        XCTAssertEqual(TCAddOns.fontFiles(in: m).map(\.lastPathComponent), ["Sillycon.ttf"])
+        XCTAssertEqual(m.plugIns.first?.lastPathComponent, "Plug-Ins", "Nova Plug-ins before Nova Files")
+        XCTAssertTrue(m.plugIns.allSatisfy { !$0.path.contains("EVO Facelift") })
+
+        // With the add-on: its folder is searched first.
+        TCAddOns.add(&lists, tc: "EV Override for Nova", id: "EVO Facelift")
+        p = PluginSet.arrange(discovered: p, persisted: PluginSet.persistedState(of: p), manual: false, tcAddOns: lists)
+        m = TCAddOns.mediaDirectories(plugins: p, baseDir: base)
+        XCTAssertEqual(m.plugIns.first?.lastPathComponent, "EVO Facelift")
+        XCTAssertNotNil(TCAddOns.findMedia(named: "Facelift.mov", in: m))
+    }
+
+    func testDescMovieFlagsAndStrayNames() throws {
+        func desc(name: [UInt8], flags: UInt16) -> DescRes {
+            var d = Data("Text".utf8); d.append(0)
+            d.append(contentsOf: [0, 0])                 // picture id
+            var n = name + [UInt8](repeating: 0, count: 32 - name.count)
+            n[n.count - 1] = 0
+            d.append(contentsOf: n); d.append(contentsOf: [UInt8(flags >> 8), UInt8(flags & 0xff)])
+            return DescRes(Resource(type: NovaType.desc, id: 128, data: d))
+        }
+        let a = desc(name: Array("Intro.mp4".utf8), flags: 0x0004)
+        XCTAssertEqual(a.movieFilename, "Intro.mp4")
+        XCTAssertTrue(a.movieFillsScreen); XCTAssertFalse(a.movieDoubleSize); XCTAssertFalse(a.moviePlaysAfterText)
+        let b = desc(name: Array("TD.mov".utf8), flags: 0x0003)
+        XCTAssertTrue(b.movieDoubleSize); XCTAssertTrue(b.moviePlaysAfterText)
+        XCTAssertNil(desc(name: [1], flags: 1).movieFilename, "a stray control byte names no file")
+    }
 }
