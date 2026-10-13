@@ -1167,6 +1167,8 @@ final class GameScene: SKScene {
         var altTextures: [SKTexture] = []
         var hullAnim = HullAnim()
         var animClock: Double = 0
+        /// Alt-layer cycle clock; holds while a disabled ship has shän Flags 0x0020.
+        var altClock: Double = 0
         var blinkClock: Double = 0
         var bank = BankTracker()
         /// The stacked shield (top) / armor (bottom) bars over a ship. `shieldRow`
@@ -4365,7 +4367,9 @@ final class GameScene: SKScene {
             // Bands: disabled hulks sink under shots (8), escorts sit under other ships (9).
             node.container.zPosition = npc.disabled ? 6.5 : (npc.escortRecordID != nil ? 8.5 : 9)
             node.container.alpha = screenRevealsCloaked ? 1.0 : CGFloat(1 - npc.effectiveCloakLevel)
-            node.animClock += frameDT
+            // shän Flags 0x0010 / 0x0020: a disabled hull's animation timer / alt layer stop.
+            if node.hullAnim.animClockAdvances(disabled: npc.disabled) { node.animClock += frameDT }
+            if node.hullAnim.altUpdates(disabled: npc.disabled) { node.altClock += frameDT }
             node.blinkClock += frameDT
             let turn = node.bank.update(angle: npc.angle, dt: frameDT)
             // Off-screen: SpriteKit already skips drawing it, so skip the
@@ -4430,8 +4434,12 @@ final class GameScene: SKScene {
                 }
             }
             if let alt = node.alt, !node.altTextures.isEmpty {
-                let altSet = node.hullAnim.altSet(animClock: node.animClock)
-                alt.texture = node.altTextures[node.hullAnim.frameIndex(set: altSet, heading: heading, count: node.altTextures.count)]
+                // Flags 0x0020 + disabled: the original skips the alt update, so the overlay
+                // keeps its last drawn frame (it is not hidden).
+                if node.hullAnim.altUpdates(disabled: npc.disabled) {
+                    let altSet = node.hullAnim.altSet(animClock: node.altClock)
+                    alt.texture = node.altTextures[node.hullAnim.frameIndex(set: altSet, heading: heading, count: node.altTextures.count)]
+                }
             }
             if let wg = node.weaponGlow, !node.weaponGlowTextures.isEmpty {
                 node.weaponGlowFlare = node.hullAnim.weaponGlowAfter(node.weaponGlowFlare, dt: frameDT)

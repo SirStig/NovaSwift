@@ -3,11 +3,11 @@
 <rect width="432" height="1339" rx="10" fill="#0d0a0e"/>
 <text x="16" y="32" class="h1">EV Nova CE executable: 3199 functions, one square each</text>
 <rect x="16" y="46" width="9" height="9" fill="#3fb950"/>
-<text x="30" y="55" class="lg">Checked: matches the original (638)</text>
+<text x="30" y="55" class="lg">Checked: matches the original (636)</text>
 <rect x="16" y="64" width="9" height="9" fill="#3aa6b9"/>
 <text x="30" y="73" class="lg">Done differently by design (33)</text>
 <rect x="16" y="82" width="9" height="9" fill="#e3a52b"/>
-<text x="30" y="91" class="lg">Differs: fix in progress (13)</text>
+<text x="30" y="91" class="lg">Differs: fix in progress (15)</text>
 <rect x="16" y="100" width="9" height="9" fill="#3a3236"/>
 <text x="30" y="109" class="lg">Not gameplay, nothing to port (2515)</text>
 <text x="16" y="134" class="gh">Flight &amp; collision</text><text x="416" y="134" class="gn" text-anchor="end">23 functions · 19 matched</text>
@@ -19,11 +19,11 @@
 <rect x="56" y="141" width="7" height="7" fill="#3fb950"><title>Math_AddPolarVelocity @ 0x0043b4a0 (64 B) — Checked: matches the original</title></rect>
 <rect x="64" y="141" width="7" height="7" fill="#3fb950"><title>Math_AddPolarVelocityWithClamp @ 0x0043b4e0 (400 B) — Checked: matches the original — FL-18, WP-16</title></rect>
 <rect x="72" y="141" width="7" height="7" fill="#3fb950"><title>Math_ClampVelocityComponents @ 0x0043b6a0 (93 B) — Checked: matches the original</title></rect>
-<rect x="80" y="141" width="7" height="7" fill="#3fb950"><title>Ship_HandlePlayerShipCore @ 0x0044aa70 (1660 B) — Checked: matches the original — FL-03, FL-04, FL-09, FL-23, WP-03, WP-27, EC-24, UI-04, UI-15</title></rect>
+<rect x="80" y="141" width="7" height="7" fill="#3fb950"><title>Ship_HandlePlayerShipCore @ 0x0044aa70 (1660 B) — Checked: matches the original — FL-03, FL-04, FL-09, FL-23, WP-03, WP-27, EC-24, OS-08, UI-04, UI-15</title></rect>
 <rect x="88" y="141" width="7" height="7" fill="#3fb950"><title>PlayerTick_ManualFlightAndRegeneration @ 0x0044c8d0 (2710 B) — Checked: matches the original — FL-04, FL-10, FL-18, UI-15</title></rect>
 <rect x="96" y="141" width="7" height="7" fill="#3fb950"><title>PlayerTick_MouseTargetAndControlCommands @ 0x0044e019 (2658 B) — Checked: matches the original — FL-23</title></rect>
 <rect x="104" y="141" width="7" height="7" fill="#3fb950"><title>PlayerTick_ReverseCommand @ 0x0044fff0 (18418 B) — Checked: matches the original — FL-08, FL-09, OS-02, EC-24, EC-24, AI-35, UI-15</title></rect>
-<rect x="112" y="141" width="7" height="7" fill="#3fb950"><title>Ship_HandlePlayerTargetActionCommand @ 0x00454910 (2071 B) — Checked: matches the original — UI-17, AI-44, UI-09, AI-39, UI-06</title></rect>
+<rect x="112" y="141" width="7" height="7" fill="#3fb950"><title>Ship_HandlePlayerTargetActionCommand @ 0x00454910 (2071 B) — Checked: matches the original — UI-17, AI-44, UI-09, AI-39</title></rect>
 <rect x="120" y="141" width="7" height="7" fill="#3fb950"><title>Ship_RecenterSpaceObjectsForWorldWrap @ 0x0045baa0 (3069 B) — Checked: matches the original — FL-21</title></rect>
 <rect x="128" y="141" width="7" height="7" fill="#3fb950"><title>Ship_WorldWrapPositionRelativeToPlayer @ 0x0045c6d0 (196 B) — Checked: matches the original</title></rect>
 <rect x="136" y="141" width="7" height="7" fill="#3fb950"><title>Ship_AccelerateShipTowardPoint @ 0x0046e2f0 (199 B) — Checked: matches the original — FL-19</title></rect>
@@ -32,7 +32,7 @@
 <rect x="160" y="141" width="7" height="7" fill="#3a3236"><title>Sprite_TestOpaquePixelAtPoint @ 0x00475e20 (141 B) — Not gameplay, nothing to port</title></rect>
 <rect x="168" y="141" width="7" height="7" fill="#3aa6b9"><title>Ship_TestSpriteLayerOverlaps @ 0x004772d0 (848 B) — Done differently by design</title></rect>
 <rect x="176" y="141" width="7" height="7" fill="#3fb950"><title>Ship_RunSpaceflightMode @ 0x00489210 (2895 B) — Checked: matches the original — FL-03, FL-23</title></rect>
-<rect x="184" y="141" width="7" height="7" fill="#3fb950"><title>Ship_ResetPlayerShipState @ 0x004b3350 (3771 B) — Checked: matches the original — OS-02</title></rect>
+<rect x="184" y="141" width="7" height="7" fill="#3fb950"><title>Ship_ResetPlayerShipState @ 0x004b3350 (3771 B) — Checked: matches the original — OS-02, EC-09</title></rect>
 <rect x="192" y="141" width="7" height="7" fill="#3a3236"><title>PlayerTick_MouseCoordinateBridge @ 0x00875790 (16 B) — Not gameplay, nothing to port</title></rect>
 <text x="16" y="171" class="gh">Weapons</text><text x="416" y="171" class="gn" text-anchor="end">72 functions · 55 matched</text>
 <rect x="16" y="178" width="7" height="7" fill="#3fb950"><title>Weapon_FireTurretAtTarget @ 0x0040ce00 (1034 B) — Checked: matches the original — AI-02</title></rect>
@@ -75,7 +75,7 @@
 <rect x="312" y="178" width="7" height="7" fill="#3fb950"><title>FUN_0044ead0 @ 0x0044ead0 (995 B) — Checked: matches the original — FL-23</title></rect>
 <rect x="320" y="178" width="7" height="7" fill="#3fb950"><title>Weapon_FirePlayerWeaponBank @ 0x00455150 (3207 B) — Checked: matches the original — WP-15</title></rect>
 <rect x="328" y="178" width="7" height="7" fill="#3fb950"><title>NovaUi_DrawActiveWeaponAmmoPanel @ 0x00460ec0 (1008 B) — Checked: matches the original</title></rect>
-<rect x="336" y="178" width="7" height="7" fill="#3fb950"><title>Weapon_ReconcileOutfitPoolWithWeaponBanks @ 0x00462ec0 (921 B) — Checked: matches the original — UI-02</title></rect>
+<rect x="336" y="178" width="7" height="7" fill="#3fb950"><title>Weapon_ReconcileOutfitPoolWithWeaponBanks @ 0x00462ec0 (921 B) — Checked: matches the original — UI-02, EC-09</title></rect>
 <rect x="344" y="178" width="7" height="7" fill="#3fb950"><title>Weapon_RebuildWeaponBankPoolsFromOwnedOutfits @ 0x00463260 (519 B) — Checked: matches the original</title></rect>
 <rect x="352" y="178" width="7" height="7" fill="#3fb950"><title>Weapon_WeaponCanTrackTarget @ 0x00463dc0 (159 B) — Checked: matches the original</title></rect>
 <rect x="360" y="178" width="7" height="7" fill="#3fb950"><title>Weapon_HasLaunchBayWeapon @ 0x00464520 (107 B) — Checked: matches the original</title></rect>
@@ -221,11 +221,11 @@
 <rect x="56" y="305" width="7" height="7" fill="#3fb950"><title>Mission_TickDailyCronEvents @ 0x00439500 (566 B) — Checked: matches the original — MS-14</title></rect>
 <rect x="64" y="305" width="7" height="7" fill="#3fb950"><title>Mission_ActivateCronEvent @ 0x00439750 (339 B) — Checked: matches the original</title></rect>
 <rect x="72" y="305" width="7" height="7" fill="#3fb950"><title>Mission_TerminateCronEvent @ 0x004398b0 (339 B) — Checked: matches the original</title></rect>
-<rect x="80" y="305" width="7" height="7" fill="#3fb950"><title>NovaResources_LoadMisnResourceDefs @ 0x0043bbb0 (2076 B) — Checked: matches the original — MS-01</title></rect>
+<rect x="80" y="305" width="7" height="7" fill="#3fb950"><title>NovaResources_LoadMisnResourceDefs @ 0x0043bbb0 (2076 B) — Checked: matches the original — MS-01, MS-19</title></rect>
 <rect x="88" y="305" width="7" height="7" fill="#3a3236"><title>Misn_ResolveMissionStellarLocators @ 0x0043c3e0 (127 B) — Not gameplay, nothing to port</title></rect>
 <rect x="96" y="305" width="7" height="7" fill="#3fb950"><title>NovaUi_RunMissionBbsWindow @ 0x0043c470 (1931 B) — Checked: matches the original</title></rect>
 <rect x="104" y="305" width="7" height="7" fill="#3fb950"><title>Mission_EvaluateMissionLists @ 0x0043cf00 (816 B) — Checked: matches the original</title></rect>
-<rect x="112" y="305" width="7" height="7" fill="#3fb950"><title>Mission_ResolveMissionStellarTargets @ 0x0043d240 (586 B) — Checked: matches the original — MS-08, MS-15</title></rect>
+<rect x="112" y="305" width="7" height="7" fill="#3fb950"><title>Mission_ResolveMissionStellarTargets @ 0x0043d240 (586 B) — Checked: matches the original — MS-08, MS-15, MS-19</title></rect>
 <rect x="120" y="305" width="7" height="7" fill="#3fb950"><title>Mission_ResolveMissionSpecialShipSystem @ 0x0043d490 (36 B) — Checked: matches the original</title></rect>
 <rect x="128" y="305" width="7" height="7" fill="#e3a52b"><title>Mission_ResolveMissionSpecialShipCount @ 0x0043d4c0 (61 B) — Differs: fix in progress — MS-19</title></rect>
 <rect x="136" y="305" width="7" height="7" fill="#3fb950"><title>Mission_SelectMissionStellarByLocator @ 0x0043d510 (4532 B) — Checked: matches the original — MS-15</title></rect>
@@ -285,7 +285,7 @@
 <rect x="168" y="313" width="7" height="7" fill="#3a3236"><title>Debug_HandleCheatAndNcbCommands @ 0x00872040 (386 B) — Not gameplay, nothing to port</title></rect>
 <rect x="176" y="313" width="7" height="7" fill="#3a3236"><title>NovaUi_SetCargoPanelMissionTitleCursor @ 0x0087530f (127 B) — Not gameplay, nothing to port</title></rect>
 <rect x="184" y="313" width="7" height="7" fill="#3a3236"><title>NovaUi_SetCargoPanelMissionValueCursor @ 0x0087538e (127 B) — Not gameplay, nothing to port</title></rect>
-<text x="16" y="343" class="gh">Economy &amp; spaceport</text><text x="416" y="343" class="gn" text-anchor="end">33 functions · 22 matched</text>
+<text x="16" y="343" class="gh">Economy &amp; spaceport</text><text x="416" y="343" class="gn" text-anchor="end">33 functions · 21 matched</text>
 <rect x="16" y="350" width="7" height="7" fill="#3fb950"><title>Ship_UpdateShipAiBehavior0x01_WimpyTrader @ 0x00402860 (264 B) — Checked: matches the original — AI-18</title></rect>
 <rect x="24" y="350" width="7" height="7" fill="#3fb950"><title>Ship_UpdateShipAiBehavior0x02_BraveTrader @ 0x00402bd0 (589 B) — Checked: matches the original — AI-13, AI-18</title></rect>
 <rect x="32" y="350" width="7" height="7" fill="#3fb950"><title>Player_RedistributeFleetCargoOverflow @ 0x0041f330 (1214 B) — Checked: matches the original — UI-13</title></rect>
@@ -295,11 +295,11 @@
 <rect x="64" y="350" width="7" height="7" fill="#3fb950"><title>TradeCenter_HasSelectedRowStock @ 0x00465ea0 (80 B) — Checked: matches the original</title></rect>
 <rect x="72" y="350" width="7" height="7" fill="#e3a52b"><title>Ship_ComputeTradeInValue @ 0x00469100 (288 B) — Differs: fix in progress — EC-09</title></rect>
 <rect x="80" y="350" width="7" height="7" fill="#3fb950"><title>Player_ComputeFleetCargoCapacity @ 0x00469760 (170 B) — Checked: matches the original — EC-21</title></rect>
-<rect x="88" y="350" width="7" height="7" fill="#3fb950"><title>Player_TransferCargoAndJunkToEscortByRatio @ 0x00469810 (1138 B) — Checked: matches the original — EC-21, AI-38</title></rect>
+<rect x="88" y="350" width="7" height="7" fill="#3fb950"><title>Player_TransferCargoAndJunkToEscortByRatio @ 0x00469810 (1138 B) — Checked: matches the original — EC-21, EC-27, AI-38</title></rect>
 <rect x="96" y="350" width="7" height="7" fill="#3fb950"><title>Player_ComputeCargoAndJunkTotal @ 0x0046a5d0 (161 B) — Checked: matches the original</title></rect>
 <rect x="104" y="350" width="7" height="7" fill="#3fb950"><title>Ship_ComputeShipTotalCargoCapacity @ 0x0046a730 (132 B) — Checked: matches the original</title></rect>
 <rect x="112" y="350" width="7" height="7" fill="#3fb950"><title>Player_ComputeRemainingCargoSpace @ 0x0046a7c0 (161 B) — Checked: matches the original — EC-21</title></rect>
-<rect x="120" y="350" width="7" height="7" fill="#3fb950"><title>NovaUi_RunBarWindow @ 0x0047c8e0 (1205 B) — Checked: matches the original</title></rect>
+<rect x="120" y="350" width="7" height="7" fill="#e3a52b"><title>NovaUi_RunBarWindow @ 0x0047c8e0 (1205 B) — Differs: fix in progress — EC-26</title></rect>
 <rect x="128" y="350" width="7" height="7" fill="#3fb950"><title>NovaUi_RunTradeCenterWindow @ 0x0048c730 (2622 B) — Checked: matches the original — EC-01, EC-03</title></rect>
 <rect x="136" y="350" width="7" height="7" fill="#3fb950"><title>NovaUi_HandleTradeCenterInput @ 0x0048d190 (1008 B) — Checked: matches the original</title></rect>
 <rect x="144" y="350" width="7" height="7" fill="#3fb950"><title>NovaUi_TradeCenterCycleSelection @ 0x0048d5a0 (328 B) — Checked: matches the original</title></rect>
@@ -345,7 +345,7 @@
 <rect x="24" y="424" width="7" height="7" fill="#3fb950"><title>Outfit_GrantOutfitToPlayer @ 0x00427770 (778 B) — Checked: matches the original — UI-04</title></rect>
 <rect x="32" y="424" width="7" height="7" fill="#3a3236"><title>Frame_JitterPlayerStatModifiers @ 0x00431480 (110 B) — Not gameplay, nothing to port</title></rect>
 <rect x="40" y="424" width="7" height="7" fill="#3a3236"><title>Frame_RerollPlayerStatModifiers @ 0x00431500 (36 B) — Not gameplay, nothing to port</title></rect>
-<rect x="48" y="424" width="7" height="7" fill="#3fb950"><title>Ship_ComputeShipFreeMass @ 0x00463470 (155 B) — Checked: matches the original — EC-08</title></rect>
+<rect x="48" y="424" width="7" height="7" fill="#3fb950"><title>Ship_ComputeShipFreeMass @ 0x00463470 (155 B) — Checked: matches the original — EC-07, EC-08</title></rect>
 <rect x="56" y="424" width="7" height="7" fill="#3fb950"><title>Ship_ComputeShipMaxShieldPoints @ 0x00463550 (301 B) — Checked: matches the original — OS-01, AI-41</title></rect>
 <rect x="64" y="424" width="7" height="7" fill="#3fb950"><title>Ship_ComputeShipShieldRegenRate @ 0x00463680 (288 B) — Checked: matches the original — OS-01, AI-41</title></rect>
 <rect x="72" y="424" width="7" height="7" fill="#3fb950"><title>Ship_ComputeShipMaxArmor @ 0x004637a0 (313 B) — Checked: matches the original — AI-41</title></rect>
@@ -380,24 +380,24 @@
 <rect x="304" y="424" width="7" height="7" fill="#3fb950"><title>ShipClass_ComputeShipClassSkillVarianceScale @ 0x0046b870 (92 B) — Checked: matches the original — FL-15</title></rect>
 <rect x="312" y="424" width="7" height="7" fill="#3fb950"><title>Ship_ComputeIonizationDecayRate @ 0x0046c080 (211 B) — Checked: matches the original</title></rect>
 <rect x="320" y="424" width="7" height="7" fill="#3fb950"><title>Ship_GetIonizationIntensity @ 0x0046c160 (229 B) — Checked: matches the original — WP-11</title></rect>
-<rect x="328" y="424" width="7" height="7" fill="#3fb950"><title>Ship_IsShipCloakVisibilityThresholdActive @ 0x0046c7a0 (86 B) — Checked: matches the original — OS-04</title></rect>
+<rect x="328" y="424" width="7" height="7" fill="#3fb950"><title>Ship_IsShipCloakVisibilityThresholdActive @ 0x0046c7a0 (86 B) — Checked: matches the original — OS-04, AI-44</title></rect>
 <rect x="336" y="424" width="7" height="7" fill="#3fb950"><title>Outfit_HasScannerTargetUntargetableCapability @ 0x0046c930 (293 B) — Checked: matches the original — OS-01, OS-12</title></rect>
 <rect x="344" y="424" width="7" height="7" fill="#3fb950"><title>Outfit_HasCloakScannerTargetCloakedCapability @ 0x0046ca60 (293 B) — Checked: matches the original — OS-01</title></rect>
 <rect x="352" y="424" width="7" height="7" fill="#3fb950"><title>Outfit_HasMiningScoopOutfit @ 0x0046cb90 (192 B) — Checked: matches the original — OS-01, OS-11</title></rect>
 <rect x="360" y="424" width="7" height="7" fill="#3fb950"><title>Outfit_EvaluateRequireMask @ 0x0046cd80 (65 B) — Checked: matches the original</title></rect>
 <rect x="368" y="424" width="7" height="7" fill="#3fb950"><title>Ship_CheckSpecialLoadoutCapability @ 0x0046d080 (241 B) — Checked: matches the original — OS-01, FL-06</title></rect>
-<rect x="376" y="424" width="7" height="7" fill="#3fb950"><title>Outfit_RecomputeOutfitDerivedState @ 0x0046d4b0 (2677 B) — Checked: matches the original — OS-10, OS-08</title></rect>
+<rect x="376" y="424" width="7" height="7" fill="#3fb950"><title>Outfit_RecomputeOutfitDerivedState @ 0x0046d4b0 (2677 B) — Checked: matches the original — OS-10, EC-27, OS-08</title></rect>
 <rect x="384" y="424" width="7" height="7" fill="#3fb950"><title>Outfit_ShipIsInertialess @ 0x0046df70 (219 B) — Checked: matches the original</title></rect>
 <rect x="392" y="424" width="7" height="7" fill="#3fb950"><title>Ship_GetShipFuelBurnRate @ 0x0046e060 (186 B) — Checked: matches the original — FL-08</title></rect>
 <rect x="400" y="424" width="7" height="7" fill="#3fb950"><title>Outfit_ComputeOutfitPurchasePrice @ 0x0046e910 (52 B) — Checked: matches the original — EC-14</title></rect>
 <rect x="408" y="424" width="7" height="7" fill="#3fb950"><title>Outfit_ComputeOutfitPurchaseMass @ 0x0046e950 (134 B) — Checked: matches the original — EC-14</title></rect>
 <rect x="16" y="432" width="7" height="7" fill="#3fb950"><title>Outfit_CountCarriedShipsForOutfit @ 0x0046ea40 (355 B) — Checked: matches the original</title></rect>
-<rect x="24" y="432" width="7" height="7" fill="#e3a52b"><title>NovaUi_RunOutfitterInteractionLoop @ 0x0048ea70 (6389 B) — Differs: fix in progress — EC-07</title></rect>
+<rect x="24" y="432" width="7" height="7" fill="#e3a52b"><title>NovaUi_RunOutfitterInteractionLoop @ 0x0048ea70 (6389 B) — Differs: fix in progress — EC-07, EC-28</title></rect>
 <rect x="32" y="432" width="7" height="7" fill="#3fb950"><title>NovaUi_HandleOutfitterMenuInput @ 0x004903c0 (1471 B) — Checked: matches the original</title></rect>
 <rect x="40" y="432" width="7" height="7" fill="#3aa6b9"><title>OutfitterMenu_FUN_004909a0 @ 0x004909a0 (626 B) — Done differently by design</title></rect>
 <rect x="48" y="432" width="7" height="7" fill="#3a3236"><title>NovaUi_RedrawOutfitterMenu @ 0x00490c70 (3268 B) — Not gameplay, nothing to port</title></rect>
-<rect x="56" y="432" width="7" height="7" fill="#e3a52b"><title>NovaLanded_CanBuyOutfit @ 0x00491950 (1421 B) — Differs: fix in progress — EC-12</title></rect>
-<rect x="64" y="432" width="7" height="7" fill="#e3a52b"><title>NovaUi_RunShipyardPurchaseLoop @ 0x00492f30 (4191 B) — Differs: fix in progress — EC-09</title></rect>
+<rect x="56" y="432" width="7" height="7" fill="#e3a52b"><title>NovaLanded_CanBuyOutfit @ 0x00491950 (1421 B) — Differs: fix in progress — EC-12, EC-28</title></rect>
+<rect x="64" y="432" width="7" height="7" fill="#e3a52b"><title>NovaUi_RunShipyardPurchaseLoop @ 0x00492f30 (4191 B) — Differs: fix in progress — EC-09, EC-11, EC-28</title></rect>
 <rect x="72" y="432" width="7" height="7" fill="#3fb950"><title>NovaUi_ShipyardHandleSelectionInput @ 0x00493fc0 (1478 B) — Checked: matches the original</title></rect>
 <rect x="80" y="432" width="7" height="7" fill="#3aa6b9"><title>NovaUi_ShipyardSetCursorSlot @ 0x0049458d (709 B) — Done differently by design</title></rect>
 <rect x="88" y="432" width="7" height="7" fill="#3a3236"><title>NovaUi_DrawShipyardShipList @ 0x004948b0 (3549 B) — Not gameplay, nothing to port</title></rect>
@@ -417,7 +417,7 @@
 <rect x="200" y="432" width="7" height="7" fill="#3a3236"><title>OutfitterMenu_FUN_004a2ac0 @ 0x004a2ac0 (353 B) — Not gameplay, nothing to port</title></rect>
 <rect x="208" y="432" width="7" height="7" fill="#3a3236"><title>ShipClass_FindShipSpriteSetByResourceId @ 0x004b67c0 (64 B) — Not gameplay, nothing to port</title></rect>
 <rect x="216" y="432" width="7" height="7" fill="#3a3236"><title>FUN_004cfc70 @ 0x004cfc70 (22 B) — Not gameplay, nothing to port</title></rect>
-<text x="16" y="462" class="gh">Government &amp; legal</text><text x="416" y="462" class="gn" text-anchor="end">22 functions · 21 matched</text>
+<text x="16" y="462" class="gh">Government &amp; legal</text><text x="416" y="462" class="gn" text-anchor="end">22 functions · 20 matched</text>
 <rect x="16" y="469" width="7" height="7" fill="#3fb950"><title>Ship_ScanPlayerForContraband @ 0x00401800 (4056 B) — Checked: matches the original — EC-15, AI-24</title></rect>
 <rect x="24" y="469" width="7" height="7" fill="#3fb950"><title>Government_PropagateHostilityFromAttack @ 0x004102e0 (901 B) — Checked: matches the original — AI-06</title></rect>
 <rect x="32" y="469" width="7" height="7" fill="#3fb950"><title>Government_TryTriggerGovtAssistanceEncounter @ 0x00413610 (481 B) — Checked: matches the original — AI-13</title></rect>
@@ -427,15 +427,15 @@
 <rect x="64" y="469" width="7" height="7" fill="#3fb950"><title>Rank_Deactivate @ 0x00427f40 (336 B) — Checked: matches the original — MS-03</title></rect>
 <rect x="72" y="469" width="7" height="7" fill="#3fb950"><title>Government_ApplyReputationCreditDelta @ 0x00440750 (464 B) — Checked: matches the original — MS-06, MS-09</title></rect>
 <rect x="80" y="469" width="7" height="7" fill="#3fb950"><title>Government_IsCandidateHostileToTargeter @ 0x004629e0 (452 B) — Checked: matches the original — EC-02</title></rect>
-<rect x="88" y="469" width="7" height="7" fill="#3fb950"><title>Government_ProcessFactionCombatEvent @ 0x00466fc0 (375 B) — Checked: matches the original — EC-02, EC-10</title></rect>
+<rect x="88" y="469" width="7" height="7" fill="#3fb950"><title>Government_ProcessFactionCombatEvent @ 0x00466fc0 (375 B) — Checked: matches the original — EC-02</title></rect>
 <rect x="96" y="469" width="7" height="7" fill="#3fb950"><title>Government_PropagateFactionCombatInfluenceToNearbySystems @ 0x00467140 (1463 B) — Checked: matches the original — EC-02</title></rect>
 <rect x="104" y="469" width="7" height="7" fill="#3fb950"><title>NovaUi_DrawCombatRankLabel @ 0x00469030 (201 B) — Checked: matches the original</title></rect>
 <rect x="112" y="469" width="7" height="7" fill="#3fb950"><title>NovaAi_PlayerCombatRatingGate @ 0x0046b330 (34 B) — Checked: matches the original</title></rect>
 <rect x="120" y="469" width="7" height="7" fill="#3a3236"><title>Government_SetSystemFillColor @ 0x0046bc50 (57 B) — Not gameplay, nothing to port</title></rect>
-<rect x="128" y="469" width="7" height="7" fill="#3fb950"><title>Government_AreGovtsAllied @ 0x0046bc90 (336 B) — Checked: matches the original — AI-18</title></rect>
+<rect x="128" y="469" width="7" height="7" fill="#3fb950"><title>Government_AreGovtsAllied @ 0x0046bc90 (336 B) — Checked: matches the original — EC-10, AI-18</title></rect>
 <rect x="136" y="469" width="7" height="7" fill="#3fb950"><title>Government_AreGovtsHostileOrXenophobic @ 0x0046bdf0 (491 B) — Checked: matches the original</title></rect>
 <rect x="144" y="469" width="7" height="7" fill="#3fb950"><title>Government_DoGovtsShareClass @ 0x0046bff0 (132 B) — Checked: matches the original — MS-15</title></rect>
-<rect x="152" y="469" width="7" height="7" fill="#3fb950"><title>Government_HasRankPrivilege @ 0x0046e860 (71 B) — Checked: matches the original</title></rect>
+<rect x="152" y="469" width="7" height="7" fill="#e3a52b"><title>Government_HasRankPrivilege @ 0x0046e860 (71 B) — Differs: fix in progress — EC-10</title></rect>
 <rect x="160" y="469" width="7" height="7" fill="#3fb950"><title>Government_IsShipGovernmentDerelict @ 0x0046f100 (57 B) — Checked: matches the original</title></rect>
 <rect x="168" y="469" width="7" height="7" fill="#3fb950"><title>Frame_AddCombatRatingPoints @ 0x0046f1e0 (136 B) — Checked: matches the original — WP-04</title></rect>
 <rect x="176" y="469" width="7" height="7" fill="#3fb950"><title>NovaUi_RunTravelDestinationBribeWindow @ 0x0047f9c0 (111 B) — Checked: matches the original</title></rect>
@@ -467,15 +467,15 @@
 <rect x="200" y="506" width="7" height="7" fill="#3fb950"><title>Stellar_RebuildTravelDestinationList @ 0x0043cc20 (722 B) — Checked: matches the original</title></rect>
 <rect x="208" y="506" width="7" height="7" fill="#3fb950"><title>Stellar_BuildTravelDestinationDescription @ 0x004444f0 (6193 B) — Checked: matches the original — MS-16</title></rect>
 <rect x="216" y="506" width="7" height="7" fill="#3fb950"><title>System_IsSystemVisible @ 0x00447f00 (22 B) — Checked: matches the original</title></rect>
-<rect x="224" y="506" width="7" height="7" fill="#3fb950"><title>PlayerTick_HyperspaceExitVelocity @ 0x0044b120 (3607 B) — Checked: matches the original — FL-04, OS-08, OS-08</title></rect>
+<rect x="224" y="506" width="7" height="7" fill="#3fb950"><title>PlayerTick_HyperspaceExitVelocity @ 0x0044b120 (3607 B) — Checked: matches the original — FL-04, UI-15</title></rect>
 <rect x="232" y="506" width="7" height="7" fill="#3fb950"><title>FUN_0044c2e0 @ 0x0044c2e0 (1322 B) — Checked: matches the original — FL-04, FL-04, FL-23</title></rect>
-<rect x="240" y="506" width="7" height="7" fill="#3fb950"><title>PlayerTick_HyperspaceProgressBranch @ 0x0044d371 (2974 B) — Checked: matches the original — UI-01, UI-01, FL-04, FL-05, FL-05, OS-02, OS-02, OS-02, OS-08</title></rect>
+<rect x="240" y="506" width="7" height="7" fill="#3fb950"><title>PlayerTick_HyperspaceProgressBranch @ 0x0044d371 (2974 B) — Checked: matches the original — UI-01, UI-01, FL-04, FL-05, FL-05, OS-02, OS-02, OS-02</title></rect>
 <rect x="248" y="506" width="7" height="7" fill="#3fb950"><title>FUN_0044eed5 @ 0x0044eed5 (1261 B) — Checked: matches the original — FL-04, FL-04, FL-23</title></rect>
 <rect x="256" y="506" width="7" height="7" fill="#3fb950"><title>PlayerTick_HyperspaceSequenceAnchor @ 0x0044f3d0 (3067 B) — Checked: matches the original — FL-04, FL-04, FL-06, FL-13, FL-13, UI-11, UI-15</title></rect>
 <rect x="264" y="506" width="7" height="7" fill="#3fb950"><title>Stellar_RunDockAndLaunchSequence @ 0x00455e10 (1627 B) — Checked: matches the original — UI-01, FL-05, FL-20, EC-06, EC-06, UI-04, UI-11</title></rect>
 <rect x="272" y="506" width="7" height="7" fill="#e3a52b"><title>Stellar_EnterHypergate @ 0x00456480 (2053 B) — Differs: fix in progress — OS-06</title></rect>
 <rect x="280" y="506" width="7" height="7" fill="#e3a52b"><title>Stellar_EnterWormhole @ 0x00456ca0 (2259 B) — Differs: fix in progress — OS-06</title></rect>
-<rect x="288" y="506" width="7" height="7" fill="#3fb950"><title>Stellar_HandleStellarEntryAndExit @ 0x00457580 (9002 B) — Checked: matches the original — FL-12, OS-06, AI-12, EC-04, EC-05, UI-08</title></rect>
+<rect x="288" y="506" width="7" height="7" fill="#3fb950"><title>Stellar_HandleStellarEntryAndExit @ 0x00457580 (9002 B) — Checked: matches the original — FL-12, OS-06, AI-12, EC-04, EC-05, EC-10, EC-25, UI-08</title></rect>
 <rect x="296" y="506" width="7" height="7" fill="#3fb950"><title>NovaUi_UpdateTravelEngagementProgress @ 0x00459950 (2637 B) — Checked: matches the original — FL-12, UI-08</title></rect>
 <rect x="304" y="506" width="7" height="7" fill="#3a3236"><title>NovaUi_MarkTravelAndStatusPanelsDirty @ 0x0045c7a0 (218 B) — Not gameplay, nothing to port</title></rect>
 <rect x="312" y="506" width="7" height="7" fill="#3fb950"><title>NovaUi_DrawTravelStatusPanel @ 0x0045e400 (1458 B) — Checked: matches the original — UI-10</title></rect>
@@ -483,8 +483,8 @@
 <rect x="328" y="506" width="7" height="7" fill="#e3a52b"><title>Stellar_FindNearestAvailableTravelStellar @ 0x00462db0 (265 B) — Differs: fix in progress — UI-06</title></rect>
 <rect x="336" y="506" width="7" height="7" fill="#3fb950"><title>Stellar_ComputeHyperspaceTravelDays @ 0x00465550 (179 B) — Checked: matches the original — FL-05</title></rect>
 <rect x="344" y="506" width="7" height="7" fill="#3fb950"><title>Stellar_ComputeTravelRangeSq @ 0x00465610 (135 B) — Checked: matches the original — FL-14</title></rect>
-<rect x="352" y="506" width="7" height="7" fill="#3fb950"><title>Stellar_GetStellarRadarColor @ 0x00466030 (537 B) — Checked: matches the original</title></rect>
-<rect x="360" y="506" width="7" height="7" fill="#3fb950"><title>Stellar_ComputeStellarDisplayColor @ 0x00466260 (701 B) — Checked: matches the original — UI-18</title></rect>
+<rect x="352" y="506" width="7" height="7" fill="#3fb950"><title>Stellar_GetStellarRadarColor @ 0x00466030 (537 B) — Checked: matches the original — EC-10, OS-05</title></rect>
+<rect x="360" y="506" width="7" height="7" fill="#3fb950"><title>Stellar_ComputeStellarDisplayColor @ 0x00466260 (701 B) — Checked: matches the original — EC-10, UI-18, OS-05</title></rect>
 <rect x="368" y="506" width="7" height="7" fill="#3fb950"><title>Stellar_FindValidRespawnStellar @ 0x00467710 (139 B) — Checked: matches the original — OS-02</title></rect>
 <rect x="376" y="506" width="7" height="7" fill="#3fb950"><title>Stellar_FindValidRespawnStellarRecursive @ 0x004677a0 (446 B) — Checked: matches the original</title></rect>
 <rect x="384" y="506" width="7" height="7" fill="#3fb950"><title>System_RebuildSystemVisibilityMap @ 0x00467970 (314 B) — Checked: matches the original</title></rect>
@@ -540,7 +540,7 @@
 <rect x="384" y="514" width="7" height="7" fill="#3aa6b9"><title>NovaUi_DrawTravelDestinationPaymentButtons @ 0x004a21e0 (233 B) — Done differently by design</title></rect>
 <rect x="392" y="514" width="7" height="7" fill="#3a3236"><title>NovaUi_HandleTravelDestinationServicesButtons @ 0x004a26e0 (301 B) — Not gameplay, nothing to port</title></rect>
 <rect x="400" y="514" width="7" height="7" fill="#3fb950"><title>NovaUi_DrawTravelDestinationServicesButtons @ 0x004a2810 (321 B) — Checked: matches the original</title></rect>
-<rect x="408" y="514" width="7" height="7" fill="#3fb950"><title>NovaUi_RunStarmapWindow @ 0x004a3aa0 (2200 B) — Checked: matches the original — UI-05</title></rect>
+<rect x="408" y="514" width="7" height="7" fill="#3fb950"><title>NovaUi_RunStarmapWindow @ 0x004a3aa0 (2200 B) — Checked: matches the original — UI-05, UI-15</title></rect>
 <rect x="16" y="522" width="7" height="7" fill="#3fb950"><title>NovaUi_StarmapWindowInnerLoop @ 0x004a4353 (3121 B) — Checked: matches the original — UI-05</title></rect>
 <rect x="24" y="522" width="7" height="7" fill="#3fb950"><title>NovaUi_CloseStarmapWindow @ 0x004a4fd0 (515 B) — Checked: matches the original</title></rect>
 <rect x="32" y="522" width="7" height="7" fill="#3a3236"><title>FUN_004a51e0 @ 0x004a51e0 (1 B) — Not gameplay, nothing to port</title></rect>

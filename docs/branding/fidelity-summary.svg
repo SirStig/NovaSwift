@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="650" height="500" viewBox="0 0 650 500" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
 <style>.hl{font-size:22px;font-weight:700;fill:#f0e6da}.sb{font-size:11px;fill:#a89a95}.nm{font-size:13px;fill:#f0e6da}.pc{font-size:13px;font-weight:600;fill:#f0e6da}</style>
 <rect width="650" height="500" rx="10" fill="#0d0a0e"/>
-<text x="20" y="34" class="hl">Compared and matching: 658 of 671 functions</text>
-<text x="20" y="56" class="sb">16 plan items are open; the 13 functions only they cite are amber, not green.</text>
+<text x="20" y="34" class="hl">Compared and matching: 656 of 671 functions</text>
+<text x="20" y="56" class="sb">16 plan items are open; the 15 functions only they cite are amber, not green.</text>
 <text x="20" y="90" class="nm">Flight &amp; collision</text>
 <rect x="230" y="78" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="78" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -131,10 +131,10 @@
 <rect x="468" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="485" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="502" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="519" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="519" y="198" width="14" height="14" rx="2" fill="#e3a52b"/>
 <rect x="536" y="198" width="14" height="14" rx="2" fill="#e3a52b"/>
 <rect x="553" y="198" width="14" height="14" rx="2" fill="#e3a52b"/>
-<text x="580" y="210" class="pc">22/25</text>
+<text x="580" y="210" class="pc">21/25</text>
 <text x="20" y="234" class="nm">Boarding &amp; hails</text>
 <rect x="230" y="222" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="222" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -199,8 +199,8 @@
 <rect x="502" y="270" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="519" y="270" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="536" y="270" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="553" y="270" width="14" height="14" rx="2" fill="#3fb950"/>
-<text x="580" y="282" class="pc">21/21</text>
+<rect x="553" y="270" width="14" height="14" rx="2" fill="#e3a52b"/>
+<text x="580" y="282" class="pc">20/21</text>
 <text x="20" y="306" class="nm">Star map &amp; travel</text>
 <rect x="230" y="294" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="294" width="14" height="14" rx="2" fill="#3fb950"/>

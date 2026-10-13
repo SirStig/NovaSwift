@@ -11,6 +11,30 @@ final class HullAnimatorTests: XCTestCase {
         XCTAssertEqual(c.frameIndex(set: 2, heading: 5, count: 36), 5)   // fewer sets than the base wraps
     }
 
+    func testDisabledAnimatedHullPausesOnlyWithFlag0x10() {
+        var c = HullAnimConfig()
+        c.setCount = 4; c.mode = .animation; c.animDelaySec = 0.1
+        // Without Flags 0x0010 a disabled animated hull keeps cycling (no snap to set 0).
+        XCTAssertEqual(c.baseSet(turnSign: 0, animClock: 0.25, disabled: true), 2)
+        XCTAssertTrue(c.animClockAdvances(disabled: true))
+        // With it the timer holds, so the caller's clock (and so the frame) stops.
+        c.pausesAnimationWhenDisabled = true
+        XCTAssertFalse(c.animClockAdvances(disabled: true))
+        XCTAssertTrue(c.animClockAdvances(disabled: false))
+        XCTAssertEqual(c.baseSet(turnSign: 0, animClock: 0.25, disabled: true), 2)
+        // Banking hulks still show the level set when disabled.
+        c.mode = .banking
+        XCTAssertEqual(c.baseSet(turnSign: 1, animClock: 0, disabled: true), 0)
+    }
+
+    func testAltFreezeFlag0x20() {
+        var c = HullAnimConfig()
+        XCTAssertTrue(c.altUpdates(disabled: true))
+        c.freezesAltWhenDisabled = true
+        XCTAssertFalse(c.altUpdates(disabled: true))
+        XCTAssertTrue(c.altUpdates(disabled: false))
+    }
+
     func testWeaponGlowDecayAndShieldFlare() {
         var c = HullAnimConfig(); c.weapDecay = 50
         XCTAssertEqual(c.weaponGlowAfter(1, dt: 10), 0)

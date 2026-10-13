@@ -8,7 +8,8 @@ only if its heading says **DONE**. This script applies the same idea to the data
 already in progress.json, so it needs nothing outside this repository.
 
 Rule (reproducible from the two inputs):
-  A function whose status is "done" and which is cited by at least one plan
+  A function whose status is "done" or "mapped" (the evnova-re generator paints a function
+  cited only by open items as "mapped") and which is cited by at least one plan
   item, where EVERY citing item is not marked **DONE** in FIDELITY_PLAN.md
   (that is, **OPEN**, or with no marker), becomes "partly"
   (amber, "Differs: fix in progress").
@@ -59,7 +60,7 @@ def recolour(data, items):
     for g in data["groups"]:
         for f in g["f"]:
             ids = list(dict.fromkeys(f[5]))
-            if f[4] == "done" and ids and all(items.get(i, "open") != "done" for i in ids):
+            if f[4] in ("done", "mapped") and ids and all(items.get(i, "open") != "done" for i in ids):
                 f[4] = "partly"
                 changed += 1
     keys = [s["key"] for s in data["statuses"]]

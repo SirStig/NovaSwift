@@ -3,9 +3,9 @@
 <rect width="592" height="726" rx="10" fill="#0d0a0e"/>
 <text x="16" y="32" class="h1">Beyond the original: NovaSwift's own features, one square per task</text>
 <rect x="16" y="46" width="9" height="9" fill="#3fb950"/>
-<text x="30" y="55" class="lg">Done (163)</text>
+<text x="30" y="55" class="lg">Done (165)</text>
 <rect x="110" y="46" width="9" height="9" fill="#e3a52b"/>
-<text x="124" y="55" class="lg">Partly done (22)</text>
+<text x="124" y="55" class="lg">Partly done (25)</text>
 <rect x="241" y="46" width="9" height="9" fill="none" stroke="#8d807c"/>
 <text x="255" y="55" class="lg">Planned (28)</text>
 <text x="16" y="92" class="gh">Multiplayer co-op</text><text x="576" y="92" class="gn" text-anchor="end">9 of 14 done</text>
@@ -145,40 +145,45 @@
 <rect x="231" y="473" width="12" height="12" fill="#3fb950"><title>Native Apple builds: iPhone and iPad — Done</title></rect>
 <rect x="246" y="473" width="12" height="12" fill="#3fb950"><title>Native Apple builds: Mouse aiming on Mac — Done</title></rect>
 <rect x="261" y="473" width="12" height="12" fill="#3fb950"><title>Native Apple builds: Shared portable Swift core — Done</title></rect>
-<text x="16" y="512" class="gh">Godot port for Linux and Windows</text><text x="576" y="512" class="gn" text-anchor="end">24 of 33 done</text>
+<text x="16" y="512" class="gh">Godot port for Linux and Windows</text><text x="576" y="512" class="gn" text-anchor="end">26 of 38 done</text>
 <rect x="216" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: SwiftGodot bridge and build script — Done</title></rect>
-<rect x="231" y="500" width="12" height="12" fill="#e3a52b"><title>Godot port for Linux and Windows: Linux and Windows CI — Partly done</title></rect>
-<rect x="246" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Flight with real-data sprites — Done</title></rect>
-<rect x="261" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: HUD, radar, targeting — Done</title></rect>
-<rect x="276" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Landing and launch — Done</title></rect>
-<rect x="291" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Trade center — Done</title></rect>
-<rect x="306" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Hyperjump and galaxy map — Done</title></rect>
-<rect x="321" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Outfitter, shipyard, bar, missions — Done</title></rect>
-<rect x="336" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Sound, spaceport ambient loop, brightness — Done</title></rect>
-<rect x="351" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Saving and loading pilots — Done</title></rect>
-<rect x="366" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Story runtime — Done</title></rect>
-<rect x="381" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Live-world wiring (rating, legal record, përs gating, mining, boarding, garrisons, bombs, Strict Play) — Done</title></rect>
-<rect x="396" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Status line, arrival and launch lines, HUD icons — Done</title></rect>
-<rect x="411" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Gamepad input — Done</title></rect>
-<rect x="216" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Controls and targeting checklist (Tab and ` cycle, \ link cycle, route mini map) — Done</title></rect>
-<rect x="231" y="515" width="12" height="12" fill="#e3a52b"><title>Godot port for Linux and Windows: Packaged builds — Partly done</title></rect>
-<rect x="246" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Performance: release bridge, sprite cache with prewarm, disk cache — Done</title></rect>
-<rect x="261" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Galaxy map: drag and trackpad pan, borders, mission markers, Tab and \ cycle — Done</title></rect>
-<rect x="276" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Hypergate and wormhole entry movies — Done</title></rect>
-<rect x="291" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Race and dësc movies (through ffmpeg) — Done</title></rect>
-<rect x="306" y="515" width="12" height="12" fill="#e3a52b"><title>Godot port for Linux and Windows: Title music from a .mov file — Partly done</title></rect>
-<rect x="321" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: About dialog picture — Done</title></rect>
-<rect x="336" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: NovaSwift UI kit: Settings (8 pages), Plug-ins, pause sidebar, pilot screens — Done</title></rect>
-<rect x="351" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Overlay stacking (screens open over the menu or pause sidebar) — Done</title></rect>
-<rect x="366" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Story Map — Done</title></rect>
-<rect x="381" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Debug suite — Done</title></rect>
-<rect x="396" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Plug-in loading parity harness — Done</title></rect>
-<rect x="411" y="515" width="12" height="12" fill="#e3a52b"><title>Godot port for Linux and Windows: Key Settings dialog (original DITL 4002) — Partly done</title></rect>
-<rect x="216" y="530" width="12" height="12" fill="#e3a52b"><title>Godot port for Linux and Windows: Murk fog (per-sprite fade to the system murk colour) — Partly done</title></rect>
-<rect x="231.5" y="530.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Godot port for Linux and Windows: LAN and IP:port multiplayer — Planned</title></rect>
-<rect x="246.5" y="530.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Godot port for Linux and Windows: Plug-in editor on Linux and Windows — Planned</title></rect>
-<rect x="261.5" y="530.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Godot port for Linux and Windows: HD graphics packs — Planned</title></rect>
-<rect x="276.5" y="530.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Godot port for Linux and Windows: Steam Deck build and flight visuals on a real GPU — Planned</title></rect>
+<rect x="231" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Flight with real-data sprites — Done</title></rect>
+<rect x="246" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: HUD, radar, targeting — Done</title></rect>
+<rect x="261" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Landing and launch — Done</title></rect>
+<rect x="276" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Trade center — Done</title></rect>
+<rect x="291" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Hyperjump and galaxy map — Done</title></rect>
+<rect x="306" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Outfitter, shipyard, bar, missions — Done</title></rect>
+<rect x="321" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Sound, spaceport ambient loop, brightness — Done</title></rect>
+<rect x="336" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Saving and loading pilots — Done</title></rect>
+<rect x="351" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Story runtime — Done</title></rect>
+<rect x="366" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Live-world wiring (rating, legal record, përs gating, mining, boarding, garrisons, bombs, Strict Play) — Done</title></rect>
+<rect x="381" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Status line, arrival and launch lines, HUD icons — Done</title></rect>
+<rect x="396" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Gamepad input — Done</title></rect>
+<rect x="411" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Controls and targeting checklist (Tab and ` cycle, \ link cycle, route mini map) — Done</title></rect>
+<rect x="216" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: macOS package (arm64, ad-hoc signed) — Done</title></rect>
+<rect x="231" y="515" width="12" height="12" fill="#e3a52b"><title>Godot port for Linux and Windows: Linux x86_64 and Steam Deck package — Partly done</title></rect>
+<rect x="246" y="515" width="12" height="12" fill="#e3a52b"><title>Godot port for Linux and Windows: Windows package — Partly done</title></rect>
+<rect x="261" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Release signing tooling — Done</title></rect>
+<rect x="276" y="515" width="12" height="12" fill="#e3a52b"><title>Godot port for Linux and Windows: Auto-updater (signed releases, Skip / Later / Update Now, rollback) — Partly done</title></rect>
+<rect x="291" y="515" width="12" height="12" fill="#e3a52b"><title>Godot port for Linux and Windows: Experimental update channel and return to stable — Partly done</title></rect>
+<rect x="306" y="515" width="12" height="12" fill="#e3a52b"><title>Godot port for Linux and Windows: Quick hyperjump enhancement in the Godot port — Partly done</title></rect>
+<rect x="321" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Performance: release bridge, sprite cache with prewarm, disk cache — Done</title></rect>
+<rect x="336" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Galaxy map: drag and trackpad pan, borders, mission markers, Tab and \ cycle — Done</title></rect>
+<rect x="351" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Hypergate and wormhole entry movies — Done</title></rect>
+<rect x="366" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Race and dësc movies (through ffmpeg) — Done</title></rect>
+<rect x="381" y="515" width="12" height="12" fill="#e3a52b"><title>Godot port for Linux and Windows: Title music from a .mov file — Partly done</title></rect>
+<rect x="396" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: About dialog picture — Done</title></rect>
+<rect x="411" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: NovaSwift UI kit: Settings (8 pages), Plug-ins, pause sidebar, pilot screens — Done</title></rect>
+<rect x="216" y="530" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Overlay stacking (screens open over the menu or pause sidebar) — Done</title></rect>
+<rect x="231" y="530" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Story Map — Done</title></rect>
+<rect x="246" y="530" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Debug suite — Done</title></rect>
+<rect x="261" y="530" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Plug-in loading parity harness — Done</title></rect>
+<rect x="276" y="530" width="12" height="12" fill="#e3a52b"><title>Godot port for Linux and Windows: Key Settings dialog (original DITL 4002) — Partly done</title></rect>
+<rect x="291" y="530" width="12" height="12" fill="#e3a52b"><title>Godot port for Linux and Windows: Murk fog (per-sprite fade to the system murk colour) — Partly done</title></rect>
+<rect x="306.5" y="530.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Godot port for Linux and Windows: LAN and IP:port multiplayer — Planned</title></rect>
+<rect x="321.5" y="530.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Godot port for Linux and Windows: Plug-in editor on Linux and Windows — Planned</title></rect>
+<rect x="336.5" y="530.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Godot port for Linux and Windows: HD graphics packs — Planned</title></rect>
+<rect x="351.5" y="530.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Godot port for Linux and Windows: Steam Deck build and flight visuals on a real GPU — Planned</title></rect>
 <text x="16" y="569" class="gh">Optional graphics, audio and AI</text><text x="576" y="569" class="gn" text-anchor="end">3 of 6 done</text>
 <rect x="216" y="557" width="12" height="12" fill="#3fb950"><title>Optional graphics, audio and AI: Smoothed sprite filtering — Done</title></rect>
 <rect x="231" y="557" width="12" height="12" fill="#3fb950"><title>Optional graphics, audio and AI: Parallax starfield and engine glow — Done</title></rect>

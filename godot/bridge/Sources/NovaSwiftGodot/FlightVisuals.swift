@@ -115,7 +115,9 @@ final class FlightVisuals {
             let angle = renderAngle(ship)
             let pos = renderPosition(ship)
 
-            st.animClock += dt
+            // shän Flags 0x0010 / 0x0020: a disabled hull's animation timer / alt layer stop.
+            if cfg.animClockAdvances(disabled: disabled) { st.animClock += dt }
+            if cfg.altUpdates(disabled: disabled) { st.altClock += dt }
             st.blinkClock += dt
             let turn = st.bank.update(angle: ship.angle, dt: dt)
             let heading = cfg.heading(forAngle: angle)
@@ -224,7 +226,7 @@ final class FlightVisuals {
 
             layers[id] = st
             lastInfo[id] = (ship.shipTypeID, heading, pos)
-            let altSet = cfg.altSet(animClock: st.animClock)
+            let altSet = cfg.altSet(animClock: st.altClock)
             rows[id] = [
                 Float(set), Float(heading), Float(cfg.framesPerSet), Float(altSet),
                 Float(lightAlpha), Float(wgAlpha), Float(shieldAlpha), Float(glowAlpha),

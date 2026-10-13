@@ -97,7 +97,9 @@ amber ("differs, fix in progress") when it is cited by at least one item above a
 `####` headings in this file.
 
 **Checked against the code (2026-10-13), both frontends.** Real gaps, all deferred slices of
-items that are otherwise done, not new items:
+items that are otherwise done, not new items. **Update, later the same day:** the closing-pass sections at the end of this file
+implemented the status lines, the hint chain, Player Info Tab cycling, folding hulls, the targeting details and the `përs`
+quote gates. They are written, not yet built or tested. The list below is the state before that pass:
 
 - About 20 invented status-line sentences that the original never prints in these
   situations (contraband, plunder "Took N credits", siphoned fuel, transferred rounds,
@@ -124,7 +126,7 @@ turning hostile after an assistance request (0x0047e470); `OnShipDone` text supp
 the mission is aborted (0x00443c60); the carrier escort's weapon-1 range (Q1); the order of an
 escort's `chär` Initial Record; a stale `<DL>` slot date after a timed mission; carrier-jump
 recovery beyond Q-OS-04; whether a tractor refusal prints STR# 2002 #36 (0x0044eed5); the
-`përs` HailQuote gates above. Q-OS-04 stays open.
+`përs` HailQuote gates above. Q-OS-04 stays open. **Update 2026-10-13:** the eight decompile questions are answered in the closing pass (six closed with no gap; two real gaps fixed, written, not built: `OnShipDone` auto-abort effects and stale `<DL>` slot dates), and Q-OS-04 is settled there.
 
 ---
 
@@ -1669,7 +1671,8 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Done.** × 1.333 (AI-41's behavior-5 arm, `Ship.applyCarriedFighterScale`); launch needs a
   target (the player's too), from the carrier's centre at the bay's Speed/100, cooldown `Reload /
   mounted`; a carrier that stands down recalls its fighters; docking within 75 px per axis, an
-  empty bay re-arms to Reload. The port's low-ammo/low-health recall is gone. Q-OS-04 stays open.
+  empty bay re-arms to Reload. The port's low-ammo/low-health recall is gone. Q-OS-04 was settled
+  on 2026-10-13 (fighters that cannot jump are recovered at the carrier; see the closing pass).
 - **Original.** Bay contents are the bank's loaded-ammo count (persisted, UI-02). A launched
   fighter is behavior 5 (×1.333 max shield/armor and shield regen, AI-41). Launch
   (`Ship_LaunchShipFromCarrierBay` 0x0040d9a0) needs an in-system target; cooldown is
@@ -2352,6 +2355,7 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
   everything, persistent included) is stale for the price formula.
 - **Class.** FIX. **Impact** medium. **Confidence** high on the bank-versus-owned split.
 - **Test.** A new hull's stock weapon is in the bank and absent from owned outfits until the outfitter promotes a leftover.
+- **Functions.** `Outfit_ComputeScaledPurchasePrice` 0x0049d640, `Ship_ComputeTradeInValue` 0x00469100.
 
 #### EC-10 · Rank effects: scope, stacking, revocation — **OPEN**
 - **Still open (who the two privilege bits cover).** PriceMod as a product over allied ranks,
@@ -2732,6 +2736,7 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
   the original's global is wrong. The old line (fixed 1000/5000 stakes and a 3× return) is stale.
 - **Class.** FIX. **Impact** low. **Confidence** high.
 - **Test.** Win on a colour, leave the bar, and re-enter: that colour is not excluded. Stay in the bar and it is.
+- **Functions.** `NovaUi_RunBarGamblingWindow` 0x0047dc50, draw 0x0047e1e0, buttons 0x004a2c30 / 0x004a2de0.
 
 #### EC-27 · Commodity overflow shrinks the six ordinary bins — **OPEN**
 - **Original.** `Outfit_RecomputeOutfitDerivedState` 0x0046d4b0. When fleet cargo capacity is
@@ -3513,6 +3518,7 @@ resources have no effect. Every string fix below reads the resource, never a cop
   the fixed radius. A selected far planet is still the one that is landed on.
 
 #### UI-07 · Target cycling and nearest-target commands — ui_rules A4 — **DONE**
+- **Status 2026-10-13: slot order and the AI-state 0x15 filter are implemented, awaiting build/test** (closing pass, section 2 of "folding hulls, targeting"; `PlayerTargetSlotTests`). The paragraphs below that call them missing are historical.
 - **Done.** `Engine/PlayerTargeting.swift`: `cyclePlayerTarget(forward:squad:)` in `npcs` (spawn)
   order, no wrap, no range cap, squad-only with Alt+backquote (Q-UI-04); R =
   `selectNearestHostileThreat`, Alt+R = `selectNearestEngaged`. The old cycle is
@@ -3583,6 +3589,7 @@ resources have no effect. Every string fix below reads the resource, never a cop
   "Unexplored System".
 
 #### UI-11 · Status-bar lines, durations and HailQuote broadcasts — ui_rules A10, A15, C5, C7, C8 — **DONE** (hint chain deferred)
+- **Status 2026-10-13: the invented-line replacements, the STR# 2002 #22-31 travel hint chain and the përs HailQuote class gates (0x1000 / 0x2000 / 0x4000) and snd 154 are implemented, awaiting build/test** (closing pass "text, hints, Player Info, quotes, Apple fixes", sections 1, 2 and 4). Not modelled: the broadcaster's "jump state with control mode 4 or 0x0D" skip.
 - **Done.** `GameHUDModel.post(_:rawCalls:)` runs on sim time (frozen while paused), empty text and
   Return (`dismissMessage`) clear it, `postIfIdle`; arrival line or buoy after every in-place reload
   (`postArrivalLine`, gate/wormhole variants, #49), launch line or a staged `Q` for 0x1f4
@@ -3625,6 +3632,7 @@ resources have no effect. Every string fix below reads the resource, never a cop
   0xf0 raw calls of sim time; pausing freezes it.
 
 #### UI-13 · Player Info window — ui_rules C2, C4, C9 — **DONE** (Tab cycling, junk count words deferred)
+- **Status 2026-10-13: Tab / Shift-Tab page cycling and the original cargo prose (count words, junk) are implemented, awaiting build/test** (closing pass section 3). The Extras and Honors grouped prose (`similar_to` grouping, `PlayerInfoPages.extras` / `honors`) is in the working tree from a later edit that the closing-pass text does not cover; treat it as unbuilt too.
 - **Done.** `Story/PlayerInfoPages.swift` (stat grid, daily economy line, cargo / extras by cost with
   trade-in footer / honors by Weight, all STR#-sourced; STR# 138 ratings via
   `OriginalText.combatRating`), drawn by `PlayerInfoView` with live figures from the scene; P opens
@@ -3679,6 +3687,7 @@ resources have no effect. Every string fix below reads the resource, never a cop
 - **Test.** With CrimeTol 10, R = −50 reads "Offender" and R = −200 "Criminal".
 
 #### UI-15 · Default key bindings and missing commands — ui_rules A11, C10 — **DONE** (map cycles; Caps Lock 2× mode done)
+- **Status 2026-10-13:** the map Tab / backslash cycle was built and tested on macOS. It is still an inference, because the two handlers are not decompiled on their own.
 - **Done (cleanup 1).** The original table gains Alt-X eject (OS-02's `requestEject`; only the
   modern table had it, and touch already offers it) and Alt-− self-destruct, a held command
   (`ControlIntent.selfDestruct` → `World.stepSelfDestruct`, the 0x00451954 block of 0x0044aa70):
@@ -3809,7 +3818,7 @@ stock-data pass. "Decision" means it is not an RE question.
 | Q-MS-05 | Duplicate `S` behaviour is settled (MS-17); does any stock flow depend on it? | Data |
 | Q-OS-01 | Nonlethal bomb damage `base_armor + rand(base_armor/2 + 1)` armor-only would be fatal; is it clamped, or misread by the decomp? (OS-08) | Ghidra 0x0044aa70 at the 0x0044b446 call |
 | Q-OS-03 | Which stock hulls carry cloak, jammer, scoop or repair DefaultItems, and which have PodCount > 0 (sizes the OS-01 / OS-02 impact) | Data (`novaswift-extract`) |
-| Q-OS-04 | NPC carrier jumps: are can't-jump fighters lost or recovered first? (OS-03) | Ghidra |
+| Q-OS-04 | NPC carrier jumps: are can't-jump fighters lost or recovered first? (OS-03). Settled 2026-10-13: recovered | Ghidra |
 | Q-UI-02 | Does the pod respawn really ignore the chär ship and use class 0 for a total conversion? (OS-02) | Ghidra 0x0044d570 |
 | Q-UI-03 | Does the land command's 60-frame nearest re-pick while armed override a manual selection? (UI-06) | Ghidra (decomp `spaceflight.cpp:1145` TODO) |
 | Q-UI-04 | Key table: squad-cycle modifier (Ctrl per the port, Alt per the manual), the DIK names of slots 0x0a/0x0d, and the meanings of slots 0x0c (H), 0x0f (K), 0x29 (U) | Ghidra key-name table 0x005776dc and the 0x0044b120 key reads |
@@ -3845,8 +3854,8 @@ Q-FL-12 (oracle: the caller's signed short makes a negative ModType 22 subtract;
 
 **Quirks kept on purpose.** The original executable is ground truth, including behaviour a
 reimplementation called a bug and "fixed". A `DeathDelay` of 0 or 1 does not leave an immortal
-ghost: NovaSwift uses a 1.8 s death instead, on purpose. Ships with `shän` Flags 0x0002 do not
-fold or unfold for hyperspace or landing (`HullAnim.baseSet`). That unfold is still missing.
+ghost: NovaSwift uses a 1.8 s death instead, on purpose. Ships with `shän` Flags 0x0002 did not
+fold or unfold for hyperspace or landing (`HullAnim.baseSet`); that was implemented 2026-10-13 (closing pass, folding hulls; written, not built).
 Fleet ships are spawned with empty holds.
 
 ## 7. Coverage
@@ -4164,3 +4173,26 @@ seams, `first_key_name`, Player Info Tab / Shift-Tab / Enter, the ≥ 128 ambien
 `NovaSwiftEngine/{PersQuoteBroadcaster,Boarding}.swift`, `NovaSwiftEngine/OriginalAI/OriginalAISupervisors.swift` (scan warning ends with "."). `app/`: `Game/GameScene.swift`,
 `Game/GameContainerView.swift`, `Game/PlayerInfoView.swift`, `Audio/GameAudio.swift`, `App/AppModel.swift`. Godot: bridge
 `NovaWorld.swift`, `Debug.swift`; `Controls.gd`, `Main.gd`, `audio/GameAudio.gd`, `screens/StoryScreens.gd`, new `tests/status_text_closing_selfcheck.gd`.
+
+### 2026-10-13 leftovers
+
+**Player Info Extras / Honors prose (0x0049c050).** `PlayerInfoPages.extras`/`honors` now build the original's grouped running text:
+owned outfits are grouped by `LCName` (`similar_to` = first earlier outfit with the same non-empty name), Extras ordered by the
+representative's signed `DispWeight` (descending, ties in slot order), Honors (oütf Flags 0x2000) in slot order after the held ranks.
+Phrases are "a"/"an" (STR# 2002 #393/#394) for 1, STR# 137 words for 2 and 3, digits from 4 up, with the comma / "and" (#392) glue,
+the trade-in line (#273, #32/#33) and the empty-page strings #270 / #271. Possible regression checked: outfits with an empty
+`LCName` are skipped, exactly as in the original. Counting `data/base` (6 Nova Data files), only 2 of 242 oütf have an empty
+`LCName` (#339 ";Krypt mind attack" and #348 "Bureau Bomb Outfit", both mass 0, cost 0, tech 9999, max 1 placeholders), so no real
+outfit disappears from the page. Tests: `Tests/NovaSwiftStoryTests/PlayerInfoPagesTests.swift`.
+
+**Disabled-hull visuals.** In `Ship_UpdateVisualState` the six sprite slots are base, engine glow, lights, weapon glow, alt, shield.
+shän Flags 0x0040 + disabled zeroes the light intensity (slot 2; `hidesLightsWhenDisabled` already had the right bit and layer).
+Flags 0x0020 + disabled skips the alt layer (slot 4) update: it is not hidden, it keeps its last frame (new
+`ShanRes.freezesAltWhenDisabled`, separate `altClock` in the Apple node and `ShipLayerState`). Flags 0x0010 (with the 0x0008
+animation mode) + disabled stops the animation timer, so the hull pauses on its current frame (new
+`ShanRes.pausesAnimationWhenDisabled`); without it a disabled animated hull keeps cycling. `HullAnimator.baseSet` no longer snaps
+every disabled hull to set 0 (banking and key-carried hulks still show the level set); renderers hold `animClock` instead
+(`HullAnimation.swift`, `GameScene` NPC loop, Godot `FlightVisuals.swift`). Test: `HullAnimatorTests`.
+
+**Function-grid tooltips refreshed.** EC-09 and EC-26 items got explicit **Functions.** lines. New counts: 636 green / 33 teal /
+15 amber; matched 656 / 671.

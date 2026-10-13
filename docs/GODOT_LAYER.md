@@ -3,10 +3,12 @@
 **In progress.** The frontend plays a pilot from the main menu through flight,
 landing, the spaceport, missions, the map and saving. Verified on-toolchain (macOS,
 Swift 6.3 + Godot 4.7): the bridge builds, headless self-checks load real EV Nova
-data and step the simulation, and all 13 catalog plug-ins load. Linux, Windows and
-the Steam Deck have not been built or run, and flight visuals have not been checked
-on a real GPU. Some 2026-10-13 work is written but not yet built or tested; each
-such section below says so.
+data and step the simulation, and all 13 catalog plug-ins load. The macOS arm64 and Linux x86_64 (Steam Deck) packages
+have been built and verified headless (see [PACKAGING.md](PACKAGING.md)); nothing has run on a real Steam Deck,
+Windows PC or GPU, and flight visuals have not been checked on a real GPU. The galaxy map, gate movies, sound
+parity and brightness work was built and tested on macOS on 2026-10-13. The 2026-10-13 closing pass (Key Settings,
+`.mov` title music, shot murk, quick hyperjump, status text and travel hints, Player Info) is written but not yet
+built or tested; each such section below says so.
 
 This file describes how the layer is built. What is done, written-but-untested and
 open is tracked in [GODOT_FIDELITY_GAPS.md](GODOT_FIDELITY_GAPS.md), summarised in
@@ -326,17 +328,16 @@ allowed to run — the workflow is back on push/PR now that it can pass.
 
 - `scripts/build-gdextension.sh` — builds the `NovaSwiftGodot` dynamic library
   for the host platform and copies it into `godot/bin/`.
-- `.github/workflows/godot-linux-windows.yml` — compiles the core + bridge on
-  Linux and Windows using the official Swift toolchain, so regressions in
-  cross-platform compilation are caught on every push. `core-linux` is the
-  required signal; the full-package, Windows and bridge jobs are informational
-  (`continue-on-error`). It ran manual-only for a while — see the LZFSE entry
-  above — and is back on push/PR.
+- `.github/workflows/godot-linux-windows.yml` — a reference workflow that compiles the core + bridge on
+  Linux and Windows. It is **not used**: no pushes or dispatches, no CI builds. Packages are built locally
+  (see [`PACKAGING.md`](PACKAGING.md)).
 
 Godot **export templates** turn `godot/` + the platform library into shippable
 `.x86_64` (Linux) and `.exe` (Windows) builds; wiring the export presets into CD
-is described in [`PACKAGING.md`](PACKAGING.md) (presets, `scripts/package-linux.sh`,
-CI `package-*` jobs, Steam Deck setup).
+is described in [`PACKAGING.md`](PACKAGING.md) (presets, `scripts/package-macos.sh`,
+`scripts/package-linux-docker.sh`, `scripts/package-windows.ps1`, Steam Deck setup). The in-game auto-updater
+(`godot/updater/`, signed releases, stable and experimental channels) is in [`UPDATER.md`](UPDATER.md); it is built
+and not yet tested end to end.
 
 ## Milestones
 
@@ -438,7 +439,7 @@ CI `package-*` jobs, Steam Deck setup).
    Headless checks: `tests/story_selfcheck.gd` (accept a BBS delivery, jump, land,
    pay + text, calendar advance) and `tests/story_menu_check.gd` (offer modal
    owns input, BBS/bar/info focus). Gambling, hire escort, jettison and in-flight `pêrs` offers are wired through the same helpers as the Apple app. The gambling reset still diverges (EC-26). Mission-offer `dësc` movies are wired (see "Total-conversion add-ons").
-6. **Packaging** — Godot export presets + CD for Linux/Windows artifacts.
+6. **Packaging** — Godot export presets and local package scripts: macOS arm64 and Linux x86_64 built and verified headless; Windows script written, not run; auto-updater built, not tested end to end.
 
 ## Non-goals
 
@@ -765,7 +766,7 @@ PNG previews through `tests/UiCompose.gd`); `spaceport_menu_check` / `story_menu
 
 ### Galaxy map: borders, mission marks, Tab cycle, gate-entry movie (2026-10-13)
 
-**Written, not yet built or tested** (Godot and the matching Apple edits). The Tab / `\` map cycle is an inference: the original handlers are not decompiled on their own.
+**Built and tested on macOS (2026-10-13)** (Godot and the matching Apple edits). The Tab / `\` map cycle is an inference: the original handlers are not decompiled on their own.
 
 * **Show / Hide Borders** (D1): the original's political overlay, built by the shared `PoliticalOverlay`
   (`Sources/NovaSwiftKit/PoliticalOverlay.swift`; new `discs(...)`, `build(...)`, `allied`, `rgba(game:)`, so Apple and Godot use one

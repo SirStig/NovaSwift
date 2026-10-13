@@ -23,6 +23,10 @@ struct HullAnim {
     var blinkMode = 0
     var blink: (a: Int, b: Int, c: Int, d: Int) = (0, 0, 0, 0)
     var hidesLightsWhenDisabled = false
+    /// shän Flags 0x0020: a disabled ship's alt layer keeps its last frame.
+    var freezesAltWhenDisabled = false
+    /// shän Flags 0x0010: a disabled animated hull pauses on its current frame.
+    var pausesAnimationWhenDisabled = false
     /// `shän.AltSetCount` — how many sets the alternating-sprite overlay packs.
     /// The overlay cycles through them on the same `animDelaySec` clock as the
     /// base sheet's animation mode. 0 = this hull has no alt layer.
@@ -45,6 +49,8 @@ struct HullAnim {
         blinkMode = shan.blinkMode
         blink = shan.blinkValues
         hidesLightsWhenDisabled = shan.hidesLightsWhenDisabled
+        freezesAltWhenDisabled = shan.freezesAltWhenDisabled
+        pausesAnimationWhenDisabled = shan.pausesAnimationWhenDisabled
         altSetCount = shan.hasAltLayer ? (animations ? shan.altSetCount : 1) : 0
         baseOpacity = CGFloat(shan.baseOpacity)
     }
@@ -81,9 +87,10 @@ struct HullAnim {
                  carriesKeyShip: Bool = false, foldSet: Int = 0) -> Int {
         guard setCount > 1 else { return 0 }
         if mode == .folding { return max(0, min(foldSet, setCount - 1)) }
-        // A hulk has no attitude control, so it can't bank and its animation is
-        // dead: it always draws the level set, whatever it seems to be doing.
-        guard !disabled else { return 0 }
+        // A hulk has no attitude control, so it can't bank (level set). The animation counter is
+        // not zeroed by being disabled: it keeps cycling unless shän Flags 0x0010 stops the timer
+        // (the caller then holds `animClock`, see `animClockAdvances`).
+        if disabled && mode != .animation { return 0 }
         switch mode {
         case .banking:
             if turnSign > 0 { return min(1, setCount - 1) }   // bank left  = set 1
@@ -99,6 +106,12 @@ struct HullAnim {
             return 0   // .folding returned above
         }
     }
+
+    /// Whether the base animation clock advances this tick (false = shän Flags 0x0010 pause).
+    func animClockAdvances(disabled: Bool) -> Bool { !(disabled && pausesAnimationWhenDisabled) }
+
+    /// Whether the alt layer updates this tick (false = Flags 0x0020: keep the last alt frame).
+    func altUpdates(disabled: Bool) -> Bool { !(disabled && freezesAltWhenDisabled) }
 
     /// Flat index into a `set*framesPerSet + heading` sheet, wrapped by `count`
     /// like the original's `Sprite_SetCurrentFrame` (0x00475830): a sheet with

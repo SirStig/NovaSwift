@@ -678,11 +678,6 @@
      "where": "godot/bridge"
     },
     {
-     "name": "Linux and Windows CI",
-     "status": "partial",
-     "where": "workflow exists but is not used for verification; Linux and Windows builds are not verified"
-    },
-    {
      "name": "Flight with real-data sprites",
      "status": "done",
      "where": "NovaWorld, Main.gd"
@@ -748,9 +743,39 @@
      "where": "godot/Controls.gd, screens/RouteMiniMap.gd, tests/controls_selfcheck.gd"
     },
     {
-     "name": "Packaged builds",
+     "name": "macOS package (arm64, ad-hoc signed)",
+     "status": "done",
+     "where": "scripts/package-macos.sh; built and headless-verified"
+    },
+    {
+     "name": "Linux x86_64 and Steam Deck package",
      "status": "partial",
-     "where": "export presets and scripts/package-linux.sh exist; no Linux, Windows or Steam Deck build has been run"
+     "where": "scripts/package-linux-docker.sh; built and headless-verified in containers, not yet run on a real Steam Deck or GPU"
+    },
+    {
+     "name": "Windows package",
+     "status": "partial",
+     "where": "scripts/package-windows.ps1 is written; never run, needs a Windows PC with Swift"
+    },
+    {
+     "name": "Release signing tooling",
+     "status": "done",
+     "where": "scripts/release-sign.sh, godot/updater/update_pubkey.pem; private key kept outside the repo"
+    },
+    {
+     "name": "Auto-updater (signed releases, Skip / Later / Update Now, rollback)",
+     "status": "partial",
+     "where": "godot/updater/, docs/UPDATER.md; built, not tested end to end"
+    },
+    {
+     "name": "Experimental update channel and return to stable",
+     "status": "partial",
+     "where": "godot/updater/UpdateChecker.gd, Settings > Support > Updates; built, not tested end to end"
+    },
+    {
+     "name": "Quick hyperjump enhancement in the Godot port",
+     "status": "partial",
+     "where": "Sources/NovaSwiftEngine/QuickHyperjump.swift, godot/screens/HyperjumpFx.gd; written, awaiting build/test"
     },
     {
      "name": "Performance: release bridge, sprite cache with prewarm, disk cache",
@@ -775,7 +800,7 @@
     {
      "name": "Title music from a .mov file",
      "status": "partial",
-     "where": "godot/audio/TitleMusic.gd is silent for .mov"
+     "where": "Movies.transcode_audio, godot/audio/TitleMusic.gd; written 2026-10-13, awaiting build/test (needs ffmpeg)"
     },
     {
      "name": "About dialog picture",
@@ -810,12 +835,12 @@
     {
      "name": "Key Settings dialog (original DITL 4002)",
      "status": "partial",
-     "where": "Preferences opens the NovaSwift Controls page instead; the original 34-key table is not drawn"
+     "where": "godot/screens/ClassicKeySettings.gd; written 2026-10-13, awaiting build/test"
     },
     {
      "name": "Murk fog (per-sprite fade to the system murk colour)",
      "status": "partial",
-     "where": "godot/flight: star tint only"
+     "where": "bridge projectile_fog, FlightRenderer.fog_shots; written 2026-10-13, awaiting build/test (stars, stellars and hulls were already fogged)"
     },
     {
      "name": "LAN and IP:port multiplayer",

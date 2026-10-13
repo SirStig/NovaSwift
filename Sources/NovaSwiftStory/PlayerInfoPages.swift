@@ -201,45 +201,125 @@ public struct PlayerInfoPages {
         return out
     }
 
-    /// Extras: "Current extras for your ship:" (#272), outfits by cost,
-    /// highest first, with count words; footer "Ship trade-in value:" (#273).
-    /// Empty: #270.
-    public func extras(tradeInValue: Int?) -> String {
-        var owned: [(outfit: OutfRes, count: Int)] = []
-        for (id, n) in player.outfits where n > 0 {
-            guard let outfit = game.outfit(id), !outfit.showsInRanksSection else { continue }
-            owned.append((outfit, n))
-        }
-        owned.sort { a, b in
-            a.outfit.cost != b.outfit.cost ? a.outfit.cost > b.outfit.cost : a.outfit.id < b.outfit.id
-        }
-        var lines: [String] = []
-        if owned.isEmpty {
-            lines.append(text.misc(270))
-        } else {
-            lines.append(text.misc(272))
-            for (outfit, n) in owned {
-                lines.append(n == 1 ? outfit.lowercaseDisplayName
-                                    : "\(text.countWord(n)) \(outfit.lowercasePluralDisplayName)")
-            }
-        }
-        if let tradeInValue {
-            lines.append("")
-            lines.append("\(text.misc(273)) \(OriginalText.grouped(tradeInValue)) \(text.misc(33))")
-        }
-        return lines.joined(separator: "\n")
+    // MARK: Extras and Honors (grouped prose, 0x0049c050)
+
+    /// One owned-outfit group on the Extras / Honors pages: the owned totals of
+    /// every outfit that shares the representative's lower-case name.
+    struct OutfitGroup {
+        let representative: OutfRes
+        let count: Int
     }
 
-    /// Honors: "Your ranks and honors:" (#274), ranks by Weight then the
-    /// outfits flagged 0x2000; empty #271.
+    /// The owned outfits grouped the way `NovaUi_BuildPlayerSpecialInteractionStrings`
+    /// 0x0049c050 groups them. An outfit is listed only when its lower-case
+    /// name (`LCName`, the table at 0x0063cccc) is non-empty and its Flags
+    /// 0x2000 bit matches the page (`honors`). Its slot adds to its
+    /// `similar_to` representative, which the loader (0x004bd3c0) points at the
+    /// first earlier outfit with an identical non-empty `LCName` (itself
+    /// otherwise). Extras order the groups by the representative's `DispWeight`
+    /// (signed, descending, equal weights in slot order); Honors keep slot order.
+    func outfitGroups(honors: Bool) -> [OutfitGroup] {
+        var firstWithName: [String: Int] = [:]
+        var representative: [Int: Int] = [:]
+        for outfit in game.outfits().sorted(by: { $0.id < $1.id }) where !outfit.lowercaseName.isEmpty {
+            if let first = firstWithName[outfit.lowercaseName] {
+                representative[outfit.id] = first
+            } else {
+                firstWithName[outfit.lowercaseName] = outfit.id
+                representative[outfit.id] = outfit.id
+            }
+        }
+        var totals: [Int: Int] = [:]
+        for (id, n) in player.outfits where n > 0 {
+            guard let outfit = game.outfit(id), !outfit.lowercaseName.isEmpty,
+                  outfit.showsInRanksSection == honors, let rep = representative[id] else { continue }
+            totals[rep, default: 0] += n
+        }
+        var groups = totals.keys.sorted().compactMap { id in
+            game.outfit(id).map { OutfitGroup(representative: $0, count: totals[id] ?? 0) }
+        }
+        if !honors {
+            // Stable: `sorted(by:)` isn't, so key on (weight desc, id asc).
+            groups.sort { a, b in
+                let wa = Int16(truncatingIfNeeded: a.representative.displayWeight)
+                let wb = Int16(truncatingIfNeeded: b.representative.displayWeight)
+                return wa != wb ? wa > wb : a.representative.id < b.representative.id
+            }
+        }
+        return groups
+    }
+
+    /// One group's phrase: 1 -> "a"/"an" (by the first letter of the
+    /// lower-case name; STR# 2002 #393 / #394), 2 and 3 -> the STR# 137 words
+    /// ("two", "three"), 4 and up -> digits, then the lower-case singular or
+    /// plural. The original upper-cases the very first letter of the page's
+    /// first phrase only when its count is below 4 (a word, not digits).
+    func groupPhrase(_ group: OutfitGroup, capitalize: Bool) -> String {
+        let outfit = group.representative
+        var word: String
+        switch group.count {
+        case 1: word = text.article(before: outfit.lowercaseName)
+        case 2, 3: word = text.localizedCountWord(group.count)
+        default: word = OriginalText.grouped(group.count)
+        }
+        if capitalize, group.count < 4, let first = word.first { word = first.uppercased() + word.dropFirst() }
+        return "\(word) \(group.count > 1 ? outfit.lowercasePluralDisplayName : outfit.lowercaseName)"
+    }
+
+    /// Extras (page 3): "Current extras for your ship:" (#272) and a blank
+    /// line, then one sentence of count-word phrases over the `similar_to`
+    /// groups ("A fuel scoop, two shield boosters, and 5 light blasters."),
+    /// with a comma after every phrase but the last when there are more than
+    /// two, and "and" (#392) before the last. Then ".\n\n" and, when the
+    /// ship's trade-in value is positive, "Ship trade-in value: N credit(s)"
+    /// (#273, #32 / #33). Nothing owned: only #270 (the draw routine's
+    /// fallback).
+    public func extras(tradeInValue: Int?) -> String {
+        let groups = outfitGroups(honors: false)
+        guard !groups.isEmpty else { return text.misc(270) }
+        let n = groups.count
+        var out = text.misc(272) + "\n\n"
+        for (i, group) in groups.enumerated() {
+            let e = i + 1
+            out += groupPhrase(group, capitalize: i == 0)
+            if e <= n - 1, n > 2 { out += "," }
+            if e < n - 1 { out += " " } else if e == n - 1 { out += " \(text.misc(392)) " }
+        }
+        if let tradeInValue, tradeInValue > 0 {
+            out += ".\n\n\(text.misc(273)) \(OriginalText.grouped(tradeInValue)) \(text.misc(tradeInValue == 1 ? 32 : 33))"
+        } else {
+            out += "."
+        }
+        return out
+    }
+
+    /// Honors (page 4): "Your ranks and honors:" (#274) and a blank line, the
+    /// held ranks with a name by `Weight` (highest first, equal weights in slot
+    /// order), then the Flags 0x2000 outfit groups in slot order with the same
+    /// count-word phrases. The list glue is the original's: after every entry
+    /// but the last a comma, plus "and" (#392) after the second-to-last, but
+    /// the outfit entries get only ", " (so a list that ends in two or more
+    /// outfits has no "and" between them). No closing period. Nothing: #271.
     public func honors() -> String {
         let ranks = player.activeRanks.compactMap { game.rank($0) }
-            .sorted { $0.weight < $1.weight }
-            .map(\.conversationName).filter { !$0.isEmpty }
-        let outfits = player.outfits.filter { $0.value > 0 }.sorted { $0.key < $1.key }
-            .compactMap { id, _ in game.outfit(id) }.filter(\.showsInRanksSection).map(\.displayName)
-        let all = ranks + outfits
-        guard !all.isEmpty else { return text.misc(271) }
-        return ([text.misc(274), ""] + all).joined(separator: "\n")
+            .filter { !$0.conversationName.isEmpty }
+            .sorted { $0.weight != $1.weight ? $0.weight > $1.weight : $0.id < $1.id }
+        let groups = outfitGroups(honors: true)
+        let total = ranks.count + groups.count
+        guard total > 0 else { return text.misc(271) }
+        var out = text.misc(274) + "\n\n"
+        var e = 0
+        for rank in ranks {
+            e += 1
+            out += rank.conversationName
+            if e <= total - 1 { out += "," }
+            if e < total - 1 { out += " " } else if e == total - 1 { out += " \(text.misc(392)) " }
+        }
+        for group in groups {
+            e += 1
+            out += groupPhrase(group, capitalize: ranks.isEmpty && e == 1)
+            if e <= total - 1 { out += ", " }
+        }
+        return out
     }
 }

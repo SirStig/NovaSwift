@@ -193,8 +193,17 @@ public struct ShanRes {
         if extraFrameFlags & 0x0008 != 0 { return .animation }
         return .none
     }
-    /// "Hide running-light sprites while the ship is disabled" (flag 0x0040).
+    /// Flag 0x0040: while disabled the running-light intensity is zeroed. Sprite slot [2] of
+    /// `Ship_UpdateVisualState` (base, engine glow, LIGHTS, weapon glow, alt, shield).
     public var hidesLightsWhenDisabled: Bool { extraFrameFlags & 0x0040 != 0 }
+    /// Flag 0x0020: while disabled the ALT layer (slot [4]) is skipped entirely — it is not hidden,
+    /// it just keeps its last drawn frame (the local gate is cleared, so neither the frame
+    /// assignment nor the cycle runs).
+    public var freezesAltWhenDisabled: Bool { extraFrameFlags & 0x0020 != 0 }
+    /// Flag 0x0010 (with the 0x0008 animation mode): while disabled the animation timer
+    /// stops advancing, so the hull PAUSES on its current frame. Without it a disabled
+    /// animated hull keeps cycling.
+    public var pausesAnimationWhenDisabled: Bool { extraFrameFlags & 0x0010 != 0 }
     /// Real weapon mount points, up to 4 per kind (unused slots repeat a
     /// placeholder position — callers should cross-reference `ShipRes.maxGuns`/
     /// `maxTurrets`/weapon count to know how many are actually meaningful).

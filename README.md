@@ -32,7 +32,7 @@ Enhancement and is off unless you turn it on.
 No decompiled code is in this repository. The findings are written up as specs
 with function addresses in [docs/reverse-engineering/](docs/reverse-engineering/README.md).
 
-![Functions compared and matching, by part of the original. Amber squares are functions only an open plan item cites.](docs/branding/fidelity-summary.svg?v=b3c8d114)
+![Functions compared and matching, by part of the original. Amber squares are functions only an open plan item cites.](docs/branding/fidelity-summary.svg?v=871e8c2b)
 
 One block is roughly 5% of that part of the original code: compared and
 matching or fixed to match (green), handled differently on purpose, such as the
@@ -49,7 +49,7 @@ The function-by-function view is in [docs/STATUS.md](docs/STATUS.md) and on the
 <details>
 <summary>Features beyond the original, and parts of the original that aren't needed</summary>
 
-![NovaSwift's own features](docs/branding/features-summary.svg?v=e39be2d2)
+![NovaSwift's own features](docs/branding/features-summary.svg?v=77cbf046)
 
 ![Parts of the original NovaSwift doesn't need](docs/branding/not-needed-summary.svg?v=0f518ead)
 
@@ -164,9 +164,28 @@ and rendering use SwiftUI and SpriteKit. The Godot 4 frontend, bridged with
 [SwiftGodot](https://github.com/migueldeicaza/SwiftGodot), runs the same
 `World.step` as the Apple build. On macOS it plays a pilot through flight,
 combat, landing, the spaceport, missions, the galaxy map, sound, saving and the
-story runtime, and loads all 13 catalog plug-ins. Linux, Windows and Steam Deck
-builds have not been made or run yet, and some recent work is written but not yet
-built or tested. The per-subsystem table is in
+story runtime, and loads all 13 catalog plug-ins.
+
+Getting a build: there is no CI. Packages are made locally with the scripts below
+([docs/PACKAGING.md](docs/PACKAGING.md)).
+
+- macOS (arm64): `scripts/package-macos.sh`. Built and checked headless.
+- Linux x86_64 and Steam Deck: `scripts/package-linux-docker.sh` builds a tarball in
+  a container. Built and checked headless in a clean Ubuntu 22.04 container; not
+  yet run on a real Steam Deck or with a GPU. Add `NovaSwift.sh` to Steam as a
+  non-Steam game; setup steps are in PACKAGING.md.
+- Windows (x86_64): `scripts/package-windows.ps1` is written but has never been run.
+  It needs a Windows PC with the Swift toolchain.
+
+You supply your own EV Nova data, as on Apple platforms. The optional original
+movies need `ffmpeg` installed.
+
+The Linux and Windows builds include an auto-updater ([docs/UPDATER.md](docs/UPDATER.md)):
+signed releases, a prompt with Skip This Version / Later / Update Now, an opt-in
+experimental channel and a way back to stable. It is built but not yet tested end
+to end. Work from the latest rounds (original status-line text and travel hints,
+quick hyperjump, the original Key Settings window, `.mov` title music, folding
+hulls) is written but not yet built or tested. The per-subsystem table is in
 [docs/STATUS.md](docs/STATUS.md#linux-and-windows); the design is in
 [GODOT_LAYER.md](docs/GODOT_LAYER.md).
 

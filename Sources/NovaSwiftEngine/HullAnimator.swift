@@ -19,6 +19,10 @@ public struct HullAnimConfig: Sendable {
     public var blinkMode = 0
     public var blink: (a: Int, b: Int, c: Int, d: Int) = (0, 0, 0, 0)
     public var hidesLightsWhenDisabled = false
+    /// shän Flags 0x0020: a disabled ship's alt layer keeps its last frame.
+    public var freezesAltWhenDisabled = false
+    /// shän Flags 0x0010: a disabled animated hull stops its animation timer (pauses).
+    public var pausesAnimationWhenDisabled = false
     /// `shän.AltSetCount`; 0 = this hull has no alt layer.
     public var altSetCount = 0
     /// `shän.BaseTransp` as a 0…1 hull alpha.
@@ -37,6 +41,8 @@ public struct HullAnimConfig: Sendable {
         blinkMode = shan.blinkMode
         blink = shan.blinkValues
         hidesLightsWhenDisabled = shan.hidesLightsWhenDisabled
+        freezesAltWhenDisabled = shan.freezesAltWhenDisabled
+        pausesAnimationWhenDisabled = shan.pausesAnimationWhenDisabled
         altSetCount = shan.hasAltLayer ? (animations ? shan.altSetCount : 1) : 0
         baseOpacity = shan.baseOpacity
     }
@@ -58,7 +64,10 @@ public struct HullAnimConfig: Sendable {
                         foldSet: Int = 0) -> Int {
         guard setCount > 1 else { return 0 }
         if mode == .folding { return max(0, min(foldSet, setCount - 1)) }
-        guard !disabled else { return 0 }     // a hulk has no attitude control
+        // Banking / key-carried read live ship state, a hulk shows the level set. The animation
+        // counter is NOT zeroed by being disabled: it keeps cycling unless shän Flags 0x0010
+        // stops the timer (callers then also stop advancing `animClock`, see `animClockAdvances`).
+        if disabled && mode != .animation { return 0 }
         switch mode {
         case .banking:
             if turnSign > 0 { return min(1, setCount - 1) }
@@ -71,6 +80,17 @@ public struct HullAnimConfig: Sendable {
         case .none, .folding:
             return 0   // .folding returned above
         }
+    }
+
+    /// Whether the base animation clock should advance this tick: a disabled hull with shän
+    /// Flags 0x0010 holds its timer (`Ship_UpdateVisualState` skips the `+= delta`).
+    public func animClockAdvances(disabled: Bool) -> Bool {
+        !(disabled && pausesAnimationWhenDisabled)
+    }
+
+    /// Whether the alt layer updates this tick (false = keep the last drawn alt frame).
+    public func altUpdates(disabled: Bool) -> Bool {
+        !(disabled && freezesAltWhenDisabled)
     }
 
     /// Flat sheet index, wrapped by `count` like `Sprite_SetCurrentFrame` (0x00475830).
@@ -180,6 +200,8 @@ public enum ShieldFlare {
 public struct ShipLayerState: Sendable {
     public var bank = HullBankTracker()
     public var animClock = 0.0
+    /// Alt-layer cycle clock; holds while a disabled ship has shän Flags 0x0020.
+    public var altClock = 0.0
     public var blinkClock = 0.0
     public var weaponGlowFlare = 0.0
     public var shieldFlare = 0.0
