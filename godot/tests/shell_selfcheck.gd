@@ -190,7 +190,7 @@ func _init() -> void:
 	var pb := []
 	for b in shell.pause_menu.find_children("*", "BaseButton", true, false):
 		pb.append(b.text)
-	_ok(pb == ["Resume", "Player Info", "Settings", "Save & Quit to Menu", "Quit"], "pause buttons: " + str(pb))
+	_ok(pb == ["Resume", "Player Info", "Story Map", "Settings", "Save & Quit to Menu", "Quit"], "pause buttons: " + str(pb))
 	shell._open_settings(shell.pause_menu)
 	await process_frame
 	_ok(shell.is_paused() and not shell.pause_menu.visible, "settings over pause hides pause")

@@ -138,29 +138,35 @@ static func credits_abbr(n: int) -> String:
 
 # --- flat focusable list row ------------------------------------------------------------
 
-class Row extends Button:
+## A BaseButton (NOT a Button: Button's minimum height is the theme font's line, which
+## stretched every 13 px list row to ~19 px so the highlight hung below the text).
+## The highlight is the cölr listHilite over exactly the row rect; a keyboard/pad-focused
+## row shows it too (only while ClassicTheme.nav_active), the mouse leaves it alone.
+class Row extends BaseButton:
 	var hi: ColorRect
+	var selected := false
 
 	func _init() -> void:
-		flat = true
 		focus_mode = Control.FOCUS_ALL
-		var empty := StyleBoxEmpty.new()
-		for n in ["normal", "pressed", "disabled", "hover"]:
-			add_theme_stylebox_override(n, empty)
-		var f := StyleBoxFlat.new()
-		f.bg_color = Color(0, 0, 0, 0)
-		f.border_color = Color(1.0, 0.78, 0.35, 0.8)
-		f.set_border_width_all(1)
-		add_theme_stylebox_override("focus", f)
 		hi = ColorRect.new()
 		hi.color = T.color("listHilite")
 		hi.set_anchors_preset(Control.PRESET_FULL_RECT)
 		hi.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		hi.visible = false
 		add_child(hi)
+		focus_entered.connect(_sync)
+		focus_exited.connect(_sync)
+
+	func _enter_tree() -> void:
+		T.track(self)
+		T.on_nav_changed(func(_on): _sync())
 
 	func set_selected(on: bool) -> void:
-		hi.visible = on
+		selected = on
+		_sync()
+
+	func _sync() -> void:
+		hi.visible = selected or T.show_focus(self)
 
 
 ## A flat Button over `r` registered as a focusable item `idx` of dialog `d`.
@@ -177,7 +183,6 @@ static func cell(parent: Control, s: String, x: int, w: int, h: int, color: Colo
 	var l := Label.new()
 	l.text = s
 	l.position = Vector2(x, 0)
-	l.size = Vector2(w, h)
 	l.horizontal_alignment = align
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	l.clip_text = true
@@ -186,6 +191,10 @@ static func cell(parent: Control, s: String, x: int, w: int, h: int, color: Colo
 	l.add_theme_font_override("font", T.body_font())
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", color)
+	# Size LAST: a Control clamps `size` to its minimum at assignment time, and with the
+	# default 16 px theme font that minimum is 23 px — a 13 px row cell became 23 px tall
+	# with its text centred 5 px below the row highlight.
+	l.size = Vector2(w, h)
 	parent.add_child(l)
 	return l
 
@@ -315,10 +324,6 @@ class Tile extends Button:
 		if has_item:
 			box.border_color = T.color("gridBright") if sel else T.color("gridDim")
 
-	func _draw() -> void:
-		if has_focus() and has_item:
-			draw_rect(Rect2(1, 1, 81, 52), T.FOCUS, false, 2.0)
-
 	func _gui_input(ev: InputEvent) -> void:
 		if grid == null:
 			return
@@ -345,8 +350,7 @@ class Tile extends Button:
 			accept_event()
 
 	func _notification(what: int) -> void:
-		if what == NOTIFICATION_FOCUS_ENTER or what == NOTIFICATION_FOCUS_EXIT:
-			queue_redraw()
+		pass   # no focus outline: the selection box (gridBright) is the indication
 
 
 ## A scrolling 4x5 grid of 83x54 item tiles inside dialog `d` at `r` (DITL grid item).

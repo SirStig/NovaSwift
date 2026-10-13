@@ -10,6 +10,7 @@ const T = preload("res://ui/classic/ClassicTheme.gd")
 const MainMenu = preload("res://screens/MainMenu.gd")
 const PilotMenu = preload("res://screens/PilotMenu.gd")
 const GalaxyMap = preload("res://screens/GalaxyMap.gd")
+const AuthenticHUD = preload("res://ui/classic/AuthenticHUD.gd")
 
 const OUT := "/private/tmp/claude-504/-Users-joshuakac1-Projects-EV-NOVA/6adade1c-9674-407a-b6fb-4f119b38cb13/scratchpad/"
 
@@ -201,6 +202,28 @@ func _init() -> void:
 	await process_frame
 	_ok(not gm._framed and gm._frame == null and gm._canvas.get_parent() == gm, "full-screen toggle keeps the plain map")
 	gm.close()
+
+	# --- starfield rules (shared OriginalRendering) ------------------------------------------------------
+	_ok(nova.star_count(720.0) == 20 and nova.star_count(800.0) == 20 and nova.star_count(300.0) == 10 and nova.star_count(0.0) == 0,
+		"star count: 720/800 px views -> 20 (pool cap), 300 -> 10")
+	var fok := true
+	for r in 35:
+		var f: float = nova.star_factor(r, true)
+		fok = fok and f >= 0.0 and f <= 0.34 + 1e-9 and nova.star_factor(r, false) == 0.0
+	_ok(fok and is_equal_approx(nova.star_factor(34, true), 0.34), "star factors in 0..0.34 (parallax off = 0)")
+	_ok(nova.star_tint(0) == 32 and nova.star_tint(10) == 9 and nova.star_tint(100) == 29 and nova.star_tint(1) == 2, "star tint neutral at 0, clamped 2..29")
+	_ok(nova.sprite_info(10, 0).size() >= 7 and nova.sprite_info(10, 0)[2] == 16, "spïn-700 star sheet has 16 frames")
+	var hud = AuthenticHUD.new()
+	root.add_child(hud)
+	hud.setup(nova)
+	hud._poll(1.0)
+	await process_frame
+	await process_frame
+	_ok(is_equal_approx(hud.bar_width(Vector2(1280, 720)), 194.0 * 720.0 / 767.0), "status bar reserves %.1f px of a 1280x720 window" % hud.bar_width(Vector2(1280, 720)))
+	_ok(hud._cargo.has("free") and hud._target.is_empty() and not hud._has_iff, "HUD extras: cargo panel read, no target, no IFF on a stock ship")
+	_ok(AuthenticHUD.iff_color(1) == Color(1, 0, 0) and AuthenticHUD.iff_color(2) == Color(0, 1, 0) and AuthenticHUD.iff_color(3) == Color(0, 0, 1), "IFF colours red / green / blue")
+	_ok(nova.ship_iff_classes().size() == nova.ship_ids().size(), "ship_iff_classes parallels the ship list")
+	hud.queue_free()
 
 	print("classic_reskin_selfcheck: %d failure(s)" % _fails)
 	quit(1 if _fails > 0 else 0)

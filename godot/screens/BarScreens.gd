@@ -346,6 +346,8 @@ var _gamble_dlg: Control
 
 func _overlay_swap(old: Control, d: Control, default_key: String) -> void:
 	var key := CS.focus_key(old)
+	if key.begins_with("tile"):
+		key = ""   # the selection, not the old slot, decides which tile gets focus
 	_sp._c.show_overlay(d)
 	_sp._overlay_back = _close_overlay_beep
 	if key == "" or not CS.focus_by_key(d, key):

@@ -6,6 +6,8 @@
 # Loaded with preload() (no class_name), like Controls.gd.
 extends RefCounted
 
+const Theme_ := preload("res://ui/classic/ClassicTheme.gd")
+
 const BG := Color(0.02, 0.025, 0.05)
 const PANEL := Color(0.09, 0.09, 0.12)
 const BORDER := Color(0.45, 0.5, 0.6)
@@ -14,6 +16,19 @@ const TEXT := Color(0.88, 0.9, 0.95)
 const MUTED := Color(0.62, 0.66, 0.74)
 
 static var _theme: Theme
+static var _ring: StyleBoxFlat
+static var _t: Theme
+
+
+## The focus ring is part of keyboard / pad navigation only (no outline for the mouse).
+static func _apply_nav(on: bool) -> void:
+	if _t == null:
+		return
+	var filled := _box(Color(0.24, 0.2, 0.12), ACCENT, 3)
+	for cls in ["Button", "CheckButton"]:
+		_t.set_stylebox("focus", cls, filled if on else StyleBoxEmpty.new())
+	for cls in ["HSlider", "LineEdit", "ScrollContainer"]:
+		_t.set_stylebox("focus", cls, _ring if on else StyleBoxEmpty.new())
 
 
 static func _box(bg: Color, border: Color, width: int) -> StyleBoxFlat:
@@ -33,20 +48,24 @@ static func theme() -> Theme:
 	if _theme != null:
 		return _theme
 	var t := Theme.new()
+	var no_ring := StyleBoxEmpty.new()
 	for cls in ["Button", "CheckButton"]:
 		t.set_stylebox("normal", cls, _box(Color(0.14, 0.15, 0.2), Color(0.3, 0.33, 0.4), 1))
 		t.set_stylebox("hover", cls, _box(Color(0.19, 0.21, 0.28), BORDER, 1))
 		t.set_stylebox("pressed", cls, _box(Color(0.26, 0.22, 0.14), ACCENT, 2))
 		t.set_stylebox("disabled", cls, _box(Color(0.1, 0.1, 0.13), Color(0.2, 0.2, 0.25), 1))
 		# The focus ring replaces the default outline: thick, bright, filled.
-		t.set_stylebox("focus", cls, _box(Color(0.24, 0.2, 0.12), ACCENT, 3))
+		t.set_stylebox("focus", cls, no_ring)
 		t.set_color("font_color", cls, TEXT)
 		t.set_color("font_hover_color", cls, Color.WHITE)
 		t.set_color("font_focus_color", cls, Color.WHITE)
 	var ring := _box(Color(0, 0, 0, 0), ACCENT, 2)
-	t.set_stylebox("focus", "HSlider", ring)
-	t.set_stylebox("focus", "LineEdit", ring)
-	t.set_stylebox("focus", "ScrollContainer", ring)
+	for cls in ["HSlider", "LineEdit", "ScrollContainer"]:
+		t.set_stylebox("focus", cls, no_ring)
+	_ring = ring
+	_t = t
+	Theme_.track(null)
+	Theme_.on_nav_changed(_apply_nav)
 	t.set_color("font_color", "Label", TEXT)
 	_theme = t
 	return t
@@ -58,6 +77,10 @@ static func screen(layer: CanvasLayer, backdrop_alpha := 0.94) -> Control:
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.theme = theme()
 	layer.add_child(root)
+	Theme_.track(root)
+	root.tree_entered.connect(func(): Theme_.track(root))
+	Theme_.on_nav_changed(_apply_nav)
+	_apply_nav(Theme_.nav_active)
 	var dim := ColorRect.new()
 	dim.color = Color(BG.r, BG.g, BG.b, backdrop_alpha)
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)

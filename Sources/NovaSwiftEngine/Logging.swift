@@ -1,4 +1,7 @@
 import Foundation
+#if !canImport(os)
+import NovaSwiftKit
+#endif
 #if canImport(os)
 import os
 #endif
@@ -118,10 +121,16 @@ public struct LogMessage: ExpressibleByStringInterpolation, ExpressibleByStringL
 /// (`.debug`/`.info`/`.notice`/`.error`/`.fault`). Prints to stderr.
 public struct FallbackLogger: Sendable {
     let category: String
-    public func debug(_ message: LogMessage) { FileHandle.standardError.write("[\(category)] \(message)\n".data(using: .utf8)!) }
-    public func info(_ message: LogMessage) { FileHandle.standardError.write("[\(category)] \(message)\n".data(using: .utf8)!) }
-    public func notice(_ message: LogMessage) { FileHandle.standardError.write("[\(category)] \(message)\n".data(using: .utf8)!) }
-    public func error(_ message: LogMessage) { FileHandle.standardError.write("[\(category)] \(message)\n".data(using: .utf8)!) }
-    public func fault(_ message: LogMessage) { FileHandle.standardError.write("[\(category)] \(message)\n".data(using: .utf8)!) }
+    private func emit(_ level: String, _ message: LogMessage) {
+        let text = message.description
+        FileHandle.standardError.write("[\(category)] \(text)\n".data(using: .utf8)!)
+        // Mirror into the debug suite's in-memory log (no-op unless a frontend installed a sink).
+        DebugLogSink.emit(level: level, category: category, message: text)
+    }
+    public func debug(_ message: LogMessage) { emit("debug", message) }
+    public func info(_ message: LogMessage) { emit("info", message) }
+    public func notice(_ message: LogMessage) { emit("notice", message) }
+    public func error(_ message: LogMessage) { emit("error", message) }
+    public func fault(_ message: LogMessage) { emit("fault", message) }
 }
 #endif

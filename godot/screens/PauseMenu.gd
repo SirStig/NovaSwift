@@ -1,6 +1,6 @@
 # NOVA Swift — in-flight pause menu (Esc / pad Start).
 #
-# Resume · Settings · Save & Quit to menu · Quit. The flight sim is paused by
+# Resume · Player Info · Story Map · Settings · Save & Quit to menu · Quit. The flight sim is paused by
 # Main.gd while this is up. It only reports the choice; Main.gd does the saving
 # and screen changes. Esc / B / Start again resume.
 #
@@ -17,6 +17,7 @@ const ClassicDialog = preload("res://ui/classic/ClassicDialog.gd")
 signal resume
 signal settings
 signal player_info
+signal story_map
 signal save_quit_to_menu
 signal quit
 
@@ -37,6 +38,7 @@ func setup(nova: Object, can_save: bool) -> void:
 	first_button = ShellUI.button(box, "Resume", func(): resume.emit(), nova)
 	buttons.append(first_button)
 	buttons.append(ShellUI.button(box, "Player Info", func(): player_info.emit(), nova))
+	buttons.append(ShellUI.button(box, "Story Map", func(): story_map.emit(), nova))
 	buttons.append(ShellUI.button(box, "Settings", func(): settings.emit(), nova))
 	if can_save:
 		buttons.append(ShellUI.button(box, "Save & Quit to Menu", func(): save_quit_to_menu.emit(), nova))
@@ -48,6 +50,7 @@ func _setup_classic(nova: Object, can_save: bool) -> void:
 	var specs := [
 		{"label": "Resume", "action": func(): resume.emit()},
 		{"label": "Player Info", "action": func(): player_info.emit()},
+		{"label": "Story Map", "action": func(): story_map.emit()},
 		{"label": "Settings", "action": func(): settings.emit()},
 	]
 	if can_save:

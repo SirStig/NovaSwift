@@ -27,6 +27,14 @@ const NATIVE_PRESSED := Color(0.381, 0.381, 0.381)    # 25000
 ## Keyboard / gamepad focus highlight on the original art (amber, like the app icon).
 const FOCUS := Color(1.0, 0.78, 0.35)
 
+## True while the LAST input was keyboard navigation or a gamepad (false after any
+## mouse / touch input). The original has no hover or focus outline at all, so the
+## kit draws its focus indication (Apple's controller-cursor "hover-grow", the
+## original's dotted default ring, the list highlight) ONLY while this is true.
+static var nav_active := false
+static var _tracker: Node
+static var _tracker_pending := false
+
 static var _nova: Object
 static var _palette := {}
 static var _tex := {}        # pict id -> ImageTexture (or null)
@@ -55,6 +63,78 @@ static func nova() -> Object:
 
 static func has_data() -> bool:
 	return _nova != null and _nova.has_game()
+
+
+# --- last input device (focus indication) -----------------------------------------
+
+## Tracks the last input device. One instance lives under the scene-tree root.
+class NavTracker extends Node:
+	signal changed(active: bool)
+	var handler: Callable
+
+	func _input(event: InputEvent) -> void:
+		handler.call(event)
+
+
+const _NAV_ACTIONS := ["ui_up", "ui_down", "ui_left", "ui_right", "ui_accept", "ui_focus_next", "ui_focus_prev"]
+
+
+## Make sure the tracker exists and is in the tree (call from any control's
+## `_enter_tree`; idempotent).
+static func track(from: Node) -> void:
+	if _tracker == null or not is_instance_valid(_tracker):
+		_tracker = NavTracker.new()
+		_tracker.name = "ClassicNavTracker"
+		_tracker.handler = note_event
+		_tracker_pending = false
+	if from == null or not from.is_inside_tree():
+		return
+	if not _tracker.is_inside_tree() and not _tracker_pending:
+		_tracker_pending = true
+		from.get_tree().root.add_child.call_deferred(_tracker)
+
+
+## Fold one input event into `nav_active` (the tracker calls this; tests may too).
+static func note_event(event: InputEvent) -> void:
+	var want := nav_active
+	if event is InputEventMouseMotion or event is InputEventMouseButton or event is InputEventScreenTouch \
+			or event is InputEventScreenDrag:
+		want = false
+	elif event is InputEventKey:
+		if event.pressed:
+			for a in _NAV_ACTIONS:
+				if event.is_action_pressed(a):
+					want = true
+					break
+	elif event is InputEventJoypadButton:
+		if event.pressed:
+			want = true
+	elif event is InputEventJoypadMotion:
+		if absf(event.axis_value) > 0.5:
+			want = true
+	set_nav_active(want)
+
+
+static func set_nav_active(on: bool) -> void:
+	if on == nav_active:
+		return
+	nav_active = on
+	if _tracker != null and is_instance_valid(_tracker):
+		_tracker.changed.emit(on)
+
+
+## Call `cb(active: bool)` whenever the input device flips between mouse and keyboard/pad.
+## Needs `track()` to have run; the connection dies with the callable's object.
+static func on_nav_changed(cb: Callable) -> void:
+	if _tracker == null or not is_instance_valid(_tracker):
+		return
+	if not _tracker.changed.is_connected(cb):
+		_tracker.changed.connect(cb)
+
+
+## Should a focused control draw its focus indication right now?
+static func show_focus(c: Control) -> bool:
+	return nav_active and c.has_focus()
 
 
 # --- fonts ---------------------------------------------------------------------

@@ -343,6 +343,7 @@ class NovaWorld: Node2D {
             interactionsNote(event)       // tribute / lost escort -> pilot
             storyNote(event)              // mission ship goals / losses, fail-if-disabled
             gapsNote(event)               // scans, eject, pod respawn, game over
+            polishNote(event)             // original STR# 2002 status lines
             if case let .combatChatter(soundID) = event { sound.chatterSoundID = soundID }
             pendingEventNames.append(String(String(describing: event).prefix { $0 != "(" }))
 
@@ -719,13 +720,19 @@ class NovaWorld: Node2D {
         // A story `M`/`N` op fired while docked moves where the takeoff happens.
         let (w, _) = GameSession.makeWorld(game: game, systemID: currentSystemID ?? sysID, player: player, galaxy: galaxy)
         let ctx = w.systemContext
+        // Lift off exactly as the original (`Stellar_RunDockAndLaunchSequence`
+        // 0x00455e10) and the Apple `GameScene.reloadForDeparture`: at the
+        // stellar's CENTRE, at rest, facing a random whole-degree heading, with
+        // shields and armor refilled. (Placing the ship past the rim made it
+        // visibly jump away from the planet on launch.)
         if let body = ctx.bodies.first(where: { $0.id == spobID }) {
-            var outward = body.position - ctx.center
-            if outward.length < 1 { outward = Vec2(0, -1) }
-            let dir = outward.normalized
-            player.position = body.position + dir * (body.radius + 60)
-            player.angle = dir.angle
+            player.position = body.position
+            player.angle = Double(w.rng.range(360)) * .pi / 180
             player.velocity = Vec2()
+            player.shield = player.maxShield
+            player.armor = player.maxArmor
+        } else {
+            player.position = ctx.center + Vec2(0, -700)
         }
         player.currentTargetID = nil
         self.world = w
@@ -3334,6 +3341,68 @@ class NovaWorld: Node2D {
         return true
     }
 
+    // MARK: Story Map (Story Guide)
+    //
+    // The Apple Story Guide, minus SwiftUI: `StorylineAnalyzer.storyMap(for:)` over the
+    // live pilot, built on a background queue (`StoryMapState`), each lane linearized by
+    // the shared `StoryGuideLogic.flow` (NovaSwiftStory/StoryFlowLayout.swift, the same
+    // code `StoryGuideModel` calls). GDScript side: godot/screens/StoryGuide.gd.
+    // Poll `story_map_ready()` after `story_map_begin()`; the previous map stays readable
+    // while a rebuild runs.
+
+    private var storyMapState = StoryMapState()
+
+    /// Start (or restart) the background build for the current pilot.
+    @discardableResult
+    @Callable(autoSnakeCase: true) func storyMapBegin() -> Bool {
+        guard let game else { return false }
+        storyMapState.begin(game: game, player: pilot)
+        return true
+    }
+
+    /// True once a map exists and no build is outstanding.
+    @Callable(autoSnakeCase: true) func storyMapReady() -> Bool {
+        storyMapState.hasMap && !storyMapState.isBuilding
+    }
+
+    /// `{lanes:[{key,title,done,total,complete,govt,govtName,color,plugin,current,
+    /// currentName,currentStatus}], untagged}`.
+    @Callable(autoSnakeCase: true) func storyMapLanes() -> String {
+        guard let game else { return "{\"lanes\":[],\"untagged\":0}" }
+        return Self.json(storyMapState.lanesJSON(game: game))
+    }
+
+    /// One storyline's flow rows: `[{id,name,step,status,depth,connector,current,objective,
+    /// reward,offeredAt,synopsis,govt,govtName,blockers,jumps,cross,deadEnds,canAbort}]`.
+    @Callable(autoSnakeCase: true) func storyFlow(key: String) -> String {
+        guard let game else { return "[]" }
+        return Self.json(storyMapState.flowJSON(key: key, game: game, player: pilot))
+    }
+
+    /// The mission's storyline tag `{key,title}`, or "" (untagged, or the tag table is
+    /// still prewarming -- the first call starts that; see `story_tags_ready`).
+    @Callable(autoSnakeCase: true) func storyTag(missionId: Int) -> String {
+        guard let game, let t = storyMapState.tag(forMission: missionId, game: game) else { return "" }
+        return Self.json(["key": t.key, "title": t.title])
+    }
+
+    @Callable(autoSnakeCase: true) func storyTagsReady() -> Bool { storyMapState.tagsReady }
+
+    /// Test aid: set / clear a control bit on the live pilot.
+    @Callable(autoSnakeCase: true) func debugSetBit(bit: Int, on: Bool) {
+        if on { pilot.setBit(bit) } else { pilot.clearBit(bit) }
+    }
+
+    /// Test aid: start mission `id` and complete it as if its objective were done
+    /// (runs OnAccept / OnSuccess scripts, marks it completed).
+    @Callable(autoSnakeCase: true) func debugCompleteMission(id: Int) -> Bool {
+        guard let engine = storyEngine() else { return false }
+        engine.startMission(id)
+        engine.completeMission(id)
+        storyCommit(engine)
+        return pilot.completedMissions.contains(id)
+    }
+
     // MARK: Gameplay gaps
     //
     // What the Apple app does around hire / escorts / gambling / scans / përs
@@ -4239,5 +4308,75 @@ class NovaWorld: Node2D {
     /// absent. The frontend does the file lookup (`OriginalAudio.musicCandidates`).
     @Callable(autoSnakeCase: true) func titleMusicName() -> String {
         game?.stringList(130)?.string(at: 2) ?? ""
+    }
+
+    // MARK: UI polish
+    //
+    // Original message lines and the generic `dësc` dialog's shared rules. The Apple
+    // app posts these from GameScene.processWorldEvents / GameContainerView; the
+    // lines ride the same status-line channel as the travel messages
+    // (`drain_interaction_messages`). Nothing here is invented: every line is a
+    // STR# 2002 entry (or the literal GameScene posts), and the frontend shows ONE line
+    // that replaces the last, as MessageLogView does.
+
+    /// Status-line lines for the world events GameScene narrates (called from
+    /// collectEvents). Events the Apple app does not narrate (a target dying, a
+    /// ship docking, ...) post nothing.
+    private func polishNote(_ event: WorldEvent) {
+        guard let game else { return }
+        let strs = game.stringList(2002)
+        switch event {
+        case let .shipDisabled(entityID, _) where entityID == World.playerEntityID:
+            post(strs?.string(at: 287) ?? "")                 // WP-03
+        case .playerDying:
+            post(strs?.string(at: 288) ?? "")                 // "Ship destroyed"
+        case .playerDestroyed:
+            post("Your ship has been destroyed.")
+        case let .repairSystemEngaged(entityID) where entityID == World.playerEntityID:
+            post(strs?.string(at: 37) ?? "")                  // OS-07
+        case let .assistanceDelivered(entityID):
+            post("\(world?.ship(id: entityID)?.name ?? "Ally") transfers fuel and makes repairs.")
+        case let .escortRejoined(_, fighter):
+            post(strs?.string(at: fighter ? 128 : 127) ?? "")
+        case let .fighterRecoveredToBay(_, captured):
+            post(strs?.string(at: captured ? 129 : 128) ?? "")
+        case let .shipCapturedByNPC(_, _, stolenLine):
+            if let stolenLine, let what = strs?.string(at: stolenLine), let tail = strs?.string(at: 374) {
+                post(what + " " + tail)
+            }
+        case let .overlayMessage(text, _):
+            post(text)
+        default:
+            break
+        }
+    }
+
+    /// How long a status-line message stays up, seconds: `rawCalls` of the
+    /// original's raw sim calls (`GameHUDModel.post`; 0xf0 = the default, about 5 s).
+    @Callable(autoSnakeCase: true) func hudMessageSeconds(rawCalls: Int) -> Double {
+        Double(rawCalls <= 0 ? 0xf0 : rawCalls) * OriginalClock.rawCallSeconds
+    }
+
+    /// The About Nova text exactly as `AboutNovaText.text(game:)` builds it: the
+    /// NovaSwift header (version, unofficial-port notice, repo) over `dësc` 32767
+    /// with `<REG>` as "EV Nova Community". Carriage returns become newlines.
+    @Callable(autoSnakeCase: true) func aboutNovaText(version: String) -> String {
+        UIPolishBackend.aboutText(descText: game?.descText(32767) ?? "", version: version)
+    }
+
+    /// `dësc` text for the generic reader (`DescTextDialog`): `\r` -> `\n`, `<REG>` filled.
+    @Callable(autoSnakeCase: true) func descDialogText(text: String) -> String {
+        UIPolishBackend.descText(text)
+    }
+
+    /// The generic `dësc` dialog's ids and shrink rule as JSON:
+    /// `{textDialog, pictDialog, top, body, bottom, backdrop, minText}`.
+    @Callable(autoSnakeCase: true) func descDialogInfo() -> String {
+        UIPolishBackend.descInfo()
+    }
+
+    /// `DescDialogLayout.shrink`: how far a text-only dialog shrinks (may be negative).
+    @Callable(autoSnakeCase: true) func descDialogShrink(textHeight: Int, textItemHeight: Int) -> Int {
+        DescDialogLayout.shrink(textHeight: textHeight, textItemHeight: textItemHeight)
     }
 }

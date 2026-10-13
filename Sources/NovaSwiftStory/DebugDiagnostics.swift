@@ -1,0 +1,304 @@
+import Foundation
+import NovaSwiftKit
+import NovaSwiftEngine
+
+// Shared (Foundation-only) core of the debug suite's diagnostics battery. The Apple app's
+// `DebugDiagnosticsView` and the Godot dev tools both render what `DebugDiagnostics.run` returns.
+
+public enum DiagnosticStatus: Sendable {
+    case pass, warn, fail
+
+    /// Short upper-case label used by plain-text reports.
+    public var label: String {
+        switch self {
+        case .pass: return "PASS"
+        case .warn: return "WARN"
+        case .fail: return "FAIL"
+        }
+    }
+}
+
+public struct DiagnosticResult: Identifiable, Sendable {
+    public let id = UUID()
+    public let name: String
+    public let status: DiagnosticStatus
+    public let detail: String?
+
+    public init(name: String, status: DiagnosticStatus, detail: String?) {
+        self.name = name; self.status = status; self.detail = detail
+    }
+}
+
+public struct DiagnosticSection: Identifiable, Sendable {
+    public let id = UUID()
+    public let title: String
+    public let results: [DiagnosticResult]
+
+    public init(title: String, results: [DiagnosticResult]) {
+        self.title = title; self.results = results
+    }
+}
+
+extension Array where Element == DiagnosticSection {
+    /// `(pass, warn, fail)` totals across every section.
+    public var tally: (pass: Int, warn: Int, fail: Int) {
+        let all = flatMap(\.results)
+        return (all.filter { $0.status == .pass }.count,
+                all.filter { $0.status == .warn }.count,
+                all.filter { $0.status == .fail }.count)
+    }
+}
+
+// MARK: - The check battery
+
+/// The pure test battery behind `DebugDiagnosticsView`. Every check reads state
+/// and reports; none of them mutate anything, so running diagnostics is always
+/// safe mid-session. New checks slot into the relevant section builder.
+public enum DebugDiagnostics {
+
+    public static func run(game: NovaGame?, pilot: PlayerState,
+                    liveShip: Ship?, liveHostiles: Int?) -> [DiagnosticSection] {
+        guard let game else {
+            return [DiagnosticSection(title: "Data Set", results: [
+                DiagnosticResult(name: "Data set loaded", status: .fail,
+                                 detail: "No NovaGame — the base data hasn't loaded. Import a data set first.")
+            ])]
+        }
+        return [
+            dataSetSection(game),
+            navigationSection(game, pilot),
+            pilotSection(game, pilot),
+            liveWorldSection(liveShip, hostiles: liveHostiles),
+        ]
+    }
+
+    // MARK: Data set integrity
+
+    private static func dataSetSection(_ game: NovaGame) -> DiagnosticSection {
+        var out: [DiagnosticResult] = []
+
+        let ships = game.ships()
+        let outfits = game.outfits()
+        let weapons = game.weapons()
+        let systems = game.systems()
+        let spobs = game.spobs()
+        let missions = game.missions()
+
+        out.append(countCheck("Ships defined", ships.count))
+        out.append(countCheck("Outfits defined", outfits.count))
+        out.append(countCheck("Weapons defined", weapons.count))
+        out.append(countCheck("Systems defined", systems.count))
+        out.append(countCheck("Stellar objects defined", spobs.count))
+        out.append(missions.isEmpty
+            ? DiagnosticResult(name: "Missions defined", status: .warn,
+                               detail: "No mïsn resources — story content won't run.")
+            : countCheck("Missions defined", missions.count))
+
+        // Nav-link integrity: every syst→syst link must resolve.
+        let systemIDs = Set(systems.map(\.id))
+        let dangling = systems.flatMap { sys in
+            sys.links.filter { !systemIDs.contains($0) }.map { (sys.id, $0) }
+        }
+        out.append(dangling.isEmpty
+            ? DiagnosticResult(name: "Hyperspace links resolve", status: .pass,
+                               detail: "All nav links point at real systems.")
+            : DiagnosticResult(name: "Hyperspace links resolve", status: .fail,
+                               detail: "\(dangling.count) link(s) point at missing systems, e.g. system #\(dangling[0].0) → #\(dangling[0].1)."))
+
+        // Every system's stellar objects must resolve.
+        let spobIDs = Set(spobs.map(\.id))
+        let danglingSpobs = systems.flatMap { sys in
+            sys.spobs.filter { !spobIDs.contains($0) }.map { (sys.id, $0) }
+        }
+        out.append(danglingSpobs.isEmpty
+            ? DiagnosticResult(name: "System stellar objects resolve", status: .pass, detail: nil)
+            : DiagnosticResult(name: "System stellar objects resolve", status: .fail,
+                               detail: "\(danglingSpobs.count) reference(s) to missing spöbs, e.g. system #\(danglingSpobs[0].0) → #\(danglingSpobs[0].1)."))
+
+        // Every hull needs a matching shän sprite (same id) to draw.
+        let missingSprites = ships.filter { game.shan($0.id) == nil }
+        out.append(missingSprites.isEmpty
+            ? DiagnosticResult(name: "Ship sprites present", status: .pass,
+                               detail: "Every hull has a shän sprite.")
+            : DiagnosticResult(name: "Ship sprites present", status: .warn,
+                               detail: "\(missingSprites.count) hull(s) have no shän, e.g. \"\(missingSprites[0].displayName)\" (#\(missingSprites[0].id)) — they'd render blank."))
+
+        // Orphan systems (no links in or out) are usually a data mistake.
+        let orphaned = systems.filter { game.systemNeighbors($0.id).isEmpty }
+        out.append(orphaned.isEmpty
+            ? DiagnosticResult(name: "Systems linked", status: .pass, detail: nil)
+            : DiagnosticResult(name: "Systems linked", status: .warn,
+                               detail: "\(orphaned.count) system(s) have no hyperspace links, e.g. \"\(orphaned[0].name)\" (#\(orphaned[0].id))."))
+
+        return DiagnosticSection(title: "Data Set", results: out)
+    }
+
+    // MARK: Navigation reachability
+
+    /// Can the player actually *get* to the rest of the galaxy from where they're
+    /// standing — and, specifically, to everywhere their accepted missions are
+    /// sending them?
+    ///
+    /// This replaces a check that only asked whether each system had a non-empty
+    /// link list. That version passed while New Ireland was completely
+    /// unreachable: its system (Tuatha) ships as four bit-gated copies, and the
+    /// three the storyline swaps in list their neighbour without being listed
+    /// back, so a one-way reading of `sÿst.links` cut them off. `links` was
+    /// non-empty the whole time. A real flood from the pilot's own position is the
+    /// only thing that catches that class of bug — and a tester whose mission
+    /// target has become unroutable gets a red row naming the mission instead of
+    /// having to describe it in prose.
+    private static func navigationSection(_ game: NovaGame, _ pilot: PlayerState) -> DiagnosticSection {
+        var out: [DiagnosticResult] = []
+        let engine = StoryEngine(game: game, player: pilot)
+        let hidden = engine.hiddenSystemIDs()
+        let origin = pilot.currentSystem
+
+        // Breadth-first flood over the symmetric link graph, skipping systems the
+        // pilot's control bits currently hide — i.e. exactly what course plotting
+        // walks (`NavigationModel.shortestPath`).
+        var reached: Set<Int> = [origin]
+        var frontier = [origin]
+        while !frontier.isEmpty {
+            var next: [Int] = []
+            for id in frontier {
+                for link in game.systemNeighbors(id) where !reached.contains(link) && !hidden.contains(link) {
+                    reached.insert(link)
+                    next.append(link)
+                }
+            }
+            frontier = next
+        }
+
+        let live = game.systems().filter { !hidden.contains($0.id) }
+        let stranded = live.filter { !reached.contains($0.id) }
+        out.append(stranded.isEmpty
+            ? DiagnosticResult(name: "Galaxy reachable", status: .pass,
+                               detail: "All \(live.count) live system(s) routable from \"\(game.system(origin)?.displayName ?? "#\(origin)")\".")
+            : DiagnosticResult(name: "Galaxy reachable", status: .warn,
+                               detail: "\(stranded.count) of \(live.count) live system(s) can't be routed to from here, e.g. \"\(stranded[0].displayName)\" (#\(stranded[0].id))."))
+
+        // The one that actually strands a player: an accepted mission pointing at
+        // a system no course can reach. Always a fail — the save is unwinnable.
+        let destinations = engine.missionDestinations()
+        let unreachable = destinations.filter { !reached.contains($0.systemID) }
+        if destinations.isEmpty {
+            out.append(DiagnosticResult(name: "Mission destinations routable", status: .pass,
+                                        detail: "No accepted mission has a destination right now."))
+        } else if unreachable.isEmpty {
+            out.append(DiagnosticResult(name: "Mission destinations routable", status: .pass,
+                                        detail: "All \(destinations.count) destination(s) routable."))
+        } else {
+            let worst = unreachable[0]
+            let where_ = game.system(worst.systemID)?.displayName ?? "#\(worst.systemID)"
+            out.append(DiagnosticResult(
+                name: "Mission destinations routable", status: .fail,
+                detail: "\(unreachable.count) accepted mission destination(s) unreachable — \"\(worst.names.joined(separator: ", "))\" wants \"\(where_)\" (#\(worst.systemID)), which no course can reach from here."))
+        }
+
+        // A hidden system the player is *standing in* means the story swapped the
+        // galaxy under them; every route out is computed against a system that
+        // shouldn't exist.
+        if hidden.contains(origin) {
+            out.append(DiagnosticResult(name: "Current system is live", status: .fail,
+                                        detail: "The pilot is in system #\(origin), which the current control bits hide."))
+        }
+        out.append(DiagnosticResult(name: "Systems hidden by story bits", status: .pass,
+                                    detail: "\(hidden.count) system(s) currently gated out by sÿst.Visibility."))
+
+        return DiagnosticSection(title: "Navigation", results: out)
+    }
+
+    // MARK: Pilot state
+
+    private static func pilotSection(_ game: NovaGame, _ pilot: PlayerState) -> DiagnosticSection {
+        var out: [DiagnosticResult] = []
+
+        // Current hull must be a real ship.
+        if let ship = game.ship(pilot.shipType) {
+            out.append(DiagnosticResult(name: "Current hull valid", status: .pass,
+                                        detail: "\(ship.displayName) (#\(ship.id))."))
+        } else {
+            out.append(DiagnosticResult(name: "Current hull valid", status: .fail,
+                                        detail: "Pilot's shipType #\(pilot.shipType) has no matching shïp."))
+        }
+
+        // Owned outfits must all resolve.
+        let badOutfits = pilot.outfits.keys.filter { game.outfit($0) == nil }
+        out.append(badOutfits.isEmpty
+            ? DiagnosticResult(name: "Owned outfits valid", status: .pass,
+                               detail: "\(pilot.outfits.values.reduce(0, +)) item(s), all resolving.")
+            : DiagnosticResult(name: "Owned outfits valid", status: .fail,
+                               detail: "\(badOutfits.count) owned outfit id(s) have no oütf, e.g. #\(badOutfits.first!)."))
+
+        // Credits sanity.
+        out.append(pilot.credits >= 0
+            ? DiagnosticResult(name: "Credits non-negative", status: .pass,
+                               detail: "\(pilot.credits) cr.")
+            : DiagnosticResult(name: "Credits non-negative", status: .fail,
+                               detail: "Credits are negative (\(pilot.credits))."))
+
+        // Date sanity.
+        let d = pilot.date
+        let dateOK = (1...31).contains(d.day) && (1...12).contains(d.month) && d.year >= 0
+        out.append(dateOK
+            ? DiagnosticResult(name: "Galaxy date valid", status: .pass, detail: d.description)
+            : DiagnosticResult(name: "Galaxy date valid", status: .warn,
+                               detail: "Out-of-range date components: \(d.description)."))
+
+        return DiagnosticSection(title: "Pilot", results: out)
+    }
+
+    // MARK: Live world
+
+    private static func liveWorldSection(_ ship: Ship?, hostiles: Int?) -> DiagnosticSection {
+        guard let ship else {
+            return DiagnosticSection(title: "Live World", results: [
+                DiagnosticResult(name: "Flight session active", status: .warn,
+                                 detail: "No live scene — enter the game to run live-world checks.")
+            ])
+        }
+        var out: [DiagnosticResult] = []
+
+        out.append(DiagnosticResult(name: "Flight session active", status: .pass,
+                                    detail: "Player ship built and flying."))
+
+        out.append(ship.isAlive
+            ? DiagnosticResult(name: "Player ship alive", status: .pass, detail: nil)
+            : DiagnosticResult(name: "Player ship alive", status: .warn,
+                               detail: "Player armor is at 0 — destroyed or mid-respawn."))
+
+        out.append(ship.stats.maxSpeed > 0
+            ? DiagnosticResult(name: "Player can move", status: .pass,
+                               detail: "Max speed \(Int(ship.stats.maxSpeed)), accel \(Int(ship.stats.acceleration)).")
+            : DiagnosticResult(name: "Player can move", status: .fail,
+                               detail: "Max speed is 0 — the ship can't fly (bad hull stats?)."))
+
+        out.append(ship.maxShield + ship.maxArmor > 0
+            ? DiagnosticResult(name: "Player has health", status: .pass,
+                               detail: "Shield \(Int(ship.maxShield)) / armor \(Int(ship.maxArmor)).")
+            : DiagnosticResult(name: "Player has health", status: .fail,
+                               detail: "Both max shield and max armor are 0."))
+
+        out.append(!ship.weapons.isEmpty
+            ? DiagnosticResult(name: "Player armed", status: .pass,
+                               detail: "\(ship.weapons.count) weapon mount(s) fitted.")
+            : DiagnosticResult(name: "Player armed", status: .warn,
+                               detail: "No weapons fitted — combat checks can't fire."))
+
+        if let hostiles {
+            out.append(DiagnosticResult(name: "Live hostiles", status: .pass,
+                                        detail: "\(hostiles) hostile ship(s) in system."))
+        }
+
+        return DiagnosticSection(title: "Live World", results: out)
+    }
+
+    // MARK: Helpers
+
+    private static func countCheck(_ name: String, _ count: Int) -> DiagnosticResult {
+        count > 0
+            ? DiagnosticResult(name: name, status: .pass, detail: "\(count) defined.")
+            : DiagnosticResult(name: name, status: .fail, detail: "None found.")
+    }
+}

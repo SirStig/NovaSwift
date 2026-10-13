@@ -36,6 +36,8 @@ const DEFAULTS := {
 	"input": {"deadzone": Controls.STICK_DEADZONE, "modern_keys": false},
 	"data": {"dir": ""},
 	"map": {"gate_links": false},
+	# Story Guide: the amber storyline badge on mission rows (Apple showMissionStorylineTags).
+	"story": {"show_mission_storyline_tags": true},
 	# Presentation (mirrors the Apple GameSettings modernMainMenu / modernDialogs /
 	# modernHUD toggles). false = the authentic original UI (default); true = the
 	# port's own "Nova Swift" screens. Classic = all off, Nova Swift = all on.

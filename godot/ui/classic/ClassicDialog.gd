@@ -219,6 +219,121 @@ static func panel(nova_obj: Object, opts := {}) -> Control:
 	return d
 
 
+## The original's generic `dësc` reader (Ui_RunTravelSelectionDialog 0x004982a0; Apple
+## DescTextDialog): text only = DLOG/DITL 3003 on PICT 8524 / 8525 / 8526 that SHRINKS to the
+## measured text (shared DescDialogLayout.shrink, via the bridge); with a graphic (>= 128) =
+## 3004 on backdrop PICT 8527 with the dësc picture in item 1. OK = item 0, text = item 2
+## (white 12 pt Geneva stand-in on black, wrapped, scrolls when it overflows: wheel, Up/Down,
+## PgUp/PgDn, right stick). `<REG>` and `\r` are resolved by the bridge. opts: fit.
+## `d.get_meta("desc")` = {shrink, text_height, text_rect, scroll, with_picture, size}.
+static func desc_dialog(nova_obj: Object, text: String, graphic_id := -1, opts := {}) -> Control:
+	var info = JSON.parse_string(nova_obj.desc_dialog_info()) if nova_obj != null else null
+	if not (info is Dictionary):
+		info = {"textDialog": 3003, "pictDialog": 3004, "top": 8524, "body": 8525, "bottom": 8526, "backdrop": 8527, "minText": 48}
+	var body: String = nova_obj.desc_dialog_text(text) if nova_obj != null else text.replace("\r", "\n")
+	var pict_tex: Texture2D = Theme_.pict(graphic_id) if graphic_id >= 128 else null
+	var with_pic := pict_tex != null
+	var dlg_id := int(info["pictDialog"] if with_pic else info["textDialog"])
+	var ditl = JSON.parse_string(nova_obj.classic_dialog(dlg_id)) if nova_obj != null else null
+	var rects := {}
+	var size := Vector2i(441, 313)
+	if ditl is Dictionary and ditl.has("w"):
+		size = Vector2i(int(ditl["w"]), int(ditl["h"]))
+		for it in ditl.get("items", []):
+			rects[int(it["i"])] = Rect2i(int(it["l"]), int(it["t"]), int(it["r"]) - int(it["l"]), int(it["b"]) - int(it["t"]))
+	var ok_r: Rect2i = rects.get(0, Rect2i(size.x - 130, size.y - 36, 99, 25))
+	var txt_r: Rect2i = rects.get(2, Rect2i(18, 40, size.x - 36, size.y - 100))
+	var pic_r: Rect2i = rects.get(1, Rect2i(18, 18, 100, 100))
+	var back_tex: Texture2D = Theme_.pict(int(info["backdrop"])) if with_pic else null
+	if with_pic and back_tex != null:
+		size = Vector2i(back_tex.get_size())
+	# Measure the wrapped text at the item's width with the real font.
+	var fs := 12
+	var font: Font = Theme_.body_font()
+	var th := int(ceil(font.get_multiline_string_size(body, HORIZONTAL_ALIGNMENT_LEFT, float(txt_r.size.x), fs,
+		-1, TextServer.BREAK_MANDATORY | TextServer.BREAK_WORD_BOUND).y))
+	var shrink := 0
+	if not with_pic:
+		shrink = int(nova_obj.desc_dialog_shrink(th, txt_r.size.y)) if nova_obj != null else 0
+	var win := Vector2i(size.x, size.y - shrink)
+	var d: Control = _make(nova_obj, win, Chrome.PICT if with_pic else Chrome.PANEL)
+	d.fit_to_viewport = bool(opts.get("fit", true))
+	d.text_color = Color.WHITE
+	var black := ColorRect.new()
+	black.color = Color.BLACK
+	black.size = Vector2(win)
+	black.mouse_filter = Control.MOUSE_FILTER_STOP
+	d.add_child(black)
+	d._add_background(back_tex)
+	if with_pic:
+		var tr := TextureRect.new()
+		tr.texture = pict_tex
+		tr.stretch_mode = TextureRect.STRETCH_KEEP
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.clip_contents = true
+		tr.position = Vector2(pic_r.position)
+		tr.size = Vector2(pic_r.size)
+		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		d.add_child(tr)
+	var view_r := Rect2i(txt_r.position, Vector2i(txt_r.size.x, txt_r.size.y - shrink))
+	var sc := DescScroll.new()
+	sc.position = Vector2(view_r.position)
+	sc.size = Vector2(view_r.size)
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	sc.get_v_scroll_bar().modulate = Color(1, 1, 1, 0)
+	var l := Label.new()
+	l.text = body
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size = Vector2(view_r.size.x, 0)
+	l.add_theme_font_override("font", font)
+	l.add_theme_font_size_override("font_size", fs)
+	l.add_theme_color_override("font_color", Color.WHITE)
+	l.add_theme_constant_override("line_spacing", 0)
+	l.mouse_filter = Control.MOUSE_FILTER_PASS
+	sc.add_child(l)
+	sc.label = l
+	d.add_child(sc)
+	d.texts[2] = l
+	d.actions[0] = Callable()
+	d.default_item = 0
+	d.cancel_item = 0
+	var ok_rect := Rect2i(ok_r.position.x, ok_r.position.y - shrink, ok_r.size.x, ok_r.size.y)
+	d.add_button(str(opts.get("ok", "OK")), ok_rect, 0)
+	d.set_meta("desc", {"shrink": shrink, "text_height": th, "text_rect": view_r, "scroll": sc,
+		"with_picture": with_pic, "size": win, "ok_rect": ok_rect, "dialog_id": dlg_id})
+	return d
+
+
+## The dësc text pane: clipped, scrolls with the wheel, Up/Down, PgUp/PgDn and the right stick.
+class DescScroll extends ScrollContainer:
+	var label: Label
+
+	func scrollable() -> bool:
+		return label != null and label.get_minimum_size().y > size.y + 0.5
+
+	func _process(_dt: float) -> void:
+		if not is_visible_in_tree():
+			return
+		var ax := Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
+		if absf(ax) > 0.35:
+			scroll_vertical += int(ax * 8.0)
+
+	func _input(event: InputEvent) -> void:
+		if not is_visible_in_tree() or not scrollable():
+			return
+		if event.is_action_pressed("ui_up"):
+			scroll_vertical -= 16
+		elif event.is_action_pressed("ui_down"):
+			scroll_vertical += 16
+		elif event.is_action_pressed("ui_page_up"):
+			scroll_vertical -= int(size.y) - 16
+		elif event.is_action_pressed("ui_page_down"):
+			scroll_vertical += int(size.y) - 16
+		else:
+			return
+		get_viewport().set_input_as_handled()
+
+
 func _add_spec_button(spec: Dictionary, rect: Rect2i, idx: int) -> void:
 	var b = add_button(str(spec.get("label", "")), rect, idx)
 	b.disabled = bool(spec.get("disabled", false))
@@ -331,6 +446,7 @@ func add_button(label: String, rect: Rect2i, index := -1) -> TextureButton:
 	add_child(b)
 	b.is_default = (index == default_item and index >= 0)
 	b.pressed.connect(_activate.bind(index))
+	b.refused.connect(func(): if nova != null and nova.has_method("sound_beep"): nova.sound_beep(4))   # greyed press: snd 153
 	_register(index, b, rect, true)
 	return b
 
@@ -349,7 +465,6 @@ func add_label(text: String, rect: Rect2i, index := -1, font_size := 12, color :
 	var l := Label.new()
 	l.text = text
 	l.position = Vector2(rect.position)
-	l.size = Vector2(rect.size)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	l.clip_text = true
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -357,6 +472,7 @@ func add_label(text: String, rect: Rect2i, index := -1, font_size := 12, color :
 	l.add_theme_font_size_override("font_size", font_size)
 	l.add_theme_color_override("font_color", color if color != Color() else text_color)
 	l.add_theme_constant_override("line_spacing", 0)
+	l.size = Vector2(rect.size)   # after the font overrides (size clamps to the minimum at assignment)
 	add_child(l)
 	if index >= 0:
 		texts[index] = l
@@ -369,7 +485,6 @@ func add_edit(initial: String, rect: Rect2i, index := -1) -> LineEdit:
 	var e := LineEdit.new()
 	e.text = initial
 	e.position = Vector2(rect.position)
-	e.size = Vector2(rect.size)
 	e.add_theme_font_override("font", Theme_.body_font())
 	e.add_theme_font_size_override("font_size", 12)
 	e.add_theme_color_override("font_color", Color.BLACK)
@@ -384,10 +499,8 @@ func add_edit(initial: String, rect: Rect2i, index := -1) -> LineEdit:
 	sb.content_margin_top = 0
 	sb.content_margin_bottom = 0
 	e.add_theme_stylebox_override("normal", sb)
-	var sbf := sb.duplicate()
-	sbf.border_color = Theme_.FOCUS
-	sbf.set_border_width_all(2)
-	e.add_theme_stylebox_override("focus", sbf)
+	e.add_theme_stylebox_override("focus", sb)   # the caret is the only focus cue (no outline)
+	e.size = Vector2(rect.size)
 	e.text_submitted.connect(func(_t): if default_item >= 0: _activate(default_item))
 	add_child(e)
 	texts[index] = e

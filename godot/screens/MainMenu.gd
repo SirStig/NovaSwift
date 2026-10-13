@@ -36,11 +36,13 @@ var _root: Control
 var classic_menu: Control    # the ClassicMainMenu when drawn in Classic presentation
 var _about: Control
 var _extra: Control
+var _nova: Object
 
 
 func setup(nova: Object, data_dir: String, has_data: bool) -> void:
 	layer = 50
 	ClassicTheme.setup(nova)
+	_nova = nova
 	if has_data and ClassicTheme.classic("menu"):
 		_setup_classic(nova, data_dir)
 		return
@@ -66,6 +68,8 @@ func setup(nova: Object, data_dir: String, has_data: bool) -> void:
 	ShellUI.button(box, "New Pilot", func(): new_pilot.emit(), nova)
 	ShellUI.button(box, "Settings", func(): settings.emit(), nova)
 	ShellUI.button(box, "Game Data…", func(): game_data.emit(), nova)
+	if has_data:
+		ShellUI.button(box, "About Nova", _show_about, nova)
 	ShellUI.button(box, "Quit", func(): quit.emit(), nova)
 	ShellUI.focus(first_button)
 
@@ -131,13 +135,13 @@ func _on_classic_choice(action: String) -> void:
 
 # About Nova: the data's own dësc 32767.
 func _show_about() -> void:
-	var nova: Object = classic_menu.nova
-	var text: String = nova.classic_desc_text(32767)
-	if text == "":
+	var nova: Object = classic_menu.nova if classic_menu != null else _nova
+	if nova == null or nova.classic_desc_text(32767) == "":
 		return
-	classic_menu.blocked = true
-	var d = ClassicDialog.panel(nova, {"text": text, "width": 560,
-		"footer_buttons": [{"label": "OK", "default": true, "cancel": true}]})
+	if classic_menu != null:
+		classic_menu.blocked = true
+	# AboutNovaText: the NovaSwift header over dësc 32767, in the generic dësc dialog.
+	var d = ClassicDialog.desc_dialog(nova, nova.about_nova_text(str(ProjectSettings.get_setting("application/config/version", "1.0.0"))))
 	d.accepted.connect(_close_about)
 	d.cancelled.connect(_close_about)
 	_about = ClassicDialog.modal(_root, d, 0.6)
@@ -147,8 +151,9 @@ func _close_about() -> void:
 	if _about != null:
 		_about.queue_free()
 		_about = null
-	classic_menu.blocked = false
-	classic_menu.focus_default.call_deferred()
+	if classic_menu != null:
+		classic_menu.blocked = false
+		classic_menu.focus_default.call_deferred()
 
 
 ## A pilot dialog / sub-screen opens over the menu or closes. The classic menu stays on screen

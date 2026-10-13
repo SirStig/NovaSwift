@@ -108,7 +108,8 @@ func _build() -> void:
 		var tb := TextureButton.new()
 		tb.texture_normal = up
 		tb.texture_pressed = down
-		tb.texture_focused = down
+		tb.texture_focused = up    # the highlighted frame only for keyboard / pad focus (see _sync_nav)
+		tb.set_meta("down_tex", down)
 		tb.position = Vector2(b["x"], b["y"])
 		tb.focus_mode = Control.FOCUS_ALL
 		tb.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -125,6 +126,9 @@ func _build() -> void:
 		order.append(act)
 		idx += 1
 	_wire_focus()
+	Theme_.track(self)
+	Theme_.on_nav_changed(func(_on): _sync_nav())
+	_sync_nav()
 
 	# Rollover indicator: the gold ATMOS wordmark at rest, the hovered button's icon otherwise.
 	var ro: Dictionary = layout.get("rollover", {})
@@ -151,6 +155,12 @@ func _build() -> void:
 	_begin_slides()
 	resized.connect(fit)
 	fit.call_deferred()
+
+
+## Like Apple's menu: a keyboard/pad-focused button shows its highlighted frame; the mouse never does.
+func _sync_nav() -> void:
+	for b in buttons.values():
+		b.texture_focused = b.get_meta("down_tex") if Theme_.nav_active else b.texture_normal
 
 
 func _add_rect(tex: Texture2D, pos: Vector2) -> TextureRect:

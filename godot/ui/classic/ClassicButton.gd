@@ -2,9 +2,12 @@
 #
 # A TextureButton showing the real EV Nova three-state button (PICT 7500+3s caps /
 # middle, masks 7600+3s: normal, pressed, grey) at the requested width, with the
-# label drawn in the cölr button font and per-state colours. Keyboard / gamepad
-# focus is an amber outline + faint wash over the art (the original had no focus
-# concept on these buttons). `Style.NATIVE` is the original's bevelled grey
+# label drawn in the cölr button font and per-state colours. The original has no
+# hover or focus outline: the mouse shows nothing but the pressed art. Keyboard /
+# gamepad focus is shown only while the last input was keyboard-nav or a pad
+# (ClassicTheme.nav_active) and mirrors the Apple controller cursor's target
+# treatment: the ART button grows 1.07x (CursorClickable hover-grow); NATIVE and
+# CHECK buttons get the original's dotted default ring. `Style.NATIVE` is the original's bevelled grey
 # push button of the text/yes-no prompts (DLOG 3001/3002, ClassicUiWindow);
 # `Style.CHECK` is its X check box.
 #
@@ -70,8 +73,32 @@ func setup(text: String, width: int, btn_style: int = Style.ART, height := 20) -
 	_face.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_face.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(_face)
-	for sig in [button_down, button_up, focus_entered, focus_exited, toggled]:
+	for sig in [button_down, button_up, toggled]:
 		sig.connect(func(_a = null): _face.queue_redraw())
+	focus_entered.connect(_sync_focus)
+	focus_exited.connect(_sync_focus)
+	resized.connect(func(): pivot_offset = size / 2.0)
+	pivot_offset = Vector2(width, h) / 2.0
+
+
+func _enter_tree() -> void:
+	Theme_.track(self)
+	Theme_.on_nav_changed(_sync_focus_flag)
+
+
+func _sync_focus_flag(_on: bool) -> void:
+	_sync_focus()
+
+
+## Focus indication follows focus AND the last input device.
+func _sync_focus() -> void:
+	if _face != null:
+		_face.queue_redraw()
+	if style == Style.ART:
+		var want := 1.07 if (Theme_.show_focus(self) and not disabled) else 1.0
+		if not is_equal_approx(scale.x, want):
+			var tw := create_tween()
+			tw.tween_property(self, "scale", Vector2(want, want), 0.12).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -103,16 +130,11 @@ class _Face extends Control:
 				_draw_check(w, h, disabled, down)
 			_:
 				_draw_art_label(w, h, disabled, down)
-		if btn.has_focus() and not disabled:
-			var c: Color = Theme_.FOCUS
-			if btn.style == Style.ART:
-				draw_rect(Rect2(0, 0, w, h), Color(c.r, c.g, c.b, 0.12))
-				draw_rect(Rect2(1, 1, w - 2, h - 2), c, false, 2.0)
-			elif btn.style == Style.NATIVE:
+		if Theme_.show_focus(btn) and not disabled:
+			if btn.style == Style.NATIVE:
 				_dotted_rect(Rect2(3, 3, w - 6, h - 6), Color.BLACK)
-				draw_rect(Rect2(0.5, 0.5, w - 1, h - 1), c, false, 1.0)
-			else:
-				draw_rect(Rect2(0.5, 0.5, 17, 17), c, false, 1.0)
+			elif btn.style == Style.CHECK:
+				_dotted_rect(Rect2(-2, -2, 21, 21), Color.BLACK)
 
 	func _label_font() -> Font:
 		return Theme_.font_for(str(Theme_.palette().get("buttonFont", "Charcoal")))
@@ -179,7 +201,7 @@ class _Face extends Control:
 		# baseline (top + bottom + size) / 2 - 1
 		draw_string(font, Vector2(roundf(w / 2.0 - tw / 2.0), floorf((h + fs) / 2.0) - 1), btn.label,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
-		if btn.is_default and not btn.has_focus():
+		if btn.is_default and not Theme_.show_focus(btn):
 			_dotted_rect(Rect2(3, 3, w - 6, h - 6), Color.BLACK)
 
 	func _draw_check(w: float, h: float, disabled: bool, down: bool) -> void:

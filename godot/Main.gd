@@ -66,15 +66,29 @@ var _sprite_cache := {}
 var _stars_near: PackedVector2Array
 var _stars_far: PackedVector2Array
 var _field := Vector2(4096, 4096)
+# Classic presentation: the original's ambient field (0x0046ebf0), as the Apple app's
+# GameScene.buildOriginalStarfield -- at most 20 opaque spïn-700 stars at native size,
+# count from the view height, each streaming past at (1 + Random(35)*0.01)x the world's
+# scroll, wrapped across the view, tinted by system murk (hidden while murk < 0).
+var _orig_stars: Array = []       # [{base: Vector2, factor: float, frame: int}]
+var _orig_star_count := -1
 
 # Actions that must be released before they count again — set on a screen
 # change so the button that launched you (pad B) doesn't also fire a missile.
 var _suppressed := {}
 
-# Rolling message log: [{text, age}], newest first, oldest fades out.
+# The status line (Apple MessageLogView): ONE line, a new message replaces the old
+# outright; [{text, age}] holds at most that one entry. It lasts 0xf0 raw sim calls
+# (about 5 s, bridge hud_message_seconds) and fades over the last 0.6 s.
 var _log: Array = []
-const LOG_MAX_LINES := 6
-const LOG_LIFETIME := 6.0
+const LOG_MAX_LINES := 1
+const LOG_LIFETIME := 5.0
+const LOG_FADE := 0.6
+const MESSAGE_LINE_H := 26.0     # the original's message rect is one 26 px line (0x0087550b)
+const MESSAGE_PAD_LEFT := 16.0
+const MESSAGE_PAD_RIGHT := 50.0  # + the status-bar sidebar
+const MESSAGE_PAD_BOTTOM := 8.0
+const MESSAGE_FONT_SIZE := 14    # NovaFont .hud base size
 
 # Live transient effects spawned from the bridge's effect drain — see _spawn_fx.
 var _fx: Array = []
@@ -134,6 +148,7 @@ const SPRITE_SPOB := 5
 const SPRITE_WEAPON := 7
 const SPRITE_BOOM := 8
 const SPRITE_ASTEROID := 9
+const SPRITE_STARFIELD := 10
 
 # Effect kinds — these MUST match the `kind` column of the bridge's drainEffects.
 const FX_EXPLOSION := 0
@@ -160,21 +175,9 @@ const RADAR_CENTER_MARGIN := Vector2(120, 120)
 const RADAR_PIXEL_RADIUS := 90.0
 const RADAR_WORLD_RANGE := 4500.0   # matches the Apple app's own client-side radarRange
 
-# WorldEvent case name -> message-log phrase. Only the narratively-interesting
-# events surface here (matches GameHUDModel.post() on the Apple side); the
-# per-frame combat/FX ones (weaponFired, shieldHit, explosion, ...) are drawn by
-# the particle layer instead of being narrated.
-const EVENT_MESSAGES := {
-	"shipDestroyed": "Target destroyed",
-	"shipDisabled": "Target disabled",
-	"shipScanned": "Cargo scanned",
-	"shipBoarded": "Boarding complete",
-	"assistanceDelivered": "Assistance delivered",
-	"shipLanded": "Docked",
-	"shipLaunched": "Launched",
-	"shipDepartedViaGate": "Ship departed via hypergate",
-	"shipEmergedFromGate": "Ship emerged from hypergate",
-}
+# The status-line texts are the bridge's (`drain_interaction_messages`: STR# 2002 lines and the
+# literals GameScene posts). The Apple app does not narrate a target dying, a ship docking or
+# launching, so those events post nothing here.
 
 
 func _ready() -> void:
@@ -287,7 +290,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		# space clears the stellar. Screen -> world is the inverse of _to_screen.
 		var vp := get_viewport_rect().size
 		var pw: Vector2 = nova.player_position()
-		var world_pos := Vector2(pw.x + (event.position.x - vp.x * 0.5), pw.y - (event.position.y - vp.y * 0.5))
+		var ctr := _play_center(vp)
+		var world_pos := Vector2(pw.x + (event.position.x - ctr.x), pw.y - (event.position.y - ctr.y))
 		nova.click_select(world_pos.x, world_pos.y)
 
 
@@ -402,7 +406,6 @@ func _on_launch() -> void:
 		_suppress_held()
 		_fx.clear()
 		_refresh_background()
-		_push_log("Launched")
 
 
 func _update_top_label() -> void:
@@ -506,7 +509,6 @@ func _on_land() -> void:
 		"landed":
 			_suppress_held()
 			_fx.clear()
-			_push_log("Docked at " + str(r.get("name", "")))
 		"gate":
 			_suppress_held()
 			_nav.open_gate_picker()
@@ -530,14 +532,15 @@ func _suppress_held() -> void:
 
 
 func _log_weapon_switch(new_name: String) -> void:
-	if new_name != "":
-		_push_log("Secondary: " + new_name)
+	pass   # Apple posts nothing on a weapon switch; the readout shows it
 
 
 func _push_log(text: String) -> void:
-	_log.push_front({"text": text, "age": 0.0})
-	if _log.size() > LOG_MAX_LINES:
-		_log.resize(LOG_MAX_LINES)
+	var line := text.replace("\r", " ").replace("\n", " ")
+	if line.strip_edges() == "":
+		_log.clear()    # an empty post clears the line, as in the original
+		return
+	_log = [{"text": line, "age": 0.0}]
 
 
 func _drain_events_to_log(delta: float) -> void:
@@ -547,10 +550,7 @@ func _drain_events_to_log(delta: float) -> void:
 
 	# drain_events() genuinely drains on the bridge side, so this is safe to call
 	# on a frame where the sim didn't tick (docked) — it just comes back empty.
-	for event_name in nova.drain_events():
-		var msg: String = EVENT_MESSAGES.get(event_name, "")
-		if msg != "":
-			_push_log(msg)
+	nova.drain_events()   # names only; the narrated lines arrive through the message channels
 
 
 # MARK: Transient effects
@@ -640,11 +640,14 @@ func _draw() -> void:
 	# systems are visibly tinted and clearing wrong loses that entirely.
 	draw_rect(Rect2(Vector2.ZERO, vp), _background)
 
-	var center := vp * 0.5
+	var center := _play_center(vp)
 	var pw: Vector2 = nova.player_position()
 
-	_draw_starfield(_stars_far, pw, 0.35, COLOR_STAR_FAR, 1.0, vp)
-	_draw_starfield(_stars_near, pw, 0.7, COLOR_STAR_NEAR, 1.5, vp)
+	if _has_data and ClassicTheme.classic("hud") and _draw_original_stars(vp, center, pw):
+		pass
+	else:
+		_draw_starfield(_stars_far, pw, 0.35, COLOR_STAR_FAR, 1.0, vp)
+		_draw_starfield(_stars_near, pw, 0.7, COLOR_STAR_NEAR, 1.5, vp)
 
 	if _has_data:
 		_draw_bodies(center, pw)
@@ -1011,6 +1014,51 @@ func _draw_sprite_rotated(entry: Dictionary, pos: Vector2, frame: int, spin_angl
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
+## The centre of the flight view: the middle of the play area. With the Classic status bar up
+## the original never lets the play area run under the sidebar, so the world is centred in the
+## part of the window to its left (Apple: sceneLayer shrinks the play viewport by the sidebar).
+func _play_center(vp: Vector2) -> Vector2:
+	var bar := 0.0
+	if _has_data and ClassicTheme.classic("hud") and _classic_hud != null:
+		bar = _classic_hud.get_child(0).bar_width(vp)
+	return Vector2((vp.x - bar) * 0.5, vp.y * 0.5)
+
+
+func _build_original_stars(vp: Vector2, count: int) -> void:
+	_orig_stars.clear()
+	var entry = _sprite_entry(SPRITE_STARFIELD, 0)
+	var frames: int = entry["frames"] if entry != null else 1
+	for i in count:
+		_orig_stars.append({
+			"base": Vector2(randf_range(-vp.x * 0.5, vp.x * 0.5), randf_range(-vp.y * 0.5, vp.y * 0.5)),
+			"factor": nova.star_factor(randi() % 35, true),
+			"frame": randi() % maxi(1, frames)})
+	_orig_star_count = count
+
+
+## The original's field; false when the data has no star sprite (the plain field draws instead).
+func _draw_original_stars(vp: Vector2, center: Vector2, pw: Vector2) -> bool:
+	var entry = _sprite_entry(SPRITE_STARFIELD, 0)
+	if entry == null:
+		return false
+	var murk: int = nova.system_murk()
+	if murk < 0:
+		return true   # stars are hidden while murk < 0
+	var count: int = nova.star_count(vp.y)
+	if count != _orig_star_count:
+		_build_original_stars(vp, count)
+	var t := float(nova.star_tint(murk)) / 32.0
+	var tint := Color(minf(1.0, t), minf(1.0, t), minf(1.0, t), 1.0)
+	var span := Vector2(vp.x + 12.0, vp.y + 12.0)
+	for st in _orig_stars:
+		var k: float = 1.0 + float(st["factor"])
+		var b: Vector2 = st["base"]
+		var p := Vector2(fposmod(b.x - pw.x * k + span.x * 0.5, span.x) - span.x * 0.5,
+			fposmod(b.y + pw.y * k + span.y * 0.5, span.y) - span.y * 0.5)
+		_draw_sprite(entry, center + p, int(st["frame"]), tint)
+	return true
+
+
 func _draw_starfield(stars: PackedVector2Array, pw: Vector2, parallax: float,
 		col: Color, radius: float, vp: Vector2) -> void:
 	var offset := Vector2(
@@ -1169,14 +1217,48 @@ func _draw_radar(vp: Vector2, pw: Vector2) -> void:
 	draw_circle(rc, 3.0, COLOR_PLAYER)
 
 
+## The HUD's own text face for the status line and prompts: Apple's `.hud` role (Geneva
+## stand-in, semibold, 14 pt, white) — the ïntf status font in Classic presentation.
+func _hud_text() -> Dictionary:
+	var font: Font = ThemeDB.fallback_font
+	var right := 0.0
+	var classic := false
+	if _classic_hud_on and _classic_hud != null:
+		var h = _classic_hud.get_child(0)
+		font = h.text_font()
+		right = h.bar_width(get_viewport_rect().size)
+		classic = true
+	var fv := FontVariation.new()
+	fv.base_font = font
+	fv.variation_embolden = 0.3    # semibold
+	return {"font": fv, "size": MESSAGE_FONT_SIZE, "color": Color.WHITE, "classic": classic, "right": right}
+
+
+## Text with Apple's `shadow(.black 0.9, radius 2, y 1)`.
+func _shadow_string(font: Font, pos: Vector2, text: String, size: int, col: Color) -> void:
+	draw_string(font, pos + Vector2(0, 1), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(0, 0, 0, 0.9 * col.a))
+	draw_string(font, pos + Vector2(1, 2), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(0, 0, 0, 0.45 * col.a))
+	draw_string(font, pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
+
+
+## The one-line status message (MessageLogView): bottom-left, 16 px in, 8 px up, clipped
+## (no ellipsis) at the sidebar + 50 px; fades over its last 0.6 s.
 func _draw_message_log(vp: Vector2) -> void:
-	var pos := Vector2(20, vp.y - 220)
-	for entry in _log:
-		var t: float = entry["age"]
-		var alpha := clampf(1.0 - (t / LOG_LIFETIME), 0.0, 1.0)
-		draw_string(ThemeDB.fallback_font, pos, str(entry["text"]),
-			HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE - 1, Color(0.9, 0.9, 0.85, alpha))
-		pos.y -= 18
+	if _log.is_empty():
+		return
+	var ht := _hud_text()
+	var entry: Dictionary = _log[0]
+	var t: float = entry["age"]
+	var col: Color = ht["color"]
+	col.a = clampf((LOG_LIFETIME - t) / LOG_FADE, 0.0, 1.0)
+	var font: Font = ht["font"]
+	var fs := int(ht["size"])
+	var text := str(entry["text"])
+	var max_w := vp.x - float(ht["right"]) - MESSAGE_PAD_LEFT - MESSAGE_PAD_RIGHT
+	while text.length() > 0 and font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > max_w:
+		text = text.substr(0, text.length() - 1)
+	var base := vp.y - MESSAGE_PAD_BOTTOM - font.get_descent(fs)
+	_shadow_string(font, Vector2(MESSAGE_PAD_LEFT, base), text, fs, col)
 
 
 # The Land control's name for prompts: the pad's button when a controller is connected,
@@ -1195,18 +1277,22 @@ func _draw_land_prompt(vp: Vector2) -> void:
 		return
 	var spob_name := prompt[1]
 	var text := ""
-	var col := Color(0.6, 1.0, 0.7, 0.95)
 	match prompt[0]:
 		"land": text = "Press %s to land on %s" % [_land_label(), spob_name]
 		"request":
 			text = "Press %s to request landing on %s" % [_land_label(), spob_name]
 		_:
 			text = "Slow down to land on " + spob_name
-			col = Color(0.9, 0.8, 0.4, 0.9)
-	var pos := Vector2(vp.x * 0.5, vp.y - 70)
-	var w := ThemeDB.fallback_font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE).x
-	draw_string(ThemeDB.fallback_font, pos - Vector2(w * 0.5, 0), text,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE, col)
+	# ContextualActionsView (desktop): the same white .hud line, centred over the play
+	# area, 8 px up, a message-line higher while a message is showing.
+	var ht := _hud_text()
+	var font: Font = ht["font"]
+	var fsz := int(ht["size"])
+	var lift := MESSAGE_LINE_H if not _log.is_empty() else 0.0
+	var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fsz).x
+	var cx := (vp.x - float(ht["right"])) * 0.5
+	var pos := Vector2(cx - w * 0.5, vp.y - MESSAGE_PAD_BOTTOM - lift - font.get_descent(fsz))
+	_shadow_string(font, pos, text, fsz, Color.WHITE)
 
 
 # The original Nav panel (0x0045e400): title (Nav System Off / Stellar Navigation /

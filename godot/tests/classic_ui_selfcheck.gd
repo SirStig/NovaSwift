@@ -170,16 +170,16 @@ func _init() -> void:
 	pm.setup(nova, true)
 	await process_frame
 	await process_frame
-	_ok(pm.classic_dialog != null and pm.buttons.size() == 5, "pause menu builds the Classic panel with 5 buttons")
+	_ok(pm.classic_dialog != null and pm.buttons.size() == 6, "pause menu builds the Classic panel with 6 buttons")
 	var labels := []
 	for b in pm.buttons:
 		labels.append(b.text)
-	_ok(labels == ["Resume", "Player Info", "Settings", "Save & Quit to Menu", "Quit"], "pause labels " + str(labels))
+	_ok(labels == ["Resume", "Player Info", "Story Map", "Settings", "Save & Quit to Menu", "Quit"], "pause labels " + str(labels))
 	var got := []
 	pm.resume.connect(func(): got.append("resume"))
 	pm.quit.connect(func(): got.append("quit"))
 	pm.buttons[0].pressed.emit()
-	pm.buttons[4].pressed.emit()
+	pm.buttons[5].pressed.emit()
 	_ok(got == ["resume", "quit"], "pause buttons emit their signals")
 	pm.queue_free()
 	Prefs.apply_ui_mode(Prefs.UI_NOVA_SWIFT)

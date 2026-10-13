@@ -18,6 +18,7 @@ const PilotMenu = preload("res://screens/PilotMenu.gd")
 const MainMenu = preload("res://screens/MainMenu.gd")
 const PauseMenu = preload("res://screens/PauseMenu.gd")
 const Settings = preload("res://screens/Settings.gd")
+const StoryGuide = preload("res://screens/StoryGuide.gd")
 const DataSetup = preload("res://screens/DataSetup.gd")
 
 const PILOT_DIR := "user://pilots"
@@ -43,6 +44,7 @@ var pilot_menu: Node
 var data_setup: Node
 var settings: Node
 var pause_menu: Node
+var story_map: Node
 var _data_from_menu := false
 
 
@@ -177,6 +179,20 @@ func _open_settings(underneath: Node) -> void:
 			underneath.set_active(true))
 
 
+## Story Map / Story Guide over the pause menu (Apple GameMenuView "Story Guide"); the pause
+## menu comes back, focused, when it closes.
+func _open_story_map() -> void:
+	if pause_menu == null or story_map != null:
+		return
+	var underneath := pause_menu
+	underneath.set_active(false)
+	story_map = StoryGuide.open(self, nova)
+	story_map.closed.connect(func():
+		story_map = null
+		if is_instance_valid(underneath):
+			underneath.set_active(true))
+
+
 ## Push saved settings into the live nodes (volumes, music).
 func apply_prefs() -> void:
 	Prefs.apply_audio(audio)
@@ -195,6 +211,7 @@ func open_pause() -> void:
 	pause_menu.resume.connect(close_pause)
 	pause_menu.player_info.connect(func(): close_pause(); player_info_requested.emit())
 	pause_menu.settings.connect(func(): _open_settings(pause_menu))
+	pause_menu.story_map.connect(_open_story_map)
 	pause_menu.save_quit_to_menu.connect(_save_and_menu)
 	pause_menu.quit.connect(quit_game)
 

@@ -550,8 +550,41 @@ ammo, nav readout (STR# 2002 text via `nav_readout`), cargo free + credits (`cre
 formatting), all in the `ïntf` font and bright/dim colours. `Main.gd` creates it
 (`_sync_classic_hud`, a CanvasLayer at layer 5) when `classic("hud")` and skips its
 primitive status bars / weapon / target / nav / radar; the land prompt and message log stay.
-Not drawn yet (no bridge data): target ship silhouette, shïp subtitle + govt code, IFF
-colours, per-commodity cargo rows, radar static.
+Also drawn (bridge `hud_target_info` / `hud_cargo_panel` / `hud_has_iff` / `ship_iff_classes` /
+`radar_static_chance`, mirroring Apple `AuthenticHUDView`): the target's red silhouette (a
+grey x tint shader on frame 0 of its hull), shïp subtitle, the status row (Shield: N % / Shields Down /
+Disabled) with the govt TargetCode, IFF radar colours when an IFF outfit is fitted (grey / red /
+green / blue, cyan player, black-filled scope), per-commodity cargo rows + Special, and radar
+static. `bar_width(vp)` is the width the bar reserves; Main.gd centres the flight world in the
+play area to its left (`_play_center`, also used for click-to-select and the land prompt), and the
+message log / land prompt use the ïntf font and bright colour.
+Classic also draws the original's ambient starfield (`Main._draw_original_stars`: <= 20 spïn-700 star
+sprites, `star_count`, drift factor `star_factor`, wrapped across the view, `star_tint(system_murk())`,
+hidden while murk < 0); Nova Swift keeps the plain dot field.
+
+### Main menu, pilot dialogs, galaxy map (Classic reskins)
+
+* **Main menu** -- `ui/classic/ClassicMainMenu.gd` (a port of `AuthenticMainMenuView`): PICT 8000, logo
+  (spïn 606), three shutter strips (608-610, snd 602/603), the six real buttons (spïn 600-605 at the
+  cölr #128 positions; keys N O Q E P A; snd 600/601), rollover icon (spïn 607) and the pilot readout
+  (shared `MainMenuReadout` via `classic_menu_readout`, targeting PICT added). Shown by `MainMenu.gd`
+  when `classic("menu")`; Preferences emits `settings` -> NovaSwift's own Settings screen. "Game
+  Data..." is a port-only button at the bottom-left. Native-size 1024x768 canvas, centred, no fill-scale.
+  Bridge: `classic_main_menu`, `classic_spin_info/_tile_rgba`, `classic_menu_readout`, `sound_menu`,
+  `classic_desc_text`. Not done: the "has been killed" / "Creating Pilot..." readout states.
+* **Pilot dialogs** -- `PilotMenu.gd` classic path (`over_menu` keeps the menu visible behind): New Pilot =
+  DLOG/DITL 3102 (3101 with several scenarios) with gender / scenario as cycling buttons and Strict
+  Play; a port-only **Random** button beside the gender control keeps name entry pad-friendly; OK
+  asks the ship name in DLOG/DITL 3001 (`pilot_ship_name_prompt`, `pilot_create_strict`). Open Pilot is the
+  dialog panel (the original used the Mac file picker; Apple draws a NovaDialog); delete = DLOG 3002.
+  `ClassicDialog.add_cycle` is the new pop-up stand-in.
+* **Galaxy map** -- `GalaxyMap.gd` draws inside DLOG 2000 on PICT 8509 (item 2 = starmap, 5 = side panel,
+  1 = status bar, buttons Done / Clear Route / Find / - / +, zoom 0.5..2.0 by 3/4) unless
+  `Prefs presentation/fullscreen_galaxy_map` (Settings > Presentation; Classic = off, Enhanced =
+  Classic + on, Nova Swift = on; `Prefs.UI_ENHANCED`, `Prefs.fullscreen_map()`). Text from
+  `classic_map_info`. Frame buttons are pointer-only (pad A plots). Not done: Show/Hide Borders.
+* A greyed `ClassicDialog` button press beeps snd 153 (`refused`).
+* Test: `godot/tests/classic_reskin_selfcheck.gd` (also writes PNG previews).
 
 ### Bridge (`// MARK: Classic UI` in `NovaWorld.swift`, logic in `ClassicUI.swift`)
 
@@ -582,3 +615,57 @@ rewire later): `crispScale`, `centredOrigin`, `barSegment`, `fuelSplit`, `focusN
    composes PNGs from the real PICTs/art with `Image.blend_rect`).
 
 Test: `NOVA_DATA_DIR=$PWD/data/base godot --headless --path godot -s res://tests/classic_ui_selfcheck.gd`.
+
+### Classic spaceport, comm and story screens
+
+With Presentation > Dialogs on Classic (default) the docked / comm / story screens are the original DLOG/DITL
+dialogs on their frame PICTs, mirroring the Apple app; "Nova Swift" keeps the old plain screens (same code, same
+signals). Kit helper: `ui/classic/ClassicScreen.gd` (DITL rect lookup with stock fallback, text / scroll / picture /
+flat focus rows, and the 4x5 `ItemGrid` of 83x54 tiles with row scrolling and d-pad navigation). Frames draw at their
+native size at the shared crisp scale (windows stack over the hub, nothing is fitted to the screen).
+
+| Screen | File | Frame PICT / DITL |
+|---|---|---|
+| Landing, Trade, Outfitter, Shipyard, Ship Info, quantity prompt, Bar, Holovid, Mission BBS | `screens/SpaceportClassic.gd` (dispatched from `Spaceport.gd`) | 8500/1000, 8510/1001, 8502/1002, 8501/1004, 8507+8506/1019+1005, native 172x72, 8503/1013, news PICT, 8505/1006 |
+| Hire Escort, Gamble (choose + result) | `screens/BarScreens.gd` | 8501/1004, 8529/1023, 1015 |
+| Hail (ship/planet), haggle, Plunder, capture + name prompts, Escorts window, Escort Commands panel | `screens/Interactions.gd` | 8511/1007, 8512/1009, 8514/1008, 8515/1011, DLOG 3002 / 3001, 8513/1022 |
+| Story text, mission offer, Player Info, Mission Info | `screens/StoryScreens.gd` | 3003/3004 on 8524-8527, 8521-8523/1016, 8518-8520/1017, 8517/1012 |
+
+Window stack in the spaceport: hub < one service window (scrim) < overlay (prompt, ship info, hire, gamble); only the top one
+is focusable (`ClassicScreen.set_enabled`). Classic differences from the plain screens: a trade row / grid tile press selects (and
+moves focus to Buy), the Buy / Sell buttons transact; Alt- or right-click on Buy / Sell (or Q / E) opens the quantity prompt;
+Player Info has the original 4 tabs and Mission Info is its own dialog. Test: `tests/classic_spaceport_selfcheck.gd` (composes
+PNG previews through `tests/UiCompose.gd`); `spaceport_menu_check` / `story_menu_check` take `NOVA_UI=modern` for the plain path.
+
+### Story Map / Story Guide (`screens/StoryGuide.gd`)
+
+Port of the Apple Story Guide (`StoryGuideView` / `StorylineFlowView` / `StorylineTagBadge`). Apple's current guide is a
+**vertical flow** (the old pan/zoom node graph was removed), so that is what is ported: lane list on the left (government
+swatch, title, progress, "n/N steps", grouped per plug-in with a source filter, "+N one-off jobs"), overview bar + the
+selected campaign's flow on the right (branch indent + connector labels, status badges, YOU ARE HERE, expandable detail with
+HOW TO UNLOCK blockers, "Can end here", jump chips, cross-storyline chips, Abort mission). Drawn in code in Apple's own dark
+style in every presentation mode (Apple does not use the authentic chrome for it either). Input: stick / d-pad move Godot
+focus between steps and the list, A / click opens detail, B / Esc closes, LB / RB or - / + zoom (0.8-1.6, rebuilds the flow
+at scale), right stick / wheel scroll, X / Y or PageUp / PageDown switch storyline.
+
+* **Shared code:** `Sources/NovaSwiftStory/StoryFlowLayout.swift` holds `buildStoryFlow`, `StoryFlowRow`, `StoryConnector`
+  (labels + branch ranking), `CrossLink`, `StoryJump` and `StoryGuideLogic` (cross-links, current step, per-lane flow), moved
+  out of `app/NovaSwift/Story/StoryFlow.swift` / `StoryGuideModel.swift` (Apple keeps only the SwiftUI tint / symbol and
+  calls the shared code). Tests: `StoryFlowLayoutTests`.
+* **Bridge (`// MARK: Story Map` in `NovaWorld.swift`, state in `Story.swift` `StoryMapState`):** `story_map_begin()` builds
+  `StorylineAnalyzer.storyMap(for: pilot)` on a serial background queue, `story_map_ready()` polls, `story_map_lanes()` /
+  `story_flow(key)` return JSON, `story_tag(mission_id)` / `story_tags_ready()` serve the badge table (prewarmed once off-thread
+  through `StorylineTagCache`), `mission_abort` is the existing call. Test seams: `debug_set_bit(bit, on)`,
+  `debug_complete_mission(id)`.
+* **Entry:** pause menu "Story Map" (Classic and Nova Swift paths; `Shell._open_story_map` stacks the guide over the pause
+  menu and restores it on close). Anywhere else: `StoryGuide.open(parent, nova, storyline_key)`.
+* **Badge:** `StoryGuide.make_badge(nova, mission_id, host) -> Control|null` (amber book button, opens the guide on that lane;
+  null when untagged, still prewarming, or `Prefs story/show_mission_storyline_tags` is off). Placement on mission rows is a
+  follow-up for the files the reskin agent owned (BBS list row in `SpaceportClassic.gd` / `Spaceport.gd`, offer dialog and
+  Mission Info in `StoryScreens.gd`): in each row builder add
+  `var _b = StoryGuide.make_badge(nova, int(m.id), self); if _b != null: row.add_child(_b)` (+ `const StoryGuide = preload("res://screens/StoryGuide.gd")`).
+  The tag table fills in after the first call, so rows built in the first seconds may lack it; rebuild or re-call on refresh.
+* Not ported: the Apple `PilotSummary` header (unused by the current Apple view), a Settings toggle for the badge, plug-in
+  display names (lanes show the plug-in id until plug-in loading, package 6, lands).
+* Test: `tests/story_map_selfcheck.gd` (real data lanes/flow, progress change after completing a mission / setting a bit, badge,
+  focus walk, detail, zoom, lane cycling, pause-menu open/close; `NOVA_UI=modern`, `NOVA_PREVIEW=<png>` writes a layout preview).

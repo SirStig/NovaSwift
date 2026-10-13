@@ -114,3 +114,167 @@ struct StoryState {
     var spawnRequested = false
     var deferred = StoryWorldOps()
 }
+
+// MARK: - Story Map / Story Guide state
+//
+// Plain-Swift backing for NovaWorld's "Story Map" callables. The Apple
+// `StoryGuideModel` builds the campaign graph off the main thread, memoizes each
+// lane's flow and prewarms the mission->storyline tag table; this is the same,
+// minus SwiftUI. `StorylineAnalyzer` is not Sendable, so it only ever runs on
+// the one serial queue below; results cross back under `lock`.
+
+private final class UncheckedBox<T>: @unchecked Sendable {
+    let value: T
+    init(_ value: T) { self.value = value }
+}
+
+final class StoryMapState: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "novaswift.storymap", qos: .userInitiated)
+    private let lock = NSLock()
+    private var analyzer: StorylineAnalyzer?
+    private var map: StoryMap?
+    private var pending = 0                 // builds queued or running
+    private var tags: [Int: MissionStorylineTag]?
+    private var tagsPending = false
+    private var flowCache: [String: [StoryFlowRow]] = [:]
+    private var crossLinkCache: [Int: [CrossLink]]?
+    private var palette: GovernmentMapPalette?
+    /// Identity of the game the analyzer/tags were built for (a reload drops them).
+    private var gameStamp = ""
+
+    /// Forget everything when the loaded data set changes.
+    private func reset(for stamp: String) {
+        guard stamp != gameStamp else { return }
+        gameStamp = stamp
+        analyzer = nil; map = nil; tags = nil; palette = nil
+        flowCache = [:]; crossLinkCache = nil
+    }
+
+    static func stamp(of game: NovaGame) -> String {
+        // FNV-1a over mission ids + names: stable across launches (Hasher is not).
+        var h: UInt64 = 0xcbf29ce484222325
+        for m in game.missions() {
+            for b in "\(m.id)\(m.name)".utf8 { h = (h ^ UInt64(b)) &* 0x100000001b3 }
+        }
+        return String(h, radix: 16)
+    }
+
+    /// Start (or restart) a background map build for `player`. The previous map
+    /// stays readable until the new one lands.
+    func begin(game: NovaGame, player: PlayerState) {
+        let stamp = Self.stamp(of: game)
+        lock.lock(); reset(for: stamp); pending += 1; lock.unlock()
+        let box = UncheckedBox(game)
+        queue.async { [self] in
+            lock.lock(); let existing = analyzer; lock.unlock()
+            let a = existing ?? StorylineAnalyzer(game: box.value)
+            let built = a.storyMap(for: player)
+            lock.lock()
+            if gameStamp == stamp {
+                analyzer = a
+                map = built
+                flowCache = [:]; crossLinkCache = nil
+                palette = GovernmentMapPalette(game: box.value)
+            }
+            pending -= 1
+            lock.unlock()
+        }
+    }
+
+    var isBuilding: Bool { lock.lock(); defer { lock.unlock() }; return pending > 0 }
+    var hasMap: Bool { lock.lock(); defer { lock.unlock() }; return map != nil }
+
+    // MARK: Tags
+
+    /// The mission's storyline tag; nil while the table is still prewarming (and
+    /// the first call starts that prewarm, off-thread, through the disk cache).
+    func tag(forMission id: Int, game: NovaGame) -> MissionStorylineTag? {
+        lock.lock()
+        let stamp = Self.stamp(of: game)
+        reset(for: stamp)
+        if let tags { lock.unlock(); return tags[id] }
+        let start = !tagsPending
+        tagsPending = true
+        lock.unlock()
+        if start {
+            let box = UncheckedBox(game)
+            queue.async { [self] in
+                let cache = StorylineTagCache(fingerprint: "godot-\(stamp)")
+                let table: [Int: MissionStorylineTag]
+                if let cached = cache?.load() { table = cached } else {
+                    lock.lock(); let existing = analyzer; lock.unlock()
+                    let a = existing ?? StorylineAnalyzer(game: box.value)
+                    table = a.storylineTags()
+                    cache?.store(table)
+                    lock.lock(); if gameStamp == stamp { analyzer = a }; lock.unlock()
+                }
+                lock.lock()
+                if gameStamp == stamp { tags = table }
+                tagsPending = false
+                lock.unlock()
+            }
+        }
+        return nil
+    }
+
+    var tagsReady: Bool { lock.lock(); defer { lock.unlock() }; return tags != nil }
+
+    // MARK: Read-out
+
+    private func rgb(_ govt: Int?) -> [Double] {
+        guard let govt, let palette else { return GovernmentMapPalette.independent }
+        return palette.color(for: govt)
+    }
+
+    /// `{lanes:[...], untagged, pluginLabels}` — lane = key/title/done/total/complete/
+    /// govt/govtName/color/plugin/current (the "you are here" step's id) / currentName.
+    func lanesJSON(game: NovaGame) -> [String: Any] {
+        lock.lock(); defer { lock.unlock() }
+        guard let map else { return ["lanes": [Any](), "untagged": 0] }
+        let lanes = map.lanes.map { l -> [String: Any] in
+            let nodes = map.nodes.filter { $0.storylineKey == l.key }
+            let cur = StoryGuideLogic.currentStepID(in: nodes)
+            let curNode = nodes.first { $0.id == cur }
+            return ["key": l.key, "title": l.title, "done": l.completedCount, "total": l.totalCount,
+                    "complete": l.isComplete, "govt": l.governmentID ?? -1,
+                    "govtName": l.governmentID.flatMap { game.govt($0)?.displayName } ?? "",
+                    "color": rgb(l.governmentID), "plugin": l.pluginID,
+                    "current": cur ?? -1, "currentName": curNode?.step.displayName ?? "",
+                    "currentStatus": curNode?.step.status.rawValue ?? ""]
+        }
+        return ["lanes": lanes, "untagged": map.untaggedCount]
+    }
+
+    func flowJSON(key: String, game: NovaGame, player: PlayerState) -> [[String: Any]] {
+        lock.lock(); defer { lock.unlock() }
+        guard let map else { return [] }
+        let rows: [StoryFlowRow]
+        if let cached = flowCache[key] { rows = cached } else {
+            let links = crossLinkCache ?? StoryGuideLogic.crossLinks(in: map)
+            crossLinkCache = links
+            rows = StoryGuideLogic.flow(for: key, in: map, crossLinks: links)
+            flowCache[key] = rows
+        }
+        return rows.map { r -> [String: Any] in
+            let s = r.step
+            return [
+                "id": r.id, "name": s.displayName, "step": s.stepNumber, "status": s.status.rawValue,
+                "depth": r.depth, "connector": r.connector.label ?? "", "current": r.isCurrent,
+                "objective": s.objective, "reward": s.reward, "offeredAt": s.offeredAt,
+                "synopsis": s.synopsis, "govt": s.governmentID ?? -1,
+                "govtName": s.governmentID.flatMap { game.govt($0)?.displayName } ?? "",
+                "blockers": s.blockers.map { b -> [String: Any] in
+                    ["bit": b.bit, "needsSet": b.needsSet,
+                     "hint": b.unlockedBy.first.map { "\($0.hint)\(b.unlockedBy.count > 1 ? " (or others)" : "")" } ?? "",
+                     "unknown": b.unlockedBy.isEmpty]
+                },
+                "jumps": r.jumps.map { ["id": $0.targetID, "label": $0.connector.label ?? "Leads to",
+                                        "name": $0.targetName] as [String: Any] },
+                "cross": r.crossLinks.map { ["key": $0.key, "outgoing": $0.outgoing] as [String: Any] },
+                "deadEnds": r.node.deadEndOutcomes.map(\.rawValue).joined(separator: " / "),
+                "canAbort": s.status == .active && (game.mission(r.id)?.canAbort ?? false)
+                    && player.activeMission(r.id) != nil,
+            ]
+        }
+    }
+}

@@ -921,7 +921,7 @@ func _escorts_classic(labels: Dictionary, roster: Array) -> void:
 		_show_escorts()
 	add.call(str(names[_esc_group + 1]), 100, gnext, "grp", has)
 	add.call(str(ol.get("3", "Return to Hangar")), 120, func(): _escort_window_order(3), "o3", has)
-	var done_x := d.window_size.x - 66
+	var done_x: int = int(d.window_size.x) - 66
 	if rec >= 0:
 		cur[0] = 8
 		cur[1] = fh + 50

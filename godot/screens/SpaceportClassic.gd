@@ -125,12 +125,13 @@ func overlay_closed() -> void:
 	if top == null or not is_instance_valid(top):
 		return
 	CS.set_enabled(top, true)
-	if _prev_focus != null and is_instance_valid(_prev_focus) and _prev_focus.is_inside_tree() \
-			and _prev_focus.focus_mode != Control.FOCUS_NONE:
-		_prev_focus.grab_focus.call_deferred()
-	else:
-		top.focus_first.call_deferred()
+	var pf := _prev_focus
 	_prev_focus = null
+	(func():
+		if pf != null and is_instance_valid(pf) and pf.is_inside_tree() and pf.focus_mode != Control.FOCUS_NONE:
+			pf.grab_focus()
+		elif is_instance_valid(top) and top.is_inside_tree():
+			top.focus_first()).call_deferred()
 
 
 func set_message(t: String) -> void:
@@ -363,6 +364,8 @@ func shop_window(kind: String, fresh: bool) -> void:
 	show_window(d)
 	select(sp._sel_id)
 	var si: int = grid.slot_of_selected()
+	if _want_key.begins_with("tile"):
+		_want_key = "tile%d" % si if si >= 0 else ""   # the grid's selection wins over the old focus
 	finish_focus("tile%d" % si if si >= 0 else "shop_done")
 
 
@@ -626,3 +629,10 @@ func bbs_present(o: Dictionary) -> void:
 	n.brief.scroll_vertical = 0
 	n.accept.disabled = false
 	n.accept.visible = true
+
+
+## The dialog inside the open overlay host (tests / focus code).
+func ov_top() -> Control:
+	if sp._overlay == null:
+		return null
+	return sp._overlay.get_child(sp._overlay.get_child_count() - 1)

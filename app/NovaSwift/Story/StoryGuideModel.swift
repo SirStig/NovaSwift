@@ -156,11 +156,7 @@ final class StoryGuideModel: ObservableObject {
     /// The linearized vertical flow for one storyline, built once and cached.
     func flow(for key: String) -> [StoryFlowRow] {
         if let cached = flowCache[key] { return cached }
-        let nodes = storyMap.nodes.filter { $0.storylineKey == key }
-        let ids = Set(nodes.map(\.id))
-        let internalEdges = storyMap.edges.filter { ids.contains($0.from) && ids.contains($0.to) }
-        let rows = buildStoryFlow(nodes: nodes, edges: internalEdges,
-                                  crossLinks: crossLinks(), currentID: currentStepID(in: nodes))
+        let rows = StoryGuideLogic.flow(for: key, in: storyMap, crossLinks: crossLinks())
         flowCache[key] = rows
         return rows
     }
@@ -172,21 +168,13 @@ final class StoryGuideModel: ObservableObject {
     }
 
     private func currentStepID(in nodes: [StoryMapNode]) -> Int? {
-        nodes.filter { $0.step.status != .completed }
-            .min(by: { $0.rowIndex < $1.rowIndex })?.id
+        StoryGuideLogic.currentStepID(in: nodes)
     }
 
     /// Cross-campaign links per node id, computed once over the whole map.
     private func crossLinks() -> [Int: [CrossLink]] {
         if let cached = crossLinkCache { return cached }
-        let byID = Dictionary(storyMap.nodes.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        var out: [Int: [CrossLink]] = [:]
-        for edge in storyMap.edges {
-            guard let from = byID[edge.from], let to = byID[edge.to],
-                  from.storylineKey != to.storylineKey else { continue }
-            out[from.id, default: []].append(CrossLink(key: to.storylineKey, outgoing: true))
-            out[to.id, default: []].append(CrossLink(key: from.storylineKey, outgoing: false))
-        }
+        let out = StoryGuideLogic.crossLinks(in: storyMap)
         crossLinkCache = out
         return out
     }
