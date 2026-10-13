@@ -64,7 +64,7 @@ func _init() -> void:
 	var mm_buttons := []
 	for b in shell.main_menu.find_children("*", "Button", true, false):
 		mm_buttons.append(b.text)
-	_ok(mm_buttons == ["Open Pilot", "New Pilot", "Settings", "Game Data…", "Plug-ins", "Plugin Editor", "About Nova", "Quit"], "menu buttons: %s" % str(mm_buttons))
+	_ok(mm_buttons == ["Open Pilot", "New Pilot", "Settings", "Plug-ins", "Plugin Editor", "About Nova", "Quit"], "menu buttons: %s" % str(mm_buttons))
 	var tm = shell.main_menu.music
 	_ok(tm != null, "title music node exists (found track: '%s')" % tm.track_path)
 	var track := TitleMusic.locate(shell.data_dir, nova.title_music_name())

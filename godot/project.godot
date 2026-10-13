@@ -1,6 +1,7 @@
 ; Godot 4 project — NOVA Swift desktop (Linux/Windows/macOS) frontend.
-; This hosts the vertical slice that drives the Swift engine through the
-; NovaSwiftGodot GDExtension. See docs/GODOT_LAYER.md.
+; This is the Godot frontend that drives the Swift engine through the
+; NovaSwiftGodot GDExtension. Boot.tscn is the main scene: a tiny error-boundary that checks the
+; extension and Main.tscn before handing over (docs/GODOT_LAYER.md "Errors and crash reporting"). See docs/GODOT_LAYER.md.
 ;
 ; Engine floor: Godot 4.6. It is not a taste call — it tracks whatever Godot
 ; release SwiftGodot's pinned `main` revision generates its bindings against
@@ -15,10 +16,18 @@ config_version=5
 
 config/name="NOVA Swift (Godot)"
 config/description="Cross-platform desktop frontend for NOVA Swift, driving the Swift engine via a SwiftGodot GDExtension."
-run/main_scene="res://Main.tscn"
+run/main_scene="res://Boot.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
 config/icon="res://icon.png"
 config/version="0.7.0"
+
+[debug]
+
+; Godot's own log goes to user://logs/godot.log (CrashLogger.gd keeps user://logs/novaswift.log beside it).
+file_logging/enable_file_logging=true
+file_logging/enable_file_logging.pc=true
+file_logging/log_path="user://logs/godot.log"
+file_logging/max_log_files=5
 
 [autoload]
 

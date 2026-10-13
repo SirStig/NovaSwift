@@ -15,6 +15,8 @@
 # ["A", cx, cy, r, from_deg, to_deg, width] arc. An op name starting with "-" erases instead.
 extends RefCounted
 
+const SVG = preload("res://ui/novaswift/NovaSVG.gd")
+
 const GLYPHS := {
 	"chevron.right": [["L", 2.2, [9, 5, 16, 12, 9, 19]]],
 	"chevron.left": [["L", 2.2, [15, 5, 8, 12, 15, 19]]],
@@ -97,15 +99,20 @@ static var _cache := {}
 
 
 static func has(name: String) -> bool:
-	return GLYPHS.has(name)
+	return SVG.has(name) or GLYPHS.has(name)
 
 
 static func texture(name: String, px := 16, color := Color.WHITE) -> Texture2D:
+	if SVG.has(name):
+		return SVG.texture(name, px, color)
 	return ImageTexture.create_from_image(image(name, px, color))
 
 
-## The glyph rasterised at `px` x `px` (4x supersampled). Unknown names draw a small square.
+## The glyph rasterised at `px` x `px`: the SVG version (NovaSVG.gd) when one exists, else the
+## stroke ops below (4x supersampled). Unknown names draw a small square.
 static func image(name: String, px := 16, color := Color.WHITE) -> Image:
+	if SVG.has(name):
+		return SVG.image(name, px, color)
 	var key := "%s/%d" % [name, px]
 	var cov: Image
 	if _cache.has(key):

@@ -20,9 +20,10 @@ const TitleMusic = preload("res://audio/TitleMusic.gd")
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
 const ClassicMainMenu = preload("res://ui/classic/ClassicMainMenu.gd")
 const ClassicDialog = preload("res://ui/classic/ClassicDialog.gd")
-const ClassicButton = preload("res://ui/classic/ClassicButton.gd")
 const PilotFiles = preload("res://screens/PilotFiles.gd")
 const DescMovie = preload("res://ui/DescMovie.gd")
+const NovaTheme = preload("res://ui/novaswift/NovaTheme.gd")
+const NovaSVG = preload("res://ui/novaswift/NovaSVG.gd")
 
 signal new_pilot
 signal open_pilot
@@ -74,7 +75,6 @@ func setup(nova: Object, data_dir: String, has_data: bool) -> void:
 	first_button = ShellUI.button(box, "Open Pilot", func(): open_pilot.emit(), nova)
 	ShellUI.button(box, "New Pilot", func(): new_pilot.emit(), nova)
 	ShellUI.button(box, "Settings", func(): settings.emit(), nova)
-	ShellUI.button(box, "Game Data…", func(): game_data.emit(), nova)
 	if has_data:
 		ShellUI.button(box, "Plug-ins", func(): plugins.emit(), nova)
 		ShellUI.button(box, "Plugin Editor", func(): plugin_editor.emit(), nova)
@@ -100,41 +100,35 @@ func _setup_classic(nova: Object, data_dir: String) -> void:
 	classic_menu.chosen.connect(_on_classic_choice)
 	first_button = classic_menu.buttons.get("open_pilot")
 
-	# Port-only extras, kept off the original's artwork: the data folder.
+	# Port-only extras, kept off the original's artwork: Plug-ins and the Plugin Editor, as clean
+	# glass pills in the bottom-left corner (NovaSwift's own controls, not EV Nova button art).
+	# Game Data is not offered here: missing data opens the setup wizard by itself, and
+	# Settings > "Re-import / Change Game Data…" covers changing it.
 	_extra = Control.new()
 	_extra.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_extra.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_root.add_child(_extra)
-	var gd = ClassicButton.make("Game Data…", 120)
-	gd.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	gd.position = Vector2(14, -(gd.size.y + 12))
-	gd.pressed.connect(func():
-		nova.sound_beep(1)
-		game_data.emit())
-	_extra.add_child(gd)
-	var pg = ClassicButton.make("Plug-ins", 120)   # Apple's Classic menu has a "Plugins" extra button
-	pg.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	pg.position = Vector2(14 + 120 + 10, -(pg.size.y + 12))
-	pg.pressed.connect(func():
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	row.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	row.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	row.offset_left = 18
+	row.offset_bottom = -18
+	row.offset_top = -18
+	_extra.add_child(row)
+	var pg := _pill(row, "Plug-ins", "puzzlepiece.extension.fill", "Browse, install and order plug-ins", func():
 		nova.sound_beep(1)
 		plugins.emit())
-	_extra.add_child(pg)
-	var pe = ClassicButton.make("Plugin Editor", 150)
-	pe.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	pe.position = Vector2(14 + 120 + 10 + 120 + 10, -(pe.size.y + 12))
-	pe.pressed.connect(func():
+	var pe := _pill(row, "Plugin Editor", "wrench.and.screwdriver", "Create and edit plug-ins", func():
 		nova.sound_beep(1)
 		plugin_editor.emit())
-	_extra.add_child(pe)
-	gd.focus_neighbor_right = gd.get_path_to(pg)
-	pg.focus_neighbor_left = pg.get_path_to(gd)
 	pg.focus_neighbor_right = pg.get_path_to(pe)
 	pe.focus_neighbor_left = pe.get_path_to(pg)
 	var q = classic_menu.buttons.get("quit")
 	if q != null:
-		q.focus_neighbor_bottom = q.get_path_to(gd)
-		gd.focus_neighbor_top = gd.get_path_to(q)
-		gd.focus_neighbor_right = gd.get_path_to(q)
+		q.focus_neighbor_bottom = q.get_path_to(pg)
+		pg.focus_neighbor_top = pg.get_path_to(q)
+		pe.focus_neighbor_top = pe.get_path_to(q)
 
 	music = TitleMusic.new()
 	music.name = "TitleMusic"
@@ -173,6 +167,34 @@ func _on_classic_choice(action: String) -> void:
 		"prefs": settings.emit()
 		"about": _show_about()
 		"quit": quit.emit()
+
+
+## A NovaSwift "glass pill" for the port-only extras over the Classic artwork: smoked dark glass,
+## a hairline rim that warms to amber on hover / focus, an SVG glyph and a semibold label.
+func _pill(parent: Control, text: String, glyph: String, tip: String, cb: Callable) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.tooltip_text = tip
+	b.focus_mode = Control.FOCUS_ALL
+	var scale: float = maxf(1.0, DisplayServer.screen_get_scale()) if DisplayServer.get_name() != "headless" else 1.0
+	b.icon = NovaSVG.texture(glyph, int(round(16.0 * scale)), NovaTheme.AMBER)
+	b.add_theme_constant_override("icon_max_width", 16)
+	b.add_theme_constant_override("h_separation", 8)
+	b.add_theme_font_override("font", NovaTheme.font("body", "semibold"))
+	b.add_theme_font_size_override("font_size", 13)
+	var white := Color(1, 1, 1, 0.92)
+	for c in ["font_color", "font_focus_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color"]:
+		b.add_theme_color_override(c, white)
+	var pad := Vector2(16, 9)
+	var amber := NovaTheme.AMBER
+	b.add_theme_stylebox_override("normal", NovaTheme.box(Color(0.03, 0.03, 0.035, 0.78), 18, Color(1, 1, 1, 0.16), 1, pad))
+	b.add_theme_stylebox_override("hover", NovaTheme.box(Color(0.09, 0.075, 0.05, 0.9), 18, Color(amber.r, amber.g, amber.b, 0.75), 1, pad))
+	b.add_theme_stylebox_override("pressed", NovaTheme.box(Color(amber.r, amber.g, amber.b, 0.28), 18, amber, 1, pad))
+	b.add_theme_stylebox_override("hover_pressed", NovaTheme.box(Color(amber.r, amber.g, amber.b, 0.28), 18, amber, 1, pad))
+	b.add_theme_stylebox_override("focus", NovaTheme.box(Color(0, 0, 0, 0), 18, amber, 2, pad))
+	b.pressed.connect(cb)
+	parent.add_child(b)
+	return b
 
 
 # About Nova: the data's own dësc 32767.

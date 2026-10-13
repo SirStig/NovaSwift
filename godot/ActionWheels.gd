@@ -21,8 +21,7 @@ const HOLD_DELAY := 0.22
 
 ## Actions that are held controls: they can't be a one-shot slot (self_destruct is latched instead) and a button
 ## bound to one can't be a trigger.
-const CONTINUOUS := ["turn_left", "turn_right", "thrust", "reverse", "afterburner", "fire_primary",
-	"fire_secondary", "self_destruct"]
+const CONTINUOUS := Controls.HELD_ACTIONS
 ## Right-stick aim actions are analog, never slots.
 const STICK_ACTIONS := ["aim_left", "aim_right", "aim_up", "aim_down"]
 
@@ -58,6 +57,8 @@ static func default_anchor(trigger: int) -> String:
 
 
 static func wheel_for(button: int) -> Dictionary:
+	if not can_trigger(button):
+		return {}   # bound to a held control: that wheel is off, the button keeps its binding
 	for w in wheels:
 		if int((w as Dictionary).get("trigger", -1)) == button:
 			return w

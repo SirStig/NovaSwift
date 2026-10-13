@@ -51,8 +51,6 @@ const DevTools = preload("res://debug/DevTools.gd")           # Debug suite (con
 const ActionWheel = preload("res://ui/ActionWheel.gd")         # hold-a-button radial menus (ActionWheels.gd)
 const DescMovie = preload("res://ui/DescMovie.gd")             # dësc movies (gate / wormhole entry)
 const FlightRenderer = preload("res://flight/FlightRenderer.gd")   # the world drawn on screen (godot/flight/)
-const UpdaterMode = preload("res://updater/UpdaterMode.gd")        # `-- --updater ...`: this process is the installer
-const UpdaterScene = preload("res://updater/UpdaterScene.gd")     # its progress window (no bridge, no game)
 
 var _dev: Node               # DevTools: debug suite host (always captures the log)
 var _shell: Node             # Shell: menus around the game (see screens/Shell.gd)
@@ -115,19 +113,58 @@ const RADAR_WORLD_RANGE := 4500.0   # matches the Apple app's own client-side ra
 # launching, so those events post nothing here.
 
 
+## Set at the end of a complete _ready(). Every per-frame / input callback early-returns until then, so a
+## half-built Main (a script that failed to compile, an error mid-_ready) never spams null calls.
+var _alive := false
+
+
 func _ready() -> void:
-	# Updater mode (godot/updater/, docs/UPDATER.md): the game copied itself aside and started that copy to swap
-	# the install folder. Show only the progress window -- never touch NovaWorld / the GDExtension, which may be
-	# absent or locked in this copy.
-	var updater_opts: Dictionary = UpdaterMode.requested()
-	if not updater_opts.is_empty():
-		$HUD.visible = false
-		var up_layer: CanvasLayer = CanvasLayer.new()
-		add_child(up_layer)
-		var up_scene: Control = UpdaterScene.new()
-		up_layer.add_child(up_scene)
-		up_scene.setup(updater_opts)
+	# Boot.gd (the main scene) already checked the GDExtension and ran the updater-mode hand-off; this scene is
+	# only instantiated when its scripts compiled.
+	var hud := Label.new()   # the top-left dev status line (_update_top_label); Classic hides it
+	hud.name = "HUD"
+	hud.offset_left = 12.0
+	hud.offset_top = 8.0
+	hud.offset_right = 640.0
+	hud.offset_bottom = 80.0
+	hud.visible = false
+	add_child(hud)
+	_ready_game()
+	# A runtime error inside _ready_game aborts that call and leaves later fields null: catch it here and show
+	# the error screen instead of running a half-built game.
+	_alive = nova != null and _flight != null and _audio != null and _nav != null and _interact != null \
+		and _spaceport != null and _story != null and _shell != null and _dev != null and _wheel != null
+	if not _alive:
+		hud.visible = false
+		_report_boot_failure()
+
+
+func _report_boot_failure() -> void:
+	var watch: Node = get_tree().root.get_node_or_null("ErrorWatch")
+	var detail := "Main.gd _ready() did not finish; some systems were not created."
+	if watch != null and watch.has_method("show_fatal"):
+		watch.call("show_fatal", {
+			"title": "NovaSwift couldn't finish starting",
+			"message": "The game started but one of its parts failed while setting up, so it can't run safely.",
+			"hints": ["This is almost always a bug or a damaged install; reinstalling the game files usually fixes the latter.", "Your pilots and settings are untouched."],
+			"detail": detail,
+			"errors": true,
+			"retry": true,
+		})
+	else:
+		push_error("NovaSwift: " + detail)
+
+
+## Error boundary hook (ui/ErrorWatch.gd "Back to main menu"): leave whatever is happening and show the main menu.
+func recover_to_menu() -> void:
+	if not _alive:
+		get_tree().change_scene_to_file("res://Boot.tscn")
 		return
+	_pressing = false
+	_shell.call("_open_main_menu")
+
+
+func _ready_game() -> void:
 	if not ClassDB.class_exists("NovaWorld"):
 		push_error("NovaWorld class not found — is godot/bin/ built? See scripts/build-gdextension.sh")
 		return
@@ -186,6 +223,11 @@ func _ready() -> void:
 	_dev = DevTools.new()
 	add_child(_dev)
 	_dev.setup(nova, Callable(self, "_dbg_to_screen"))
+	# The corner chip is for live flight only: not over menus, pause, the editor, landed screens or dialogs.
+	_dev.flight_live = func() -> bool:
+		return nova != null and _shell != null and _nav != null and _interact != null and _story != null and _spaceport != null \
+			and not _shell.in_menu() and not _shell.is_paused() and not nova.is_landed() \
+			and not _spaceport.is_open() and not _nav.blocks_flight() and not _interact.blocks_flight() and not _story.blocks_flight()
 
 	_wheel = ActionWheel.new()   # action wheels: LB / RB / Back hold -> radial menu (taps re-fired on release)
 	add_child(_wheel)
@@ -208,6 +250,8 @@ func _dbg_to_screen(w: Vector2) -> Vector2:
 
 
 func _sync_story_view() -> void:
+	if nova == null:
+		return
 	var sz := get_viewport_rect().size
 	nova.set_story_view_size(sz.x, sz.y)
 
@@ -242,8 +286,8 @@ func _on_pilot_chosen() -> void:
 # keys (map, dialogs, docked UI) handles them first, so this only sees them when
 # nothing else wants them.
 func _unhandled_input(event: InputEvent) -> void:
-	if nova == null:
-		return   # updater mode / bridge missing: no game to drive
+	if not _alive:
+		return   # bridge missing / half-built: no game to drive
 	if event.is_action_pressed("pause_menu") and _can_pause():
 		get_viewport().set_input_as_handled()
 		_shell.open_pause()
@@ -305,7 +349,7 @@ func _can_pause() -> bool:
 
 # Quitting is an original save point only while landed (the launch tail runs).
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_CLOSE_REQUEST and nova != null and _shell != null and not _shell.in_menu() and _has_data:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST and _alive and _shell != null and not _shell.in_menu() and _has_data:
 		nova.pilot_autosave("backgroundLanded" if nova.is_landed() else "background")
 
 
@@ -338,7 +382,7 @@ var _press_menu := false
 const LONG_PRESS_MS := 450
 
 func _process(delta: float) -> void:
-	if nova == null:
+	if not _alive:
 		return
 	if _wheel != null:
 		_wheel.live = false   # re-asserted below only in plain flight
@@ -642,7 +686,7 @@ func _drain_events_to_log(delta: float) -> void:
 func _draw() -> void:
 	# The world itself is the FlightRenderer's (godot/flight/), drawn behind this node; this draws the
 	# primitive HUD and the text overlays over it.
-	if nova == null or _shell.in_menu() or nova.is_landed():
+	if not _alive or _shell.in_menu() or nova.is_landed():
 		return
 	var vp := get_viewport_rect().size
 	var pw: Vector2 = nova.player_position()

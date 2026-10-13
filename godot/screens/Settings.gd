@@ -38,6 +38,7 @@
 # written to user://settings.cfg when the screen closes.
 extends CanvasLayer
 
+const ErrorReport = preload("res://ui/ErrorReport.gd")   # logs folder + prefilled GitHub issue (error boundary helpers)
 const T = preload("res://ui/novaswift/NovaTheme.gd")
 const NC = preload("res://ui/novaswift/NovaControls.gd")
 const Chrome = preload("res://ui/novaswift/NovaChrome.gd")
@@ -661,7 +662,9 @@ func _build_support() -> void:
 	_button("Re-import / Change Game Data…", func(): data_setup_requested.emit(), "square.and.arrow.down")
 	_build_updates()
 	_section("Support", "Builds a report you can share: your description plus the pilot save, the recent game log and a self-test — the state that's hard to describe in a message. None of your imported EV Nova data is included.", "lifepreserver")
-	_button("Report a Bug", func(): get_tree().call_group("nova_devtools", "open_tab", "report"), "ladybug")
+	_button("Report a Bug…", func(): get_tree().call_group("nova_devtools", "open_tab", "report"), "ladybug")
+	_button("Report on GitHub…", func(): ErrorReport.open_issue("[Godot %s] Bug report" % ErrorReport.version(), "(describe the problem here)"), "ladybug")
+	_button("Open Logs Folder", ErrorReport.open_logs_folder, "folder")
 	_button("About NovaSwift", _show_about, "info.circle")
 	_section("Developer", "Shows an in-game debug button that opens the debug suite: the UI measurement overlay, a performance stress test, and more developer tools as we build them. Preview Setup Wizard replays the full first-run data guide from the top, even with data already imported.", "hammer")
 	var dev := NC.toggle(_group, "Debug mode", bool(Prefs.get_value("developer", "debug_mode")), func(on: bool):

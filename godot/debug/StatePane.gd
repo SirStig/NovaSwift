@@ -10,7 +10,7 @@ extends ScrollContainer
 const DevUI = preload("res://debug/DevUI.gd")
 
 var _tools: Node
-var _col: VBoxContainer
+var _col: GridContainer
 var _timer := 0.0
 var _w := {}                     # widget refs by key
 var _bits_sig := ""
@@ -25,8 +25,8 @@ func setup(tools: Node) -> void:
 	follow_focus = true
 	horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_col = DevUI.vbox(self, 8)
-	_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var m := DevUI.margin(self, 14, 12, 14, 14)
+	_col = DevUI.responsive_grid(m, 2, 470, 12, 12)
 	_build()
 	tick(10.0)
 
@@ -57,20 +57,18 @@ func _chip(parent: Node, title: String, cmd: String, tint := DevUI.GREEN) -> But
 	return DevUI.button(parent, title, func(): _run(cmd), tint)
 
 
+const GLYPHS := {"Pilot": "person.crop.circle", "Ship": "airplane", "Ship health": "shield.fill", "Cheats": "bolt.fill",
+	"Fleet": "person.2.fill", "Time": "calendar", "Relations": "flag.fill", "Mission control bits (NCB)": "switch.2",
+	"Outfits": "shippingbox.fill", "Spawn enemies": "scope"}
+
+
 func _section(title: String, footer := "") -> VBoxContainer:
-	var card := DevUI.card(_col)
-	DevUI.label(card, title.to_upper(), 11, DevUI.GREEN)
-	var body := DevUI.vbox(card, 5)
-	if footer != "":
-		DevUI.wrap_label(card, footer, 10)
-	return body
+	var accent := DevUI.RED if title == "Spawn enemies" else (DevUI.AMBER if title == "Cheats" else (DevUI.BLUE if title in ["Time", "Relations"] else DevUI.GREEN))
+	return DevUI.section_card(_col, title, str(GLYPHS.get(title, "list.bullet")), accent, footer)
 
 
 func _kv(parent: Node, key: String, title: String) -> Label:
-	var r := DevUI.hbox(parent, 8)
-	var k := DevUI.label(r, title, 12, DevUI.DIM)
-	k.custom_minimum_size = Vector2(140, 0)
-	var v := DevUI.label(r, "—", 12, Color.WHITE)
+	var v := DevUI.kv_row(parent, title, "—", 140)
 	_w[key] = v
 	return v
 
@@ -92,12 +90,13 @@ func _spin(parent: Node, key: String, lo: float, hi: float, step: float, on_chan
 func _slider(parent: Node, key: String, title: String, stat: String) -> void:
 	var r := DevUI.hbox(parent, 8)
 	var k := DevUI.label(r, title, 12, DevUI.DIM)
-	k.custom_minimum_size = Vector2(140, 0)
+	k.custom_minimum_size = Vector2(110, 0)
 	var s := HSlider.new()
 	s.min_value = 0
 	s.max_value = 100
 	s.step = 1
-	s.custom_minimum_size = Vector2(240, 22)
+	s.custom_minimum_size = Vector2(120, 22)
+	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	s.focus_mode = Control.FOCUS_ALL
 	# Apply when the value settles (drag released, or a key / pad step), not on every pixel.
@@ -108,7 +107,9 @@ func _slider(parent: Node, key: String, title: String, stat: String) -> void:
 		if not _updating and not s.has_meta("dragging") and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) == false:
 			_run("set %s %d" % [stat, int(v)]))
 	r.add_child(s)
-	var l := DevUI.label(r, "—", 11, DevUI.DIM)
+	var l := DevUI.label(r, "—", 11, DevUI.DIM, true)
+	l.custom_minimum_size = Vector2(72, 0)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_w[key] = s
 	_w[key + "_l"] = l
 
@@ -116,9 +117,10 @@ func _slider(parent: Node, key: String, title: String, stat: String) -> void:
 func _build() -> void:
 	# Pilot
 	var pilot := _section("Pilot")
-	var r := DevUI.hbox(pilot, 8)
+	var r := DevUI.flow(pilot, 6)
 	var k := DevUI.label(r, "Credits", 12, DevUI.DIM)
-	k.custom_minimum_size = Vector2(140, 0)
+	k.custom_minimum_size = Vector2(60, 0)
+	k.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var cr := LineEdit.new()
 	cr.custom_minimum_size = Vector2(150, 0)
 	cr.text_submitted.connect(func(t: String):
@@ -133,6 +135,7 @@ func _build() -> void:
 	var rr := DevUI.hbox(pilot, 8)
 	var rk := DevUI.label(rr, "Combat rating", 12, DevUI.DIM)
 	rk.custom_minimum_size = Vector2(140, 0)
+	rk.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var rs := _spin(rr, "rating", 0, 1000000, 100, func(v: float): _run("rating %d" % int(v)))
 	rs.set_meta("kind", "rating")
 	_kv(pilot, "date", "Date")
@@ -140,10 +143,11 @@ func _build() -> void:
 
 	# Ship
 	var ship := _section("Ship", "Hull and outfit changes apply the next time the ship is rebuilt (takeoff, jump, or landing/departure) — or run `rebuild`.")
-	var sr := DevUI.hbox(ship, 8)
+	var sr := DevUI.flow(ship, 6)
 	var sk := DevUI.label(sr, "Current ship", 12, DevUI.DIM)
-	sk.custom_minimum_size = Vector2(140, 0)
-	_w["ship"] = DevUI.label(sr, "—", 12, Color.WHITE)
+	sk.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_w["ship"] = DevUI.label(sr, "—", 12, Color.WHITE, true)
+	_w["ship"].size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	DevUI.button(sr, "Choose…  ›", func(): _tools.open_tab("ships"), DevUI.GREEN)
 	_chip(sr, "Rebuild now", "rebuild")
 
@@ -152,7 +156,7 @@ func _build() -> void:
 	_slider(health, "shield", "Shield", "shield")
 	_slider(health, "armor", "Armor (hull)", "armor")
 	_slider(health, "fuel", "Fuel", "fuel")
-	var hr := DevUI.hbox(health, 6)
+	var hr := DevUI.flow(health, 6)
 	_chip(hr, "Full heal", "heal")
 	_chip(hr, "Refuel", "refuel")
 	_chip(hr, "Damage", "damage", DevUI.RED)
@@ -160,37 +164,33 @@ func _build() -> void:
 	# Cheats
 	var cheats := _section("Cheats", "Toggles take effect the moment you're flying.")
 	for t in [["God mode — no damage", "god"], ["Infinite fuel", "fuel"]]:
-		var row := DevUI.hbox(cheats, 8)
-		var l := DevUI.label(row, t[0], 12)
-		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		var c := CheckButton.new()
+		var c := DevUI.toggle_row(cheats, t[0])
 		var cmd: String = t[1]
 		c.toggled.connect(func(on: bool):
 			if not _updating:
 				_run("%s %s" % [cmd, "on" if on else "off"]))
-		row.add_child(c)
 		_w["cheat_" + cmd] = c
 
 	# Fleet
 	var fleet := _section("Fleet")
 	_kv(fleet, "fleet", "Escorts · hostile")
-	var fr := DevUI.hbox(fleet, 8)
-	DevUI.label(fr, "Escorts to add", 12, DevUI.DIM)
+	var fr := DevUI.flow(fleet, 6)
+	DevUI.label(fr, "Escorts to add", 12, DevUI.DIM).size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var es := _spin(fr, "escort_n", 1, 12, 1, func(_v): pass)
 	es.value = 2
 	DevUI.button(fr, "Add escorts", func(): _run("escorts %d" % int(es.value)), DevUI.GREEN)
-	var fr2 := DevUI.hbox(fleet, 6)
+	var fr2 := DevUI.flow(fleet, 6)
 	_chip(fr2, "Disable hostiles", "hostiles disable")
 	_chip(fr2, "Destroy hostiles", "hostiles destroy", DevUI.RED)
 	_chip(fr2, "Clear all NPCs", "clearnpcs", DevUI.RED)
 
 	# Time
 	var time := _section("Time")
-	var tr := DevUI.hbox(time, 8)
+	var tr := DevUI.flow(time, 6)
 	for part in [["Day", "day", 1, 31], ["Month", "month", 1, 12], ["Year", "year", 0, 9999]]:
-		DevUI.label(tr, part[0], 12, DevUI.DIM)
+		DevUI.label(tr, part[0], 12, DevUI.DIM).size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		_spin(tr, "date_" + part[1], part[2], part[3], 1, func(_v): _apply_date())
-	var tr2 := DevUI.hbox(time, 6)
+	var tr2 := DevUI.flow(time, 6)
 	_chip(tr2, "+1 day", "date +1")
 	_chip(tr2, "+30 days", "date +30")
 	_chip(tr2, "+1 year", "date +365")
@@ -198,11 +198,11 @@ func _build() -> void:
 	# Relations
 	var rel := _section("Relations")
 	_kv(rel, "rep", "Legal record here")
-	var rl := DevUI.hbox(rel, 6)
+	var rl := DevUI.flow(rel, 6)
 	_chip(rl, "Hostile here", "relation -30000", DevUI.RED)
 	_chip(rl, "Neutral here", "relation 0")
 	_chip(rl, "Friendly here", "relation 30000")
-	DevUI.label(rl, "or", 11, DevUI.DIM)
+	DevUI.label(rl, "or", 11, DevUI.DIM).size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var rv := LineEdit.new()
 	rv.placeholder_text = "value"
 	rv.custom_minimum_size = Vector2(90, 0)
@@ -213,28 +213,28 @@ func _build() -> void:
 
 	# Control bits
 	var bits := _section("Mission control bits (NCB)", "Browse every bit and what sets / tests it in the Bits tab.")
-	var br := DevUI.hbox(bits, 6)
-	DevUI.label(br, "Bit", 12, DevUI.DIM)
+	var br := DevUI.flow(bits, 6)
+	DevUI.label(br, "Bit", 12, DevUI.DIM).size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var bn := _spin(br, "bit_n", 0, 10000, 1, func(_v): pass)
 	DevUI.button(br, "Set", func(): _run("bit set %d" % int(bn.value)), DevUI.GREEN)
 	DevUI.button(br, "Clear", func(): _run("bit clear %d" % int(bn.value)), DevUI.RED)
 	DevUI.button(br, "Toggle", func(): _run("bit toggle %d" % int(bn.value)), DevUI.GREEN)
 	DevUI.button(br, "Explain", func(): _run("bit info %d" % int(bn.value)), DevUI.BLUE)
-	_w["bits_title"] = DevUI.label(bits, "—", 11, DevUI.DIM)
+	_w["bits_title"] = DevUI.label(bits, "—", 11, DevUI.DIM, true)
 	_bits_box = DevUI.vbox(bits, 3)
 
 	# Outfits
 	var outfits := _section("Outfits", "Browse and grant individual outfits in the Outfits tab.")
-	_w["outfits_title"] = DevUI.label(outfits, "—", 11, DevUI.DIM)
-	var orow := DevUI.hbox(outfits, 6)
+	_w["outfits_title"] = DevUI.label(outfits, "—", 11, DevUI.DIM, true)
+	var orow := DevUI.flow(outfits, 6)
 	_chip(orow, "Grant every outfit", "outfits all")
 	_chip(orow, "Clear all", "outfits clear", DevUI.RED)
 	_outfits_box = DevUI.vbox(outfits, 3)
 
 	# Spawn
 	var spawn := _section("Spawn enemies", "Armed ships appear near you, provoked and locked on.")
-	var sp := DevUI.hbox(spawn, 8)
-	DevUI.label(sp, "Count", 12, DevUI.DIM)
+	var sp := DevUI.flow(spawn, 6)
+	DevUI.label(sp, "Count", 12, DevUI.DIM).size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var sn := _spin(sp, "spawn_n", 1, 50, 1, func(_v): pass)
 	sn.value = 3
 	DevUI.button(sp, "Spawn hostiles", func(): _run("hostiles spawn %d" % int(sn.value)), DevUI.RED)
@@ -297,7 +297,7 @@ func _refresh() -> void:
 		for o in outfits.slice(0, 80):
 			var id: int = int(o.id)
 			var row := DevUI.hbox(_outfits_box, 6)
-			DevUI.label(row, "×%d  #%d  %s" % [int(o.count), id, str(o.name)], 11, Color(1, 1, 1, 0.8))
+			DevUI.label(row, "×%d  #%d  %s" % [int(o.count), id, str(o.name)], 11, Color(1, 1, 1, 0.8), true).size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			DevUI.button(row, "+", func(): _run("outfit add %d" % id), DevUI.GREEN)
 			DevUI.button(row, "−", func(): _run("outfit remove %d" % id), DevUI.RED)
 	_updating = false

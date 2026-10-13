@@ -1269,3 +1269,46 @@ Port of the Apple `DataSetupWizard` + `DataImporter`: bring-your-own-data, copie
 * **Check.** `NOVA_DATA_DIR=$PWD/data/base godot --headless --path godot -s res://tests/data_import_selfcheck.gd` (fake Windows-CE install made
   of symlinks to data/base in a scratch dir: scanner, inspect, deep inspect, import, refused re-import keeps old data, cancel, the no-data gate);
   `tests/shell_selfcheck.gd` covers the wizard from the shell. The bridge parts SKIP until the bridge is rebuilt.
+
+
+## Errors and crash reporting (error boundary)
+
+Godot opens a scene even when its script failed to compile; with `Main.gd` broken that meant an empty scene and a
+per-frame `Nonexistent function 'in_menu' in base 'Nil'` flood. The Godot frontend now boots through an error boundary
+that works when every game script is broken. None of these files preload a game script (only each other):
+
+| File | Role |
+|------|------|
+| `godot/Boot.tscn` + `Boot.gd` | `run/main_scene`. Installs the Logger + watcher, handles updater mode, checks the GDExtension (`ClassDB.class_exists("NovaWorld")`), loads `Main.tscn` at runtime and verifies the instance has a compiled script with `recover_to_menu`; only then swaps Main in. Failure -> ErrorScreen with a plain-language message and packaged-build hints (missing `.so`/`.dll`/`.dylib`, Linux glibc, macOS quarantine). |
+| `godot/ui/ErrorScreen.gd` | Plain Controls on the default theme. Title, message, hints, collapsible technical details (error, file:line, recent log), version/OS/renderer. Buttons: Continue anyway, Back to main menu, Retry, Report a bug, Copy details, Open logs folder, Save report bundle, Quit. Mouse, keyboard (Esc) and pad focus navigation. |
+| `godot/ui/CrashLogger.gd` | `extends Logger`, `OS.add_logger`ed in Boot. Ring buffer (400 lines) + `user://logs/novaswift.log` (rotated at 2 MB, capped 4 MB/session); Godot's own `user://logs/godot.log` is on via `debug/file_logging`. Storm detector + toast event queue. |
+| `godot/ui/ErrorWatch.gd` | Root-level node (survives scene changes, `PROCESS_MODE_ALWAYS`). Polls the logger each frame: storm -> pause the tree + ErrorScreen overlay; single error -> toast. |
+| `godot/ui/ErrorReport.gd` | `sanitize()` (home dir / account name -> `~`), `build_issue_url()`, `save_bundle()`, `open_logs_folder()`. |
+
+**Boot checks** (any failure shows the screen, nothing is half-started): GDExtension class missing -> "engine bridge is
+missing or for the wrong platform"; `Main.tscn` missing/unloadable, root without a script, script that cannot
+instantiate, or no `recover_to_menu` method -> "a game file failed to load" plus the error lines the load logged (the
+parse error naming the file and line). Updater mode (`-- --updater ...`) is decided in Boot *before* anything else and
+loads `updater/UpdaterMode.gd` / `UpdaterScene.gd` at runtime, so the updater never depends on Main compiling.
+
+**Storm thresholds** (`CrashLogger`, 1 s window): the same error (file:line:function:text) 8 times, or a *script* error
+raised from `_process`/`_physics_process`/`_draw`/`_input`/`_unhandled_input`/`_notification` 3 times. Either pauses the
+tree and shows the overlay (Back to main menu / Continue anyway / Report); Continue and Back ignore that error for the
+rest of the session. A single non-repeating error shows a small bottom-left toast "Something went wrong - Report" (at
+most one per 8 s, 6 s on screen). Warnings are logged but never toast or trip.
+
+**Main.gd guards**: `_ready` is split into `_ready_game()`; afterwards `_alive` is set only if every subsystem exists,
+otherwise the fatal ErrorScreen opens (`ErrorWatch.show_fatal`). `_process`, `_draw`, `_unhandled_input` and
+`_notification` return immediately while `_alive` is false. `Main.recover_to_menu()` is the "Back to main menu" hook.
+The dev status label (`HUD`) is now created by `Main.gd` instead of living in `Main.tscn`.
+
+**Reporting**: the "Report a bug" button opens `https://github.com/SirStig/NovaSwift/issues/new?title=&body=` prefilled
+with version, OS, renderer, the error and the last 30 log lines (home paths -> `~`; URL capped at 6500 chars by
+dropping the oldest lines first). "Save report bundle" zips `report.txt`, `novaswift.log`, `godot.log`, `settings.cfg`
+and the newest pilot from `settings.cfg [pilots] recent` into `user://reports/` and reveals it. Settings > Support has
+Report a Bug (the full Apple-style bundle, `debug/ReportPane.gd`, which now also has "Open GitHub issue" / "Logs
+folder"), Report on GitHub and Open Logs Folder.
+
+Limits: an engine-level failure (a broken *autoload* script such as `ui/PadKeyboard.gd`, or a GDExtension that crashes
+natively) happens before Boot runs and cannot be caught from GDScript. Check:
+`godot --headless --path godot -s res://tests/error_boundary_selfcheck.gd`.

@@ -234,6 +234,10 @@ static var overrides := {}
 # `wheel_taps` records button -> [actions] it stripped, which the wheel fires itself when a tap is released.
 # ActionWheels.sync() fills `wheel_triggers`.
 static var wheel_triggers: Array = []
+## Held Flight controls: a pad button bound to one can't double as a wheel trigger (tap vs hold), so that
+## wheel is off and the button keeps its plain binding (Apple ActionWheels.canTrigger).
+const HELD_ACTIONS := ["turn_left", "turn_right", "thrust", "reverse", "afterburner", "fire_primary",
+	"fire_secondary", "self_destruct"]
 static var wheel_taps: Dictionary = {}
 
 # Rebinding screen layout: group -> actions it lists, in order. A key/button may
@@ -389,8 +393,23 @@ static func describe_buttons(action: String) -> String:
 	return " / ".join(parts) if not parts.is_empty() else "—"
 
 
+## The wheel triggers that are live: every configured trigger not bound to a held control.
+static func active_wheel_triggers() -> Array:
+	var out: Array = []
+	for t in wheel_triggers:
+		var held := false
+		for a in HELD_ACTIONS:
+			if int(t) in effective(a).get("buttons", []):
+				held = true
+				break
+		if not held:
+			out.append(int(t))
+	return out
+
+
 static func register() -> void:
 	wheel_taps = {}
+	var live_triggers: Array = active_wheel_triggers()
 	for action in BINDINGS:
 		if InputMap.has_action(action):
 			InputMap.erase_action(action)
@@ -417,7 +436,7 @@ static func register() -> void:
 			sk.shift_pressed = true
 			InputMap.action_add_event(action, sk)
 		for button in spec.get("buttons", []):
-			if int(button) in wheel_triggers and action in GROUPS["Flight"]:
+			if int(button) in live_triggers and action in GROUPS["Flight"]:
 				var taps: Array = wheel_taps.get(int(button), [])
 				taps.append(action)
 				wheel_taps[int(button)] = taps

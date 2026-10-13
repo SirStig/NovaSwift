@@ -145,7 +145,7 @@ func _top_bar() -> Control:
 	h.add_child(_title)
 	_badge = EdTheme.button("Validate", func(): _show_tool("lint"))
 	h.add_child(_badge)
-	h.add_child(EdTheme.button("Test Run", _test_run, true))
+	h.add_child(EdTheme.button("Test Run", _test_run, "accent"))
 	return bar
 
 

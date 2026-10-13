@@ -31,14 +31,24 @@ const HDViewer = preload("res://debug/HDViewer.gd")
 signal opened
 signal closed
 
+# [id, label, SF-symbol-style glyph (NovaSVG)] -- the glyphs are Apple's DevConsoleTab.systemImage.
 const TABS := [
-	["console", "Console"], ["tools", "Tools"], ["state", "State"], ["bits", "Bits"],
-	["ships", "Ships"], ["outfits", "Outfits"], ["govts", "Govts"], ["checks", "Checks"],
-	["report", "Report"],
+	["console", "Console", "terminal.fill"], ["tools", "Tools", "slider.horizontal.3"],
+	["state", "State", "person.text.rectangle"], ["bits", "Bits", "switch.2"],
+	["ships", "Ships", "airplane"], ["outfits", "Outfits", "shippingbox.fill"],
+	["govts", "Govts", "flag.fill"], ["checks", "Checks", "checklist"],
+	["report", "Report", "ladybug.fill"],
 ]
+## Panes that live in the right-hand inspector rail on a wide panel (Apple's inspectorCases);
+## state / checks / report take the full width; the console is the left half.
+const RAIL_TABS := ["tools", "bits", "ships", "outfits", "govts"]
+const FULL_TABS := ["state", "checks", "report"]
+const WIDE_BREAKPOINT := 900.0
 const WINDOW := 0.5                 # metrics window, seconds
 const SPIKE_MS := 33.0              # a frame over this reads as a hitch
 
+## Set by Main: true only during live in-flight gameplay (the corner chip shows only then).
+var flight_live := Callable()
 var dbg: Object                     # NovaDebug (bridge), null when the extension is older
 var nova: Object                    # NovaWorld
 var is_open := false
@@ -51,7 +61,20 @@ var _logger: Logger
 var _root: Control
 var _panel: PanelContainer
 var _tab_buttons := {}
+var _scrim: ColorRect
+var _title: Label
+var _metrics_label: Label
+var _metrics_dot: Control
+var _tabs_row: HBoxContainer
+var _wide := true
+var _rail_tab := "tools"
+var _left: Control
+var _rail: PanelContainer
+var _rail_in: Control
+var _full: Control
+var _split: HBoxContainer
 var _body: Control
+var _tween: Tween
 var _panes := {}
 var _overlay: Control
 var _chip: Control
@@ -223,7 +246,7 @@ func open_tab(tab: String) -> void:
 	if dbg == null:
 		return
 	is_open = true
-	_panel.visible = true
+	_set_shown(true)
 	_show_tab(tab)
 	_apply_visibility()
 	opened.emit()
@@ -244,7 +267,7 @@ func close() -> void:
 	if not is_open:
 		return
 	is_open = false
-	_panel.visible = false
+	_set_shown(false)
 	_released_frame = Engine.get_process_frames()
 	var f := get_viewport().gui_get_focus_owner()
 	if f != null:
@@ -254,7 +277,8 @@ func close() -> void:
 
 
 func _apply_visibility() -> void:
-	_chip.visible = debug_enabled() and not is_open and dbg != null
+	var live: bool = not flight_live.is_valid() or bool(flight_live.call())
+	_chip.visible = debug_enabled() and not is_open and dbg != null and live
 	_overlay.visible = debug_enabled() and dbg != null
 
 
@@ -309,6 +333,11 @@ func _step_tab(delta: int) -> void:
 # --- per-frame -------------------------------------------------------------------
 
 func _process(delta: float) -> void:
+	if _chip != null:
+		var live: bool = not flight_live.is_valid() or bool(flight_live.call())
+		var want: bool = debug_enabled() and not is_open and dbg != null and live
+		if _chip.visible != want:
+			_chip.visible = want
 	if _logger != null and dbg != null:
 		for row in _logger.drain():
 			dbg.log_append(row[0], "Godot", row[1])
@@ -338,8 +367,11 @@ func _process(delta: float) -> void:
 		_refresh_chip()
 		_sync_prefs()
 	_overlay.queue_redraw()
-	if is_open and _panes.has(current) and _panes[current].has_method("tick"):
-		_panes[current].tick(delta)
+	if is_open:
+		for k in _panes:
+			var pn: Control = _panes[k]
+			if pn.visible and pn.has_method("tick"):
+				pn.tick(delta)
 
 
 func _refresh_chip() -> void:
@@ -351,7 +383,13 @@ func _refresh_chip() -> void:
 	_chip_label.text = t
 	var fps := float(snapshot.get("fps", 0))
 	var c := DevUI.GREEN if fps >= 55.0 else (DevUI.AMBER if fps >= 30.0 else DevUI.RED)
-	_chip_label.add_theme_color_override("font_color", c)
+	DevUI.style_chip(_chip_label, c, 14, Vector2(10, 4))
+	if _metrics_label != null:
+		_metrics_label.text = "%.0f fps · %.1f ms · %d ships" % [fps, float(snapshot.get("frameMsAvg", 0)), int(snapshot.get("ships", 0))]
+		var st := StyleBoxFlat.new()
+		st.bg_color = c
+		st.set_corner_radius_all(8)
+		_metrics_dot.add_theme_stylebox_override("panel", st)
 
 
 ## The measurement grid is a persisted setting on Apple (uiDebugOverlay); mirror console changes.
@@ -391,7 +429,9 @@ func _build_chip() -> void:
 	_chip = DevUI.hbox(null, 6)
 	_chip.theme = DevUI.theme()
 	_chip.position = Vector2(14, 68)
-	DevUI.button(_chip, ">_", func(): open_tab("console"), DevUI.GREEN).focus_mode = Control.FOCUS_NONE
+	var b := DevUI.button(_chip, "", func(): open_tab("console"), DevUI.GREEN, false, "terminal.fill")
+	b.focus_mode = Control.FOCUS_NONE
+	b.tooltip_text = "Developer Console (F12)"
 	_chip_label = DevUI.button(_chip, "— fps", func(): open_tab("tools"), DevUI.GREEN)
 	_chip_label.focus_mode = Control.FOCUS_NONE
 	add_child(_chip)
@@ -403,43 +443,146 @@ func _build_panel() -> void:
 	_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_root.theme = DevUI.theme()
 	add_child(_root)
+	# Backdrop scrim: dims the game and swallows clicks outside the panel (a click closes it).
+	_scrim = ColorRect.new()
+	_scrim.color = Color(0, 0, 0, 0.52)
+	_scrim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_scrim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_scrim.visible = false
+	_scrim.gui_input.connect(func(ev: InputEvent) -> void:
+		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+			close())
+	_root.add_child(_scrim)
 	_panel = PanelContainer.new()
 	_panel.visible = false
-	_panel.anchor_left = 0.0
-	_panel.anchor_right = 1.0
-	_panel.anchor_top = 0.0
-	_panel.anchor_bottom = 0.0
-	_panel.offset_left = 8
-	_panel.offset_right = -8
-	_panel.offset_top = 8
-	_panel.offset_bottom = 0
-	_panel.add_theme_stylebox_override("panel", DevUI.panel_style(DevUI.PANEL_BG, DevUI.GREEN * Color(1, 1, 1, 0.45), 10))
+	var sb := DevUI.panel_style(DevUI.PANEL_BG, DevUI.GREEN * Color(1, 1, 1, 0.38), 16)
+	sb.content_margin_left = 0
+	sb.content_margin_right = 0
+	sb.content_margin_top = 0
+	sb.content_margin_bottom = 0
+	sb.shadow_color = Color(0, 0, 0, 0.6)
+	sb.shadow_size = 28
+	sb.shadow_offset = Vector2(0, 10)
+	sb.anti_aliasing = true
+	_panel.add_theme_stylebox_override("panel", sb)
+	_panel.clip_contents = true
 	_root.add_child(_panel)
-	var v := DevUI.vbox(_panel, 6)
-	var bar := DevUI.hbox(v, 4)
-	var title := DevUI.label(bar, "DEBUG SUITE", 12, DevUI.GREEN)
-	title.custom_minimum_size = Vector2(110, 0)
+	var v := DevUI.vbox(_panel, 0)
+
+	# Header: icon tile + title, live metrics capsule, the tab strip, close.
+	var head_bg := PanelContainer.new()
+	var hs := DevUI.panel_style(Color(DevUI.GREEN.r, DevUI.GREEN.g, DevUI.GREEN.b, 0.05), Color(0, 0, 0, 0), 0)
+	hs.content_margin_left = 14
+	hs.content_margin_right = 12
+	hs.content_margin_top = 9
+	hs.content_margin_bottom = 9
+	head_bg.add_theme_stylebox_override("panel", hs)
+	v.add_child(head_bg)
+	var bar := DevUI.hbox(head_bg, 10)
+	var tile := PanelContainer.new()
+	var ts := DevUI.panel_style(DevUI.GREEN, Color(0, 0, 0, 0), 8)
+	ts.content_margin_left = 6
+	ts.content_margin_right = 6
+	ts.content_margin_top = 6
+	ts.content_margin_bottom = 6
+	tile.add_theme_stylebox_override("panel", ts)
+	tile.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	DevUI.icon_rect(tile, "terminal", 16, Color(0.03, 0.06, 0.04))
+	bar.add_child(tile)
+	_title = DevUI.heading(bar, "Developer Console", 15, DevUI.GREEN)
+	_title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var cap := DevUI.hbox(null, 6)
+	var cap_p := PanelContainer.new()
+	cap_p.add_theme_stylebox_override("panel", DevUI.panel_style(Color(1, 1, 1, 0.06), Color(1, 1, 1, 0.05), 20))
+	(cap_p.get_theme_stylebox("panel") as StyleBoxFlat).content_margin_top = 4
+	(cap_p.get_theme_stylebox("panel") as StyleBoxFlat).content_margin_bottom = 4
+	cap_p.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	cap_p.add_child(cap)
+	_metrics_dot = DevUI.dot(cap, DevUI.GREEN, 8)
+	_metrics_label = DevUI.label(cap, "— fps", 11, Color(1, 1, 1, 0.75), true)
+	bar.add_child(cap_p)
+	DevUI.spacer(bar, 0, 0, true)
+	_tabs_row = DevUI.hbox(bar, 2)
 	for t in TABS:
-		var b := DevUI.button(bar, t[1], _show_tab.bind(t[0]), DevUI.DIM, true)
-		_tab_buttons[t[0]] = b
-	var sp := Control.new()
-	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bar.add_child(sp)
-	DevUI.button(bar, "Close", close, DevUI.RED)
+		_tab_buttons[t[0]] = DevUI.tab_button(_tabs_row, t[1], t[2], _show_tab.bind(t[0]))
+		_tab_buttons[t[0]].tooltip_text = t[1]
+	var close_b := DevUI.button(bar, "esc", close, DevUI.DIM, false, "xmark")
+	close_b.tooltip_text = "Close (Esc / pad B)"
+	close_b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	DevUI.rule(v, Color(DevUI.GREEN.r, DevUI.GREEN.g, DevUI.GREEN.b, 0.22))
+
+	# Body: [console | inspector rail], with a full-width layer for State / Checks / Report.
 	_body = Control.new()
 	_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_body.custom_minimum_size = Vector2(0, 300)
 	v.add_child(_body)
+	_split = HBoxContainer.new()
+	_split.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_split.add_theme_constant_override("separation", 0)
+	_body.add_child(_split)
+	_left = Control.new()
+	_left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_left.clip_contents = true
+	_split.add_child(_left)
+	_rail = PanelContainer.new()
+	var rs := DevUI.panel_style(Color(1, 1, 1, 0.02), Color(0, 0, 0, 0), 0)
+	rs.border_color = Color(DevUI.GREEN.r, DevUI.GREEN.g, DevUI.GREEN.b, 0.18)
+	rs.border_width_left = 1
+	rs.set_border_width(SIDE_RIGHT, 0)
+	rs.content_margin_left = 0
+	rs.content_margin_right = 0
+	rs.content_margin_top = 0
+	rs.content_margin_bottom = 0
+	_rail.add_theme_stylebox_override("panel", rs)
+	_split.add_child(_rail)
+	_rail_in = Control.new()
+	_rail_in.clip_contents = true
+	_rail.add_child(_rail_in)
+	_full = Control.new()
+	_full.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_full.clip_contents = true
+	_body.add_child(_full)
 	get_viewport().size_changed.connect(_fit_panel)
 	_fit_panel()
 
 
 func _fit_panel() -> void:
-	# Drops from the top, ~62% of the window (Apple's panel), never under 360 px.
-	var h := maxf(360.0, get_viewport().get_visible_rect().size.y * 0.62)
-	_panel.offset_bottom = _panel.offset_top + h
-	_body.custom_minimum_size = Vector2(0, h - 70)
+	var vp := get_viewport().get_visible_rect().size
+	# A centred drop-down: wide but never edge to edge, ~80% tall, never under 380 px.
+	var w := clampf(vp.x - 40.0, 320.0, 1560.0)
+	var h := clampf(vp.y * 0.82, 380.0, 880.0)
+	h = minf(h, maxf(300.0, vp.y - 24.0))
+	_panel.size = Vector2(w, h)
+	_panel.custom_minimum_size = Vector2(w, h)
+	_panel.position = Vector2((vp.x - w) * 0.5, 14.0)
+	_wide = w >= WIDE_BREAKPOINT
+	_title.visible = w >= 760.0
+	# Tab labels: selected always shows its name; others collapse to icons when tight.
+	var roomy := w >= 1400.0
+	for t in TABS:
+		var b: Button = _tab_buttons[t[0]]
+		b.text = t[1] if (roomy or t[0] == current) else ""
+	_rail.custom_minimum_size = Vector2(clampf(w * 0.34, 380.0, 470.0) if _wide else 0.0, 0)
+	_rail.size_flags_horizontal = Control.SIZE_FILL if _wide else Control.SIZE_EXPAND_FILL
+	_apply_layout()
+
+
+func _set_shown(on: bool) -> void:
+	_scrim.visible = on
+	_panel.visible = on
+	if on:
+		_fit_panel()
+		if _tween != null and _tween.is_valid():
+			_tween.kill()
+		_panel.modulate.a = 0.0
+		_scrim.modulate.a = 0.0
+		var base_y: float = _panel.position.y
+		_panel.position.y = base_y - 18.0
+		_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		_tween.tween_property(_panel, "modulate:a", 1.0, 0.16)
+		_tween.tween_property(_scrim, "modulate:a", 1.0, 0.16)
+		_tween.tween_property(_panel, "position:y", base_y, 0.18)
 
 
 func pane(tab: String) -> Control:
@@ -458,7 +601,13 @@ func pane(tab: String) -> Control:
 		"report": p = ReportPane.new()
 		_: return null
 	p.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_body.add_child(p)
+	# Inset so content never touches the panel edge / rail divider.
+	if tab == "console":
+		_left.add_child(p)
+	elif tab in RAIL_TABS:
+		_rail_in.add_child(p)
+	else:
+		_full.add_child(p)
 	if tab in ["ships", "outfits", "govts"]:
 		p.setup(self, tab)
 	else:
@@ -467,16 +616,53 @@ func pane(tab: String) -> Control:
 	return p
 
 
+## Which inspector pane the rail is showing: the current tab when it is a rail tab, else the
+## last one used (Apple falls back to Tools).
+func _rail_now() -> String:
+	return current if current in RAIL_TABS else _rail_tab
+
+
+func _apply_layout() -> void:
+	if _split == null:
+		return
+	var full: bool = current in FULL_TABS
+	_split.visible = not full
+	_full.visible = full
+	_left.visible = _wide or current == "console"
+	_rail.visible = _wide or current in RAIL_TABS
+	var rail_id := _rail_now()
+	for k in _panes:
+		var vis := false
+		if k == "console":
+			vis = not full and (_wide or current == "console")
+		elif k in RAIL_TABS:
+			vis = not full and k == rail_id and (_wide or current == k)
+		else:
+			vis = full and k == current
+		_panes[k].visible = vis
+
+
 func _show_tab(tab: String) -> void:
 	if not _tab_buttons.has(tab):
 		return
 	current = tab
-	for k in _tab_buttons:
-		_tab_buttons[k].set_pressed_no_signal(k == tab)
+	if tab in RAIL_TABS:
+		_rail_tab = tab
+	# The pane(s) this layout needs: the tab itself, plus console + rail when wide.
 	var p := pane(tab)
-	for k in _panes:
-		_panes[k].visible = (k == tab)
+	if _wide and tab != "console" and not (tab in FULL_TABS):
+		pane("console")
+	if _wide and tab == "console":
+		pane(_rail_tab)
+	for k in _tab_buttons:
+		var on: bool = k == tab or (_wide and tab == "console" and k == _rail_tab)
+		_tab_buttons[k].set_pressed_no_signal(on)
+	_fit_panel()
 	if p != null and p.has_method("on_show"):
 		p.on_show()
+	if _wide and tab == "console" and _panes.has(_rail_tab) and _panes[_rail_tab].has_method("on_show"):
+		_panes[_rail_tab].on_show()
+	if _wide and tab != "console" and not (tab in FULL_TABS) and _panes.has("console") and _panes["console"].has_method("on_show"):
+		pass
 	if p != null and p.has_method("focus_first"):
 		p.focus_first.call_deferred()

@@ -505,7 +505,7 @@ func _show_test_bar(on: bool) -> void:
 		h.alignment = BoxContainer.ALIGNMENT_CENTER
 		bar.add_child(h)
 		h.add_child(EditorTheme.label("Test run", 13, EditorTheme.AMBER))
-		h.add_child(EditorTheme.button("End Test Run", _end_editor_test, true))
+		h.add_child(EditorTheme.button("End Test Run", _end_editor_test, "accent"))
 	_test_bar.visible = on
 
 
