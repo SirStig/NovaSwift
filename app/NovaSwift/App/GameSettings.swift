@@ -42,14 +42,7 @@ struct GameSettings: Codable, Equatable {
         /// Damage the player takes, scaled. Easy is more forgiving; hard, less.
         /// Very Easy halves Easy again, for players who want the story without
         /// the fights — still lethal if you ignore your shields entirely.
-        var playerDamageScale: Double {
-            switch self {
-            case .veryEasy: return 0.3
-            case .easy: return 0.6
-            case .normal: return 1.0
-            case .hard: return 1.5
-            }
-        }
+        var playerDamageScale: Double { GameDifficulty(rawValue: rawValue)?.playerDamageScale ?? 1.0 }
     }
 
     /// How densely populated/landed-on systems feel — separate from combat
@@ -81,14 +74,8 @@ struct GameSettings: Codable, Equatable {
         /// `maxConcurrentFleets`, and inversely scales `spawnInterval`/
         /// `fleetInterval` (so a lower population also arrives more slowly).
         /// The `Spawner` rules this setting runs.
-        var spawnModel: Spawner.SpawnModel { self == .original ? .original : .port }
-        var populationScale: Double {
-            switch self {
-            case .original, .normal: return 1.0
-            case .authentic: return 0.55
-            case .bustling: return 1.35
-            }
-        }
+        var spawnModel: Spawner.SpawnModel { SystemTrafficLevel(rawValue: rawValue)?.spawnModel ?? .original }
+        var populationScale: Double { SystemTrafficLevel(rawValue: rawValue)?.populationScale ?? 1.0 }
     }
 
     enum HullPresentation: String, Codable, CaseIterable, Identifiable {
@@ -262,16 +249,7 @@ struct GameSettings: Codable, Equatable {
             }
         }
         /// Physics-timestep multiplier — `x1` is exactly real-time.
-        var multiplier: Double {
-            switch self {
-            case .x0_5: return 0.5
-            case .x1: return 1.0
-            case .x1_5: return 1.5
-            case .x2: return 2.0
-            case .x4: return 4.0
-            case .x8: return 8.0
-            }
-        }
+        var multiplier: Double { GameSpeedSetting(rawValue: rawValue)?.multiplier ?? 1.0 }
     }
 
     /// Where the slim armor/shield bar sits relative to a ship (or off entirely).

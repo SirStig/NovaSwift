@@ -29,6 +29,10 @@ const Controls = preload("res://Controls.gd")
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
 const ClassicDialog = preload("res://ui/classic/ClassicDialog.gd")
 const ShellUI = preload("res://screens/ShellUI.gd")
+const T = preload("res://ui/novaswift/NovaTheme.gd")
+const NC = preload("res://ui/novaswift/NovaControls.gd")
+const Chrome = preload("res://ui/novaswift/NovaChrome.gd")
+const Icons = preload("res://ui/novaswift/NovaIcons.gd")
 
 ## The course ended (finished, or Skip Tutorial / Leave Training).
 signal finished
@@ -94,14 +98,14 @@ class _Offer extends CanvasLayer:
 			buttons["skip"] = dialog.item(0)
 			buttons["start"] = dialog.item(1)
 			return
-		var root := ShellUI.screen(self, 0.8)
-		var box := ShellUI.panel(root, 460, 10)
-		ShellUI.title(box, "Flight Training", 26)
-		ShellUI.label(box, OFFER_TEXT, 15, ShellUI.TEXT)
-		ShellUI.label(box, OFFER_NOTE, 12)
-		buttons["start"] = ShellUI.button(box, "Start Training", func(): start.emit(), nova)
-		buttons["skip"] = ShellUI.button(box, "Skip", func(): skip.emit(), nova)
-		ShellUI.focus(buttons["start"])
+		# TutorialOfferView: NovaDialog "Flight Training" (Skip / Start Training).
+		var d := Chrome.dialog(self, {"title": "Flight Training", "width": 460.0, "buttons": [
+			{"text": "Skip", "cb": func(): skip.emit()},
+			{"text": "Start Training", "default": true, "cb": func(): start.emit()}]})
+		NC.label(d.body, OFFER_TEXT, "body", "regular", T.WHITE, true)
+		NC.label(d.body, OFFER_NOTE, "caption", "regular", Color(1, 1, 1, 0.65), true)
+		buttons["start"] = d.buttons["Start Training"]
+		buttons["skip"] = d.buttons["Skip"]
 
 	func _unhandled_input(event: InputEvent) -> void:
 		if dialog == null and event.is_action_pressed("ui_cancel"):
@@ -175,24 +179,24 @@ func _build_card() -> void:
 	var step := current_step()
 	if step.is_empty():
 		return
-	# Skip Tutorial, always available, top right.
+	# Skip Tutorial, always available, top right: a dark capsule with a hairline (TutorialCoachView).
 	var skip := Button.new()
 	skip.text = "Skip Tutorial"
+	skip.icon = T.icon("xmark", 12, Color(1, 1, 1, 0.85))
+	skip.add_theme_constant_override("h_separation", 6)
 	skip.focus_mode = Control.FOCUS_NONE
 	skip.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	skip.position = Vector2(-150, 10)
-	skip.custom_minimum_size = Vector2(130, 32)
+	skip.position = Vector2(-158, 10)
+	var cap := T.box(Color(0, 0, 0, 0.55), 20, Color(1, 1, 1, 0.18), 1, Vector2(12, 7))
+	for st in ["normal", "hover", "pressed"]:
+		skip.add_theme_stylebox_override(st, cap)
+	T.style_text(skip, "caption", "semibold", Color(1, 1, 1, 0.85))
 	skip.pressed.connect(_finish)
 	_root.add_child(skip)
 
 	_card = PanelContainer.new()
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0, 0, 0, 0.8)
-	sb.border_color = Color(AMBER.r, AMBER.g, AMBER.b, 0.35)
-	sb.set_border_width_all(1)
-	sb.set_corner_radius_all(16)
-	sb.set_content_margin_all(18)
-	_card.add_theme_stylebox_override("panel", sb)
+	_card.theme = T.theme()
+	_card.add_theme_stylebox_override("panel", T.box(Color(0, 0, 0, 0.8), 16, Color(AMBER.r, AMBER.g, AMBER.b, 0.35), 1, Vector2(18, 18)))
 	_card.custom_minimum_size = Vector2(460, 0)
 	_card.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	_card.grow_horizontal = Control.GROW_DIRECTION_BOTH
@@ -202,23 +206,19 @@ func _build_card() -> void:
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 12)
 	_card.add_child(v)
-	var title := Label.new()
-	title.text = str(step["title"])
-	title.add_theme_font_size_override("font_size", 20)
-	title.add_theme_color_override("font_color", AMBER)
-	v.add_child(title)
-	var sub := Label.new()
-	sub.text = "Step %d of %d" % [int(state["number"]), int(state["count"])]
-	sub.add_theme_font_size_override("font_size", 12)
-	sub.add_theme_color_override("font_color", Color(1, 1, 1, 0.55))
-	v.add_child(sub)
-	var body := Label.new()
-	body.text = str(step["body"])
-	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 10)
+	v.add_child(head)
+	var sym := str(step.get("icon", ""))
+	NC.icon_rect(head, sym if Icons.has(sym) else "sparkles", 22, AMBER)
+	var tcol := VBoxContainer.new()
+	tcol.add_theme_constant_override("separation", 1)
+	tcol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(tcol)
+	NC.label(tcol, str(step["title"]), "heading", "bold", T.WHITE)
+	NC.label(tcol, "Step %d of %d" % [int(state["number"]), int(state["count"])], "caption", "regular", Color(1, 1, 1, 0.55))
+	var body := NC.label(v, str(step["body"]), "body", "regular", Color(1, 1, 1, 0.92), true)
 	body.custom_minimum_size = Vector2(424, 0)
-	body.add_theme_font_size_override("font_size", 15)
-	body.add_theme_color_override("font_color", Color(1, 1, 1, 0.92))
-	v.add_child(body)
 	v.add_child(_dots())
 	v.add_child(_footer(step))
 
@@ -228,42 +228,37 @@ func _dots() -> Control:
 	h.add_theme_constant_override("separation", 6)
 	var n := int(state["count"])
 	for i in n:
-		var d := ColorRect.new()
-		d.color = AMBER if i <= int(state["index"]) else Color(1, 1, 1, 0.22)
+		var d := Panel.new()
+		d.add_theme_stylebox_override("panel", T.box(AMBER if i <= int(state["index"]) else Color(1, 1, 1, 0.22), 3))
 		d.custom_minimum_size = Vector2(16 if i == int(state["index"]) else 7, 5)
+		d.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		h.add_child(d)
 	return h
 
 
 func _footer(step: Dictionary) -> Control:
 	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 8)
 	if str(step.get("goal", "")) == "":
 		var sp := Control.new()
 		sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		h.add_child(sp)
-		var b := Button.new()
-		b.text = finish_label if bool(state["is_last"]) else "Continue"
-		b.focus_mode = Control.FOCUS_NONE
-		b.custom_minimum_size = Vector2(120, 34)
-		b.pressed.connect(continue_step)
-		h.add_child(b)
-		var hint := Label.new()
-		hint.text = "  A / Enter" if Controls.pad_connected() else "  Enter"
+		var hint := NC.label(h, "A / Enter" if Controls.pad_connected() else "Enter", "caption", "regular", Color(1, 1, 1, 0.45))
 		hint.add_theme_font_size_override("font_size", 11)
-		hint.add_theme_color_override("font_color", Color(1, 1, 1, 0.45))
-		h.add_child(hint)
+		# the amber capsule (22 / 9 padding, black text)
+		var b := NC.button(finish_label if bool(state["is_last"]) else "Continue", "pill_default", continue_step)
+		var cb := T.box(AMBER, 20, Color(0, 0, 0, 0), 0, Vector2(22, 9))
+		for st in ["normal", "hover", "pressed"]:
+			b.add_theme_stylebox_override(st, cb)
+		b.focus_mode = Control.FOCUS_NONE
+		h.add_child(b)
 	else:
-		var l := Label.new()
-		l.text = "Try it — this advances on its own"
-		l.add_theme_font_size_override("font_size", 12)
-		l.add_theme_color_override("font_color", Color(1, 1, 1, 0.6))
+		NC.progress(h, 0.4, 14)
+		var l := NC.label(h, "Try it — this advances on its own", "caption", "regular", Color(1, 1, 1, 0.6))
 		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		h.add_child(l)
-		var s := Button.new()
-		s.text = "Skip step ›"
-		s.flat = true
+		var s := NC.button("Skip step ›", "plain", skip_step)
+		T.style_text(s, "caption", "semibold", Color(1, 1, 1, 0.7))
 		s.focus_mode = Control.FOCUS_NONE
-		s.pressed.connect(skip_step)
 		h.add_child(s)
 	return h
 

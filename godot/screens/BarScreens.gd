@@ -11,13 +11,19 @@
 # Controller-first with Godot focus: d-pad / stick move focus, A / Enter press,
 # B / Esc closes (Spaceport's overlay back). Mouse works everywhere.
 #
-# Loaded with preload() (no class_name), like the other screens. The holovid race
-# clip (Race n.mov) isn't played — the result screen shows the outcome art.
+# Loaded with preload() (no class_name), like the other screens. After a bet the
+# winner's holovid clip (Race n.mov, converted by Movies.gd) plays in a 440x260 black
+# card with a Skip button (Apple's GamblingView.racingView), then the result shows. With
+# the classic "QuickTime Movies" pref off, no ffmpeg, or a clip that isn't converted
+# yet, the clip is skipped and the result appears at once.
 extends RefCounted
 
 const CS = preload("res://ui/classic/ClassicScreen.gd")
 const T = preload("res://ui/classic/ClassicTheme.gd")
 const CD = preload("res://ui/classic/ClassicDialog.gd")
+const Prefs = preload("res://Prefs.gd")
+const Movies = preload("res://Movies.gd")
+const MoviePlayer = preload("res://ui/MoviePlayer.gd")
 
 const COL_DIM := Color(0.62, 0.66, 0.74)
 const COL_HI := Color(1.0, 0.95, 0.7)
@@ -188,6 +194,10 @@ func open_gamble() -> void:
 	_pick = -1
 	_gamble_msg = ""
 	_nova.sound_beep(2)
+	# Convert the race clips in the background so the first bet can play one.
+	if _movies_on():
+		for i in range(1, 5):
+			Movies.convert_async(_find_clip("Race %d.mov" % i))
 	_show_choose()
 
 
@@ -289,8 +299,52 @@ func _bet(wager: int) -> void:
 		_gamble_msg = "You can't cover that bet."
 		_show_choose()
 		return
-	_sp._update_credits()
-	_show_result(r)
+	_play_race(r)
+
+
+# --- Race holovid ------------------------------------------------------------------------
+
+# Classic "QuickTime Movies" pref (Prefs [classic] play_movies; Ui_PlayMovieFileModal
+# 0x0049db00 returns at once when it is off).
+func _movies_on() -> bool:
+	return bool(Prefs.get_value("classic", "play_movies"))
+
+
+func _find_clip(name: String) -> String:
+	for dir in Prefs.data_candidates():
+		var hit: String = Movies.find_movie(name, Movies.search_roots(dir))
+		if hit != "":
+			return hit
+	return ""
+
+
+# The winner's clip, if it can play right now; otherwise straight to the result.
+func _play_race(r: Dictionary) -> void:
+	var info: Dictionary = {}
+	if _movies_on():
+		info = Movies.ready(_find_clip("Race %d.mov" % (int(r.winner) + 1)))
+	if info.is_empty():
+		_sp._update_credits()
+		_show_result(r)
+		return
+	var box := _begin(488)
+	_gamble_dlg = null   # _begin closed the (classic) chooser dialog
+	var player: Control = MoviePlayer.new()
+	player.name = "race_movie"
+	player.setup(info, Vector2(440, 260))
+	var row := CenterContainer.new()
+	row.add_child(player)
+	box.add_child(row)
+	var done := func():
+		if _sp._overlay == null:
+			return
+		_sp._update_credits()
+		_show_result(r)
+	player.finished.connect(done)
+	var skip = _sp._button("Skip", func(): player.skip(), box)
+	skip.name = "race_skip"
+	_sp._overlay_back = func(): player.skip()
+	_sp._focus(skip)
 
 
 func _show_result(r: Dictionary) -> void:

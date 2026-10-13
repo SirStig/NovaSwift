@@ -472,6 +472,10 @@ func _bar_ui() -> void:
 			if bet != null:
 				bet.pressed.emit()
 				await _frames(3)
+				var skip = _find_node(sp, "race_skip")   # the race holovid, when its clip is converted
+				if skip != null:
+					skip.pressed.emit()
+					await _frames(3)
 				var res = _find_node(sp, "gamble_result")
 				_check("the result screen appears", res != null)
 				var delta: int = nova.player_credits() - cash2

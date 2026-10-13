@@ -7,8 +7,11 @@
 #                              └─ Settings · Game Data… · Quit
 #   pause() (Esc / Start in flight) ──► Resume · Settings · Save & Quit to menu · Quit
 #
-# Screens are CanvasLayers; opening a sub-screen hides the one beneath it so
-# gamepad focus can't wander into it. Esc/B inside a dialog uses ui_cancel; the
+# Screens are CanvasLayers. Like the Apple app, Settings, Plug-ins, the Story Map, the pilot list,
+# Data Setup ... are OVERLAYS: the screen beneath (main menu / pause sidebar) stays in the tree,
+# visible and animating, but inert (Inert.hold: out of focus navigation and the input path), and
+# closing the overlay gives focus back to the control that opened it. Only real route changes
+# (menu -> flight, flight -> spaceport) replace a screen. Esc/B inside a dialog uses ui_cancel; the
 # separate `pause_menu` action (Esc / Start) is only polled by Main in flight.
 extends Node
 
@@ -26,6 +29,7 @@ const LoadingScreen = preload("res://screens/LoadingScreen.gd")
 const IntroSequence = preload("res://screens/IntroSequence.gd")
 const Tutorial = preload("res://screens/Tutorial.gd")
 const Hints = preload("res://screens/Hints.gd")
+const Inert = preload("res://ui/novaswift/NovaInert.gd")
 
 ## Seconds a slow operation runs before the loading screen appears (no flash for quick ones),
 ## and the least time it then stays up (no flicker when the work ends just after).
@@ -214,9 +218,7 @@ func _open_main_menu() -> void:
 	main_menu.new_pilot.connect(_open_pilots.bind(true))
 	main_menu.open_pilot.connect(_open_pilots.bind(false))
 	main_menu.settings.connect(_open_settings.bind(main_menu))
-	main_menu.game_data.connect(func():
-		main_menu.visible = false
-		_open_data_setup(true))
+	main_menu.game_data.connect(func(): _open_data_setup(true))
 	main_menu.plugins.connect(_open_plugins.bind(main_menu))
 	main_menu.quit.connect(quit_game)
 	main_menu.enter_ship.connect(_enter_ship)
@@ -236,7 +238,7 @@ func _enter_ship() -> void:
 
 
 func _open_pilots(start_new: bool) -> void:
-	main_menu.dialog_open(true)   # the classic menu stays on screen (inert) behind the dialog
+	var tok := _overlay_push(main_menu)   # the menu stays on screen (inert) behind the dialog
 	pilot_menu = PilotMenu.new()
 	add_child(pilot_menu)
 	pilot_menu.over_menu = main_menu.classic_menu != null
@@ -246,7 +248,7 @@ func _open_pilots(start_new: bool) -> void:
 	pilot_menu.cancelled.connect(func():
 		pilot_menu = null
 		main_menu.refresh_pilot()   # a pilot may have been deleted
-		main_menu.dialog_open(false))
+		_overlay_pop(tok, main_menu))
 	pilot_menu.setup(nova, pilot_dir(), start_new)
 
 
@@ -350,6 +352,7 @@ func _on_pilot_chosen() -> void:
 
 func _open_data_setup(from_menu: bool) -> void:
 	_data_from_menu = from_menu
+	var tok := _overlay_push(main_menu) if from_menu and main_menu != null else {}
 	data_setup = DataSetup.new()
 	add_child(data_setup)
 	data_setup.setup(nova)
@@ -365,8 +368,8 @@ func _open_data_setup(from_menu: bool) -> void:
 	data_setup.back.connect(func():
 		if _data_from_menu:
 			_close_data_setup()
-			main_menu.visible = true
-			main_menu.refocus())
+			if main_menu != null and not tok.is_empty():
+				_overlay_pop(tok, main_menu))
 
 
 func _close_data_setup() -> void:
@@ -389,51 +392,68 @@ func _on_data_found(dir: String) -> void:
 # --- settings (from the main menu or the pause menu) -------------------------------
 
 func _open_settings(underneath: Node) -> void:
-	underneath.visible = false
+	var tok := _overlay_push(underneath)
 	settings = Settings.new()
 	add_child(settings)
 	settings.allow_training = underneath == main_menu and has_data and main_menu != null
 	settings.training_requested.connect(func():
 		settings.close()
 		start_training("menu"))
+	settings.data_setup_requested.connect(func():
+		settings.close()
+		if underneath == main_menu and main_menu != null:
+			_open_data_setup(true))
 	settings.setup(nova)
 	settings.changed.connect(apply_prefs)
 	settings.closed.connect(func():
 		settings = null
-		underneath.visible = true
-		if underneath.has_method("refocus"):
-			underneath.refocus()
-		elif underneath.has_method("set_active"):
-			underneath.set_active(true))
+		_overlay_pop(tok, underneath))
 
 
 ## The Plug-ins manager (main menu / Settings); reloads the game data through the loading screen.
 func _open_plugins(underneath: Node) -> void:
-	underneath.visible = false
+	var tok := _overlay_push(underneath)
 	var scr = PluginsScreen.new()
 	add_child(scr)
 	scr.setup(nova)
 	scr.closed.connect(func():
 		scr.queue_free()
-		underneath.visible = true
-		if underneath.has_method("refocus"):
-			underneath.refocus()
-		elif underneath.has_method("set_active"):
-			underneath.set_active(true))
+		_overlay_pop(tok, underneath))
 
 
 ## Story Map / Story Guide over the pause menu (Apple GameMenuView "Story Guide"); the pause
-## menu comes back, focused, when it closes.
+## menu stays underneath, inert, and gets focus back when it closes.
 func _open_story_map() -> void:
 	if pause_menu == null or story_map != null:
 		return
 	var underneath := pause_menu
-	underneath.set_active(false)
+	var tok := _overlay_push(underneath)
 	story_map = StoryGuide.open(self, nova)
 	story_map.closed.connect(func():
 		story_map = null
-		if is_instance_valid(underneath):
-			underneath.set_active(true))
+		_overlay_pop(tok, underneath))
+
+
+## Stack an overlay over `under`: remember the focused control and make `under` inert (it stays
+## visible). Returns the token for _overlay_pop.
+func _overlay_push(under: Node) -> Dictionary:
+	if under != null and under.get("classic_menu") != null:
+		under.classic_menu.blocked = true
+	return Inert.hold(under)
+
+
+## The overlay closed: `under` is live again and the opener has focus.
+func _overlay_pop(tok: Dictionary, under: Node) -> void:
+	if not is_instance_valid(under):
+		return
+	if under.get("classic_menu") != null:
+		under.classic_menu.blocked = false
+	var fb := Callable()
+	if under.has_method("refocus"):
+		fb = under.refocus
+	elif under.has_method("set_active"):
+		fb = under.set_active.bind(true)
+	Inert.release(tok, fb)
 
 
 ## Push saved settings into the live nodes (volumes, music).

@@ -7,8 +7,14 @@
 #   [video]   fullscreen · vsync · scale (window size multiple of 1280×720)
 #   [input]   deadzone (Controls.stick_deadzone) · modern_keys (Controls.layout: the port's
 #             earlier key layout instead of the original's, default off)
+#   [gameplay] frequent_autosave · difficulty · system_aliveness · game_speed · auto_target_after_firing ·
+#             confirm_landing · auto_landing · pause_on_focus_loss · the enhancement toggles
 #   [graphics] screen_shake · reduce_flashing · camera_view (0-3) · camera_zoom · chase_tilt -- flight camera and
-#             accessibility (flight/FlightRenderer.gd reads them)
+#             accessibility (flight/FlightRenderer.gd reads them) · starfield_density · show_fps · smooth_sprites ·
+#             particle_density · frame_rate_cap · ce_hyperspace_look · ship_bar_position · show_planet_labels
+#   [interface] show_radar · hud_opacity · ui_scale · sidebar_pause_menu
+#   [accessibility] larger_hud · high_contrast_hud · colorblind_mode
+#   [ui]      pad_keyboard (auto|off)
 #   [map]     gate_links — draw hypergate / wormhole spokes on the plain galaxy map (an
 #             enhancement; the original draws them only in the gate picker), default off
 #   [presentation] modern_menu · modern_dialogs · modern_hud · fullscreen_galaxy_map — Classic
@@ -23,8 +29,9 @@
 #   [classic] the original Preferences window's (DLOG 4003) flags and levels (screens/ClassicPreferences.gd)
 #   [keys]    action -> { keys, buttons, alt_keys } — only what the player rebound
 #
-# Game speed (the Apple app's GameSpeedRules multiplier) is not exposed by the
-# bridge yet, so there is deliberately no setting for it here.
+# Every GameSettings field with a Godot equivalent has a key here (docs/GODOT_SETTINGS_KEYS.md is the
+# table). The engine-side ones reach the bridge through engine_settings() -> NovaWorld.apply_settings
+# (SettingsPlumbing.gd autoload, which re-applies on Prefs.hub.changed); the rest are read where they act.
 #
 # Loaded with preload() (no class_name), like Controls.gd. All state is static so
 # every screen sees the same values.
@@ -37,9 +44,11 @@ const BASE_SIZE := Vector2i(1280, 720)
 const SCALES := [0.75, 1.0, 1.25, 1.5, 2.0]
 
 const DEFAULTS := {
-	"audio": {"master": 1.0, "sfx": 1.0, "ui": 1.0, "music": 0.7, "muted": false},
+	"audio": {"master": 1.0, "sfx": 1.0, "ui": 1.0, "music": 0.7, "muted": false, "music_enabled": true},
 	"video": {"fullscreen": false, "vsync": true, "scale": 1.0},
-	"input": {"deadzone": Controls.STICK_DEADZONE, "modern_keys": false},
+	# invert_turn / mouse_aiming: Apple invertTurn / mouseAiming (both off = the original's feel).
+	"input": {"deadzone": Controls.STICK_DEADZONE, "modern_keys": false, "invert_turn": false,
+		"mouse_aiming": false},
 	"data": {"dir": ""},
 	"pilots": {"dir": "", "recent": [], "migrated": false},
 	# The original's Preferences window (NovaPrefs_ResetToDefaults: volume 5, brightness 3, all on
@@ -57,12 +66,34 @@ const DEFAULTS := {
 	# training finished or skipped once (TutorialProgress.hasCompleted).
 	"hints": {"enabled": true, "seen": [], "flight_card": false, "completed": false},
 	# Apple GameplayEnhancements.frequentAutosave (default off = the original's save points only).
-	"gameplay": {"frequent_autosave": false},
+	# The rest of Apple GameSettings' Gameplay section and GameplayEnhancements (engine-side, pushed to
+	# the bridge by SettingsPlumbing.gd / engine_settings()). difficulty: veryEasy|easy|normal|hard;
+	# system_aliveness: original|authentic|normal|bustling; game_speed: x0_5|x1|x1_5|x2|x4|x8 (x1 =
+	# "Authentic", real time; Caps Lock doubles whichever is chosen). The five *_landing .. *_targeting
+	# booleans are the enhancement toggles (all off = the original).
+	"gameplay": {"frequent_autosave": false, "difficulty": "normal", "system_aliveness": "original",
+		"game_speed": "x1", "auto_target_after_firing": false, "confirm_landing": false, "auto_landing": false,
+		"pause_on_focus_loss": true, "formation_flying": false, "forgiving_landing": false,
+		"quick_hyperjump": false, "auto_route_plotting": false, "nearest_first_targeting": false},
 	# In-flight presentation (Apple GameSettings: enhancements.screenShake, reduceFlashing, cameraView,
 	# cameraZoom, chaseTilt). Classic defaults: no shake, the original's fixed north-up camera at 1:1.
 	# camera_view indexes flight/FlightCamera.gd VIEWS (0 Classic, 1 Look ahead, 2 Ship up, 3 Chase).
+	# Plus Apple's Graphics section: starfield_density 0.2-2, show_fps, smooth_sprites (linear instead of
+	# crisp), particle_density full|reduced|minimal, frame_rate_cap fps30|fps60|fps120|unlimited,
+	# ce_hyperspace_look, ship_bar_position above|below|off, show_planet_labels.
 	"graphics": {"screen_shake": false, "reduce_flashing": false, "camera_view": 0, "camera_zoom": 1.0,
-		"chase_tilt": 30.0},
+		"chase_tilt": 30.0, "starfield_density": 1.0, "show_fps": false, "smooth_sprites": false,
+		"particle_density": "full", "frame_rate_cap": "fps60", "ce_hyperspace_look": false,
+		"ship_bar_position": "off", "show_planet_labels": false},
+	# Apple's Interface HUD options (show_radar, hud_opacity 0.2-1) and the overall ui_scale (0.8-1.4).
+	"interface": {"show_radar": true, "hud_opacity": 1.0, "ui_scale": 1.0, "sidebar_pause_menu": true},
+	# Apple's Accessibility section. reduce_flashing lives in [graphics] (the flight agent's key) and
+	# noHyperspaceEffects is [classic] hyperspace_effects, inverted (screens/HyperjumpFx.gd reads it);
+	# colorblind_mode: none|protanopia|deuteranopia|tritanopia.
+	"accessibility": {"larger_hud": false, "high_contrast_hud": false, "colorblind_mode": "none"},
+	# The gamepad on-screen keyboard (ui/PadKeyboard.gd): auto = opens when a text field takes focus
+	# while the last input was a gamepad; off = never.
+	"ui": {"pad_keyboard": "auto"},
 	# Story Guide: the amber storyline badge on mission rows (Apple showMissionStorylineTags).
 	"story": {"show_mission_storyline_tags": true},
 	# Presentation (mirrors the Apple GameSettings modernMainMenu / modernDialogs /
@@ -77,6 +108,12 @@ const DEFAULTS := {
 		"fullscreen_galaxy_map": false},
 }
 
+## Emits (section, key) from every set_value, so anything that mirrors a setting (the engine plumbing,
+## the colorblind shader, the FPS counter...) can follow it live. Connect to Prefs.hub.changed.
+class Hub extends RefCounted:
+	signal changed(section: String, key: String)
+
+static var hub := Hub.new()
 static var _cfg := ConfigFile.new()
 static var _loaded := false
 ## Where load_all/save read and write; tests point it at a scratch file.
@@ -120,6 +157,7 @@ static func set_value(section: String, key: String, value: Variant) -> void:
 		Controls.stick_deadzone = float(value)
 	elif section == "input" and key == "modern_keys":
 		Controls.layout = Controls.LAYOUT_MODERN if bool(value) else Controls.LAYOUT_ORIGINAL
+	hub.changed.emit(section, key)
 
 
 ## Back to factory settings for the sections the Settings screen's pages edit.
@@ -136,6 +174,58 @@ static func reset_bindings() -> void:
 static func apply_saving(nova: Object) -> void:
 	if nova != null and nova.has_method("set_frequent_autosave"):
 		nova.set_frequent_autosave(bool(get_value("gameplay", "frequent_autosave")))
+
+
+## The Apple GameSettings fields the engine applies, as the JSON object NovaWorld.apply_settings takes
+## (keys and raw values are Apple's: difficulty "easy", gameSpeed "x1_5", enhancements {...}).
+static func engine_settings() -> Dictionary:
+	return {
+		"difficulty": str(get_value("gameplay", "difficulty")),
+		"systemAliveness": str(get_value("gameplay", "system_aliveness")),
+		"gameSpeed": str(get_value("gameplay", "game_speed")),
+		"autoTargetAfterFiring": bool(get_value("gameplay", "auto_target_after_firing")),
+		"confirmLanding": bool(get_value("gameplay", "confirm_landing")),
+		"autoLanding": bool(get_value("gameplay", "auto_landing")),
+		"invertTurn": bool(get_value("input", "invert_turn")),
+		"enhancements": {
+			"formationFlying": bool(get_value("gameplay", "formation_flying")),
+			"forgivingLanding": bool(get_value("gameplay", "forgiving_landing")),
+			"quickHyperjump": bool(get_value("gameplay", "quick_hyperjump")),
+			"frequentAutosave": bool(get_value("gameplay", "frequent_autosave")),
+			"autoRoutePlotting": bool(get_value("gameplay", "auto_route_plotting")),
+			"nearestFirstTargeting": bool(get_value("gameplay", "nearest_first_targeting")),
+			"modernKeyBindings": bool(get_value("input", "modern_keys")),
+			"screenShake": bool(get_value("graphics", "screen_shake")),
+		},
+	}
+
+
+# --- HUD options (Apple GameSettings showRadar / hudOpacity / largerHUD / highContrastHUD) -----
+
+static func show_radar() -> bool:
+	return bool(get_value("interface", "show_radar"))
+
+
+static func hud_opacity() -> float:
+	return clampf(float(get_value("interface", "hud_opacity")), 0.2, 1.0)
+
+
+## The modern HUD's scale: Apple's largerHUD is x1.28.
+static func hud_scale() -> float:
+	return 1.28 if bool(get_value("accessibility", "larger_hud")) else 1.0
+
+
+static func hud_high_contrast() -> bool:
+	return bool(get_value("accessibility", "high_contrast_hud"))
+
+
+## Push every engine-side setting onto the bridge (also the saving one).
+static func apply_engine(nova: Object) -> void:
+	if nova == null:
+		return
+	if nova.has_method("apply_settings"):
+		nova.apply_settings(JSON.stringify(engine_settings()))
+	apply_saving(nova)
 
 
 # --- tutorial hints (Apple HintTracker / TutorialProgress) -----------------------------------
@@ -186,7 +276,7 @@ static func apply_audio(audio: Object) -> void:
 
 ## Linear gain for the title music: master × music, 0 when muted.
 static func music_gain() -> float:
-	if bool(get_value("audio", "muted")):
+	if bool(get_value("audio", "muted")) or not bool(get_value("audio", "music_enabled")):
 		return 0.0
 	return float(get_value("audio", "master")) * float(get_value("audio", "music"))
 

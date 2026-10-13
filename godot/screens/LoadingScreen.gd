@@ -29,6 +29,7 @@ const TIPS := [
 	"Hire escorts at the Bar to fight at your side -- they draw a daily wage.",
 	"Cargo and courier missions pay on delivery, and some run against a deadline.",
 	"Some missions only appear at the right place and time, or once a government trusts you.",
+	"New to the cockpit? Replay Flight Training any time from the main menu.",
 ]
 const CELLS := 36
 ## The original's bar: fill span 198 px (LoadingProgressBar.fillSpan) inside a 204x10 rect.

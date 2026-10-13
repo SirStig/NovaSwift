@@ -71,19 +71,29 @@ func _init() -> void:
 	print("INFO title music name='%s' file='%s'" % [nova.title_music_name(), track])
 
 	# --- open pilots and back -----------------------------------------------------
+	var opener := root.gui_get_focus_owner()
+	var menu_buttons: Array = shell.main_menu.find_children("*", "Button", true, false)
 	shell._open_pilots(false)
 	await process_frame
-	_ok(shell.pilot_menu != null and not shell.main_menu.visible, "Open Pilot shows the pilot menu, hides main menu")
+	await process_frame
+	_ok(shell.pilot_menu != null and shell.main_menu.visible and shell.main_menu.is_inside_tree(), "Open Pilot stacks over the main menu: it stays in the tree and visible")
+	_ok(menu_buttons.all(func(b): return b.focus_mode == Control.FOCUS_NONE), "...and is inert (no control under it can take focus)")
+	_ok(root.gui_get_focus_owner() != null and shell.pilot_menu.is_ancestor_of(root.gui_get_focus_owner()), "focus moved into the pilot dialog")
 	shell.pilot_menu._cancel()
 	await process_frame
-	_ok(shell.pilot_menu == null and shell.main_menu.visible, "pilot menu Back returns to the main menu")
+	await process_frame
+	_ok(shell.pilot_menu == null and shell.main_menu.visible, "pilot menu Close returns to the main menu")
+	_ok(menu_buttons.all(func(b): return b.focus_mode == Control.FOCUS_ALL), "...whose controls are live again")
+	_ok(root.gui_get_focus_owner() == opener, "...and focus is back on the control that opened it (%s)" % (opener.text if opener else "none"))
 
 	# --- settings: focus navigation -------------------------------------------------
+	opener = root.gui_get_focus_owner()
 	shell._open_settings(shell.main_menu)
 	await process_frame
 	await process_frame
 	var st = shell.settings
-	_ok(st != null and not shell.main_menu.visible, "Settings opens over the menu")
+	_ok(st != null and shell.main_menu.visible and shell.main_menu.is_inside_tree(), "Settings opens over the menu: the menu stays in the tree and visible")
+	_ok(menu_buttons.all(func(b): return b.focus_mode == Control.FOCUS_NONE), "...and inert while Settings is up (no input / focus underneath)")
 	fo = root.gui_get_focus_owner()
 	_ok(fo == st.tab_buttons["Presentation"], "settings focus starts on the Interface sidebar entry")
 	st.show_page("Audio")
@@ -150,7 +160,9 @@ func _init() -> void:
 	# --- persist + reload --------------------------------------------------------------
 	st.close()
 	await process_frame
+	await process_frame
 	_ok(shell.main_menu.visible and shell.settings == null, "closing settings restores the menu")
+	_ok(menu_buttons.all(func(b): return b.focus_mode == Control.FOCUS_ALL) and root.gui_get_focus_owner() == opener, "...focus returns to the control that opened Settings")
 	var cfg := ConfigFile.new()
 	_ok(cfg.load(Prefs.path) == OK, "settings.cfg written")
 	_ok(is_equal_approx(float(cfg.get_value("audio", "master")), 0.5), "cfg: audio.master=0.5")
@@ -192,13 +204,21 @@ func _init() -> void:
 	var pb := []
 	for b in shell.pause_menu.find_children("*", "BaseButton", true, false):
 		pb.append(b.text)
-	_ok(pb == ["Resume", "Player Info", "Story Map", "Settings", "Report a Bug", "Save & Quit to Menu", "Quit"], "pause buttons: " + str(pb))
+	_ok(pb == ["", "Resume", "Galaxy Map", "Pilot Info", "Missions", "Story Guide", "Preferences", "Report Issue", "Full Screen", "Multiplayer", "Save Pilot", "Load Pilot", "Main Menu", "Quit Game"], "pause sidebar rows (Apple GameMenuView + Quit Game): " + str(pb))
+	var pause_btns: Array = shell.pause_menu.find_children("*", "BaseButton", true, false)
+	var pause_opener := root.gui_get_focus_owner()
+	shell.pause_menu.sidebar_rows["Preferences"].grab_focus()
+	pause_opener = shell.pause_menu.sidebar_rows["Preferences"]
 	shell._open_settings(shell.pause_menu)
 	await process_frame
-	_ok(shell.is_paused() and not shell.pause_menu.visible, "settings over pause hides pause")
+	await process_frame
+	_ok(shell.is_paused() and shell.pause_menu.visible and shell.pause_menu.is_inside_tree(), "settings stacks over the pause sidebar (it stays up, visible)")
+	_ok(pause_btns.all(func(b): return b.focus_mode == Control.FOCUS_NONE), "...and the sidebar is inert underneath")
 	shell.settings.close()
 	await process_frame
-	_ok(shell.pause_menu.visible, "closing settings re-shows pause")
+	await process_frame
+	_ok(shell.pause_menu.visible and pause_btns.all(func(b): return b.focus_mode == Control.FOCUS_ALL), "closing settings: the sidebar is live again")
+	_ok(root.gui_get_focus_owner() == pause_opener, "...focus back on Preferences, the row that opened it")
 	shell.close_pause()
 	await process_frame
 	_ok(not shell.is_paused() and resumed[0] == 1, "pause closes, resumed emitted")

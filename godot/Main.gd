@@ -391,6 +391,8 @@ func _process_hotkeys() -> void:
 	match _chord("clear_ship_target", "clear_target"):
 		"chord": nova.clear_ship_target()
 		"plain": _clear_target()
+	if Input.is_action_just_pressed("dismiss_message"):
+		_log.clear()   # Return: dismiss the status-bar message (slot 0x06)
 	if Input.is_action_just_pressed("clear_secondary"):
 		nova.clear_secondary_weapon()
 	if Input.is_action_just_pressed("secondary_prev"):
@@ -489,14 +491,24 @@ func _draw() -> void:
 	var pw: Vector2 = nova.player_position()
 	var target_id: int = nova.player_target_id()
 
+	# Settings > Larger HUD (Apple scales its modern HUD x1.28): the primitive HUD draws on a scaled
+	# canvas whose "viewport" is vp / k, so everything anchored to an edge stays on that edge.
+	var k := Prefs.hud_scale()
+	var hv := vp / k
+	_hud_high_contrast = Prefs.hud_high_contrast()
+	if k != 1.0:
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2(k, k))
 	if not _sync_classic_hud():   # Classic presentation: the ïntf status bar (a CanvasLayer) draws these
-		_draw_status_bars(vp)
-		_draw_weapon_readout(vp)
-		_draw_target_panel(vp, target_id)
-	_draw_land_prompt(vp)
+		_draw_status_bars(hv)
+		_draw_weapon_readout(hv)
+		_draw_target_panel(hv, target_id)
 	if not _classic_hud_on:
-		_draw_nav_panel(vp)
-		_draw_radar(vp, pw)
+		_draw_nav_panel(hv)
+		if Prefs.show_radar():   # Settings > Show radar
+			_draw_radar(hv, pw)
+	if k != 1.0:
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	_draw_land_prompt(vp)
 	_draw_message_log(vp)
 
 
@@ -548,13 +560,16 @@ const BAR_H := 14.0
 const BAR_GAP := 6.0
 const HUD_FONT_SIZE := 14
 
+var _hud_high_contrast := false   # Settings > High-contrast HUD (set each _draw)
+
 func _bar(pos: Vector2, frac: float, fill: Color, label: String) -> void:
-	var bg := Color(0.15, 0.15, 0.18, 0.85)
+	var bg := Color(0.0, 0.0, 0.0, 0.95) if _hud_high_contrast else Color(0.15, 0.15, 0.18, 0.85)
 	draw_rect(Rect2(pos, Vector2(BAR_W, BAR_H)), bg)
 	draw_rect(Rect2(pos, Vector2(BAR_W * clampf(frac, 0.0, 1.0), BAR_H)), fill)
-	draw_rect(Rect2(pos, Vector2(BAR_W, BAR_H)), Color(1, 1, 1, 0.25), false, 1.0)
+	draw_rect(Rect2(pos, Vector2(BAR_W, BAR_H)), Color(1, 1, 1, 0.9 if _hud_high_contrast else 0.25), false,
+		2.0 if _hud_high_contrast else 1.0)
 	draw_string(ThemeDB.fallback_font, pos + Vector2(6, BAR_H - 3), label,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE - 2, Color(1, 1, 1, 0.9))
+		HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE - 2, Color(1, 1, 1, 1.0 if _hud_high_contrast else 0.9))
 
 
 func _draw_status_bars(vp: Vector2) -> void:

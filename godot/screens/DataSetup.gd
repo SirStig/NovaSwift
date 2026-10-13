@@ -1,4 +1,6 @@
-# NOVA Swift — "where is your EV Nova data?" screen.
+# NOVA Swift — "where is your EV Nova data?" screen (the Apple app's DataSetupWizard Import step,
+# drawn as its NovaDialog: amber title, text body, footer buttons -- the original dialog frame in
+# Classic presentation, the modern chrome with "Modern dialog chrome" on, a plain card without data).
 #
 # Shown at startup when no data is found (instead of silently dropping into the
 # demo world), and from the main menu's "Game Data…" button. Same ground rules as
@@ -15,6 +17,9 @@ extends CanvasLayer
 
 const ShellUI = preload("res://screens/ShellUI.gd")
 const Prefs = preload("res://Prefs.gd")
+const T = preload("res://ui/novaswift/NovaTheme.gd")
+const NC = preload("res://ui/novaswift/NovaControls.gd")
+const Chrome = preload("res://ui/novaswift/NovaChrome.gd")
 
 ## A folder that loads as EV Nova data was chosen/found (already saved to settings).
 signal data_found(dir: String)
@@ -25,7 +30,8 @@ signal quit
 signal back
 
 var path_edit: LineEdit
-var first_button: Button
+var first_button: Control
+var dialog: Dictionary
 
 var _nova: Object
 var _root: Control
@@ -36,28 +42,30 @@ var _dialog: FileDialog
 func setup(nova: Object, allow_demo := true) -> void:
 	_nova = nova
 	layer = 55
-	_root = ShellUI.screen(self, 1.0)
-	var box := ShellUI.panel(_root, 700, 8)
-	ShellUI.title(box, "Find your EV Nova data", 28)
-	ShellUI.label(box, "NOVA Swift plays the EV Nova you already own — it doesn't include or download any game data. Point it at your copy: the game's Nova Files folder (or the folder containing it) with the .ndat / .rez files inside.", 15, ShellUI.TEXT)
-	ShellUI.label(box, "Easiest: unzip the Windows build of EV Nova and choose that folder. Or drop the files into one of the places below and press Rescan:", 15)
+	var specs := []
+	if allow_demo:
+		specs.append({"text": "Run Demo (no data)", "cb": func(): run_demo.emit()})
+	specs.append({"text": "Quit", "cb": func(): quit.emit()})
+	specs.append({"text": "Choose Folder…", "default": true, "cb": _open_picker})
+	dialog = Chrome.dialog(self, {"title": "Find your EV Nova data", "width": 560.0, "buttons": specs})
+	_root = dialog.root
+	var box: VBoxContainer = dialog.body
+	first_button = dialog.buttons["Choose Folder…"]
+	NC.label(box, "NOVA Swift plays the EV Nova you already own — it doesn't include or download any game data. Point it at your copy: the game's Nova Files folder (or the folder containing it) with the .ndat / .rez files inside.", "body", "regular", T.WHITE, true)
+	NC.label(box, "Easiest: unzip the Windows build of EV Nova and choose that folder. Or drop the files into one of the places below and press Rescan:", "body", "regular", T.SECONDARY, true)
 	var places := PackedStringArray()
 	for d in Prefs.data_candidates():
 		places.append("  " + d)
-	ShellUI.label(box, "\n".join(places), 13, ShellUI.MUTED)
-
-	first_button = ShellUI.button(box, "Choose Folder…", _open_picker)
-	path_edit = LineEdit.new()
-	path_edit.placeholder_text = "…or type a folder path and press Enter"
-	path_edit.custom_minimum_size = Vector2(0, 38)
+	NC.label(box, "\n".join(places), "caption", "regular", T.TERTIARY, true)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	box.add_child(row)
+	path_edit = NC.text_field("…or type a folder path and press Enter")
+	path_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	path_edit.text_submitted.connect(try_dir)
-	box.add_child(path_edit)
-	ShellUI.button(box, "Rescan Default Locations", _rescan)
-	if allow_demo:
-		ShellUI.button(box, "Run Demo (no data)", func(): run_demo.emit())
-	ShellUI.button(box, "Quit", func(): quit.emit())
-	_status = ShellUI.label(box, "", 14, Color(1.0, 0.6, 0.5))
-	ShellUI.focus(first_button)
+	row.add_child(path_edit)
+	row.add_child(NC.button("Rescan Default Locations", "bordered", _rescan, "arrow.clockwise"))
+	_status = NC.label(box, "", "caption", "regular", Color(1.0, 0.6, 0.5), true)
 
 	_dialog = FileDialog.new()
 	_dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
@@ -66,7 +74,7 @@ func setup(nova: Object, allow_demo := true) -> void:
 	_dialog.title = "Choose your EV Nova data folder"
 	_dialog.size = Vector2i(900, 560)
 	_dialog.dir_selected.connect(try_dir)
-	_dialog.theme = ShellUI.theme()
+	_dialog.theme = T.theme()
 	add_child(_dialog)
 
 

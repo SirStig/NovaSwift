@@ -153,14 +153,16 @@ func _init() -> void:
 	pm2.setup(nova, pdir, false)
 	await process_frame
 	await process_frame
-	_ok(pm2._cdialog.window_size.x == 460 and pm2._pilots.size() == 1, "Open Pilot lists the pilot in the classic panel")
-	_ok(pm2._cdialog.item(0).text.begins_with("Choose Pilot File"), "Open Pilot's first row is the file picker")
-	_ok(pm2._cdialog.item(1).text.begins_with(rows[0].name), "recent pilot row label '%s'" % pm2._cdialog.item(1).text)
-	_compose_dialog_png(pm2._cdialog, "classic_open_pilot.png", -1)
+	# The roster is a port addition (the original used the OS file dialog): like the Apple app it is
+	# a NovaDialog -- here in the original's PICT frame -- with kit rows, in both presentations.
+	_ok(pm2._ndlg.mode == "classic" and pm2._pilots.size() == 1, "Open Pilot lists the pilot in the NovaDialog (classic PICT frame)")
+	var roster_btns := pm2.find_children("*", "BaseButton", true, false).map(func(b): return str(b.get("text")))
+	_ok(roster_btns.has("New Pilot") and roster_btns.has("Import EV Nova Pilot…"), "Select a Pilot footer: New Pilot / Import EV Nova Pilot…")
 	pm2._confirm_delete(rows[0])
 	await process_frame
 	await process_frame
-	_ok(root.gui_get_focus_owner() == pm2._cdialog.item(4) and pm2._cdialog.window_size == Vector2i(355, 109), "delete confirm = DLOG 3002 with the safe answer focused")
+	var del_alert := pm2.find_children("NovaAlert", "CanvasLayer", true, false)
+	_ok(del_alert.size() == 1 and (root.gui_get_focus_owner() != null) , "delete confirm is the NovaAlert (Cancel / Delete)")
 	pm2.queue_free()
 	await process_frame
 	Prefs.set_value("presentation", "modern_dialogs", true)
@@ -168,7 +170,7 @@ func _init() -> void:
 	root.add_child(pm3)
 	pm3.setup(nova, pdir, true)
 	await process_frame
-	_ok(pm3._cdialog == null and pm3._name_edit is LineEdit and pm3._scenario_btn is Button, "modern_dialogs keeps the plain pilot screen")
+	_ok(pm3._cdialog == null and pm3._name_edit is LineEdit and not pm3._ndlg.is_empty(), "modern_dialogs keeps the plain (NovaSwift) pilot screen: Create a New Pilot dialog with a name field")
 	pm3.queue_free()
 	Prefs.set_value("presentation", "modern_dialogs", false)
 

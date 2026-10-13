@@ -881,3 +881,91 @@ event saves only). On adds land, jump and a 180 s in-flight heartbeat, and the i
 saved and restored (`PilotSaveReason.shouldSave`).
 
 Verify: `godot/tests/new_pilot_flow_selfcheck.gd` (headless; NOVA_PILOTS_DIR scratch).
+
+## Settings plumbing and the pad keyboard (2026-10-13)
+
+* **Keys.** Every Apple `GameSettings` field with a Godot equivalent has a `Prefs.gd` key; `docs/GODOT_SETTINGS_KEYS.md` is the
+  table (key, type, default, Apple label, wired or not). `Prefs.hub.changed(section, key)` fires on every `set_value`.
+* **Engine.** `SettingsPlumbing.gd` (autoload) re-applies on `Prefs.hub.changed` and when a `NovaWorld` enters the tree:
+  `Prefs.engine_settings()` -> `NovaWorld.apply_settings(json)` (bridge `Settings.swift` + the `// MARK: Settings plumbing`
+  section in `NovaWorld.swift`). The rules are shared engine code (`Sources/NovaSwiftEngine/GameSettingsRules.swift`:
+  difficulty / traffic / speed tables, `LandingRules`, `AutoLandPilot`, `ColorblindFilter`, nearest-first cycle), now called by
+  the Apple app too. `settings_state()` reads back what the engine runs with. Game speed rides the fixed-step accumulator
+  (`GameSpeedRules`, Caps Lock 2x via `set_caps_lock`); mouse aim is `set_mouse_aim(active, heading)`; auto-landing and the
+  "Land here?" confirmation live in the bridge's `press_land` (`confirm` / `autoland` results, `pending_land_confirm`,
+  `confirm_landing`).
+* **Presentation.** Colorblind shader overlay (the engine's matrix), FPS counter, frame cap, UI scale, HUD opacity, smooth
+  sprites, pause on focus loss: all in `SettingsPlumbing.gd`. `Main.gd` reads `Prefs.hud_scale()` / `hud_high_contrast()` /
+  `show_radar()` for the primitive HUD.
+* **Pad keyboard.** `ui/PadKeyboard.gd` (autoload): any `LineEdit` focused while the last input was a gamepad opens a key grid
+  (suggestion chips, Shift, Del, Clear, Done/Cancel; A presses, B cancels, Y deletes, X spaces, Start commits). Optional
+  per-field config: `PadKeyboard.attach(line_edit, {title, suggestions, style, auto})`. Style follows the presentation
+  (Classic greys / NovaSwift dark and amber) unless given. Prefs `ui/pad_keyboard = off` disables the auto-open.
+* **Check.** `NOVA_DATA_DIR=$PWD/data/base NOVA_PILOTS_DIR=<scratch> godot --headless --path godot -s res://tests/settings_plumbing_selfcheck.gd`.
+
+## NovaSwift UI kit (`godot/ui/novaswift/`) and the Apple-style screens
+
+NovaSwift's OWN screens (Settings, Plug-ins, the pause sidebar, the pilot roster / slots / backups / New Pilot, alerts,
+Data Setup, the flight-training offer / coach, hint cards) are drawn with one kit that mirrors the Apple app's design
+system (`app/NovaSwift/UI/NovaUITheme.swift`, `NovaFont.swift`, `NovaFormControls.swift`, `NovaDialog.swift`,
+`NovaAlert.swift`, `PadGlyph.swift`). The kit is built from stock Controls + `StyleBoxFlat` + icon textures, so it
+navigates by Godot focus alone and composes in the headless preview. The original EV Nova screens keep `ui/classic/`.
+
+| File | What it is |
+|---|---|
+| `NovaTheme.gd` | tokens: `AMBER` (novaAmber 1.0/0.7/0.28), `ACCENT`, SwiftUI dark system colours (`RED GREEN ORANGE INDIGO TEAL`), `SECONDARY`/`TERTIARY` alphas, `CHIP_BG`, `FIELD_BG`, `GROUP_BG`, `CARD_BG` (primary 7 %), `SCRIM`; fonts `font(role, weight)` (title/heading = Rubik, body/caption/button/hud = Arimo, NovaFontRole sizes 28/20/15/13/15/14; `system()` = the SwiftUI system-font stand-in); `box(bg, radius, border, bw, pad)`; `icon(name, px, colour)`; `theme()` = the shared `Theme` (check box, slider, option chip, line edit, popup, scroll bar) with Apple's keyboard / pad focus treatment (amber ring only while the last input was keyboard / pad) |
+| `NovaIcons.gd` | ~65 vector glyphs standing in for the SF Symbols the Apple screens use, rasterised to `ImageTexture`s (`Icons.texture(name, px, colour)`) |
+| `NovaControls.gd` (`NC`) | builders: `section(parent, title, icon, footer) -> Group` (`add_row`), `toggle` (NovaToggleStyle), `slider` (NovaSlider row), `segmented` (NovaSegmentedPicker), `menu` / `option_chip` (NovaMenuPicker), `stepper`, `value_row`, `form_button`, `button(text, kind, cb, icon)` (kinds `primary bordered destructive form plain pill pill_default`), `icon_button`, `select_row` (NovaSelectRow), `chip`, `badge`, `card`, `card_button`, `search_field`, `text_field` (NovaTextField), `progress`, `label` / `caption` / `footer`, `pad_glyph` (PadGlyph), `grow_on_focus` (the controller cursor's hover-grow) |
+| `NovaChrome.gd` | `dialog(host, {title, width, buttons}) -> {root, body, buttons, default, mode}` = NovaDialog; `card_frame(host, title, w, h, on_close) -> {root, card, body, done}` = DialogChrome (fixed 660 x 620, scaled down to fit, never up); `mode()` picks `classic` (original PICT 8524/8525/8526 frame + three-state button art), `modern` ("Modern dialog chrome": steel border, blue gradient + glow) or `plain` (no data) exactly as `NovaPanelBackground` does |
+| `NovaAlert.gd` | `Alert.show(host, {title, message, text?, buttons: [{title, role: normal/cancel/destructive, cb}]})` = `.novaAlert`: cancel first, default = last normal button (never a delete), Esc / B = cancel, optional text field (callbacks taking an argument get its text) |
+| `NovaInert.gd` | `Inert.hold(node)` / `Inert.release(token, fallback)`: how an overlay makes the screen beneath inert (out of focus navigation and the input path; animation and music keep running) and hands focus back to the control that opened it |
+| `pilot/NovaPilotUI.gd` | pilot rows: `roster_row`, `roster_empty`, `roster_scroll`, `group_header`, `slot_row`, `backup_row`, `link_button`, `kv_row` (data-in / callbacks-out, fed with the bridge's `pilot_groups` / `pilot_group_history` rows) |
+
+**Screens.** `screens/Settings.gd` (Apple SettingsView: sidebar + grouped sections, every row bound to the Prefs key in
+`docs/GODOT_SETTINGS_KEYS.md`; rows with no Godot key persist under Prefs `[apple]` and are listed in `todo_rows`),
+`screens/Plugins.gd` (PluginsView: gradient window, top bar, Browse / Installed / Load order, search, filter chips, card
+grid, detail), `screens/PauseMenu.gd` (GameMenuView sidebar when `interface/sidebar_pause_menu`, else the original's pause
+dialog), `screens/PilotMenu.gd` (roster / slots / backups / import / New Pilot via `_nd()`; Classic keeps the original
+DLOG 3102 / 3001 for naming), `screens/DataSetup.gd`, `screens/Tutorial.gd` + `Hints.gd`.
+
+**Overlays, not replacements.** `Shell._overlay_push(under)` / `_overlay_pop(token, under)`: Settings, Plug-ins, the Story
+Map, Data Setup (from the menu) and the pilot dialogs stack over the main menu or the pause sidebar, which stay in the
+tree, visible and animating but inert; closing returns focus to the opener. Only real route changes replace a screen.
+
+**Check.** `NOVA_PLUGIN_OFFLINE=1 NOVA_UI_PREVIEW_DIR=/abs/dir NOVA_DATA_DIR=$PWD/data/base godot --headless --path godot -s res://tests/novaswift_ui_selfcheck.gd`
+(rows per Settings page, prefs binding, focus, Plug-ins tabs, pause sidebar rows, pilot screens, alert, and PNG previews;
+`tests/UiCompose.gd` draws StyleBoxFlat panels / buttons / sliders and text as width-accurate bars). Overlay stacking
+(underlying screen visible + inert, focus restored) is asserted in `tests/shell_selfcheck.gd`.
+
+## Original movies (`godot/Movies.gd`, `godot/ui/MoviePlayer.gd`)
+
+The original's QuickTime clips live in `Nova Files/` and plug-in folders (`Race 1..4.mov` for bar race
+betting, a `dësc` record's movie file, plug-in clips such as `Ring.mov`). Godot only decodes Ogg
+Theora, so `Movies.gd` transcodes each clip **once** with an external `ffmpeg` into `user://movies/`
+(keyed by name + hash of path/size/mtime, so a changed source re-converts; writes go to a `.part`
+name and are renamed, so a crash never leaves a half-file in the cache):
+
+- `ogv` when ffmpeg has the `libtheora` encoder (most Linux/Windows builds);
+- otherwise a JPEG frame sequence + `movie.json` (+ `audio.wav` if the clip has sound). Homebrew's
+  ffmpeg lacks libtheora, so macOS dev machines take this path. `MoviePlayer.gd` plays either kind.
+
+ffmpeg is found on `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` (`ffmpeg.exe` on
+Windows). It is optional: when missing, or the conversion fails, `Movies.ready()/transcode()` return
+`{}` and callers skip the clip exactly as the original does with its "QuickTime Movies" preference off
+(`Ui_PlayMovieFileModal` 0x0049db00 returns at once). `Prefs [classic] play_movies` is that preference.
+
+Where clips play:
+
+- **Race betting** (`screens/BarScreens.gd`): after a bet the winner's `Race n.mov` plays in a 440x260
+  black card with a Skip button (Apple `GamblingView.racingView`), then the result screen shows; credits
+  update when the clip ends. Opening the Gambling screen starts background conversion of the four race
+  clips (`Movies.convert_async`), so the first bet normally already has its clip; if the conversion is
+  still running, the clip is skipped for that bet (the result appears at once). Skip = Enter/Space/Esc,
+  pad A/B (`ui_accept`/`ui_cancel`), the button or a click; `finished` fires exactly once.
+- Not yet wired in Godot (Apple plays them): the mission-offer `dësc` movie (`MissionBoardView`, 640x400
+  overlay, before the text or after it per Flags 0x0001) and `.gif` movies. The pieces
+  (`Movies.find_movie` + `MoviePlayer`) are reusable for them.
+
+Self-check: `NOVA_DATA_DIR=$PWD/data/base godot --headless --path godot -s res://tests/movies_selfcheck.gd`
+(conversion, cache hit, async, forced-missing ffmpeg, player skip). The libtheora branch is only
+exercised on machines whose ffmpeg has the encoder.

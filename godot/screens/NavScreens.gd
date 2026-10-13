@@ -12,6 +12,7 @@ extends Node
 
 const GalaxyMap = preload("res://screens/GalaxyMap.gd")
 const HyperjumpFx = preload("res://screens/HyperjumpFx.gd")
+const RouteMiniMap = preload("res://screens/RouteMiniMap.gd")
 
 signal log_message(text: String)
 signal arrived(system_name: String)
@@ -20,6 +21,7 @@ signal screen_closed
 var nova
 var _map
 var _fx
+var _mini
 
 
 func setup(world) -> void:
@@ -34,6 +36,9 @@ func setup(world) -> void:
 	add_child(_fx)
 	_fx.setup(nova)
 	_fx.arrived.connect(_on_arrived)
+	_mini = RouteMiniMap.new()
+	add_child(_mini)
+	_mini.setup(nova)
 
 
 # While the map is up the flight sim is paused and Main skips its flight pass.
@@ -47,6 +52,23 @@ func process_hotkeys() -> void:
 		_map.open()
 	elif Input.is_action_just_pressed("hyperjump"):
 		engage_hyperjump()
+	# `\` / Shift-`\` step the armed hyperspace link (snd 152, raised by the bridge) and
+	# raise the route mini map; H (Main.gd arms the route) raises it too; - / = zoom it.
+	if Input.is_action_just_pressed("cycle_hyperspace_link_prev"):
+		if nova.cycle_hyperspace_link(false):
+			_mini.show_map()
+	elif Input.is_action_just_pressed("cycle_hyperspace_link"):
+		if nova.cycle_hyperspace_link(true):
+			_mini.show_map()
+	if Input.is_action_just_pressed("hyperspace_arm"):
+		_mini.show_map()
+	if not Input.is_key_pressed(KEY_ALT):   # Alt-- is the self-destruct
+		if Input.is_action_just_pressed("route_map_zoom_out"):
+			if _mini.zoom(true):
+				nova.sound_beep(1)
+		elif Input.is_action_just_pressed("route_map_zoom_in"):
+			if _mini.zoom(false):
+				nova.sound_beep(1)
 	for m in nova.drain_nav_messages():
 		log_message.emit(m)
 
@@ -68,6 +90,8 @@ func engage_hyperjump() -> void:
 
 
 func _on_arrived(system_name: String) -> void:
+	if nova.nav_route().size() > 0:   # the jump sequence redraws the route map when a route remains
+		_mini.show_map()
 	log_message.emit("Arrived in " + system_name)
 	arrived.emit(system_name)
 

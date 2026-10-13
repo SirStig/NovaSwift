@@ -379,3 +379,14 @@ Ordered by user value. Each is sized for one agent. "Do not touch" lists keep co
 
 ### Package 4 status (2026-10-13): Flight visual fidelity
 DONE: split into `godot/flight/`; shan layers (base/bank/animation sets, alt, engine glow, running lights, weapon glow, shield flare, tint, BaseTransp, cloak, ionize/murk/gate-wash blend); animated + destroyed stellars; explosions (additive boom, 32-pool), staggered 9+1 death sequence, SWParticles, smoke cicn, trails, hit sprays, area blasts, disable ring; corona beams, beam art, lightning; Classic reticle/nav cursor cicn; camera views (Classic/Look ahead/Ship up, Chase = Ship up), zoom, opt-in shake; NPC launch/landing visuals; Mac hyperjump fade/flash. Not done / uncertain: chase 3D tilt (needs live 3D), no-jump zone indicator, planet name labels, ship health bars, smoothSprites/particleDensity settings, per-shot murk fog, visual verification on a real GPU (only headless + composed PNG), fill/additive shaders unverified on gl_compatibility hardware.
+
+### Package 5 status (2026-10-13): engine settings plumbing (the Settings screen rows are the UI-kit agent's)
+DONE: a `Prefs.gd` key for every `GameSettings` field with a Godot equivalent (table: `docs/GODOT_SETTINGS_KEYS.md`),
+`Prefs.hub.changed`, `SettingsPlumbing.gd` autoload + bridge `apply_settings` / `settings_state`: difficulty, System Aliveness,
+game speed with Caps Lock 2x (`GameSpeedRules`), auto-target after firing, confirm landing, auto-landing, forgiving landing,
+tight formations, nearest-first targeting, invert turn, mouse aim, colorblind shader (engine matrix), FPS counter, frame cap,
+UI scale, HUD opacity / larger / high contrast / show radar (primitive HUD), smooth sprites, pause on focus loss. Shared rules
+moved to `Sources/NovaSwiftEngine/GameSettingsRules.swift` (Apple calls them too). Pad on-screen keyboard: `ui/PadKeyboard.gd`.
+Not wired: quick hyperjump (app-side jump phases), starfield/particle density, ship bars, planet labels, CE hyperspace look
+(render code, flight agent), Classic `ïntf` radar / larger / high-contrast (fixed art in `ui/classic/AuthenticHUD.gd`),
+sidebar pause menu, HD/3D, classic movies/ambient/brightness.

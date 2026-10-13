@@ -172,7 +172,7 @@ func _init() -> void:
 	var texts := []
 	for b in pm.find_children("*", "Button", true, false):
 		texts.append(b.text)
-	_ok(texts[0] == "Choose Pilot File…" and texts.size() >= 4, "modern Open Pilot: picker first, then recents: %s" % str(texts))
+	_ok(texts.has("New Pilot") and texts.has("Import EV Nova Pilot…") and texts.any(func(t): return str(t).begins_with("Ada Test")), "modern Open Pilot (Select a Pilot): New Pilot / Import EV Nova Pilot… footer, recents listed: %s" % str(texts))
 	var chosen := [0]
 	pm.pilot_chosen.connect(func(): chosen[0] += 1)
 	_ok(pm.open_path(copy) and chosen[0] == 1, "open_path(.evpilot) loads and emits pilot_chosen")
@@ -197,7 +197,7 @@ func _init() -> void:
 	pm3.setup(nova, pilots)
 	await process_frame
 	await process_frame
-	_ok(pm3._cdialog != null and pm3._cdialog.item(0).text.begins_with("Choose Pilot File"), "classic Open Pilot: picker row first")
+	_ok(not pm3._ndlg.is_empty() and pm3._ndlg.mode == "classic", "classic Open Pilot: the Select a Pilot NovaDialog in the original frame")
 	pm3.queue_free()
 
 	# --- Settings (Apple layout) -----------------------------------------------------------------
@@ -236,7 +236,7 @@ func _init() -> void:
 	await process_frame
 	await process_frame
 	var cp = st.classic_prefs
-	_ok(cp != null and cp.dialog.window_size != Vector2i(0, 0) and not st._root.visible, "Classic Preferences opens (DLOG 4003 %s) over Settings" % str(cp.dialog.window_size))
+	_ok(cp != null and cp.dialog.window_size != Vector2i(0, 0) and st._root.visible, "Classic Preferences opens (DLOG 4003 %s) stacked over Settings, which stays visible" % str(cp.dialog.window_size))
 	var intro = cp.dialog.item(7)
 	_ok(intro != null and intro.button_pressed == true, "Intro Music checkbox starts on (Apple default)")
 	intro.button_pressed = false

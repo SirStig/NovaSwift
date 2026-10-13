@@ -64,6 +64,8 @@ class NovaWorld: Node2D {
     private var galaxy: Galaxy?
     private var game: NovaGame?
     private var intent = ControlIntent()
+    /// The user settings that change how the world plays (see `// MARK: Settings plumbing`).
+    private var plumbing = SettingsPlumbing()
     /// The system id `makeWorld` last built, so `launch()` can rebuild the same
     /// system after a docked visit — landing never changes system.
     private var currentSystemID: Int?
@@ -204,7 +206,7 @@ class NovaWorld: Node2D {
         guard let collection = PluginRuntime.shared.loadMerged(baseDir: URL(fileURLWithPath: baseDir)) else { return false }
         let g = NovaGame(collection)
         self.game = g
-        self.galaxy = Galaxy(game: g)
+        self.galaxy = Galaxy(game: g, flightTuning: plumbing.flightTuning)
         return true
     }
 
@@ -214,7 +216,7 @@ class NovaWorld: Node2D {
     @Callable(autoSnakeCase: true)
     func makeWorld(systemID: Int) -> Bool {
         guard let game = self.game else { return false }
-        let galaxy = self.galaxy ?? Galaxy(game: game)
+        let galaxy = self.galaxy ?? Galaxy(game: game, flightTuning: plumbing.flightTuning)
         self.galaxy = galaxy
 
         // Bootstrap the pilot from the scenario's `chär` exactly once — the
@@ -234,7 +236,7 @@ class NovaWorld: Node2D {
             ?? Ship(name: "Player", stats: ShipStats(speed: 300, acceleration: 300, turnRate: 100))
         player.cargo = pilot.cargo
 
-        let (w, _) = GameSession.makeWorld(game: game, systemID: sysID, player: player, galaxy: galaxy)
+        let (w, _) = makeConfiguredWorld(game: game, systemID: sysID, player: player, galaxy: galaxy)
         // A pilot saved at a spaceport (the original's only save point) resumes
         // at that stellar's centre, at rest, on a random whole-degree heading
         // (FL-20) — mirrors GameContainerView's resume placement.
@@ -301,17 +303,24 @@ class NovaWorld: Node2D {
     func step(dt: Double) {
         guard let world = self.world else { return }
         // The engine flies a hyperjump itself; held keys mustn't fight it.
-        var live = self.intent
+        var live = settingsPlayerIntent(self.intent)  // Settings: invert turn, mouse aim, auto-landing
         live.selfDestruct = gaps.selfDestructHeld     // Alt-−, held
         world.intent = world.playerJump == nil ? live : ControlIntent()
+        settingsAutoTarget(world)                     // Settings: auto-target after firing
 
+        // Settings > Game speed, doubled while the original's Caps Lock 2x flag is up
+        // (`GameSpeedRules`, the Apple `GameScene.update` clock): the multiplier rides
+        // the timestep into the accumulator, so faster just means more ticks per frame.
+        let speed = settingsSpeed(world)
         let fixed = Self.fixedStep
         // Clamp before the loop, not inside it: a 4-second stall should drop the
         // backlog, not simulate 4 seconds of combat in one frame.
-        simAccumulator = min(simAccumulator + max(0, dt), fixed * Double(Self.maxCatchupTicks))
+        let cap = fixed * Double(GameSpeedRules.catchupTickCap(multiplier: speed, base: Self.maxCatchupTicks))
+        simAccumulator = min(simAccumulator + max(0, dt) * speed, cap)
         while simAccumulator >= fixed {
             world.snapshotRenderState()   // pre-tick pose for render interpolation
             world.step(fixed)
+            plumbing.ticks += 1
             simAccumulator -= fixed
             collectEvents(from: world)    // World.events is cleared by the next step
             gapsAfterTick(world)          // tribbles breed / perishables rot (EC-24)
@@ -764,7 +773,7 @@ class NovaWorld: Node2D {
         // app's `buildPlayerShip` does.
         player.fuel = pilot.fuel.map { min($0, player.maxFuel) } ?? player.maxFuel
         // A story `M`/`N` op fired while docked moves where the takeoff happens.
-        let (w, _) = GameSession.makeWorld(game: game, systemID: currentSystemID ?? sysID, player: player, galaxy: galaxy)
+        let (w, _) = makeConfiguredWorld(game: game, systemID: currentSystemID ?? sysID, player: player, galaxy: galaxy)
         let ctx = w.systemContext
         // Lift off exactly as the original (`Stellar_RunDockAndLaunchSequence`
         // 0x00455e10) and the Apple `GameScene.reloadForDeparture`: at the
@@ -1136,7 +1145,7 @@ class NovaWorld: Node2D {
             pilot = engine.player
         }
 
-        let (w, _) = GameSession.makeWorld(game: game, systemID: plan.destination, player: ship, galaxy: galaxy)
+        let (w, _) = makeConfiguredWorld(game: game, systemID: plan.destination, player: ship, galaxy: galaxy)
         w.previousSystemBearing = plan.bearing + .pi   // AI-14: mission ships jump in from where we came
         w.placePlayerAtHyperspaceArrival(bearing: plan.bearing)
         ship.currentTargetID = nil
@@ -2182,6 +2191,7 @@ class NovaWorld: Node2D {
     @Callable(autoSnakeCase: true) func loadGameAsync(baseDir: String) -> Bool {
         guard asyncLoad.begin() else { return false }
         let state = asyncLoad
+        let flightTuning = plumbing.flightTuning   // formationFlying is baked into the galaxy's ships
         Thread.detachNewThread {
             state.report("Finding resource files", 0.04)
             state.report("Reading game data and plug-ins", 0.12)
@@ -2189,7 +2199,7 @@ class NovaWorld: Node2D {
             guard let collection = PluginRuntime.shared.loadMerged(baseDir: URL(fileURLWithPath: baseDir)) else { state.finish(nil); return }
             state.report("Indexing the galaxy", 0.85)
             let g = NovaGame(collection)
-            let galaxy = Galaxy(game: g)
+            let galaxy = Galaxy(game: g, flightTuning: flightTuning)
             state.finish((g, galaxy))
         }
         return true
@@ -2474,7 +2484,7 @@ class NovaWorld: Node2D {
                                          includeDefaultItems: false, includeHullWeapons: false) ?? old
         ship.cargo = pilot.cargo
         ship.fuel = pilot.fuel.map { min($0, ship.maxFuel) } ?? ship.maxFuel
-        let (w, _) = GameSession.makeWorld(game: game, systemID: sysID, player: ship, galaxy: galaxy)
+        let (w, _) = makeConfiguredWorld(game: game, systemID: sysID, player: ship, galaxy: galaxy)
         ship.position = old.position
         ship.velocity = old.velocity
         ship.angle = old.angle
@@ -2662,13 +2672,17 @@ class NovaWorld: Node2D {
     /// Returns the new target's id or -1.
     @Callable(autoSnakeCase: true) func cycleTarget(reverse: Bool, squad: Bool) -> Int {
         beep(3)
+        if plumbing.enhancements.nearestFirstTargeting {   // the port's nearest-first, wrapping, 3000 px cycle
+            return world?.cycleNearestFirst(reverse: reverse)?.entityID ?? -1
+        }
         return world?.cyclePlayerTarget(forward: !reverse, squad: squad)?.entityID ?? -1
     }
 
     /// Alt-R: the nearest ship outside the player's squad, no range limit (0x00462850).
     @Callable(autoSnakeCase: true) func selectNearestEngaged() -> Int {
         let was = world?.player.currentTargetID
-        let found = world?.selectNearestEngaged()
+        let found = plumbing.enhancements.nearestFirstTargeting ? world?.selectNearestTarget(hostileOnly: false)
+                                                                : world?.selectNearestEngaged()
         beepForNearestTarget(found: found, was: was)
         return found?.entityID ?? -1
     }
@@ -2677,7 +2691,8 @@ class NovaWorld: Node2D {
     /// limit (0x00462bd0).
     @Callable(autoSnakeCase: true) func selectNearestHostileThreat() -> Int {
         let was = world?.player.currentTargetID
-        let found = world?.selectNearestHostileThreat()
+        let found = plumbing.enhancements.nearestFirstTargeting ? world?.selectNearestTarget(hostileOnly: true)
+                                                                : world?.selectNearestHostileThreat()
         beepForNearestTarget(found: found, was: was)
         return found?.entityID ?? -1
     }
@@ -2732,6 +2747,17 @@ class NovaWorld: Node2D {
         nav.route.selectHyperspace(current: cur, linked: nv.isLinked)
     }
 
+    /// `\` (slot 0x0d; 0x0044b120): step the armed hyperspace link through the current
+    /// system's links, wrapping, and arm it (snd 152). False without links.
+    @Callable(autoSnakeCase: true) func cycleHyperspaceLink(forward: Bool) -> Bool {
+        guard let cur = currentSystemID, let nv = navigator() else { return false }
+        refreshNavVisibility()
+        guard nav.route.cycleLink(links: nv.visibleNeighbors(cur), current: cur, forward: forward,
+                                  linked: nv.isLinked) else { return false }
+        beep(3)
+        return true
+    }
+
     /// The map window closed: the route head re-syncs (0x004a4fd0 → 0x004a8080).
     @Callable(autoSnakeCase: true) func navMapClosed() {
         guard let cur = currentSystemID, let nv = navigator() else { return }
@@ -2776,8 +2802,10 @@ class NovaWorld: Node2D {
         if p.isEffectivelyCloaked { return .cloaked }
         if canLand(on: body, p) { return nil }
         let d = body.position - p.position
-        let inside = PlayerLanding.inEnvelope(offset: d, radius: body.radius)
-        let slow = PlayerLanding.isSlowEnough(p.velocity)
+        let rules = plumbing.landingRules
+        let reach = rules.reach(radius: body.radius)
+        let inside = abs(d.x) < reach && abs(d.y) < reach
+        let slow = abs(p.velocity.x) <= rules.speedLimit && abs(p.velocity.y) <= rules.speedLimit
         let cleared = travel.cleared.contains(id)
         if (!cleared || !slow) && inside && cleared { return .tooFast }
         return .tooFar
@@ -2786,10 +2814,8 @@ class NovaWorld: Node2D {
     /// Whether `p` may set down on `body` right now: inside the square envelope,
     /// under the per-axis speed limit, cleared, and not cloaked.
     private func canLand(on body: StellarBody, _ p: Ship) -> Bool {
-        PlayerLanding.inEnvelope(offset: body.position - p.position, radius: body.radius)
-            && PlayerLanding.isSlowEnough(p.velocity)
-            && travel.cleared.contains(body.id)
-            && !p.isEffectivelyCloaked
+        plumbing.landingRules.canLand(offset: body.position - p.position, radius: body.radius, velocity: p.velocity,
+                                      cleared: travel.cleared.contains(body.id), cloaked: p.isEffectivelyCloaked)
     }
 
     /// The spöb to land on if the player may set down this instant: the selected one.
@@ -2825,8 +2851,16 @@ class NovaWorld: Node2D {
     /// Per `step`: reaching ±250 px of the stellar a landing was requested from
     /// grants clearance and sounds the clearance line (0x00459950).
     private func tickTravel() {
-        guard let world, dockedSpobID == nil, world.player.isAlive, let request = travel.landingRequest,
-              !travel.cleared.contains(request), let body = stellarBody(request) else { return }
+        guard let world, dockedSpobID == nil, world.player.isAlive else { return }
+        if plumbing.enhancements.forgivingLanding {
+            // `forgivingLanding`: every body arms on approach, silently (Apple `updateLanding`).
+            for body in landTargets() where PlayerLanding.inClearanceRange(offset: body.position - world.player.position) {
+                travel.cleared.insert(body.id)
+            }
+            return
+        }
+        guard let request = travel.landingRequest, !travel.cleared.contains(request),
+              let body = stellarBody(request) else { return }
         if PlayerLanding.inClearanceRange(offset: body.position - world.player.position) {
             travel.cleared.insert(request)
             postLandingClearance(request)
@@ -2848,12 +2882,13 @@ class NovaWorld: Node2D {
     /// X"), `slowDown` or `none` — `PlayerLanding.prompt`, as the HUD shows it.
     @Callable(autoSnakeCase: true) func landPrompt() -> PackedStringArray {
         guard let world, let game, dockedSpobID == nil, world.player.isAlive, let near = nearestLandTarget(),
-              PlayerLanding.inEnvelope(offset: near.position - world.player.position, radius: near.radius)
+              plumbing.landingRules.inReach(offset: near.position - world.player.position, radius: near.radius)
         else { return PackedStringArray(["none", ""]) }
         let p = world.player
         let canNow = !world.playerInEscapePod && canLand(on: near, p)
-        let prompt = PlayerLanding.prompt(canLandNow: canNow, slowEnough: PlayerLanding.isSlowEnough(p.velocity),
-                                          needsRequest: !travel.cleared.contains(near.id), cloaked: p.isEffectivelyCloaked)
+        let forgiving = plumbing.enhancements.forgivingLanding
+        let prompt = PlayerLanding.prompt(canLandNow: canNow, slowEnough: plumbing.landingRules.isSlowEnough(p.velocity),
+                                          needsRequest: !forgiving && !travel.cleared.contains(near.id), cloaked: p.isEffectivelyCloaked)
         let name = game.spob(near.id)?.displayName ?? ""
         switch prompt {
         case .land: return PackedStringArray(["land", name])
@@ -2877,6 +2912,9 @@ class NovaWorld: Node2D {
         guard let world, let game, dockedSpobID == nil, world.playerJump == nil, travel.gatePicker == nil,
               world.player.isAlive else { return landJSON("none") }
         if travel.selectedSpob == nil, let near = nearestLandTarget() { selectStellar(near.id) }
+        if plumbing.autoLanding || plumbing.enhancements.forgivingLanding {
+            return settingsPressLand(world)   // Settings: auto-landing / forgiving landing replace the two presses
+        }
         guard let id = travel.selectedSpob, let spob = game.spob(id) else { return landJSON("none") }
         let text = OriginalText(game: game)
         let kind = OriginalText.Body(spob)
@@ -2936,7 +2974,7 @@ class NovaWorld: Node2D {
     /// Commit a landing the second press allowed: a gate is used rather than docked
     /// with; a refusal that still stands (a bribe that lapsed, a destroyed stellar)
     /// says so.
-    private func requestLanding(_ id: Int) -> String {
+    private func requestLanding(_ id: Int, confirmed: Bool = false) -> String {
         guard let game, let spob = game.spob(id) else { return landJSON("none") }
         if pilot.destroyedStellars?.contains(id) == true, !spob.landableOnlyWhenDestroyed {
             post("Nothing but wreckage remains.")
@@ -2947,6 +2985,11 @@ class NovaWorld: Node2D {
             post(reason)
             return landJSON("messages")
         }
+        if plumbing.confirmLanding, !confirmed {
+            plumbing.pendingLandConfirm = id   // Settings > Confirm landing: "Land here?" first
+            return landJSON("confirm", spob: id)
+        }
+        plumbing.pendingLandConfirm = nil
         touchDown(spobID: id, chargeFee: true)
         return landJSON("landed", spob: id)
     }
@@ -3109,7 +3152,7 @@ class NovaWorld: Node2D {
         if !engine.player.activeMissions.isEmpty { engine.missionFlightPass() }
         pilot = engine.player
 
-        let (w, _) = GameSession.makeWorld(game: game, systemID: destSystem, player: ship, galaxy: galaxy)
+        let (w, _) = makeConfiguredWorld(game: game, systemID: destSystem, player: ship, galaxy: galaxy)
         if let gate = w.systemContext.bodies.first(where: { $0.id == destGate }) {
             w.placePlayerEmergingFromGate(gate)
         } else {
@@ -3389,7 +3432,7 @@ class NovaWorld: Node2D {
         guard dockedSpobID == nil, let world, let game, let galaxy, let sysID = currentSystemID else { return }
         if let target = ops.moveToSystem {
             let ship = world.player
-            let (w, _) = GameSession.makeWorld(game: game, systemID: target, player: ship, galaxy: galaxy)
+            let (w, _) = makeConfiguredWorld(game: game, systemID: target, player: ship, galaxy: galaxy)
             ship.currentTargetID = nil
             self.world = w
             self.intent = ControlIntent()
@@ -3412,7 +3455,7 @@ class NovaWorld: Node2D {
             player.armor = min(old.armor, player.maxArmor)
             player.shield = min(old.shield, player.maxShield)
             while player.disabled, player.armor < player.maxArmor { player.armor += 1 }
-            let (w, _) = GameSession.makeWorld(game: game, systemID: sysID, player: player, galaxy: galaxy)
+            let (w, _) = makeConfiguredWorld(game: game, systemID: sysID, player: player, galaxy: galaxy)
             player.position = old.position
             player.currentTargetID = nil
             self.world = w
@@ -4425,6 +4468,187 @@ class NovaWorld: Node2D {
 
     /// Whether përs `id` is recorded as never to appear again.
     @Callable(autoSnakeCase: true) func debugPersDefeated(id: Int) -> Bool { pilot.isPersDefeated(id) }
+
+    // MARK: Settings plumbing
+    //
+    // The Settings that change how the world plays. GDScript (`SettingsPlumbing.gd`, an autoload
+    // watching `Prefs`) packs the engine-relevant ones into one JSON object -- Apple's
+    // `GameSettings` property names and raw values -- and calls `apply_settings`; `Settings.swift`
+    // holds the state, the rules are the engine's own (`GameSettingsRules.swift`, `GameSpeedRules`,
+    // `GameplayEnhancements`), shared with the Apple app. Applied to every world built from here
+    // on (`makeConfiguredWorld`) and to the live one at once.
+
+    /// `GameSession.makeWorld` with the settings in force: combat tuning (difficulty), the spawn
+    /// model (System Aliveness, from the initial fill on) and the enhancement toggles; the
+    /// population scale lands right after, as in Apple's `GameScene.init`.
+    private func makeConfiguredWorld(game: NovaGame, systemID: Int, player: Ship,
+                                     galaxy: Galaxy) -> (world: World, galaxy: Galaxy) {
+        let built = GameSession.makeWorld(game: game, systemID: systemID, player: player, galaxy: galaxy,
+                                          combatTuning: plumbing.combatTuning, spawnModel: plumbing.traffic.spawnModel,
+                                          enhancements: plumbing.enhancements)
+        plumbing.configure(built.world)
+        plumbing.resetForNewWorld()
+        return built
+    }
+
+    /// Replace the gameplay settings from JSON (see Settings.swift for the keys). False if the
+    /// text isn't a JSON object. Takes effect on the live world immediately.
+    @Callable(autoSnakeCase: true) func applySettings(json: String) -> Bool {
+        let formation = plumbing.enhancements.formationFlying
+        guard plumbing.apply(json: json) else { return false }
+        if let game, plumbing.enhancements.formationFlying != formation {
+            // Tight formations change the ships' flight model, which the galaxy bakes in: the
+            // next world built uses a fresh galaxy (Apple builds it per launch).
+            galaxy = Galaxy(game: game, flightTuning: plumbing.flightTuning)
+        }
+        if let world { plumbing.configure(world) }
+        return true
+    }
+
+    /// What the engine is running with, as JSON: the settings as parsed, the live world's
+    /// damage scale / spawn model / population scale / time scale, the effective speed
+    /// multiplier and the 2x flag, ticks run since the world was built, the auto-landing
+    /// target (-1 none).
+    @Callable(autoSnakeCase: true) func settingsState() -> String { plumbing.stateJSON(world: world) }
+
+    /// Caps Lock is the original's 2x mode (`GameSpeedRules`). Godot cannot ask the OS for the
+    /// lock's state, so the frontend tracks the key and pushes it here.
+    @Callable(autoSnakeCase: true) func setCapsLock(on: Bool) { plumbing.capsLock = on }
+
+    /// Desktop mouse aim (Apple `GameScene.updateMouseAim`): `heading` is the compass angle
+    /// (radians, 0 = up, clockwise) from the ship to the pointer; `active == false` clears it.
+    /// A stick's aim (`set_aim_heading`) and the turn keys win over it, as on Apple.
+    @Callable(autoSnakeCase: true) func setMouseAim(active: Bool, heading: Double) {
+        plumbing.mouseAimHeading = active ? heading : nil
+    }
+
+    /// The colorblind-assist filter (`none`, `protanopia`, `deuteranopia`, `tritanopia`) as the 16
+    /// floats of its 4x4 colour matrix, row-major, rows R, G, B, A (Apple's `CIColorMatrix`
+    /// vectors: out.r = dot(row0, rgba), ...); empty for `none` or an unknown name.
+    @Callable(autoSnakeCase: true) func colorblindMatrix(mode: String) -> PackedFloat32Array {
+        guard let rows = ColorblindFilter(rawValue: mode)?.matrixRows else { return PackedFloat32Array() }
+        return PackedFloat32Array(rows.flatMap { $0 }.map { Float($0) })
+    }
+
+    /// Test aids (settings self-check): the ids of the bodies the player could land on or use, the
+    /// position of one, and a teleport that leaves the ship at rest.
+    @Callable(autoSnakeCase: true) func debugLandTargets() -> PackedInt32Array {
+        PackedInt32Array(landTargets().map { Int32($0.id) })
+    }
+    @Callable(autoSnakeCase: true) func debugStellarPosition(id: Int) -> Vector2 {
+        stellarBody(id).map { Vector2(x: Float($0.position.x), y: Float($0.position.y)) } ?? Vector2()
+    }
+    @Callable(autoSnakeCase: true) func debugTeleportPlayer(x: Double, y: Double) {
+        world?.player.position = Vec2(x, y)
+        world?.player.velocity = Vec2()
+    }
+
+    /// The simulation speed the last `step` ran at (Settings game speed x Caps Lock 2x).
+    @Callable(autoSnakeCase: true) func speedMultiplier() -> Double { plumbing.multiplier }
+
+    /// The original's x2 indicator condition: the effective speed is exactly 2x.
+    @Callable(autoSnakeCase: true) func x2Active() -> Bool { abs(plumbing.multiplier - 2) < 1e-9 }
+
+    /// Whether the auto-landing autopilot is flying the ship.
+    @Callable(autoSnakeCase: true) func isAutoLanding() -> Bool { plumbing.autoLandTarget != nil }
+
+    /// Hand control back (the Land key cancels too).
+    @Callable(autoSnakeCase: true) func cancelAutoLand() { plumbing.autoLandTarget = nil }
+
+    /// The `spöb` id awaiting the "Land here?" confirmation (Settings > Confirm landing), or -1.
+    @Callable(autoSnakeCase: true) func pendingLandConfirm() -> Int { plumbing.pendingLandConfirm ?? -1 }
+
+    /// Answer the confirmation: land (same JSON as `press_land`), or drop it.
+    @Callable(autoSnakeCase: true) func confirmLanding(accept: Bool) -> String {
+        guard let id = plumbing.pendingLandConfirm else { return landJSON("none") }
+        plumbing.pendingLandConfirm = nil
+        guard accept, dockedSpobID == nil, world?.player.isAlive == true else { return landJSON("none") }
+        return requestLanding(id, confirmed: true)
+    }
+
+    /// The player's intent for this frame: invert turn, then (in this order) the auto-landing
+    /// autopilot, which any manual turn/thrust hands back, or the mouse-aim heading.
+    private func settingsPlayerIntent(_ raw: ControlIntent) -> ControlIntent {
+        func inverted(_ r: ControlIntent) -> ControlIntent {
+            var i = r
+            if plumbing.invertTurn { swap(&i.turnLeft, &i.turnRight) }   // "Invert turn direction"
+            return i
+        }
+        if let id = plumbing.autoLandTarget {
+            if raw.turnLeft || raw.turnRight || raw.thrust || raw.reverse {
+                plumbing.autoLandTarget = nil
+                return inverted(raw)
+            }
+            guard let world, dockedSpobID == nil, let body = stellarBody(id), body.isLandable || body.isGate else {
+                plumbing.autoLandTarget = nil
+                return ControlIntent()
+            }
+            switch AutoLandPilot.step(player: world.player, body: body, rules: plumbing.landingRules,
+                                      cleared: travel.cleared.contains(id)) {
+            case .arrived:
+                plumbing.autoLandTarget = nil
+                _ = requestLanding(id)   // the Apple container's `onAutoLandArrived`
+                return ControlIntent()
+            case .fly(let flying):
+                return flying
+            }
+        }
+        var i = inverted(raw)
+        if i.desiredHeading == nil, let heading = plumbing.mouseAimHeading, world?.playerJump == nil {
+            i.desiredHeading = heading
+        }
+        return i
+    }
+
+    /// Settings game speed x the original's Caps Lock 2x flag -> the world's `timeScale`.
+    private func settingsSpeed(_ world: World) -> Double {
+        plumbing.x2Flag = plumbing.evaluateX2Flag(world)
+        let m = GameSpeedRules.effectiveMultiplier(setting: plumbing.gameSpeed.multiplier, x2Flag: plumbing.x2Flag)
+        plumbing.multiplier = m
+        world.timeScale = m
+        world.x2Mode = plumbing.x2Flag
+        return m
+    }
+
+    /// "Auto-target after firing": the shot that opens fire with nothing locked locks the
+    /// nearest hostile (`GameScene.update`).
+    private func settingsAutoTarget(_ world: World) {
+        let firing = intent.firePrimary
+        if plumbing.autoTargetAfterFiring, firing, !plumbing.wasFiring, world.player.currentTargetID == nil {
+            let found = plumbing.enhancements.nearestFirstTargeting ? world.selectNearestTarget(hostileOnly: true)
+                                                                    : world.selectNearestHostileThreat()
+            beepForNearestTarget(found: found, was: nil)
+        }
+        plumbing.wasFiring = firing
+    }
+
+    /// The Land key under Auto-landing / Forgiving landing (`GameContainerView`'s `.land` action):
+    /// auto-landing flies to the selected (or nearest) body and sets down on arrival, a second
+    /// press cancelling; forgiving landing lands on the nearest body in its wide envelope in one
+    /// press, with no clearance exchange.
+    private func settingsPressLand(_ world: World) -> String {
+        if plumbing.autoLanding {
+            if plumbing.autoLandTarget != nil {
+                plumbing.autoLandTarget = nil
+                return landJSON("none")
+            }
+            for id in [travel.selectedSpob, nearestLandTarget()?.id].compactMap({ $0 }) {
+                guard let body = stellarBody(id), body.isLandable || body.isGate else { continue }
+                plumbing.autoLandTarget = id
+                selectStellar(id)
+                // The autopilot is the Land press: request clearance so the 250 px arm runs for this body.
+                if !plumbing.enhancements.forgivingLanding, travel.landingRequest != id { travel.landingRequest = id }
+                return landJSON("autoland", spob: id)
+            }
+        }
+        let p = world.player
+        if plumbing.enhancements.forgivingLanding {
+            if let near = nearestLandTarget(), canLand(on: near, p) { return requestLanding(near.id) }
+        } else if let id = attemptLandSelected() {
+            return requestLanding(id)
+        }
+        return landJSON("none")
+    }
 
     // MARK: Audio
     //

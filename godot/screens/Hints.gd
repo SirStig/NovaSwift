@@ -20,6 +20,8 @@ extends CanvasLayer
 const Controls = preload("res://Controls.gd")
 const Prefs = preload("res://Prefs.gd")
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
+const T = preload("res://ui/novaswift/NovaTheme.gd")
+const NC = preload("res://ui/novaswift/NovaControls.gd")
 
 ## A hint stays this long (unpaused) before it counts as read.
 const AUTO_DISMISS := 20.0
@@ -122,44 +124,43 @@ func dismiss() -> void:
 func _show(id: String) -> void:
 	current_id = id
 	_age = 0.0
+	# HintBanner: black 82 % card, amber hairline, 12 px corners, shadow; amber icon, amber bold title,
+	# white caption message, dismiss X.
 	_panel = PanelContainer.new()
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0, 0, 0, 0.82)
-	sb.border_color = Color(AMBER.r, AMBER.g, AMBER.b, 0.4)
-	sb.set_border_width_all(1)
-	sb.set_corner_radius_all(12)
-	sb.set_content_margin_all(14)
+	var sb := T.box(Color(0, 0, 0, 0.82), 12, Color(AMBER.r, AMBER.g, AMBER.b, 0.4), 1, Vector2(14, 14))
+	sb.shadow_color = Color(0, 0, 0, 0.4)
+	sb.shadow_size = 12
+	sb.shadow_offset = Vector2(0, 4)
 	_panel.add_theme_stylebox_override("panel", sb)
+	_panel.theme = T.theme()
 	_panel.custom_minimum_size = Vector2(460, 0)
 	_panel.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_panel.position = Vector2(-230, 14 if id != "flight" else 70)
 	add_child(_panel)
-	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 4)
-	_panel.add_child(v)
 	var head := HBoxContainer.new()
-	v.add_child(head)
-	var title := Label.new()
-	title.text = "Getting started" if id == "flight" else str(_catalog[id]["title"])
-	title.add_theme_font_size_override("font_size", 16)
-	title.add_theme_color_override("font_color", AMBER)
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	head.add_child(title)
-	var btn := Button.new()
-	btn.text = "Got it" if id == "flight" else "✕"
-	btn.focus_mode = Control.FOCUS_NONE
-	btn.pressed.connect(dismiss)
-	head.add_child(btn)
+	head.add_theme_constant_override("separation", 11)
+	_panel.add_child(head)
+	var ic := NC.icon_rect(head, "gamecontroller" if id == "flight" else "info.circle", 20, AMBER)
+	ic.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 3)
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(v)
+	NC.label(v, "Getting started" if id == "flight" else str(_catalog[id]["title"]), "body", "bold", AMBER)
 	var lines: Array = flight_tips() if id == "flight" else [str(_catalog[id]["message"])]
 	for t in lines:
-		var l := Label.new()
-		l.text = ("› " if id == "flight" else "") + str(t)
-		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		l.custom_minimum_size = Vector2(430, 0)
-		l.add_theme_font_size_override("font_size", 13)
-		l.add_theme_color_override("font_color", Color(1, 1, 1, 0.9))
-		v.add_child(l)
+		var l := NC.label(v, ("› " if id == "flight" else "") + str(t), "caption", "regular", Color(1, 1, 1, 0.9), true)
+		l.custom_minimum_size = Vector2(380, 0)
+	var btn: Button
+	if id == "flight":
+		btn = NC.button("Got it", "plain", dismiss)
+		T.style_text(btn, "caption", "semibold", AMBER)
+	else:
+		btn = NC.icon_button("xmark", dismiss, Color(1, 1, 1, 0.7), 26, 12)
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	head.add_child(btn)
 
 
 ## The first-flight card's tips (Apple's desktop wording, with this build's bound keys; the pad's
@@ -167,8 +168,8 @@ func _show(id: String) -> void:
 static func flight_tips() -> Array:
 	if Controls.pad_connected():
 		return ["Left stick to steer and thrust · %s to fire" % Controls.describe_buttons("fire_primary"),
-			"%s to target the nearest ship · %s to cycle weapons" % [
-				Controls.describe_buttons("target_nearest"), Controls.describe_buttons("secondary_next")],
+			"%s to cycle targets · %s to cycle weapons" % [
+				Controls.describe_buttons("target_next"), Controls.describe_buttons("secondary_next")],
 			"%s to land · %s for the galaxy map" % [
 				Controls.describe_buttons("land"), Controls.describe_buttons("galaxy_map")]]
 	return ["Steer with %s / %s, thrust with %s · %s to fire" % [

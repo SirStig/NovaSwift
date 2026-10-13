@@ -768,31 +768,26 @@ final class GameScene: SKScene {
     private var forgivingLanding: Bool { settings.enhancements.forgivingLanding }
     /// The speed below which a landing is allowed, px/s: the forgiving overall
     /// limit, or the original's per-axis 0.75 px/tick.
-    private var landingSpeedLimit: Double { forgivingLanding ? 130 : PlayerLanding.perAxisSpeedLimit }
+    private var landingSpeedLimit: Double { landingRules.speedLimit }
+    /// The landing envelope the settings select (shared with the Godot frontend).
+    private var landingRules: LandingRules { LandingRules(forgiving: forgivingLanding) }
 
     /// The original's landing envelope (0x00457580): `|dx|` and `|dy|` both
     /// inside `round(spriteWidth × 1.75)` (75 without a sprite).
     private func landingReach(_ body: StellarBody) -> Double {
-        forgivingLanding ? body.radius + 70 : PlayerLanding.reach(radius: body.radius)
+        landingRules.reach(radius: body.radius)
     }
 
     /// The original's per-axis speed gate (0.75 px/tick), or the forgiving
     /// overall limit.
     private func isSlowEnoughToLand(_ p: Ship) -> Bool {
-        forgivingLanding ? p.velocity.length <= landingSpeedLimit : PlayerLanding.isSlowEnough(p.velocity)
+        landingRules.isSlowEnough(p.velocity)
     }
 
     /// Whether `p` may set down on `body` right now.
     private func canLand(on body: StellarBody, _ p: Ship) -> Bool {
-        let d = body.position - p.position
-        if forgivingLanding {
-            return d.length <= landingReach(body) && p.velocity.length <= landingSpeedLimit
-        }
-        let reach = landingReach(body)
-        return abs(d.x) < reach && abs(d.y) < reach
-            && abs(p.velocity.x) <= landingSpeedLimit && abs(p.velocity.y) <= landingSpeedLimit
-            && landingClearance.contains(body.id)
-            && !p.isEffectivelyCloaked                  // a cloaked ship is refused (STR# 2002 #73)
+        landingRules.canLand(offset: body.position - p.position, radius: body.radius, velocity: p.velocity,
+                             cleared: landingClearance.contains(body.id), cloaked: p.isEffectivelyCloaked)
     }
     /// Read-only handle to the live player ship (fuel top-up / cargo sync on land).
     var playerShip: Ship? { world?.player }
@@ -1026,33 +1021,15 @@ final class GameScene: SKScene {
               let body = world.systemContext.bodies.first(where: { $0.id == id && isPlayerLandTarget($0) }) else {
             cancelAutoLand(); return .init()
         }
-        let p = world.player
-        let to = body.position - p.position
-        let dist = to.length
-        let reach = min(body.radius + 55, landingReach(body))
-        let speed = p.velocity.length
-        if canLand(on: body, p) {
+        switch AutoLandPilot.step(player: world.player, body: body, rules: landingRules,
+                                  cleared: landingClearance.contains(body.id)) {
+        case .arrived:
             autoLandTargetID = nil
             onAutoLandArrived?(id)              // container opens the spaceport
             return .init()
+        case .fly(let intent):
+            return intent
         }
-        var i = ControlIntent()
-        i.desiredHeading = atan2(to.x, to.y)   // 0 = +y (up), clockwise — matches the engine
-        var da = (i.desiredHeading! - p.angle).truncatingRemainder(dividingBy: 2 * .pi)
-        if da > .pi { da -= 2 * .pi }
-        if da < -.pi { da += 2 * .pi }
-        let aligned = abs(da) < 0.5
-        if dist > reach * 1.8 {
-            if aligned { i.thrust = true }             // cruise in while pointed at it
-        } else if speed > landingSpeedLimit * 0.75 {
-            // Brake into the pad: swing to retrograde and burn.
-            let retro = p.velocity.angle + .pi
-            i.desiredHeading = retro
-            i.thrust = abs(angleDelta(from: p.angle, to: retro)) < 0.3
-        } else if aligned && dist > reach {
-            i.thrust = true                            // nudge the last stretch
-        }
-        return i
     }
 
     // NPC rendering: the catalog for per-hull sprites, a layer for NPC ships, a
@@ -2394,32 +2371,6 @@ final class GameScene: SKScene {
         world.playerRecallFighters()
     }
 
-    /// The Tab-cycle order: every in-range ship the player can actually see,
-    /// nearest first. Planets/stations are selected by clicking them, not by the
-    /// ship targeting cycle, matching EV Nova.
-    ///
-    /// The player's own escorts sort to the *back* of the order rather than by
-    /// distance, so Tab walks every other ship in the system before it ever
-    /// offers you your own wing — escorts fly closest to you, and in the
-    /// original game they crowded the front of the cycle during a fight.
-    private func cycleCandidates() -> [Int] {
-        let p = world.player.position
-        var others: [(id: Int, dist: Double)] = []
-        var escorts: [(id: Int, dist: Double)] = []
-        for npc in world.npcs
-        where npc.isAlive && world.canTarget(npc, by: world.player) {
-            let d = (npc.position - p).length
-            guard d <= World.targetLockRange else { continue }
-            if world.isPlayerEscort(npc) {
-                escorts.append((npc.entityID, d))
-            } else {
-                others.append((npc.entityID, d))
-            }
-        }
-        let byDistance: ((id: Int, dist: Double), (id: Int, dist: Double)) -> Bool = { $0.dist < $1.dist }
-        return (others.sorted(by: byDistance) + escorts.sorted(by: byDistance)).map(\.id)
-    }
-
     /// Step the ship target (UI-07): in arrival order with no wrap — past the
     /// last ship it clears to "No Target" — and no range limit; `squad` cycles
     /// only the player's escorts. `reverse` walks backward. The
@@ -2433,7 +2384,7 @@ final class GameScene: SKScene {
             return
         }
         audio?.play(.beep3)   // 0x0044b120
-        let candidates = cycleCandidates()
+        let candidates = world.nearestFirstCycleCandidates()
         guard !candidates.isEmpty else { return }
         let currentIdx = candidates.firstIndex { $0 == world.player.currentTargetID }
         let step = reverse ? -1 : 1
@@ -5613,20 +5564,13 @@ final class GameScene: SKScene {
             return
         }
         let f = CIFilter(name: "CIColorMatrix")
-        let k: CGFloat = 0.5
-        switch settings.colorblindMode {
-        case .protanopia, .deuteranopia:
-            f?.setValue(CIVector(x: 1, y: 0, z: 0, w: 0), forKey: "inputRVector")
-            f?.setValue(CIVector(x: 0, y: 1, z: 0, w: 0), forKey: "inputGVector")
-            f?.setValue(CIVector(x: k, y: -k, z: 1, w: 0), forKey: "inputBVector")
-        case .tritanopia:
-            f?.setValue(CIVector(x: 1, y: 0, z: 0, w: 0), forKey: "inputRVector")
-            f?.setValue(CIVector(x: -k, y: 1, z: k, w: 0), forKey: "inputGVector")
-            f?.setValue(CIVector(x: 0, y: 0, z: 1, w: 0), forKey: "inputBVector")
-        case .none:
-            break
+        // The matrix is shared with the Godot frontend (`ColorblindFilter`).
+        let keys = ["inputRVector", "inputGVector", "inputBVector", "inputAVector"]
+        if let rows = ColorblindFilter(rawValue: settings.colorblindMode.rawValue)?.matrixRows {
+            for (row, key) in zip(rows, keys) {
+                f?.setValue(CIVector(x: CGFloat(row[0]), y: CGFloat(row[1]), z: CGFloat(row[2]), w: CGFloat(row[3])), forKey: key)
+            }
         }
-        f?.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
         filter = f
         shouldEnableEffects = true
     }

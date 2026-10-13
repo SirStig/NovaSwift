@@ -68,6 +68,21 @@ workflow `env` (`GODOT_VERSION`); project floor is 4.6, we ship 4.7.x.
 
 Saves/settings: `~/.local/share/godot/app_userdata/NOVA Swift (Godot)/`.
 
+## Optional runtime dependency: ffmpeg (original movies)
+
+The original's bar race clips (and plug-in movies) are QuickTime `.mov`; Godot can only play Ogg
+Theora, so the game converts them on first use with `ffmpeg` into `user://movies/` (see
+`docs/GODOT_LAYER.md`, "Original movies"). ffmpeg is **not bundled** and **not required**: without it
+the movies are skipped, as with the original's "QuickTime Movies" preference off, and everything else
+(including race betting's result) works. Install it to get the clips:
+
+- Linux / Steam Deck: `sudo pacman -S ffmpeg` (SteamOS: unlock the read-only rootfs first with
+  `sudo steamos-readonly disable`, and note SteamOS updates may remove it), or a static build placed on
+  `PATH` (e.g. `~/.local/bin/ffmpeg`; the game also checks `/usr/local/bin` and `/usr/bin`).
+- Windows: put `ffmpeg.exe` on `PATH`. macOS: `brew install ffmpeg` (found in `/opt/homebrew/bin`).
+- If the ffmpeg lacks the `libtheora` encoder the game falls back to a JPEG frame sequence cache, so
+  any ffmpeg works.
+
 ## Status / caveats
 
 - Verified locally (macOS): export_presets.cfg parses and Godot 4.7.2 reaches the

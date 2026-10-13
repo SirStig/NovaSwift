@@ -24,6 +24,10 @@ config/version="1.0.0"
 
 ; Logical viewport = window size in points (no magnify-to-fill). See WindowScale.gd.
 WindowScale="*res://WindowScale.gd"
+; Live user-settings plumbing (engine, Caps Lock 2x, mouse aim, colorblind, FPS, UI scale...): SettingsPlumbing.gd.
+SettingsPlumbing="*res://SettingsPlumbing.gd"
+; Gamepad on-screen keyboard that opens for any LineEdit focused with a pad: ui/PadKeyboard.gd.
+PadKeyboard="*res://ui/PadKeyboard.gd"
 
 [display]
 

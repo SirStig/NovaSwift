@@ -216,7 +216,22 @@ static func theme() -> Theme:
 		t.set_stylebox("grabber_pressed", cls, grab_hi)
 	t.set_stylebox("panel", "PanelContainer", box(Color(0, 0, 0, 0)))
 	_theme = t
+	ClassicTheme.track(null)
+	ClassicTheme.on_nav_changed(_apply_nav)
+	_apply_nav(ClassicTheme.nav_active)
 	return t
+
+
+## Keyboard / pad focus ring (the controller cursor's affordance): an amber 2 px outline drawn only
+## while the last input was keyboard or pad, never after mouse input.
+static func _apply_nav(on: bool) -> void:
+	if _theme == null:
+		return
+	for cls in ["Button", "OptionButton", "MenuButton"]:
+		_theme.set_stylebox("focus", cls, box(Color(0, 0, 0, 0), 8, AMBER, 2) if on else empty())
+	for cls in ["CheckBox", "CheckButton"]:
+		_theme.set_stylebox("focus", cls, box(Color(AMBER.r, AMBER.g, AMBER.b, 0.10), 6, AMBER, 2, Vector2(4, 2)) if on else empty())
+	_theme.set_stylebox("focus", "HSlider", box(Color(0, 0, 0, 0), 6, AMBER, 2) if on else empty())
 
 
 ## The 16 px check box (NovaToggleStyle): amber fill + black check when on, near-black with a grey

@@ -875,7 +875,11 @@ public final class PluginDocument {
                               excludeHD: Bool = false) -> ExportJob {
         var json: Data?
         if embedMetadata {
-            json = try? JSONEncoder().encode(Metadata(name: name, author: author, version: version, notes: notes))
+            // Sorted keys: JSONEncoder's default key order isn't stable, so the same document could
+            // export to different bytes (same size) from one save to the next.
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            json = try? encoder.encode(Metadata(name: name, author: author, version: version, notes: notes))
         }
         return ExportJob(layer: layer, base: includeBase ? base : nil, metadata: json, excludeHD: excludeHD,
                          format: format, changeCount: changeCount)

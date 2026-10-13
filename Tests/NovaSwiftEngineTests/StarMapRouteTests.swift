@@ -18,6 +18,22 @@ final class StarMapRouteTests: XCTestCase {
         XCTAssertNil(route.armedSystem, "a click elsewhere disarms")
     }
 
+    func testCycleLinkStepsAndWraps() {
+        var route = StarMapRoute()
+        let links = [2, 7, 9]
+        func lk(_ a: Int, _ b: Int) -> Bool { links.contains(b) }
+        XCTAssertFalse(route.cycleLink(links: [], current: 1, linked: lk))
+        XCTAssertTrue(route.cycleLink(links: links, current: 1, linked: lk))
+        XCTAssertEqual(route.armedSystem, 2)
+        route.cycleLink(links: links, current: 1, linked: lk)
+        XCTAssertEqual(route.armedSystem, 7)
+        route.cycleLink(links: links, current: 1, linked: lk)
+        route.cycleLink(links: links, current: 1, linked: lk)
+        XCTAssertEqual(route.armedSystem, 2, "wraps")
+        route.cycleLink(links: links, current: 1, forward: false, linked: lk)
+        XCTAssertEqual(route.armedSystem, 9)
+    }
+
     func testShiftClickBuildsTheRouteHopByHop() {
         var route = StarMapRoute()
         XCTAssertFalse(route.shiftClick(3, current: 1, linked: linked), "not linked to the tail")

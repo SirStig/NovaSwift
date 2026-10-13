@@ -21,8 +21,12 @@
 # native DLOG/DITL 3102 (3101 with several scenarios) -- Full Name, Nickname, gender, Strict Play,
 # OK/Cancel -- followed by the ship-name prompt DLOG/DITL 3001; Open Pilot is the app's dialog
 # panel (the original had only the Mac file picker). A "Random" button beside the gender control
-# fills the name without typing (gamepad). The plain Nova Swift screens below stay behind the
-# toggle. Same signals and the same method names (_show_list / _show_new / _create / ...).
+# fills the name without typing (gamepad). The plain Nova Swift screens are the Apple app's modern
+# path drawn with the NovaSwift UI kit (ui/novaswift/, pilot rows in ui/novaswift/pilot/): a
+# "Select a Pilot" roster over the menu, the pilot's slots / backups, "Create a New Pilot" (scenario
+# step when a plug-in adds scenarios, then name + nickname + gender + Strict Play, then the ship
+# name). Each is a NovaDialog stacked over whatever is underneath. Same signals and the same
+# method names (_show_list / _show_new / _create / ...).
 #
 # Loaded with preload() (no class_name) so it resolves without an editor import
 # pass, like Controls.gd.
@@ -31,6 +35,11 @@ extends CanvasLayer
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
 const ClassicDialog = preload("res://ui/classic/ClassicDialog.gd")
 const PilotFiles = preload("res://screens/PilotFiles.gd")
+const T = preload("res://ui/novaswift/NovaTheme.gd")
+const NC = preload("res://ui/novaswift/NovaControls.gd")
+const Chrome = preload("res://ui/novaswift/NovaChrome.gd")
+const Alert = preload("res://ui/novaswift/NovaAlert.gd")
+const PilotUI = preload("res://ui/novaswift/pilot/NovaPilotUI.gd")
 
 ## The player picked or created a pilot; the live pilot is already bound on the
 ## bridge, so the host only has to build the world (`make_world(-1)`).
@@ -93,26 +102,8 @@ func setup(nova: Object, dir: String, start_new := false) -> void:
 		else:
 			_show_list()
 		return
-	var dim := ColorRect.new()
-	dim.color = Color(0.02, 0.02, 0.06, 0.94)
-	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_root.add_child(dim)
-	var center := CenterContainer.new()
-	center.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_root.add_child(center)
-	var box := PanelContainer.new()
-	box.custom_minimum_size = Vector2(520, 0)
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.09, 0.09, 0.12)
-	style.border_color = Color(0.45, 0.5, 0.6)
-	style.set_border_width_all(2)
-	style.set_corner_radius_all(4)
-	style.set_content_margin_all(22)
-	box.add_theme_stylebox_override("panel", style)
-	center.add_child(box)
+	# Plain (NovaSwift) screens: each is a NovaDialog built by _nd(); nothing to lay out up front.
 	_panel = VBoxContainer.new()
-	_panel.add_theme_constant_override("separation", 8)
-	box.add_child(_panel)
 	if start_new:
 		_show_new()
 	else:
@@ -127,17 +118,26 @@ func _unhandled_input(event: InputEvent) -> void:
 
 # --- helpers ---------------------------------------------------------------
 
-func _clear(title: String, back: Callable = Callable()) -> void:
-	for c in _panel.get_children():
-		_panel.remove_child(c)
-		c.queue_free()
+var _ndlg := {}            # the NovaDialog currently up (plain screens)
+
+
+## Open the NovaDialog for a plain screen, replacing the previous one. `_panel` becomes its body.
+func _nd(title: String, width: float, buttons: Array, back: Callable = Callable()) -> Dictionary:
+	if not _ndlg.is_empty() and is_instance_valid(_ndlg.root):
+		_ndlg.root.queue_free()
+	if _cdlg != null and is_instance_valid(_cdlg):   # a classic (DITL) dialog was up: this replaces it
+		_cdlg.queue_free()
+		_cdlg = null
+		_cdialog = null
 	_on_back = back
 	_status = null
-	var t := Label.new()
-	t.text = title
-	t.add_theme_font_size_override("font_size", 26)
-	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_panel.add_child(t)
+	_ndlg = Chrome.dialog(_root, {"title": title, "width": width, "buttons": buttons})
+	_panel = _ndlg.body
+	return _ndlg
+
+
+func _clear(title: String, back: Callable = Callable()) -> void:
+	_nd(title, 520.0, [], back)
 
 
 func _button(text: String, cb: Callable) -> Button:
@@ -152,12 +152,8 @@ func _button(text: String, cb: Callable) -> Button:
 
 
 func _label(text: String, size := 15, color := Color(0.75, 0.78, 0.85)) -> Label:
-	var l := Label.new()
-	l.text = text
+	var l := NC.label(_panel, text, "body", "regular", color, true)
 	l.add_theme_font_size_override("font_size", size)
-	l.add_theme_color_override("font_color", color)
-	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_panel.add_child(l)
 	return l
 
 
@@ -178,25 +174,62 @@ func _refresh_pilots() -> void:
 func _show_list() -> void:
 	creating_changed.emit(false)
 	_refresh_pilots()
-	if _classic:
-		_c_list()
-		return
+	_show_roster()
+
+
+## "Select a Pilot" (Apple PilotListView): one card per pilot identity, a duplicate and a delete
+## button beside each, and New Pilot / Import EV Nova Pilot... / Close in the footer.
+func _show_roster() -> void:
 	var hosted := not cancelled.get_connections().is_empty()
-	_clear("Open Pilot", _cancel if hosted else Callable())
-	var browse := _button("Choose Pilot File…", _browse)
-	_label("Pilots are files in %s. Open one from anywhere, or an original EV Nova pilot." % _dir, 13)
-	var first: Button = browse
-	for r in _recent:
-		_button("%s — %s · %s" % [r.name, r.ship, r.system], open_path.bind(r.path))
-	if _recent.is_empty():
-		_label("No recent pilots yet.")
-	var new_btn := _button("New Pilot…", _show_new)
-	if not _pilots.is_empty():
-		_button("Manage Pilots…", _show_manage)
+	var groups := _groups()
+	var specs := [
+		{"text": "New Pilot", "default": groups.is_empty(), "cb": _show_new},
+		{"text": "Import EV Nova Pilot…", "cb": _browse}]
 	if hosted:
-		_button("Back", _cancel)
-	_status = _label("", 14, Color(1.0, 0.55, 0.5))
-	_focus(first if first != null else new_btn)
+		specs.append({"text": "Close", "cb": _cancel})
+	var d := _nd("Select a Pilot", 480.0, specs, _cancel if hosted else Callable())
+	var first: Control = null
+	if groups.is_empty():
+		PilotUI.roster_empty(_panel)
+	else:
+		var list := PilotUI.roster_scroll(_panel, groups.size())
+		for g in groups:
+			var parts := PilotUI.roster_row(list, g, {
+				"open": _show_group.bind(str(g.group)),
+				"duplicate": _duplicate_group.bind(g),
+				"delete": _confirm_delete_group.bind(g),
+				# TODO(wiring): the bridge has no pilot_duplicate yet (Apple PilotRoster.duplicate).
+				"can_duplicate": _nova.has_method("pilot_duplicate")})
+			if first == null:
+				first = parts.open
+	var outside: Array = _recent.filter(func(r): return not str(r.path).begins_with(_dir))
+	if not outside.is_empty():
+		PilotUI.caps_label(_panel, "RECENT FILES")
+		for r in outside:
+			var rb := PilotUI.link_button(_panel, "%s — %s · %s" % [r.name, r.ship, r.system], "folder", open_path.bind(r.path), T.SECONDARY)
+			if first == null:
+				first = rb
+	_status = NC.label(_panel, "", "caption", "regular", Color(1.0, 0.55, 0.5), true)
+	_focus(first if first != null else d.buttons["New Pilot"])
+
+
+func _duplicate_group(g: Dictionary) -> void:
+	if _nova.has_method("pilot_duplicate") and _nova.pilot_duplicate(_dir, str(g.most_recent)) != "":
+		_nova.sound_beep(1)
+		_show_roster()
+	else:
+		_status_msg("Duplicating pilots isn't available in this build yet.")
+
+
+func _confirm_delete_group(g: Dictionary) -> void:
+	var n: int = (g.slots as Array).size()
+	var word := "%d save slots" % n if n > 1 else "save"
+	Alert.show(self, {"title": "Delete pilot?",
+		"message": "“%s” — its %s and all backups will be removed. This can't be undone." % [g.name, word],
+		"buttons": [{"title": "Cancel", "role": "cancel"},
+			{"title": "Delete", "role": "destructive", "cb": func():
+				_nova.pilot_delete(_dir, str(g.most_recent))
+				_show_roster()}]})
 
 
 ## The OS file picker (or Godot's pad-friendly one, see PilotFiles.want_native), starting in the
@@ -246,16 +279,28 @@ func import_preview(path: String) -> void:
 	if not (sum.unmapped as Array).is_empty():
 		lines.append("Not carried over: " + "; ".join(PackedStringArray(sum.unmapped)))
 	var text := "\n".join(lines)
-	if _classic:
-		_c_show(ClassicDialog.panel(_nova, {"title": "Import EV Nova Pilot", "width": 480, "text": text,
-			"footer_buttons": [{"label": "Cancel", "action": _show_list, "cancel": true},
-				{"label": "Create Pilot", "action": import_commit, "default": true}]}))
-		return
-	_clear("Import EV Nova Pilot", _show_list)
-	_label(text)
-	var go := _button("Create Pilot", import_commit)
-	_button("Cancel", _show_list)
-	_focus(go)
+	var d := _nd("Import EV Nova Pilot", 480.0, [
+		{"text": "Cancel", "cb": _show_list},
+		{"text": "Create Pilot", "default": true, "cb": import_commit}], _show_list)
+	PilotUI.kv_row(_panel, "Pilot", "%s%s" % [sum.name, (" “%s”" % sum.nickname) if str(sum.nickname) != "" else ""])
+	PilotUI.caps_label(_panel, str(sum.format))
+	PilotUI.kv_row(_panel, "Ship", str(sum.ship))
+	PilotUI.kv_row(_panel, "Credits", "%s cr" % _commas(int(sum.credits)))
+	PilotUI.kv_row(_panel, "Date", str(sum.date))
+	if str(sum.location) != "":
+		PilotUI.kv_row(_panel, "Location", str(sum.location))
+	PilotUI.kv_row(_panel, "Combat rating", str(sum.rating))
+	PilotUI.kv_row(_panel, "Story progress", str(sum.story))
+	PilotUI.kv_row(_panel, "Escorts", str(int(sum.escorts)))
+	if not (sum.warnings as Array).is_empty():
+		NC.label(_panel, "Warnings", "caption", "bold", T.AMBER)
+		for w in sum.warnings:
+			NC.label(_panel, "• " + str(w), "caption", "regular", T.SECONDARY, true)
+	if not (sum.unmapped as Array).is_empty():
+		NC.label(_panel, "Not carried over", "caption", "bold", Color(0.7, 0.7, 0.7))
+		for w in sum.unmapped:
+			NC.label(_panel, "• " + str(w), "caption", "regular", PilotUI.DIM, true)
+	_focus(d.default)
 
 
 ## Write the previewed conversion into the Pilots folder as a new .evpilot and play it.
@@ -272,35 +317,14 @@ func import_commit() -> bool:
 ## A one-button message on whichever screen is up; OK returns to the Open Pilot screen.
 func _notice(text: String) -> void:
 	_nova.sound_beep(3)
-	if _classic:
-		var d := ClassicDialog.confirm(_nova, text, {"ok": "OK", "cancel": "Back"})
-		d.actions[0] = _show_list
-		d.actions[4] = _show_list
-		_c_show(d)
-		return
-	_clear("Open Pilot", _show_list)
-	_label(text)
-	_focus(_button("OK", _show_list))
+	Alert.show(self, {"title": "Open Pilot", "message": text,
+		"buttons": [{"title": "OK", "role": "cancel", "cb": _show_list}]})
 
 
 # --- manage pilots (the Pilots folder, one row per pilot) ------------------------------------
 
 func _show_manage() -> void:
-	if _classic:
-		_c_manage()
-		return
-	_clear("Pilots", _show_list)
-	_refresh_pilots()
-	var first: Button = null
-	for p in _pilots:
-		var b := _button("%s — %s · %s · %s cr" % [p.name, p.ship, p.system, _commas(int(p.credits))],
-				_show_pilot.bind(p))
-		if first == null:
-			first = b
-	if _pilots.is_empty():
-		_label("No pilots in the Pilots folder.")
-	var back := _button("Back", _show_list)
-	_focus(first if first != null else back)
+	_show_roster()
 
 
 func _cancel() -> void:
@@ -310,18 +334,7 @@ func _cancel() -> void:
 
 
 func _show_pilot(p: Dictionary) -> void:
-	if _classic:
-		_c_pilot(p)
-		return
-	_clear(p.name, _show_manage)
-	_label("%s · %s\n%s credits · %s\nScenario: %s · saved %s" % [
-		p.ship, p.system, _commas(int(p.credits)), p.rating,
-		p.scenario if p.scenario != "" else "—", p.updated])
-	var play := _button("Play", _load.bind(p))
-	_button("Save Slots & Backups…", _show_group.bind(p.id))
-	_button("Delete…", _confirm_delete.bind(p))
-	_button("Back", _show_manage)
-	_focus(play)
+	_show_group(str(p.id))
 
 
 func _load(p: Dictionary) -> void:
@@ -333,17 +346,12 @@ func _load(p: Dictionary) -> void:
 
 
 func _confirm_delete(p: Dictionary) -> void:
-	if _classic:
-		_c_confirm_delete(p)
-		return
-	_clear("Delete %s?" % p.name, _show_pilot.bind(p))
-	_label("This removes the pilot, every save slot and all backups. It cannot be undone.")
-	# Default focus is the safe choice.
-	var no := _button("No, keep this pilot", _show_pilot.bind(p))
-	_button("Yes, delete", func():
-		_nova.pilot_delete(_dir, p.id)
-		_show_manage())
-	_focus(no)
+	Alert.show(self, {"title": "Delete pilot?",
+		"message": "“%s” — its save slots and all backups will be removed. This can't be undone." % p.name,
+		"buttons": [{"title": "Cancel", "role": "cancel"},
+			{"title": "Delete", "role": "destructive", "cb": func():
+				_nova.pilot_delete(_dir, p.id)
+				_show_roster()}]})
 
 
 # --- new pilot -----------------------------------------------------------------
@@ -356,67 +364,145 @@ func _show_new() -> void:
 		_c_new()
 		return
 	if _scenarios.is_empty():
-		_clear("No Scenarios", _show_list)
-		_label("No starting scenarios were found in the game data.")
-		_focus(_button("Back", _show_list))
+		var nd := _nd("No Scenarios", 420.0, [{"text": "OK", "default": true, "cb": _show_list}], _show_list)
+		NC.label(_panel, "No starting scenarios were found in the game data. Import your EV Nova data first.", "body", "regular", T.WHITE, true)
 		return
 	_scenario_index = 0
 	_is_male = true
-	_clear("New Pilot", _show_list)
-	_scenario_btn = _button("", _cycle_scenario)
-	_name_edit = LineEdit.new()
+	_strict = false
+	# NewPilotView: with several scenarios a "Select a Scenario" step comes first (a plug-in added
+	# them); a single scenario goes straight to the name step.
+	if _scenarios.size() > 1:
+		_new_scenario_step()
+	else:
+		_new_name_step()
+
+
+var _start_btn: Control
+var _strict_btn: Control
+var _ship_edit: LineEdit
+var _pending_name := ""
+var _pending_nick := ""
+
+
+func _scenario_summary(sc: Dictionary) -> String:
+	return "%s cr · %s" % [_commas(int(sc.get("cash", 0))), sc.get("ship", "ship")]
+
+
+func _new_scenario_step() -> void:
+	var d := _nd("Select a Scenario", 500.0, [
+		{"text": "Cancel", "cb": _show_list},
+		{"text": "Continue", "default": true, "cb": _new_name_step}], _show_list)
+	var rows: Array = []
+	for i in _scenarios.size():
+		var sc: Dictionary = _scenarios[i]
+		var b := NC.select_row(_panel, str(sc.name), "", i == _scenario_index)
+		b.custom_minimum_size = Vector2(0, 44)
+		var cap := NC.caption(b, _scenario_summary(sc))
+		cap.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+		cap.offset_left = 10
+		cap.offset_bottom = -4
+		cap.add_theme_font_size_override("font_size", 11)
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		rows.append(b)
+		b.pressed.connect(func():
+			_scenario_index = i
+			for j in rows.size():
+				rows[j].set_pressed_no_signal(j == i))
+	_focus(rows[_scenario_index])
+
+
+## "Create a New Pilot": Full Name (+ dice), Nickname, Gender, Strict Play, scenario summary.
+func _new_name_step() -> void:
+	var back := _new_scenario_step if _scenarios.size() > 1 else _show_list
+	var sc: Dictionary = _scenarios[_scenario_index]
+	var d := _nd("Create a New Pilot", 400.0, [
+		{"text": "Cancel", "cb": back},
+		{"text": "Create", "default": true, "cb": _new_confirm_name}], back)
+	_start_btn = d.default
+	var r1 := HBoxContainer.new()
+	r1.add_theme_constant_override("separation", 10)
+	_panel.add_child(r1)
+	NC.label(r1, "Full Name:", "caption", "regular").custom_minimum_size = Vector2(84, 0)
+	_name_edit = NC.text_field("Captain", _pending_name if _pending_name != "" else _nova.pilot_default_name(0))
 	_name_edit.max_length = _nova.pilot_max_name_length()
-	_name_edit.text = _nova.pilot_default_name(0)
-	_name_edit.placeholder_text = "Pilot name"
-	_name_edit.custom_minimum_size = Vector2(0, 38)
-	# Enter in the box moves on to Start rather than doing nothing.
-	_name_edit.text_submitted.connect(func(_t): _start_btn.grab_focus())
-	_panel.add_child(_name_edit)
-	_button("Random name", func(): _name_edit.text = _nova.pilot_random_name())
-	_gender_btn = _button("", func():
-		_is_male = not _is_male
-		_refresh_new())
-	_strict_btn = _button("", func():
-		_strict = not _strict
-		_refresh_new())
-	_start_btn = _button("Start", _create)
-	_button("Back", _show_list)
-	_status = _label("", 14, Color(1.0, 0.55, 0.5))
-	_refresh_new()
-	_focus(_start_btn)
+	_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_name_edit.text_submitted.connect(func(_t): _new_confirm_name())
+	r1.add_child(_name_edit)
+	var dice := NC.icon_button("dice", func(): _name_edit.text = _nova.pilot_random_name(), T.AMBER, 34, 18)
+	dice.add_theme_stylebox_override("normal", T.box(T.FIELD_BG, 5, T.FIELD_BORDER, 1))
+	dice.tooltip_text = "Random name"
+	r1.add_child(dice)
+	var r2 := HBoxContainer.new()
+	r2.add_theme_constant_override("separation", 10)
+	_panel.add_child(r2)
+	NC.label(r2, "Nickname:", "caption", "regular").custom_minimum_size = Vector2(84, 0)
+	_nick_edit = NC.text_field("", _pending_nick if _pending_nick != "" else _nova.pilot_default_name(1))
+	_nick_edit.max_length = _nova.pilot_max_name_length()
+	_nick_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	r2.add_child(_nick_edit)
+	var r3 := HBoxContainer.new()
+	r3.add_theme_constant_override("separation", 12)
+	_panel.add_child(r3)
+	NC.label(r3, "Gender:", "caption", "regular").custom_minimum_size = Vector2(84, 0)
+	var seg := NC.segmented(r3, ["Male", "Female"], 0 if _is_male else 1, func(i: int): _is_male = i == 0)
+	seg.size_flags_horizontal = Control.SIZE_FILL
+	seg.custom_minimum_size = Vector2(200, 0)
+	_strict_btn = NC.toggle(_panel, "Strict Play", _strict, func(on: bool): _strict = on)
+	_strict_btn.custom_minimum_size = Vector2(200, 28)
+	_strict_btn.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	NC.caption(_panel, _scenario_summary(sc))
+	_status = NC.label(_panel, "", "caption", "regular", Color(1.0, 0.55, 0.5), true)
+	_focus(_name_edit)
 
 
-var _start_btn: Button
-var _strict_btn: Button
+func _new_confirm_name() -> void:
+	var nm := _name_edit.text.strip_edges() if is_instance_valid(_name_edit) else _pending_name
+	if nm == "":
+		_status_msg("Enter a name, or press the dice.")
+		return
+	_pending_name = nm
+	_pending_nick = _nick_edit.text.strip_edges() if is_instance_valid(_nick_edit) else _pending_nick
+	_new_ship_step()
+
+
+## The ship-name prompt after the pilot dialog (STR# 2002 #121); Cancel abandons the new pilot.
+func _new_ship_step() -> void:
+	var sc: Dictionary = _scenarios[_scenario_index]
+	var d := _nd("", 400.0, [
+		{"text": "Cancel", "cb": _show_list},
+		{"text": "OK", "default": true, "cb": _create}], _new_name_step)
+	NC.label(_panel, _nova.pilot_ship_name_prompt(int(sc.id)), "caption", "regular", T.WHITE, true).custom_minimum_size = Vector2(360, 0)
+	_ship_edit = NC.text_field("", _nova.pilot_default_name(2))
+	_ship_edit.max_length = 64
+	_ship_edit.text_submitted.connect(func(_t): _create())
+	_panel.add_child(_ship_edit)
+	_status = NC.label(_panel, "", "caption", "regular", Color(1.0, 0.55, 0.5), true)
+	_focus(_ship_edit)
 
 
 func _refresh_new() -> void:
-	var s: Dictionary = _scenarios[_scenario_index]
-	_scenario_btn.text = "Scenario: %s%s" % [s.name,
-		("  (%d/%d)" % [_scenario_index + 1, _scenarios.size()]) if _scenarios.size() > 1 else ""]
-	_gender_btn.text = "Pilot: %s" % ("Male" if _is_male else "Female")
-	if _strict_btn != null:
-		_strict_btn.text = "Strict Play: %s" % ("On" if _strict else "Off")
+	pass
 
 
 func _cycle_scenario() -> void:
 	_scenario_index = (_scenario_index + 1) % _scenarios.size()
-	_refresh_new()
 
 
 func _create() -> void:
 	if _classic:
 		_c_name_ok()
 		return
-	var nm := _name_edit.text.strip_edges()
+	var nm := _name_edit.text.strip_edges() if is_instance_valid(_name_edit) else _pending_name
 	if nm == "":
 		_status_msg("Enter a name, or press Random name.")
 		return
 	var s: Dictionary = _scenarios[_scenario_index]
-	# Nickname and ship name take the dialog's prefilled STR# 128 defaults, as
-	# the Apple flow does when the player accepts them.
-	var id: String = _nova.pilot_create_strict(_dir, int(s.id), nm, _is_male,
-			_nova.pilot_default_name(1), _nova.pilot_default_name(2), _strict)
+	# Nickname and ship name: the fields of the steps above, else the STR# 128 defaults (as when the
+	# player accepts the prefilled values).
+	var nick: String = _nick_edit.text.strip_edges() if is_instance_valid(_nick_edit) else (_pending_nick if _pending_nick != "" else _nova.pilot_default_name(1))
+	var ship: String = _ship_edit.text.strip_edges() if is_instance_valid(_ship_edit) else _nova.pilot_default_name(2)
+	var id: String = _nova.pilot_create_strict(_dir, int(s.id), nm, _is_male, nick, ship, _strict)
 	if id == "":
 		_status_msg("Could not create the pilot.")
 		return
@@ -459,6 +545,10 @@ static func _commas(n: int) -> String:
 # --- Classic dialogs ---------------------------------------------------------------------
 
 func _c_show(d: Control) -> void:
+	if not _ndlg.is_empty() and is_instance_valid(_ndlg.root):
+		_ndlg.root.queue_free()
+		_ndlg = {}
+	_on_back = Callable()
 	if _cdlg != null and is_instance_valid(_cdlg):
 		_cdlg.queue_free()
 	_cdialog = d
@@ -658,42 +748,24 @@ func _show_group(any_id: String) -> void:
 		return
 	_group_id = str(g.group)
 	var slots: Array = g.slots
-	if _classic:
-		var body := []
-		for sl in slots:
-			body.append({"label": "Play Slot %d" % int(sl.slot), "action": _play_slot.bind(str(sl.id))})
-		if slots.size() > 1:
-			for sl in slots:
-				body.append({"label": "Delete Slot %d" % int(sl.slot), "action": _confirm_delete_slot.bind(str(sl.id), int(sl.slot))})
-		if bool(g.can_add):
-			body.append({"label": "New Save Slot (%d/%d)" % [slots.size(), int(g.max_slots)], "action": _add_slot})
-		body.append({"label": "View All Backups", "action": _show_backups.bind(0)})
-		body.append({"label": "Rename", "action": _rename_group.bind(str(g.name))})
-		var lines := PackedStringArray()
-		lines.append(str(g.scenario) if str(g.scenario) != "" else "Pilot")
-		for sl in slots:
-			lines.append("Slot %d: %s" % [int(sl.slot), _slot_text(sl)])
-		_c_show(ClassicDialog.panel(_nova, {"title": str(g.name), "width": 520, "text": "\n".join(lines),
-			"body_buttons": body, "body_buttons_width": 300,
-			"footer_buttons": [{"label": "Back", "action": _show_manage, "cancel": true},
-				{"label": "Continue", "action": _play_slot.bind(str(g.most_recent)), "default": true}]}))
-		return
-	_clear(str(g.name), _show_manage)
-	_label(str(g.scenario) if str(g.scenario) != "" else "Pilot", 13)
-	var first: Button = null
+	# PilotGroupDetailView: header (scenario / Rename), SAVES, one row per slot, New Save Slot,
+	# View All Backups; footer Back / Continue (the most recent slot).
+	var d := _nd(str(g.name), 480.0, [
+		{"text": "Back", "cb": _show_roster},
+		{"text": "Continue", "default": true, "cb": _play_slot.bind(str(g.most_recent))}], _show_roster)
+	PilotUI.group_header(_panel, str(g.scenario), _rename_group.bind(str(g.name)))
+	PilotUI.caps_label(_panel, "SAVES")
+	var first: Control = null
 	for sl in slots:
-		var b := _button("Slot %d - %s" % [int(sl.slot), _slot_text(sl)], _play_slot.bind(str(sl.id)))
+		var parts := PilotUI.slot_row(_panel, sl, {"play": _play_slot.bind(str(sl.id)),
+			"delete": _confirm_delete_slot.bind(str(sl.id), int(sl.slot)), "multiple": slots.size() > 1})
 		if first == null:
-			first = b
-		if slots.size() > 1:
-			_button("   Delete Slot %d…" % int(sl.slot), _confirm_delete_slot.bind(str(sl.id), int(sl.slot)))
+			first = parts.play
 	if bool(g.can_add):
-		_button("New Save Slot (%d/%d)" % [slots.size(), int(g.max_slots)], _add_slot)
-	_button("View All Backups", _show_backups.bind(0))
-	_button("Rename…", _rename_group.bind(str(g.name)))
-	_button("Back", _show_manage)
-	_status = _label("", 14, Color(1.0, 0.55, 0.5))
-	_focus(first)
+		PilotUI.link_button(_panel, "New Save Slot (%d/%d)" % [slots.size(), int(g.max_slots)], "plus.square.on.square", _add_slot)
+	PilotUI.link_button(_panel, "View All Backups", "clock.arrow.circlepath", _show_backups.bind(0), T.SECONDARY)
+	_status = NC.label(_panel, "", "caption", "regular", Color(1.0, 0.55, 0.5), true)
+	_focus(d.default if first == null else first)
 
 
 func _play_slot(slot_id: String) -> void:
@@ -718,39 +790,15 @@ func _confirm_delete_slot(slot_id: String, slot: int) -> void:
 	var del := func():
 		_nova.pilot_delete_slot(_dir, slot_id)
 		_show_group(_group_id)
-	if _classic:
-		var d := ClassicDialog.confirm(_nova, msg, {"ok": "Delete", "cancel": "Keep"})
-		d.actions[0] = del
-		d.actions[4] = back
-		_c_show(d)
-		(func(): if is_instance_valid(d): d.item(4).grab_focus()).call_deferred()
-		return
-	_clear("Delete Slot %d?" % slot, back)
-	_label(msg)
-	var no := _button("No, keep it", back)
-	_button("Yes, delete", del)
-	_focus(no)
+	Alert.show(self, {"title": "Delete this save slot?",
+		"message": "This slot and its backups will be removed. This can't be undone.",
+		"buttons": [{"title": "Cancel", "role": "cancel"}, {"title": "Delete", "role": "destructive", "cb": del}]})
 
 
 func _rename_group(current: String) -> void:
-	if _classic:
-		var d := ClassicDialog.text_prompt(_nova, "Rename Pilot", current)
-		d.texts[4].max_length = int(_nova.pilot_max_name_length())
-		d.actions[0] = func(): _do_rename(d.edit_text(4))
-		d.actions[5] = _show_group.bind(_group_id)
-		_c_show(d)
-		(func(): if is_instance_valid(d): d.texts[4].grab_focus()).call_deferred()
-		return
-	_clear("Rename Pilot", _show_group.bind(_group_id))
-	var edit := LineEdit.new()
-	edit.text = current
-	edit.max_length = int(_nova.pilot_max_name_length())
-	edit.custom_minimum_size = Vector2(0, 38)
-	edit.text_submitted.connect(func(t): _do_rename(t))
-	_panel.add_child(edit)
-	_button("Save", func(): _do_rename(edit.text))
-	_button("Cancel", _show_group.bind(_group_id))
-	_focus(edit)
+	Alert.show(self, {"title": "Rename Pilot", "text": current, "buttons": [
+		{"title": "Cancel", "role": "cancel"},
+		{"title": "Save", "cb": func(t: String): _do_rename(t)}]})
 
 
 func _do_rename(name_text: String) -> void:
@@ -768,39 +816,21 @@ func _show_backups(page: int) -> void:
 	var empty_text := "No backups yet -- they are made automatically each time you launch from a spaceport, and on manual saves."
 	var slice := rows.slice(_backup_page * PAGE, (_backup_page + 1) * PAGE)
 	var more := rows.size() > PAGE
-	if _classic:
-		var body := []
-		for r in slice:
-			body.append({"label": "Slot %d - %s - %s cr" % [int(r.slot), r.system if str(r.system) != "" else "-", _commas(int(r.credits))],
-				"action": _restore.bind(str(r.slot_id), str(r.path))})
-		var footer := []
-		if more:
-			footer.append({"label": "More", "action": func(): _show_backups((_backup_page + 1) % ((rows.size() + PAGE - 1) / PAGE))})
-		footer.append({"label": "Close", "action": _show_group.bind(_group_id), "cancel": true})
-		var opts := {"title": "Backups", "width": 480, "body_buttons": body, "body_buttons_width": 400,
-			"footer_buttons": footer}
-		if rows.is_empty():
-			opts["text"] = empty_text
-		else:
-			opts["text"] = "Pick a backup to roll that slot back and play it."
-		_c_show(ClassicDialog.panel(_nova, opts))
-		if not body.is_empty():
-			(func(): if is_instance_valid(_cdialog): _cdialog.item(0).grab_focus()).call_deferred()
-		return
-	_clear("Backups", _show_group.bind(_group_id))
-	var first: Button = null
+	var bspecs := []
+	if more:
+		bspecs.append({"text": "More", "cb": func(): _show_backups((_backup_page + 1) % ((rows.size() + PAGE - 1) / PAGE))})
+	bspecs.append({"text": "Close", "default": true, "cb": _show_group.bind(_group_id)})
+	var d := _nd("Backups", 480.0, bspecs, _show_group.bind(_group_id))
+	var first: Control = null
+	if rows.is_empty():
+		var el := NC.label(_panel, "No backups yet — they're made automatically on landing, jumping, or manual save.", "caption", "regular", T.SECONDARY, true)
+		el.custom_minimum_size = Vector2(380, 0)
 	for r in slice:
-		var b := _button("Slot %d - %s - %s cr - %s" % [int(r.slot), r.system if str(r.system) != "" else "-",
-				_commas(int(r.credits)), r.updated], _restore.bind(str(r.slot_id), str(r.path)))
+		var b := PilotUI.backup_row(_panel, r, "Slot %d" % int(r.slot), _restore.bind(str(r.slot_id), str(r.path)))
 		if first == null:
 			first = b
-	if rows.is_empty():
-		_label(empty_text)
-	if more:
-		_button("More", func(): _show_backups((_backup_page + 1) % ((rows.size() + PAGE - 1) / PAGE)))
-	var close := _button("Close", _show_group.bind(_group_id))
-	_status = _label("", 14, Color(1.0, 0.55, 0.5))
-	_focus(first if first != null else close)
+	_status = NC.label(_panel, "", "caption", "regular", Color(1.0, 0.55, 0.5), true)
+	_focus(first if first != null else d.default)
 
 
 ## Roll `slot_id` back to the backup file and play it (Apple: restore, then model.play).

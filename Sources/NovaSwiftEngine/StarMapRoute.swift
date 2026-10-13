@@ -83,6 +83,22 @@ public struct StarMapRoute: Equatable, Sendable {
         return true
     }
 
+    /// The hyperspace-link cycle key (`\`, slot 0x0d; 0x0044b120): step the armed link
+    /// through `links` (the current system's resolvable links, at most 16), wrapping,
+    /// and arm it like a map click. With nothing armed it starts at the first (or the
+    /// last going back). False without links.
+    @discardableResult
+    public mutating func cycleLink(links: [Int], current: Int, forward: Bool = true,
+                                   linked: (Int, Int) -> Bool) -> Bool {
+        let links = Array(links.prefix(16))
+        guard !links.isEmpty else { return false }
+        let at = armed ? hops.first.flatMap { links.firstIndex(of: $0) } : nil
+        let next = at.map { ($0 + (forward ? 1 : links.count - 1)) % links.count }
+            ?? (forward ? 0 : links.count - 1)
+        _ = click(links[next], current: current, linked: linked)
+        return true
+    }
+
     /// Re-arm the route's first hop when it is one link from `current` — the
     /// sync `NovaUi_SyncTravelSelectionFromStarmapRoute` 0x004a8080 run by H,
     /// by closing the map and after a gate arrival. When the head is not

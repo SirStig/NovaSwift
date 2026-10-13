@@ -165,6 +165,9 @@ func _init() -> void:
 	_compose_hud_png(intf)
 
 	# --- converted pause menu ------------------------------------------------------------------------------------------------------
+	# The sidebar (Apple GameMenuView) is the default pause menu; "Sidebar pause menu" off gives the
+	# original's plain pause dialog, which is what this section converts.
+	Prefs.set_value("interface", "sidebar_pause_menu", false)
 	var pm = PauseMenu.new()
 	root.add_child(pm)
 	pm.setup(nova, true)
@@ -189,6 +192,7 @@ func _init() -> void:
 	await process_frame
 	_ok(pm2.classic_dialog == null and pm2.first_button is Button, "Nova Swift presentation keeps the plain pause menu")
 	pm2.queue_free()
+	Prefs.set_value("interface", "sidebar_pause_menu", true)
 
 	print("classic_ui_selfcheck: %d failure(s)" % _fails)
 	quit(1 if _fails > 0 else 0)

@@ -1,40 +1,53 @@
-# NOVA Swift — Settings screen, laid out like the Apple app's SettingsView: a card titled in amber,
-# a category sidebar on the left (with a pinned "Reset All Settings"), and the selected category's
-# grouped sections on the right -- amber section headers over dark rounded groups, toggles as amber
-# check boxes, "title ........ 70%" slider rows, footers in muted caption text. Persisted by Prefs.gd.
+# NOVA Swift — Settings screen: the Godot form of the Apple app's Launcher/SettingsView.swift, drawn
+# with the NovaSwift UI kit (ui/novaswift/): DialogChrome card (660 x 620, the original dialog frame
+# in Classic presentation / the modern steel-and-blue panel with "Modern dialog chrome" / a plain
+# dark card without game data), an amber "Settings" title, a category sidebar (NovaSelectRow chips
+# with a pinned red "Reset All Settings") and, on the right, the selected category's grouped
+# sections: amber icon headers over dark rounded groups, amber check boxes, "title .... 70%" slider
+# rows, value-chip menu pickers, segmented pickers, footers in muted caption text.
 #
-#   Interface (page "Presentation")   presentation preset + Original Preferences Window, interface
-#                                     options, storyline tags
-#   Controls                          dead zone, key layout, every rebindable action
-#   Graphics (page "Video")           fullscreen, vsync, window scale, gate links
-#   Audio                             mute + master / effects / interface / music
-#   Data & Advanced (page "Support")  Saved Games (Pilots folder), Support, Developer
+# Pages, in Apple's order (page key -> sidebar title):
+#   Presentation -> Interface      Presentation preset, Interface Options, HUD & Interface
+#   Gameplay                       speed, auto-target, landing confirm, tutorial hints, flight training
+#   Enhancements                   the GameplayEnhancements catalog + Port Options
+#   Controls                       sticks, rebinding (inline: the Apple app's ControlsView sheet)
+#   Video -> Graphics              quality, camera, particles ... + Window
+#   Audio                          mute + the four volume sliders
+#   Accessibility                  reduce flashing & motion, colourblind mode
+#   Support -> Data & Advanced     Saved Games, Support, Developer
 #
-# Opened from the main menu and the in-flight pause menu. Everything is reachable by Godot focus
-# navigation alone (arrows / d-pad / left stick move, Enter / A activate, left/right adjust a
-# focused slider, Esc / B go back), with the thick focus ring from ShellUI's theme. Moving focus
-# onto a sidebar entry shows its page; Right (or Down from the last entry) enters the page, Up from
-# its first control returns to the sidebar.
+# Every row writes the Prefs key listed in docs/GODOT_SETTINGS_KEYS.md (the SettingsPlumbing
+# autoload applies it; nothing here talks to the bridge). Rows Apple has that Godot has no key for at
+# all (touch / haptics / cursor speed, HD & 3D, graphics-quality presets) are drawn anyway and persist
+# to Prefs [apple]; each is listed in `todo_rows` ("Page / Title -> apple.key"). Rows whose key exists
+# but whose behaviour is not read yet (quick hyperjump, show planet names, ship bars, particle density,
+# starfield density, Windows hyperspace look, sidebar pause menu fallback ...) still write their key.
 #
-# The original Preferences window (DLOG 4003, screens/ClassicPreferences.gd) opens only from a
-# button on the Interface page -- it never replaces this screen.
+# Everything is reachable by Godot focus navigation alone (arrows / d-pad / stick move, Enter / A
+# activate, left / right step a focused slider, Esc / B go back); the kit draws Apple's controller
+# hover-grow + an amber ring only for keyboard / pad. Moving focus onto a sidebar entry shows its
+# page; Right (or Down from the last entry) enters the page, Up from its first control returns.
 #
-# Controls page: every rebindable action from Controls.BINDINGS with its key and its pad button.
+# The original Preferences window (DLOG 4003, screens/ClassicPreferences.gd) opens only from the
+# button in the Presentation section -- it never replaces this screen.
+#
+# Controls page: every rebindable action from Controls.BINDINGS with its key and pad button.
 # Activate either to rebind: the next key (or pad button) pressed is captured, Esc cancels (a pad
-# press that is not wanted just times out after 6 s). A binding already held by another action in
-# the same group (Flight / Docked / Galaxy map) is swapped onto it, as PadBindings.bind does in the
-# Apple app. Sticks, triggers and the analog axes are fixed. "Defaults" restores the page;
-# everything is re-applied immediately (Controls.register()) and written to user://settings.cfg
-# when the screen closes.
-#
-# Game speed is not here: the bridge doesn't expose GameSpeedRules yet.
+# press that is not wanted times out after 6 s). A binding already held by another action in the
+# same group is swapped onto it (PadBindings.bind). Re-applied immediately (Controls.register());
+# written to user://settings.cfg when the screen closes.
 extends CanvasLayer
 
-const ShellUI = preload("res://screens/ShellUI.gd")
+const T = preload("res://ui/novaswift/NovaTheme.gd")
+const NC = preload("res://ui/novaswift/NovaControls.gd")
+const Chrome = preload("res://ui/novaswift/NovaChrome.gd")
+const Alert = preload("res://ui/novaswift/NovaAlert.gd")
+const Inert = preload("res://ui/novaswift/NovaInert.gd")
 const Controls = preload("res://Controls.gd")
 const Prefs = preload("res://Prefs.gd")
 const PilotFiles = preload("res://screens/PilotFiles.gd")
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
+const ClassicDialog = preload("res://ui/classic/ClassicDialog.gd")
 const ClassicPreferences = preload("res://screens/ClassicPreferences.gd")
 
 ## Audio/video/deadzone changed (Main re-applies volumes to GameAudio + music).
@@ -42,16 +55,20 @@ signal changed
 signal closed
 ## "Flight Training" (Apple Settings > Gameplay): the host closes Settings and runs the course.
 signal training_requested
+## "Import Data" / "Preview Setup Wizard" (Apple Settings > Data & Advanced): the host closes
+## Settings and opens the data-setup screen.
+signal data_setup_requested
 
 const CAPTURE_TIMEOUT := 6.0
-const DevSettingsPage = preload("res://debug/DevSettingsPage.gd")
-const PluginsScreen = preload("res://screens/Plugins.gd")
 ## Page keys in sidebar order (Apple SettingsView category order), and what the sidebar calls them.
-const PAGES := ["Presentation", "Controls", "Video", "Audio", "Plugins", "Support"]
-const PAGE_TITLES := {"Presentation": "Interface", "Controls": "Controls", "Video": "Graphics",
-	"Audio": "Audio", "Plugins": "Plug-ins", "Support": "Data & Advanced"}
-const AMBER := Color(1.0, 0.7, 0.28)         # novaAmber
-const GROUP_BG := Color(0.085, 0.09, 0.115)
+const PAGES := ["Presentation", "Gameplay", "Enhancements", "Controls", "Video", "Audio", "Accessibility", "Support"]
+const PAGE_TITLES := {"Presentation": "Interface", "Gameplay": "Gameplay", "Enhancements": "Enhancements",
+	"Controls": "Controls", "Video": "Graphics", "Audio": "Audio", "Accessibility": "Accessibility",
+	"Support": "Data & Advanced"}
+const PAGE_ICONS := {"Presentation": "sparkles.tv", "Gameplay": "gamecontroller", "Enhancements": "wand.and.stars",
+	"Controls": "dpad", "Video": "sparkles", "Audio": "speaker.wave.2", "Accessibility": "accessibility",
+	"Support": "externaldrive"}
+const AMBER := T.AMBER
 
 var page := "Presentation"
 var tab_buttons := {}          # page name -> Button (the sidebar entries)
@@ -61,109 +78,91 @@ var first_control: Control
 ## Set by the host before setup(): Settings was opened from the main menu, so Flight Training can run.
 var allow_training := false
 var classic_prefs: Node        # the original Preferences window while it is up
+## Apple rows drawn without engine wiring on the pages built so far ("Page / Title -> apple.key").
+var todo_rows: Array = []
+var frame: Dictionary          # Chrome.card_frame result
 
 var _nova: Object
 var _root: Control
 var _content: VBoxContainer
-var _group: VBoxContainer      # the section group rows are added to
+var _group: NC.Group           # the section group rows are added to
 var _status: Label
 var _scroll: ScrollContainer
 var _reset_all_btn: Button
-var _reset_armed := false
 var _capture := {}             # {action, field, button} while waiting for an input
 var _capture_serial := 0
 var _dirty := false
+var _pl: Object                # NovaPlugins handle (the Manual plug-in order enhancement)
 
 
 func setup(nova: Object, start_page := "Presentation") -> void:
 	_nova = nova
 	layer = 70
-	_root = ShellUI.screen(self, 0.96)
-	var center := CenterContainer.new()
-	center.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_root.add_child(center)
-	var card := PanelContainer.new()
-	card.custom_minimum_size = Vector2(900, 600)
-	var cs := StyleBoxFlat.new()
-	cs.bg_color = ShellUI.PANEL
-	cs.border_color = Color(AMBER.r, AMBER.g, AMBER.b, 0.35)
-	cs.set_border_width_all(2)
-	cs.set_corner_radius_all(6)
-	cs.set_content_margin_all(16)
-	card.add_theme_stylebox_override("panel", cs)
-	center.add_child(card)
-	var outer := VBoxContainer.new()
-	outer.add_theme_constant_override("separation", 10)
-	card.add_child(outer)
+	frame = Chrome.card_frame(self, "Settings", 660.0, 620.0, close)
+	_root = frame.root
+	var body: Control = frame.body
+	var split := HBoxContainer.new()
+	split.set_anchors_preset(Control.PRESET_FULL_RECT)
+	split.offset_left = 14
+	split.offset_right = -14
+	split.offset_bottom = -10
+	split.add_theme_constant_override("separation", 0)
+	body.add_child(split)
 
-	var title := Label.new()
-	title.text = "Settings"
-	title.add_theme_font_size_override("font_size", 28)
-	title.add_theme_color_override("font_color", AMBER)
-	outer.add_child(title)
-
-	var body := HBoxContainer.new()
-	body.add_theme_constant_override("separation", 12)
-	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	outer.add_child(body)
-
-	# Sidebar: one entry per category, then the pinned destructive reset.
+	# Sidebar: one NovaSelectRow per category, then the pinned destructive reset.
+	var side_wrap := MarginContainer.new()
+	side_wrap.custom_minimum_size = Vector2(176, 0)
+	for s in ["left", "right"]:
+		side_wrap.add_theme_constant_override("margin_" + s, 8)
+	side_wrap.add_theme_constant_override("margin_top", 10)
+	side_wrap.add_theme_constant_override("margin_bottom", 10)
+	split.add_child(side_wrap)
 	var side := VBoxContainer.new()
-	side.custom_minimum_size = Vector2(190, 0)
 	side.add_theme_constant_override("separation", 6)
-	body.add_child(side)
+	side_wrap.add_child(side)
 	for p in PAGES:
-		var b := Button.new()
-		b.text = PAGE_TITLES[p]
-		b.toggle_mode = true
-		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		b.custom_minimum_size = Vector2(0, 40)
+		var b := NC.select_row(side, PAGE_TITLES[p], PAGE_ICONS[p], p == page)
 		b.pressed.connect(show_page.bind(p))
 		b.focus_entered.connect(_on_tab_focus.bind(p))
-		side.add_child(b)
 		tab_buttons[p] = b
-	var spacer := Control.new()
-	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	side.add_child(spacer)
-	_reset_all_btn = Button.new()
-	_reset_all_btn.text = "Reset All Settings"
+	NC.spacer(side, 0, true)
+	_reset_all_btn = NC.button("Reset All Settings", "plain", _reset_all_confirm, "arrow.counterclockwise")
+	_reset_all_btn.add_theme_color_override("font_color", T.RED)
+	for st in ["font_hover_color", "font_pressed_color", "font_focus_color"]:
+		_reset_all_btn.add_theme_color_override(st, T.RED)
+	_reset_all_btn.icon = T.icon("arrow.counterclockwise", 14, T.RED)
 	_reset_all_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	_reset_all_btn.custom_minimum_size = Vector2(0, 36)
-	_reset_all_btn.add_theme_color_override("font_color", Color(1.0, 0.45, 0.4))
-	_reset_all_btn.pressed.connect(_reset_all)
+	T.style_text(_reset_all_btn, "caption", "regular", T.RED)
 	side.add_child(_reset_all_btn)
 
-	body.add_child(VSeparator.new())
+	var divider := ColorRect.new()
+	divider.color = Color(1, 1, 1, 0.12)
+	divider.custom_minimum_size = Vector2(1, 0)
+	split.add_child(divider)
 
+	var right := VBoxContainer.new()
+	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	right.add_theme_constant_override("separation", 0)
+	split.add_child(right)
 	_scroll = ScrollContainer.new()
 	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_scroll.custom_minimum_size = Vector2(0, 440)
 	_scroll.follow_focus = true
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	body.add_child(_scroll)
+	right.add_child(_scroll)
+	var pad := MarginContainer.new()
+	pad.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for s in ["left", "right"]:
+		pad.add_theme_constant_override("margin_" + s, 10)
+	pad.add_theme_constant_override("margin_top", 10)
+	pad.add_theme_constant_override("margin_bottom", 10)
+	_scroll.add_child(pad)
 	_content = VBoxContainer.new()
 	_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_content.add_theme_constant_override("separation", 6)
-	_scroll.add_child(_content)
-
-	_status = ShellUI.label(outer, "", 14, Color(1.0, 0.75, 0.4))
-	var foot := HBoxContainer.new()
-	foot.add_theme_constant_override("separation", 8)
-	outer.add_child(foot)
-	var defaults := Button.new()
-	defaults.text = "Defaults"
-	defaults.custom_minimum_size = Vector2(160, 40)
-	defaults.pressed.connect(_reset_page)
-	foot.add_child(defaults)
-	var fill := Control.new()
-	fill.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	foot.add_child(fill)
-	var back := Button.new()
-	back.text = "Done"
-	back.custom_minimum_size = Vector2(160, 40)
-	back.pressed.connect(close)
-	foot.add_child(back)
+	_content.add_theme_constant_override("separation", 4)
+	pad.add_child(_content)
+	_status = NC.label(right, "", "caption", "regular", Color(1.0, 0.75, 0.4), true)
 	show_page(start_page if PAGES.has(start_page) else "Presentation")
 
 
@@ -197,29 +196,36 @@ func _on_tab_focus(p: String) -> void:
 func show_page(p: String) -> void:
 	_cancel_capture()
 	page = p
-	_reset_armed = false
-	_reset_all_btn.text = "Reset All Settings"
 	for tab in tab_buttons:
-		tab_buttons[tab].button_pressed = tab == p
+		tab_buttons[tab].set_pressed_no_signal(tab == p)
 	for c in _content.get_children():
 		_content.remove_child(c)
 		c.queue_free()
 	sliders.clear()
 	rebind_buttons.clear()
+	todo_rows.clear()
 	_status.text = ""
 	first_control = null
-	_group = _content
+	_group = null
 	_scroll.scroll_vertical = 0
 	match p:
-		"Audio": _build_audio()
-		"Video": _build_video()
-		"Presentation": _build_presentation()
+		"Presentation":
+			_build_presentation()
+			_build_hud_interface()
+		"Gameplay": _build_gameplay()
+		"Enhancements": _build_enhancements()
 		"Controls": _build_controls()
-		"Plugins": _build_plugins()
+		"Video": _build_video()
+		"Audio": _build_audio()
+		"Accessibility": _build_accessibility()
 		"Support": _build_support()
 	_link_focus(p)
 	# Land focus on the sidebar entry, so up/down flips pages and right enters the page.
-	ShellUI.focus(tab_buttons[p])
+	_focus_later(tab_buttons[p])
+
+
+static func _focus_later(c: Control) -> void:
+	(func(): if is_instance_valid(c) and c.is_inside_tree(): c.grab_focus()).call_deferred()
 
 
 ## Right from the sidebar enters the page; Up from the page's first control returns to it.
@@ -236,120 +242,122 @@ func _link_focus(p: String) -> void:
 			first_control.focus_neighbor_left = first_control.get_path_to(tab)).call_deferred()
 
 
-# --- Apple-style building blocks -------------------------------------------------------
+# --- kit wrappers: rows bound to Prefs ----------------------------------------------------
 
-## A titled group: amber header, a dark rounded box the rows go into, a muted footer under it.
-## Everything added afterwards (rows, checks, sliders) lands in the box until the next section().
-func _section(title_text: String, footer := "") -> VBoxContainer:
-	var head := Label.new()
-	head.text = title_text
-	head.add_theme_font_size_override("font_size", 16)
-	head.add_theme_color_override("font_color", AMBER)
-	var top := _content.get_child_count() > 0
-	if top:
-		var gap := Control.new()
-		gap.custom_minimum_size = Vector2(0, 8)
-		_content.add_child(gap)
-	_content.add_child(head)
-	var box := PanelContainer.new()
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = GROUP_BG
-	sb.border_color = Color(1, 1, 1, 0.07)
-	sb.set_border_width_all(1)
-	sb.set_corner_radius_all(8)
-	sb.set_content_margin_all(12)
-	box.add_theme_stylebox_override("panel", sb)
-	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_content.add_child(box)
-	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 8)
-	box.add_child(v)
-	_group = v
-	if footer != "":
-		var f := ShellUI.label(_content, footer, 12)
-		f.add_theme_color_override("font_color", Color(0.58, 0.61, 0.69))
-	return v
+func _section(title_text: String, footer := "", icon := "") -> NC.Group:
+	_group = NC.section(_content, title_text, icon, footer)
+	return _group
 
 
-func _row(label: String) -> HBoxContainer:
-	var r := HBoxContainer.new()
-	r.add_theme_constant_override("separation", 12)
-	var l := Label.new()
-	l.text = label
-	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	l.add_theme_font_size_override("font_size", 15)
-	r.add_child(l)
-	_group.add_child(r)
-	return r
-
-
-## A slider row as in Apple's sliderRow: title left, value right, the slider under them.
-func _slider(label: String, section: String, key: String, lo: float, hi: float, step: float,
-		fmt: Callable) -> HSlider:
-	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 2)
-	_group.add_child(v)
-	var head := HBoxContainer.new()
-	v.add_child(head)
-	var t := Label.new()
-	t.text = label
-	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	t.add_theme_font_size_override("font_size", 15)
-	head.add_child(t)
-	var val := Label.new()
-	val.add_theme_font_size_override("font_size", 13)
-	val.add_theme_color_override("font_color", ShellUI.MUTED)
-	head.add_child(val)
-	var s := HSlider.new()
-	s.min_value = lo
-	s.max_value = hi
-	s.step = step
-	s.value = float(Prefs.get_value(section, key))
-	s.custom_minimum_size = Vector2(0, 22)
-	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	s.focus_mode = Control.FOCUS_ALL
-	v.add_child(s)
-	val.text = fmt.call(s.value)
-	s.value_changed.connect(func(x: float):
-		val.text = fmt.call(x)
-		Prefs.set_value(section, key, x)
-		_after_change(section))
-	sliders[section + "." + key] = s
-	if first_control == null:
-		first_control = s
-	return s
-
-
-func _check(label: String, section: String, key: String) -> CheckButton:
-	var c := CheckButton.new()
-	c.text = label
-	c.button_pressed = bool(Prefs.get_value(section, key))
-	c.custom_minimum_size = Vector2(0, 34)
-	c.toggled.connect(func(on: bool):
-		Prefs.set_value(section, key, on)
-		_after_change(section))
-	_group.add_child(c)
+func _note_first(c: Control) -> void:
 	if first_control == null:
 		first_control = c
+
+
+## Pref lookup that never errors for keys the Prefs table declares no default for (the Apple rows
+## without wiring, sidebar_pause_menu): the stored value, else Prefs' own default, else `default`.
+static func _pv(section: String, key: String, default: Variant) -> Variant:
+	Prefs.get_value("audio", "master")   # makes sure the file is loaded
+	return Prefs._cfg.get_value(section, key, Prefs.DEFAULTS.get(section, {}).get(key, default))
+
+
+func _check(label: String, section: String, key: String, default: Variant = null) -> CheckBox:
+	var c := NC.toggle(_group, label, bool(_pv(section, key, default if default != null else false)), func(on: bool):
+		Prefs.set_value(section, key, on)
+		_after_change(section))
+	_note_first(c)
 	return c
 
 
-func _button(label: String, cb: Callable) -> Button:
-	var b := Button.new()
-	b.text = label
-	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	b.custom_minimum_size = Vector2(0, 38)
-	b.pressed.connect(cb)
-	_group.add_child(b)
-	if first_control == null:
-		first_control = b
+func _slider(label: String, section: String, key: String, lo: float, hi: float, step: float,
+		fmt: Callable, disabled := false) -> HSlider:
+	var s := NC.slider(_group, label, float(_pv(section, key, lo)), lo, hi, step, fmt, func(x: float):
+		Prefs.set_value(section, key, x)
+		_after_change(section))
+	sliders[section + "." + key] = s
+	if disabled:
+		s.editable = false
+		(s.get_meta("row") as Control).modulate.a = 0.5
+	_note_first(s)
+	return s
+
+
+func _menu(label: String, section: String, key: String, options: Array, default_i := 0) -> OptionButton:
+	var o := NC.menu(_group, label, options, int(_pv(section, key, default_i)), func(i: int):
+		Prefs.set_value(section, key, i)
+		_after_change(section))
+	_note_first(o)
+	return o
+
+
+func _button(label: String, cb: Callable, icon := "") -> Button:
+	var b := NC.form_button(_group, label, icon, cb)
+	_note_first(b)
 	return b
 
 
 func _caption(text: String) -> Label:
-	var l := ShellUI.label(_group, text, 12)
-	l.add_theme_color_override("font_color", Color(0.58, 0.61, 0.69))
-	return l
+	var h := NC.caption(null, text)
+	_group.add_row(h, 0.0)
+	return h
+
+
+# TODO(wiring) rows: the Apple row exists, the engine does not read it yet. The value persists to
+# Prefs [apple] under the Apple GameSettings property name (snake_case).
+func _todo_note(title_text: String, key: String) -> void:
+	todo_rows.append("%s / %s -> apple.%s" % [PAGE_TITLES.get(page, page), title_text, key])
+
+
+func _apple_check(label: String, key: String, default := false) -> CheckBox:
+	_todo_note(label, key)
+	return _check(label, "apple", key, default)
+
+
+func _apple_slider(label: String, key: String, lo: float, hi: float, step: float, fmt: Callable,
+		default := 1.0, disabled := false) -> HSlider:
+	_todo_note(label, key)
+	var s := NC.slider(_group, label, float(_pv("apple", key, default)), lo, hi, step, fmt, func(x: float):
+		Prefs.set_value("apple", key, x)
+		_mark_changed())
+	sliders["apple." + key] = s
+	if disabled:
+		s.editable = false
+		(s.get_meta("row") as Control).modulate.a = 0.5
+	_note_first(s)
+	return s
+
+
+func _apple_menu(label: String, key: String, options: Array, default_i := 0) -> OptionButton:
+	_todo_note(label, key)
+	return _menu(label, "apple", key, options, default_i)
+
+
+## A menu bound to an enum pref stored as a String (Apple's raw values, docs/GODOT_SETTINGS_KEYS.md).
+func _enum_menu(label: String, section: String, key: String, values: Array, labels: Array) -> OptionButton:
+	var cur := str(Prefs.get_value(section, key))
+	var o := NC.menu(_group, label, labels, maxi(0, values.find(cur)), func(i: int):
+		Prefs.set_value(section, key, values[i])
+		_after_change(section))
+	_note_first(o)
+	return o
+
+
+## A segmented picker bound to an enum pref stored as a String.
+func _enum_segmented(section: String, key: String, values: Array, labels: Array) -> HBoxContainer:
+	var h := NC.segmented(_group, labels, maxi(0, values.find(str(Prefs.get_value(section, key)))), func(i: int):
+		Prefs.set_value(section, key, values[i])
+		_after_change(section))
+	_note_first(h.get_meta("buttons")[0])
+	return h
+
+
+func _apple_segmented(key: String, options: Array, default_i: int) -> HBoxContainer:
+	_todo_note("segmented " + key, key)
+	var h := NC.segmented(_group, options, int(_pv("apple", key, default_i)), func(i: int):
+		Prefs.set_value("apple", key, i)
+		_mark_changed())
+	_note_first(h.get_meta("buttons")[0])
+	return h
 
 
 func _after_change(section: String) -> void:
@@ -364,81 +372,62 @@ func _pct(x: float) -> String:
 	return "%d%%" % roundi(x * 100.0)
 
 
-# --- Audio ---------------------------------------------------------------------------
-
-func _build_audio() -> void:
-	_section("Audio", "Master scales everything; the individual sliders balance music, weapon/engine effects and interface clicks beneath it. Music plays over the main menu only, as in the original (if your data has the track as an mp3).")
-	_check("Mute all", "audio", "muted")
-	_slider("Master", "audio", "master", 0.0, 1.0, 0.05, _pct)
-	_slider("Effects", "audio", "sfx", 0.0, 1.0, 0.05, _pct)
-	_slider("Interface", "audio", "ui", 0.0, 1.0, 0.05, _pct)
-	_slider("Music", "audio", "music", 0.0, 1.0, 0.05, _pct)
-
-
-# --- Graphics ------------------------------------------------------------------------
-
-func _build_video() -> void:
-	_section("Graphics", "Window scale applies when not fullscreen. The play area adapts to 16:9 and 16:10 (Steam Deck) screens. Gate links draw hypergate and wormhole spokes on the plain galaxy map -- an enhancement the original lacks.")
-	_check("Fullscreen", "video", "fullscreen")
-	_check("VSync", "video", "vsync")
-	_slider("Window scale", "video", "scale", 0.75, 2.0, 0.25,
-		func(x: float): return "%dx%d" % [roundi(1280 * x), roundi(720 * x)])
-	_check("Gate links on the galaxy map (enhancement)", "map", "gate_links")
-	_section("Flight View", "Classic is the original's fixed, north-up camera. Look ahead drifts the view ahead of your ship; Ship up turns the world so your ship always points up; Chase falls back to Ship up (the 3D tilt needs live 3D hulls). Screen shake and the camera views are enhancements the original lacks; Reduce flashing also steadies the exhaust and removes sparks and flashes.")
-	_slider("Camera view", "graphics", "camera_view", 0, 3, 1,
-		func(x: float): return ["Classic", "Look ahead", "Ship up", "Chase"][clampi(int(x), 0, 3)])
-	_slider("Camera zoom", "graphics", "camera_zoom", 0.5, 2.0, 0.25,
-		func(x: float): return "%.2fx world per pixel" % x)
-	_check("Screen shake (enhancement)", "graphics", "screen_shake")
-	_check("Reduce flashing", "graphics", "reduce_flashing")
+func _rebuild() -> void:
+	show_page.call_deferred(page)
 
 
 # --- Interface (Presentation) ----------------------------------------------------------
 
-## Presentation: Classic (the original's status bar / dialogs / menu, drawn from the
-## player's own data -- the default) or Nova Swift (the port's own screens), as in
-## the Apple app's GameSettings presets; the toggles below mix them. Reads
-## Prefs[presentation]; screens pick the change up the next time they open (the
-## HUD immediately).
+const PRESET_BLURB := {
+	"classic": "The faithful EV Nova look, rendered from your own game data.",
+	"enhanced": "Classic, with the galaxy map opened up to full screen.",
+	"nova_swift": "The port's own modern interface — modern menu, dialogs and HUD.",
+	"custom": "Your own mix of interface options.",
+}
+
+
 func _build_presentation() -> void:
-	var mode_name := {Prefs.UI_CLASSIC: "Classic", Prefs.UI_ENHANCED: "Enhanced", Prefs.UI_NOVA_SWIFT: "Nova Swift",
-		Prefs.UI_CUSTOM: "Custom"}
-	_section("Presentation", "Classic draws the original interface from your game data (status bar, dialogs, menu). Enhanced adds the full-screen galaxy map. Nova Swift uses the port's own modern screens. Presets are templates -- pick one, then fine-tune the options below. Current: %s." % mode_name[Prefs.ui_mode()])
-	var modes := HBoxContainer.new()
-	modes.add_theme_constant_override("separation", 8)
-	_group.add_child(modes)
-	var mode_buttons := {}
-	for m in [[Prefs.UI_CLASSIC, "Classic"], [Prefs.UI_ENHANCED, "Enhanced"], [Prefs.UI_NOVA_SWIFT, "Nova Swift"]]:
-		var b := Button.new()
-		b.text = m[1]
-		b.toggle_mode = true
-		b.custom_minimum_size = Vector2(130, 38)
-		b.button_pressed = Prefs.ui_mode() == m[0]
-		b.pressed.connect(func():
-			Prefs.apply_ui_mode(m[0])
-			_mark_changed()
-			show_page.call_deferred("Presentation"))
-		modes.add_child(b)
-		mode_buttons[m[0]] = b
-	if first_control == null:
-		first_control = mode_buttons[Prefs.UI_CLASSIC]
+	var mode: String = Prefs.ui_mode()
+	_section("Presentation", PRESET_BLURB[mode] + " Presets are templates — pick one to set the interface options below, then fine-tune any of them individually.", "sparkles.tv")
+	# Nova Swift is only offered to someone already using it; Custom only reflects a hand-mixed state.
+	var keys: Array = [Prefs.UI_CLASSIC, Prefs.UI_ENHANCED]
+	var names: Array = ["Classic", "Enhanced"]
+	if mode == Prefs.UI_NOVA_SWIFT:
+		keys.append(Prefs.UI_NOVA_SWIFT)
+		names.append("Nova Swift")
+	keys.append(Prefs.UI_CUSTOM)
+	names.append("Custom")
+	var h := NC.segmented(_group, names, keys.find(mode), func(i: int):
+		if keys[i] == Prefs.UI_CUSTOM:
+			(func(): show_page(page)).call_deferred()
+			return
+		Prefs.apply_ui_mode(keys[i])
+		_mark_changed()
+		_rebuild())
+	_note_first(h.get_meta("buttons")[0])
 	if ClassicTheme.has_data():
-		_button("Original Preferences Window…", open_classic_preferences)
-	_section("Interface Options", "Mix the port's modern touches over the authentic EV Nova presentation. Full-screen map opens the galaxy map without its dialog frame. Storyline tags mark missions that continue a reconstructed campaign and jump to it in the Story Guide -- an aftermarket hint the original game never had.")
+		_button("Original Preferences Window…", open_classic_preferences, "macwindow")
+	_section("Interface Options", "Mix the port's modern touches over the authentic EV Nova presentation. Full-screen map opens the galaxy map without its dialog frame. The sidebar pause menu (on by default) opens the port's own menu, with the Story Guide and, in debug mode, the Debug Suite; off, pausing opens the original's plain pause dialog. Storyline tags mark missions that continue a reconstructed campaign and jump to it in the Story Guide — an aftermarket hint the original game never had.", "slider.horizontal.3")
 	for t in [["Full-screen galaxy map", "fullscreen_galaxy_map"], ["Modern main menu", "modern_menu"],
 			["Modern dialog chrome", "modern_dialogs"], ["Modern HUD", "modern_hud"]]:
 		var c := _check(t[0], "presentation", t[1])
-		c.toggled.connect(func(_on: bool): show_page.call_deferred("Presentation"))
-	_check("Show mission storyline tags", "story", "show_mission_storyline_tags")
-	_section("Tutorial", "Tutorial hints show one-time tips as you play (your first flight, the spaceport, the Mission BBS, the Outfitter) -- \"Show all hints again\" brings them back. Flight Training is a safe practice flight that never touches your pilot.")
-	var hc := _check("Tutorial hints", "hints", "enabled")
-	hc.toggled.connect(func(_on: bool): show_page.call_deferred("Presentation"))
-	if Prefs.hints_enabled():
-		_button("Show all hints again", func():
-			Prefs.reset_hints()
-			_status.text = "Hints will show again.")
-	if allow_training:
-		_button("Flight Training", func(): training_requested.emit())
+		c.toggled.connect(func(_on: bool): _rebuild())
+	# Sidebar pause menu: read by screens/PauseMenu.gd (Prefs interface/sidebar_pause_menu, default on).
+	_check("Sidebar pause menu", "interface", "sidebar_pause_menu")
+	_check("Show mission storyline tags", "story", "show_mission_storyline_tags", true)
+
+
+## On-screen HUD readouts and their look (Apple hudInterfaceSection). Keys: docs/GODOT_SETTINGS_KEYS.md.
+func _build_hud_interface() -> void:
+	_section("HUD & Interface", "On-screen readouts and their look, in every presentation. Hull/shield bars over ships weren't in the original — set them to Hidden for the authentic look, and the original never labelled planets in flight either. Larger and high-contrast HUD affect the modern HUD; UI scale resizes menus and dialogs everywhere.", "rectangle.on.rectangle")
+	_check("Show radar", "interface", "show_radar")
+	_check("Show planet names", "graphics", "show_planet_labels")          # key only: no stellar labels drawn yet
+	_enum_menu("Hull / shield bars", "graphics", "ship_bar_position", ["above", "below", "off"], ["Above Ships", "Below Ships", "Hidden"])   # key only
+	_slider("HUD opacity", "interface", "hud_opacity", 0.2, 1.0, 0.05, _pct)
+	_check("Larger HUD", "accessibility", "larger_hud")
+	_check("High-contrast HUD", "accessibility", "high_contrast_hud")
+	_slider("Overall UI scale", "interface", "ui_scale", 0.8, 1.4, 0.05, _pct)
+	_check("Show FPS counter", "graphics", "show_fps")
 
 
 ## The original's Preferences window (DLOG 4003) over Settings; Settings comes back, focused, when
@@ -446,7 +435,8 @@ func _build_presentation() -> void:
 func open_classic_preferences() -> Node:
 	if classic_prefs != null:
 		return classic_prefs
-	_root.visible = false
+	# Overlay, not replacement: Settings stays drawn underneath (inert) while the original window is up.
+	var tok := Inert.hold(_root)
 	classic_prefs = ClassicPreferences.new()
 	add_child(classic_prefs)
 	classic_prefs.setup(_nova)
@@ -455,45 +445,138 @@ func open_classic_preferences() -> Node:
 		(func(): show_page("Controls")).call_deferred())
 	classic_prefs.closed.connect(func():
 		classic_prefs = null
-		_root.visible = true
+		Inert.release(tok)
 		show_page(page))
 	return classic_prefs
+
+
+# --- Gameplay -------------------------------------------------------------------------------
+
+func _build_gameplay() -> void:
+	_section("Gameplay", "Game speed sets the overall pace — Authentic is the faithful, unhurried EV Nova cruise; drop to 0.5× for more room to react in a dogfight, or step it up to 8× when you'd rather not wait. Every speed applies the rules of EV Nova's own Caps Lock 2× mode (jumps take the same real time, beams hit as often) at its own multiplier, and turning Caps Lock on in flight doubles whichever speed you pick, as in the original; a co-op session uses the host's speed and ignores Caps Lock. Auto-target locks onto the nearest hostile the moment you open fire. Tutorial hints show one-time tips as you play — “Show all hints again” brings them back. Difficulty, traffic and other options the original didn't have are under Enhancements.", "gamecontroller")
+	_enum_segmented("gameplay", "game_speed", ["x0_5", "x1", "x1_5", "x2", "x4", "x8"], ["0.5×", "Authentic", "1.5×", "2×", "4×", "8×"])
+	_check("Auto-target after firing", "gameplay", "auto_target_after_firing")
+	_check("Confirm before landing", "gameplay", "confirm_landing")
+	var hc := _check("Tutorial hints", "hints", "enabled")
+	hc.toggled.connect(func(_on: bool): _rebuild())
+	if Prefs.hints_enabled():
+		_button("Show all hints again", func():
+			Prefs.reset_hints()
+			_status.text = "Hints will show again.")
+	if allow_training:
+		_button("Flight Training", func(): training_requested.emit(), "graduationcap")
+	_check("Pause when app loses focus", "gameplay", "pause_on_focus_loss")
+
+
+# --- Enhancements ---------------------------------------------------------------------------
+
+func _manual_order_handle() -> Object:
+	if _pl == null and ClassDB.class_exists("NovaPlugins") and _nova != null:
+		_pl = ClassDB.instantiate("NovaPlugins")
+		_pl.attach(_nova)
+	return _pl
+
+
+## The GameplayEnhancements catalog, one row per behaviour the original lacks (Apple
+## enhancementsSection): the toggle plus its one-line "replaces" caption.
+func _enhancement(title_text: String, replaces: String, section: String, key: String, live: bool,
+		rebuild := false) -> void:
+	var holder := VBoxContainer.new()
+	holder.add_theme_constant_override("separation", 2)
+	var c: CheckBox
+	if live:
+		c = NC.toggle(holder, title_text, bool(_pv(section, key, false)), func(on: bool):
+			Prefs.set_value(section, key, on)
+			_after_change(section))
+		if rebuild:
+			c.toggled.connect(func(_on: bool): _rebuild())
+	else:
+		_todo_note(title_text, key)
+		c = NC.toggle(holder, title_text, bool(_pv(section, key, false)), func(on: bool):
+			Prefs.set_value(section, key, on)
+			_mark_changed())
+	NC.caption(holder, replaces)
+	_group.add_row(holder, 0.0)
+	_note_first(c)
+
+
+func _build_enhancements() -> void:
+	_section("Enhancements", "Behaviours NovaSwift adds that the original EV Nova doesn't have. Each is off by default, so the game plays as the original did unless you turn one on.", "wand.and.stars")
+	var pl := _manual_order_handle()
+	var holder := VBoxContainer.new()
+	holder.add_theme_constant_override("separation", 2)
+	var mo := NC.toggle(holder, "Manual plug-in order", pl != null and bool(pl.manual_order()), func(on: bool):
+		if pl != null:
+			pl.set_manual_order(on)
+			_mark_changed())
+	NC.caption(holder, "Pick which plug-ins load and in what order. The original loads every installed plug-in, alphabetically.")
+	_group.add_row(holder, 0.0)
+	_note_first(mo)
+	# Keys: gameplay/* (docs/GODOT_SETTINGS_KEYS.md). Quick hyperjump persists but the bridge does not fly it yet.
+	_enhancement("Tight formations", "Escorts and fleet wings hold formation precisely. In the original they fly their own hull's momentum.", "gameplay", "formation_flying", true)
+	_enhancement("Forgiving landing", "Land from a wider circle around a planet at a higher speed. The original needs you almost stopped over it.", "gameplay", "forgiving_landing", true)
+	_enhancement("Quick hyperjump", "Jump after a short turn and burst. The original brakes to a stop, then spins up for the length of its warp-up sound.", "gameplay", "quick_hyperjump", true)
+	_enhancement("Frequent autosave", "Save on every jump, every few minutes and when the app goes to the background. The original saves only when you leave a spaceport, so dying or quitting in flight rolls you back.", "gameplay", "frequent_autosave", true)
+	_enhancement("Automatic route plotting", "Tap any system on the map to plot the shortest course there. In the original you click a neighbouring system, and Shift-click to add each further jump yourself.", "gameplay", "auto_route_plotting", true)
+	_enhancement("Nearest-first targeting", "Target cycling starts with the closest ship and wraps around. In the original it goes in arrival order, ends at No Target, and reaches every ship in the system.", "gameplay", "nearest_first_targeting", true)
+	_enhancement("Modern key layout", "Return fires secondaries, Shift is the afterburner and P pauses, applied when you reset the keys. The original layout uses Control, Z and P for Player Info.", "input", "modern_keys", true, true)
+	_enhancement("Screen shake", "The view shakes when something blows up nearby. The original never moves the camera.", "graphics", "screen_shake", true)
+	# Godot-only: the galaxy map's gate spokes (an enhancement the original lacks).
+	_enhancement("Gate links on the galaxy map", "Draw hypergate and wormhole spokes on the plain galaxy map. The original draws them only in the gate picker.", "map", "gate_links", true)
+	_section("Port Options", "System Aliveness controls how much traffic systems carry and how often ships land — Original is the exact original game; Quiet is the closest to its pace on the port's model; Normal and Bustling are livelier.", "slider.horizontal.3")
+	_enum_menu("Difficulty", "gameplay", "difficulty", ["veryEasy", "easy", "normal", "hard"], ["Very Easy", "Easy", "Normal", "Hard"])
+	_caption("Scales the damage you take. The original has no setting; Normal matches it.")
+	_enum_menu("System Aliveness", "gameplay", "system_aliveness", ["original", "authentic", "normal", "bustling"], ["Original", "Quiet", "Normal", "Bustling"])
+	_caption("Exactly the original game's traffic: the system's average ship count, with arrivals trickling in.")
+	_check("Auto-landing", "gameplay", "auto_landing")
+	_caption("Pressing Land flies you to the target and sets down. The original has no autopilot.")
 
 
 # --- Controls ------------------------------------------------------------------------
 
 func _build_controls() -> void:
-	_section("Controls", "Off = the original's keys (arrows, Space, Ctrl, Z; W/Alt-W, R, N, E…). The dead zone is how far a stick must move before it registers. Sticks and triggers are fixed.")
+	_section("Controls", "The dead zone is how far a stick or drag must move before it registers. Sticks and triggers are fixed; the keys and pad buttons below can be rebound.", "dpad")
 	_slider("Stick dead zone", "input", "deadzone", 0.0, 0.5, 0.01, _pct)
+	# Controller cursor speed and Haptic feedback are touch / virtual-cursor features with no Godot key
+	# (docs/GODOT_SETTINGS_KEYS.md: n/a); the rows stay as Apple draws them.
+	_apple_slider("Controller cursor speed", "cursor_sensitivity", 0.4, 2.0, 0.05, _pct, 1.0)
+	_check("Invert turn direction", "input", "invert_turn")
+	_apple_check("Haptic feedback", "haptics_enabled", true)
+	_check("Aim toward mouse cursor", "input", "mouse_aiming")
 	var modern := _check("Modern key layout (the port's earlier keys)", "input", "modern_keys")
-	modern.toggled.connect(func(_on: bool): show_page.call_deferred("Controls"))
+	modern.toggled.connect(func(_on: bool): _rebuild())
+	var first := true
 	for group in Controls.GROUPS:
-		_section("Keyboard & Controller Bindings -- " + group if group == Controls.GROUPS.keys()[0] else group,
-			"Activate a key or pad button to rebind it (Esc cancels)." if group == Controls.GROUPS.keys()[0] else "")
+		_section("Keyboard & Controller Bindings — " + group if first else group,
+			"Activate a key or pad button to rebind it (Esc cancels)." if first else "", "keyboard" if first else "")
+		first = false
 		for action in Controls.GROUPS[group]:
 			_rebind_row(_group, action)
+	_section("")
+	_button("Reset Controls to Defaults", func():
+		Prefs.reset_section("input")
+		Prefs.reset_bindings()
+		Controls.register()
+		_mark_changed()
+		show_page("Controls"), "arrow.counterclockwise")
 
 
-func _rebind_row(list: Control, action: String) -> void:
+func _rebind_row(list: NC.Group, action: String) -> void:
 	var r := HBoxContainer.new()
 	r.add_theme_constant_override("separation", 8)
-	var l := Label.new()
-	l.text = Controls.ACTION_LABELS.get(action, action)
+	var l := NC.label(r, str(Controls.ACTION_LABELS.get(action, action)), "body")
 	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	l.add_theme_font_size_override("font_size", 14)
-	r.add_child(l)
-	var kb := Button.new()
-	kb.custom_minimum_size = Vector2(190, 32)
+	var kb := NC.button("", "bordered")
+	kb.custom_minimum_size = Vector2(170, 30)
 	kb.pressed.connect(_begin_capture.bind(action, _key_field(action), kb))
 	r.add_child(kb)
-	var pb := Button.new()
-	pb.custom_minimum_size = Vector2(170, 32)
+	var pb := NC.button("", "bordered")
+	pb.custom_minimum_size = Vector2(130, 30)
 	pb.pressed.connect(_begin_capture.bind(action, "buttons", pb))
 	r.add_child(pb)
-	list.add_child(r)
+	list.add_row(r)
 	rebind_buttons[action] = {"key": kb, "pad": pb}
-	if first_control == null:
-		first_control = kb
+	_note_first(kb)
 	_refresh_row(action)
 
 
@@ -524,39 +607,80 @@ func _refresh_all_rows() -> void:
 		_refresh_row(action)
 
 
+# --- Graphics ------------------------------------------------------------------------
+
+func _build_video() -> void:
+	_section("Graphics", "Camera zoom is world pixels shown per screen point; 1.0 is the original's own native scale (higher shows more of the system at once, everything reading smaller). Camera view changes only how flight is framed: Classic is the original's fixed, north-up view; Look ahead drifts the view toward where you're heading; Ship up turns the view with your ship; Chase, with live 3D ships, lays the view back behind your ship (falls back to Ship up without them). Ships fly and fight the same in every view. In flight, O changes the view and [ and ] zoom. EV Nova's art is pixel art — leave smooth scaling off for the crisp, faithful look. Hyperspace jumps fade to white as on the Mac; the Windows look skips the fade and only flashes.", "sparkles")
+	# Quality presets and the HD / 3D rows have no Godot key (HD pipeline not ported): drawn, stored
+	# under [apple], not read. Everything else is bound to docs/GODOT_SETTINGS_KEYS.md.
+	_apple_segmented("graphics_quality", ["Low", "Medium", "High", "Ultra"], 2)
+	_slider("Starfield density", "graphics", "starfield_density", 0.2, 2.0, 0.05, _pct)
+	_slider("Camera zoom", "graphics", "camera_zoom", 0.5, 3.0, 0.05, _pct)
+	var cv := _menu("Camera view", "graphics", "camera_view", ["Classic", "Look ahead", "Ship up", "Chase"], 0)
+	cv.item_selected.connect(func(_i: int): _rebuild())
+	if int(_pv("graphics", "camera_view", 0)) == 3:
+		_slider("Chase camera tilt", "graphics", "chase_tilt", 0.0, 60.0, 1.0, func(x: float): return "%d°" % roundi(x))
+	_enum_menu("Frame rate limit", "graphics", "frame_rate_cap", ["fps30", "fps60", "fps120", "unlimited"], ["30 FPS", "60 FPS", "120 FPS", "Unlimited"])
+	_check("Smooth sprite scaling", "graphics", "smooth_sprites")
+	_apple_check("HD graphics from plug-ins", "hd_graphics")
+	if bool(_pv("apple", "hd_graphics", false)):
+		_apple_menu("HD detail", "hd_detail", ["Low (1×)", "Standard (2×)", "Sharp (4×)"], 1)
+		_apple_menu("Ships with 3D models", "hull_presentation", ["Sprites", "Full live 3D"], 0)
+	_enum_menu("Particle effects", "graphics", "particle_density", ["full", "reduced", "minimal"], ["Full", "Reduced", "Minimal"])
+	_check("Engine & weapon glow", "classic", "engine_glow")
+	_check("Windows hyperspace look", "graphics", "ce_hyperspace_look")
+	_check("Hyperspace effects", "classic", "hyperspace_effects")
+	_section("Window", "Window scale applies when not fullscreen. The play area adapts to 16:9 and 16:10 (Steam Deck) screens.", "macwindow")
+	_check("Fullscreen", "video", "fullscreen")
+	_check("VSync", "video", "vsync")
+	_slider("Window scale", "video", "scale", 0.75, 2.0, 0.25,
+		func(x: float): return "%dx%d" % [roundi(1280 * x), roundi(720 * x)])
+
+
+# --- Audio ---------------------------------------------------------------------------
+
+func _build_audio() -> void:
+	_section("Audio", "Master scales everything; the individual sliders balance music, weapon/engine effects and interface clicks beneath it. Music plays over the main menu only, as in the original (if your data has the track as an mp3).", "speaker.wave.2")
+	var mute := _check("Mute all", "audio", "muted")
+	_slider("Master", "audio", "master", 0.0, 1.0, 0.05, _pct)
+	_slider("Music", "audio", "music", 0.0, 1.0, 0.05, _pct)
+	_slider("Effects", "audio", "sfx", 0.0, 1.0, 0.05, _pct)
+	_slider("Interface", "audio", "ui", 0.0, 1.0, 0.05, _pct)
+	_check("Background music", "audio", "music_enabled")
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 8)
+	var beep := NC.button("Test Beep", "form", func():
+		if _nova != null and _nova.has_method("sound_beep"):
+			_nova.sound_beep(1), "speaker.wave.2")
+	hb.add_child(beep)
+	_group.add_row(hb)
+	mute.toggled.connect(func(on: bool):
+		for k in ["audio.master", "audio.music", "audio.sfx", "audio.ui"]:
+			if sliders.has(k):
+				(sliders[k] as HSlider).editable = not on
+				((sliders[k] as HSlider).get_meta("row") as Control).modulate.a = 0.5 if on else 1.0)
+	if mute.button_pressed:
+		mute.toggled.emit(true)
+
+
+# --- Accessibility ----------------------------------------------------------------------
+
+func _build_accessibility() -> void:
+	_section("Accessibility", "Reduce flashing calms the exhaust flicker, screen shake and jump flash. (Larger HUD, high-contrast HUD and UI scale are under HUD & Interface.)", "accessibility")
+	_check("Reduce flashing & motion", "graphics", "reduce_flashing")
+	_enum_menu("Colorblind mode", "accessibility", "colorblind_mode", ["none", "protanopia", "deuteranopia", "tritanopia"], ["Off", "Protanopia (red-weak)", "Deuteranopia (green-weak)", "Tritanopia (blue-weak)"])
+
+
 # --- Data & Advanced (Support) ---------------------------------------------------------
 
-func _build_plugins() -> void:
-	_section("Plug-ins", "EV Nova plug-ins and total conversions. Every plug-in in your game's Nova Plug-ins folder and in the NovaSwift plug-in folder loads automatically, in the original's order. The manager browses the online catalog, installs and updates, imports your own files and (optionally) lets you choose and order them.")
-	_button("Open the Plug-ins Manager…", func(): _open_plugins("Installed"))
-	_button("Browse the Online Catalog…", func(): _open_plugins("Browse"))
-	_button("Load Order…", func(): _open_plugins("Load order"))
-
-
-func _open_plugins(start_tab: String) -> void:
-	var scr = PluginsScreen.new()
-	add_child(scr)
-	scr.setup(_nova, start_tab)
-	scr.closed.connect(func():
-		scr.queue_free()
-		show_page("Plugins"))
-
-
 func _build_support() -> void:
-	_section("Saved Games", "Pilots are ordinary .evpilot files -- copy them, back them up, or open one from anywhere with Open Pilot. Changing the folder copies the pilots already in the old one across (the originals stay). Rotating backups live in a Backups folder beside them.")
-	var r := _row("Saved to")
-	var path := Label.new()
-	path.text = PilotFiles.dir()
-	path.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
-	path.custom_minimum_size = Vector2(380, 0)
-	path.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	path.add_theme_font_size_override("font_size", 12)
-	path.add_theme_color_override("font_color", ShellUI.MUTED)
-	r.add_child(path)
-	var fa := _check("Frequent autosave", "gameplay", "frequent_autosave")
-	fa.tooltip_text = "Off = the original: pilots save only when you leave a spaceport."
-	_caption("Frequent autosave (an enhancement, off by default) also saves when you land and jump, every few minutes in flight, and remembers where you were. Off is the original's cadence.")
-	_button("Open Pilots Folder", func(): OS.shell_show_in_file_manager(PilotFiles.dir()))
+	_section("Saved Games", "Pilots are ordinary .evpilot files — copy them, back them up, or open one from anywhere with Open Pilot. Changing the folder copies the pilots already in the old one across (the originals stay). Rotating backups live in a Backups folder beside them. There is no iCloud here: the Apple app's iCloud pilot and game-data sync rows do not exist on this platform.", "externaldrive")
+	var r := NC.value_row(_group, "Saved to", PilotFiles.dir())
+	r.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+	r.custom_minimum_size = Vector2(340, 0)
+	r.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	r.add_theme_font_size_override("font_size", 13)
+	_button("Open Pilots Folder", func(): OS.shell_show_in_file_manager(PilotFiles.dir()), "folder")
 	_button("Change Pilots Folder…", func():
 		PilotFiles.pick_folder(self, PilotFiles.dir(), func(d: String):
 			PilotFiles.set_dir(d)
@@ -567,8 +691,30 @@ func _build_support() -> void:
 			PilotFiles.set_dir("")
 			_mark_changed()
 			show_page("Support"))
-	_section("Support and Developer")
-	DevSettingsPage.build(self, _group, _mark_changed)
+	_button("Import Data", func(): data_setup_requested.emit(), "square.and.arrow.down")
+	_section("Support", "Builds a report you can share: your description plus the pilot save, the recent game log and a self-test — the state that's hard to describe in a message. None of your imported EV Nova data is included.", "lifepreserver")
+	_button("Report a Bug", func(): get_tree().call_group("nova_devtools", "open_tab", "report"), "ladybug")
+	_button("About NovaSwift", _show_about, "info.circle")
+	_section("Developer", "Shows an in-game debug button that opens the debug suite: the UI measurement overlay, a performance stress test, and more developer tools as we build them. Preview Setup Wizard replays the full first-run data guide from the top, even with data already imported.", "hammer")
+	var dev := NC.toggle(_group, "Debug mode", bool(Prefs.get_value("developer", "debug_mode")), func(on: bool):
+		Prefs.set_value("developer", "debug_mode", on)
+		_mark_changed()
+		_rebuild())
+	_note_first(dev)
+	if dev.button_pressed:
+		_button("Open Debug Suite", func(): get_tree().call_group("nova_devtools", "open_tab", "console"), "ladybug")
+		_button("Preview Setup Wizard", func(): data_setup_requested.emit(), "sparkles")
+
+
+## Apple AboutView: the data's own About text over the NovaSwift header in the generic dësc dialog.
+func _show_about() -> void:
+	var version := str(ProjectSettings.get_setting("application/config/version", "1.0.0"))
+	if ClassicTheme.has_data() and _nova != null and _nova.has_method("about_nova_text"):
+		var d = ClassicDialog.desc_dialog(_nova, _nova.about_nova_text(version))
+		var host: Control = ClassicDialog.modal(self, d, 0.6)
+		d.activated.connect(func(_i): if is_instance_valid(host): host.queue_free())
+	else:
+		Alert.show(self, {"title": "About NovaSwift", "message": "NovaSwift %s — a free, unofficial port by Joshua Kac (SirStig). Not affiliated with or endorsed by Ambrosia Software or ATMOS. github.com/SirStig/NovaSwift" % version})
 
 
 # --- resets ----------------------------------------------------------------------------
@@ -592,14 +738,18 @@ func _reset_page() -> void:
 	show_page(page)
 
 
-## Sidebar "Reset All Settings": asks for a second press (a pad can't answer a dialog).
+## Sidebar "Reset All Settings": the same destructive confirm Apple raises.
+func _reset_all_confirm() -> void:
+	Alert.show(self, {"title": "Reset every setting to its default?", "buttons": [
+		{"title": "Cancel", "role": "cancel"},
+		{"title": "Reset All", "role": "destructive", "cb": _reset_all}]})
+
+
 func _reset_all() -> void:
-	if not _reset_armed:
-		_reset_armed = true
-		_reset_all_btn.text = "Press again to reset everything"
-		return
-	for sec in ["audio", "video", "map", "input", "story", "presentation", "classic"]:
+	for sec in ["audio", "video", "map", "input", "story", "presentation", "classic", "graphics", "gameplay", "interface", "accessibility"]:
 		Prefs.reset_section(sec)
+	# The [apple] rows without a Godot key: drop what was stored so every row reads its default again.
+	Prefs._cfg.erase_section("apple")
 	Prefs.reset_bindings()
 	Controls.register()
 	Prefs.apply_video()
@@ -681,8 +831,6 @@ func _input(event: InputEvent) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("ui_cancel"):
+	if event.is_action_pressed("ui_cancel") and _root.visible:
 		get_viewport().set_input_as_handled()
 		close()
-
-
