@@ -52,6 +52,7 @@ var _roll_default := -1
 var _readout: Control
 var _pilot_pict: TextureRect
 var _busy := false
+var _mouse_down := ""   # the action whose button the mouse is holding down
 
 
 static func make(nova_obj: Object) -> Control:
@@ -116,9 +117,28 @@ func _build() -> void:
 		tb.visible = false
 		var act := str(b["action"])
 		var i := idx
-		tb.pressed.connect(func(): press(act))
+		# The mouse (`FUN_004861b0`): the press landing on a button sounds snd 600, leaving it with
+		# the button still held sounds 601, and the release over it sounds 601 and acts at once.
+		# Keys / pad (Enter, A) take the `FUN_0048bc20` path in press(): 600, wait, 601, act.
+		tb.button_down.connect(func():
+			if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and not blocked and not _busy:
+				_mouse_down = act
+				_menu_sound(600))
+		tb.pressed.connect(func():
+			if _mouse_down == act:
+				_mouse_down = ""
+				if blocked or _busy:
+					return
+				_menu_sound(601)
+				chosen.emit(act)
+			else:
+				press(act))
 		tb.mouse_entered.connect(func(): _show_rollover(i))
-		tb.mouse_exited.connect(func(): _show_rollover(-1))
+		tb.mouse_exited.connect(func():
+			_show_rollover(-1)
+			if _mouse_down == act:
+				_mouse_down = ""
+				_menu_sound(601))
 		tb.focus_entered.connect(func(): _show_rollover(i))
 		tb.focus_exited.connect(func(): _show_rollover(-1))
 		_canvas.add_child(tb)
@@ -271,6 +291,15 @@ func _finish_slides() -> void:
 		focus_default.call_deferred()
 
 
+## A snd's length in seconds (0.12 when the data has none): the key path waits this long.
+func _sound_seconds(id: int) -> float:
+	if nova != null and nova.has_method("sound_info"):
+		var info: PackedInt32Array = nova.sound_info(id)
+		if info.size() >= 4 and info[0] > 0 and info[3] > 0:
+			return float(info[3]) / float(info[0])
+	return 0.12
+
+
 func _menu_sound(id: int) -> void:
 	if nova != null and nova.has_method("sound_menu"):
 		nova.sound_menu(id)
@@ -328,7 +357,7 @@ func press(action: String) -> void:
 	_busy = true
 	_menu_sound(600)
 	if is_inside_tree():
-		await get_tree().create_timer(0.12).timeout
+		await get_tree().create_timer(_sound_seconds(600)).timeout   # waits for snd 600 to end
 	_menu_sound(601)
 	_busy = false
 	chosen.emit(action)

@@ -265,6 +265,22 @@ func refresh_music() -> void:
 		music.refresh_volume()
 
 
+## Leave the menu for the game. A playing title track fades out (8/256 per 60 Hz tick, the
+## original's 0x004ab820, as Apple's `setMusicAllowed(false)`), so the menu lingers invisible and
+## inert until the fade ends; with no music it frees at once.
+func leave() -> void:
+	if music != null and is_instance_valid(music) and music.has_method("fade_out") and bool(music.playing):
+		visible = false
+		if classic_menu != null:
+			classic_menu.blocked = true
+		set_process_unhandled_input(false)
+		set_process_unhandled_key_input(false)
+		music.faded.connect(queue_free)
+		music.fade_out()
+	else:
+		queue_free()
+
+
 ## Back to the menu from a sub-screen: put focus back on the first button.
 func refocus() -> void:
 	if classic_menu != null:

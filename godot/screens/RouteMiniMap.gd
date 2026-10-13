@@ -10,6 +10,8 @@
 
 extends CanvasLayer
 
+const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
+
 const SHOW_FULL_TICKS := 118.0
 const SHOW_FADE_END := 150.0
 const ZOOM_WINDOW_TICKS := 500.0
@@ -31,6 +33,7 @@ var _current := -1
 
 func setup(world) -> void:
 	nova = world
+	ClassicTheme.setup(world)   # the cölr palette (the frame is its FloatingMap colour)
 	layer = 6
 	visible = false
 	_canvas = Control.new()
@@ -116,7 +119,10 @@ func _on_draw() -> void:
 	var side: float = maxf(200.0, roundf(vp.x * 0.25))
 	var rect := Rect2(Vector2.ZERO, Vector2(side, side))
 	_canvas.draw_rect(rect, Color(0.0, 0.0, 0.0, 0.6 * alpha))
-	_canvas.draw_rect(rect, Color(0.5, 0.55, 0.65, 0.8 * alpha), false, 1.0)
+	# The floating map's frame is drawn in the cölr FloatingMap colour (0x00735658), as Apple's mini map.
+	var frame: Color = ClassicTheme.palette().get("floatingMap", Color(1.0, 0.72, 0.28, 0.25))
+	frame.a *= alpha
+	_canvas.draw_rect(rect, frame, false, 1.0)
 	var scale := 1.0 / units_per_pixel
 	var origin: Vector2 = _pos[_current]
 	var mid := Vector2(side, side) * 0.5

@@ -604,7 +604,7 @@ func _build_video() -> void:
 # --- Audio ---------------------------------------------------------------------------
 
 func _build_audio() -> void:
-	_section("Audio", "Master scales everything; the individual sliders balance music, weapon/engine effects and interface clicks beneath it. Music plays over the main menu only, as in the original (if your data has the track as an mp3).", "speaker.wave.2")
+	_section("Audio", "Master is the original's sound-volume step and scales everything; Effects and Interface balance weapon/engine sounds and interface beeps beneath it. The title music plays once over the main menu only, as in the original (if your data has the track as an mp3); its slider only turns it off at 0.", "speaker.wave.2")
 	var mute := _check("Mute all", "audio", "muted")
 	_slider("Master", "audio", "master", 0.0, 1.0, 0.05, _pct)
 	_slider("Music", "audio", "music", 0.0, 1.0, 0.05, _pct)

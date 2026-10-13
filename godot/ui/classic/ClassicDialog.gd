@@ -49,7 +49,11 @@ var default_item := -1
 var cancel_item := -1
 var fit_to_viewport := true
 var text_color := Color.BLACK
-var beep := true              # confirm beep (snd 150) on a button press
+## Confirm beep (snd 150) on a button press. Off by default: the original's own windows (the
+## spaceport hub, trade, outfitter, shipyard, bar, Preferences, story text) press silently; the
+## generic dialogs the Apple app builds as NovaDialog (confirm, text prompt, panel, the port-only
+## pilot screens) turn it on (`GameAudio.uiSelect`).
+var beep := false
 ## DITL index -> Callable() bound by the caller.
 var actions := {}
 
@@ -103,6 +107,7 @@ static func from_ditl(nova_obj: Object, id: int, opts := {}) -> Control:
 		size = Vector2i(frame_tex.get_size())
 	var d: Control = _make(nova_obj, size, kind)
 	d.fit_to_viewport = bool(opts.get("fit", true))
+	d.beep = bool(opts.get("beep", false))
 	if opts.has("text_color"):
 		d.text_color = opts["text_color"]
 	d._add_background(frame_tex)
@@ -143,7 +148,7 @@ static func from_ditl(nova_obj: Object, id: int, opts := {}) -> Control:
 ## The original's yes/no prompt (DLOG/DITL 3002, `classicConfirm`): prompt text,
 ## OK (default) / Cancel. `ok` / `cancel` override the button labels.
 static func confirm(nova_obj: Object, prompt: String, opts := {}) -> Control:
-	var o := {"texts": {2: prompt}, "default_item": 0, "cancel_item": 4,
+	var o := {"texts": {2: prompt}, "default_item": 0, "cancel_item": 4, "beep": true,
 		"fallback_size": Vector2i(354, 140)}
 	var labels := {}
 	if opts.has("ok"):
@@ -159,7 +164,7 @@ static func confirm(nova_obj: Object, prompt: String, opts := {}) -> Control:
 ## a leading "the " is dropped by `prompt_answer()`.
 static func text_prompt(nova_obj: Object, prompt: String, initial := "") -> Control:
 	return from_ditl(nova_obj, 3001, {"texts": {2: prompt, 4: initial}, "default_item": 0, "cancel_item": 5,
-		"fallback_size": Vector2i(354, 140)})
+		"beep": true, "fallback_size": Vector2i(354, 140)})
 
 
 ## A stretchable dësc-frame dialog (the app's own NovaDialog look: metal border,
@@ -196,6 +201,7 @@ static func panel(nova_obj: Object, opts := {}) -> Control:
 	y += 6
 	var height := y + strip   # the bottom piece is the control strip
 	var d: Control = _make(nova_obj, Vector2i(width, height), Chrome.PANEL)
+	d.beep = true   # the Apple NovaDialog look: its footer / row buttons click with snd 150
 	d.fit_to_viewport = bool(opts.get("fit", true))
 	d.text_color = Theme_.color("listText")
 	d._add_background(null)
@@ -449,7 +455,8 @@ func add_button(label: String, rect: Rect2i, index := -1) -> TextureButton:
 	add_child(b)
 	b.is_default = (index == default_item and index >= 0)
 	b.pressed.connect(_activate.bind(index))
-	b.refused.connect(func(): if nova != null and nova.has_method("sound_beep"): nova.sound_beep(4))   # greyed press: snd 153
+	# A greyed button is silent: only the original's specific refusals (shipyard Buy Ship, mission
+	# Abort with nothing picked, plunder, the sell that would overdraw mass) wire `refused` -> snd 153.
 	_register(index, b, rect, true)
 	return b
 
@@ -535,7 +542,7 @@ func add_cycle(labels: Array, rect: Rect2i, index := -1, selected := 0) -> Textu
 			c["selected"] = (int(c["selected"]) + 1) % c["labels"].size()
 			refresh.call()
 			cycled.emit(index, int(c["selected"]))
-		if nova != null and nova.has_method("sound_beep"):
+		if beep and nova != null and nova.has_method("sound_beep"):
 			nova.sound_beep(1))
 	_register(index, b, rect, true)
 	return b

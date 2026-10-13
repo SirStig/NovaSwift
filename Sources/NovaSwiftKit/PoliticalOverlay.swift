@@ -105,3 +105,47 @@ public struct PoliticalOverlay {
         return out
     }
 }
+
+// MARK: Building the overlay from game data (shared by the Apple map and the Godot bridge)
+
+extension PoliticalOverlay {
+    /// Whether two governments share a colour slot: the same government, or either lists the other as
+    /// an ally (`NovaUi_BlendStarmapOverlayCell`).
+    public static func allied(_ game: NovaGame, _ a: Int, _ b: Int) -> Bool {
+        a == b || (game.govt(a)?.allies.contains(b) ?? false) || (game.govt(b)?.allies.contains(a) ?? false)
+    }
+
+    /// The discs the original paints (0x004a9d50): one per visible twin group (systems at the same
+    /// coordinates count once), only for a known system with a government (id >= 128) whose Flags2
+    /// 0x0004 is clear and at least one usable stellar. `plot` maps a system's map coordinates to the
+    /// map canvas' pixel position; `isKnown` = explored and not fogged out; `hasUsableStellar` =
+    /// an inhabited stellar usable for travel.
+    public static func discs(game: NovaGame, systems: [SystRes], isKnown: (SystRes) -> Bool,
+                             hasUsableStellar: (SystRes) -> Bool, plot: (Int, Int) -> (x: Double, y: Double)) -> [Disc] {
+        var out: [Disc] = []
+        var seen = Set<[Int]>()
+        for s in systems {
+            guard s.government >= 128, isKnown(s), let g = game.govt(s.government), g.flags2 & 0x0004 == 0,
+                  hasUsableStellar(s), seen.insert([s.x, s.y]).inserted else { continue }
+            let p = plot(s.x, s.y)
+            out.append(Disc(cellX: Int(p.x) / cellSize, cellY: Int(p.y) / cellSize,
+                            govt: s.government, small: g.flags2 & 0x0002 != 0))
+        }
+        return out
+    }
+
+    /// Paints `discs` into a `width` x `height` cell grid at `unitsPerPixel` (the original's zoom).
+    public static func build(width: Int, height: Int, unitsPerPixel: Double, discs: [Disc], game: NovaGame) -> PoliticalOverlay {
+        var grid = PoliticalOverlay(width: width, height: height)
+        for d in discs { grid.paint(d, zoom: unitsPerPixel) { allied(game, $0, $1) } }
+        return grid
+    }
+
+    /// The overlay as RGBA8 cells, coloured with each government's `gövt.mapColor`.
+    public func rgba(game: NovaGame) -> [UInt8] {
+        rgba { id in
+            let c = game.govt(id)?.mapColor
+            return (Int(c?.r ?? 0), Int(c?.g ?? 0), Int(c?.b ?? 0))
+        }
+    }
+}

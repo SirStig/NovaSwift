@@ -715,6 +715,8 @@ struct GameContainerView: View {
     /// When set, the origin hypergate's spöb id — the galaxy map is showing its
     /// destination network (solid blue lines) for the player to pick a jump.
     @State private var gateMapOrigin: Int?
+    /// The movie a hypergate / wormhole entry plays before the transport (`GateTravelMovie`).
+    @StateObject private var gateMovie = DescMoviePlayback()
     /// Whether the first-flight tutorial hints card is showing (the "Tutorial
     /// hints" setting; shown once per install until dismissed).
     @State private var showFlightHints = false
@@ -888,11 +890,15 @@ struct GameContainerView: View {
                                     originSystem: nav.currentSystemID,
                                     destinations: game.gateDestinations(from: gate, hidden: game.hiddenSystemIDs(for: model.pilot.state)),
                                     onSelect: { destGate, destSystem in
-                                        performGateJump(toSystem: destSystem, arriveAtGate: destGate)
+                                        performGateJump(toSystem: destSystem, arriveAtGate: destGate,
+                                                        movieSelection: destSystem)
                                     }))
                         .transition(.opacity)
                         .cursorModal()
                 }
+
+                // Stellar_EnterHypergate / Stellar_EnterWormhole: the entry movie (modal, skippable).
+                DescMovieOverlay(playback: gateMovie)
 
                 if let shown = routeMapShownAt, !nav.showingMap {
                     // 0x00439bb0: full for 118 ticks, fading over the next 32
@@ -1726,7 +1732,8 @@ struct GameContainerView: View {
             }
             return
         }
-        performGateJump(toSystem: dest.systemID, arriveAtGate: dest.gateSpobID)
+        // The movie is keyed to the wormhole's own spöb id (travel mode 2, 0x00456ca0).
+        performGateJump(toSystem: dest.systemID, arriveAtGate: dest.gateSpobID, movieSelection: wormhole.id)
     }
 
     /// Drive a gate transport through the live scene: it flashes and swaps to
@@ -1734,10 +1741,28 @@ struct GameContainerView: View {
     /// the system — gates spend **no** fuel and **no** days (OS-06: none of the
     /// original's daily-tick callers is on the gate path), and no hyperspace link
     /// is required.
-    private func performGateJump(toSystem destSystem: Int, arriveAtGate destGate: Int) {
-        guard let host, !host.scene.isJumping else { return }
-        host.scene.gateTransitSpobID = gateMapOrigin
+    ///
+    /// `movieSelection`: the `dësc` id of the entry movie that plays first (hypergate: the chosen
+    /// destination system; wormhole: its own spöb id; `GateTravelMovie`, 0x00456480 / 0x00456ca0 ->
+    /// `FUN_0049e3c0(selection + 0x80)`), modal and skippable, gated by the QuickTime
+    /// Movies preference; the transport starts when it ends.
+    private func performGateJump(toSystem destSystem: Int, arriveAtGate destGate: Int, movieSelection: Int? = nil) {
+        guard let host, !host.scene.isJumping, !gateMovie.isPlaying else { return }
+        let origin = gateMapOrigin
         gateMapOrigin = nil
+        let go: () -> Void = {
+            guard !host.scene.isJumping else { return }
+            host.scene.gateTransitSpobID = origin
+            self.startGateJump(host, toSystem: destSystem, arriveAtGate: destGate)
+        }
+        if let clip = DescMoviePlayback.gateClip(selection: movieSelection, data: model.data) {
+            gateMovie.play(clip, then: go)
+        } else {
+            go()
+        }
+    }
+
+    private func startGateJump(_ host: GameHost, toSystem destSystem: Int, arriveAtGate destGate: Int) {
         host.scene.beginGateJump(toSystem: destSystem, arriveAtGate: destGate) {
             host.scene.gateTransitSpobID = nil
             hostSystemID = destSystem                     // set first: suppress the host-rebuild onChange
@@ -3356,6 +3381,18 @@ struct GameContainerView: View {
         // the sequence (and pressing J would otherwise pop the map open).
         if host?.scene.isJumping == true {
             switch action { case .land, .hyperjump: return; default: break }
+        }
+        // The open map takes Tab / Backslash to cycle the adjacent destination (0x004a74f0 /
+        // 0x004a7710; Shift reverses): the same link step as the flight key, and the selection
+        // follows (`NavigationModel.click`). The flight sim is paused behind the map, so the
+        // target-cycle keys have nothing to do there.
+        if nav.showingMap, gateMapOrigin == nil, landedSpobID == nil {
+            switch action {
+            case .cycleHyperspaceLink, .targetNext, .targetPrevious:
+                if nav.cycleHyperspaceLink(forward: action != .targetPrevious) { model.audio.play(.beep3) }
+                return
+            default: break
+            }
         }
         switch action {
         case .land:

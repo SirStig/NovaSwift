@@ -13,11 +13,14 @@
 # returns. No mixing rule is reimplemented here.
 #
 # Music: the Apple app plays exactly one track — the title-menu music named by
-# STR# 130 #2 (an external mp3/mov, not a snd resource), only over the authentic
-# main menu. This frontend has no main menu to play it over, so there is no music.
+# STR# 130 #2 (an external mp3/mov, not a snd resource), only over the main menu
+# (audio/TitleMusic.gd). The one looping SFX voice is the landed spaceport's
+# ambient bed (below), exactly like GameAudio.startAmbient.
 #
 # Loaded with preload() (no class_name), like Controls.gd.
 extends Node
+
+const Prefs = preload("res://Prefs.gd")
 
 var _nova: Object
 var _players: Array[AudioStreamPlayer] = []
@@ -30,6 +33,15 @@ var master_volume := 1.0
 var sfx_volume := 1.0
 var ui_volume := 1.0
 var muted := false
+## Set by the Shell: returns true while the main menu (or any pre-game screen) is up, when no
+## spaceport ambience may sound even though the world still reports "landed".
+var menu_probe: Callable = Callable()
+
+# The landed spaceport's ambient loop (GameAudio.startAmbient / stopAmbient): one dedicated
+# looping player, started on the landing edge, cut on takeoff / leaving the game.
+var _ambient: AudioStreamPlayer
+var _ambient_id := -1
+var _was_landed := false
 
 # What the last drain asked each voice to do, for tests and debugging.
 var cues_started := 0
@@ -45,11 +57,75 @@ func setup(nova: Object) -> void:
 		p.name = "Voice%d" % i
 		add_child(p)
 		_players.append(p)
+	_ambient = AudioStreamPlayer.new()
+	_ambient.name = "Ambient"
+	add_child(_ambient)
 
 
 func _process(_delta: float) -> void:
 	if _nova != null:
 		apply(_nova.drain_sound_cues())
+		_track_ambient()
+		if _ambient != null and _ambient.playing:
+			_ambient.volume_db = _db(1.0, false)   # follows the Settings sliders live
+
+
+## The ambient loop follows the docked state: it starts on the landing edge and stops on takeoff
+## (`GameContainerView` onChange of landedSpobID). Nothing sounds over the main menu.
+func _track_ambient() -> void:
+	var landed: bool = _nova.is_landed()
+	if menu_probe.is_valid() and bool(menu_probe.call()):
+		landed = false
+	if landed == _was_landed:
+		return
+	_was_landed = landed
+	if not landed:
+		stop_ambient()
+	elif _nova.has_method("landed_ambient_sound"):
+		start_ambient(int(_nova.landed_ambient_sound()))
+
+
+## `GameAudio.startAmbient`: loop the stellar's CustSndID snd gaplessly while docked. "Ambient
+## Sounds" off (Preferences, 0x00491f30), mute, a missing/undecodable sound or id < 0 = silence.
+## Level = master x effects (the sound-preference step is folded into master).
+func start_ambient(sound_id: int) -> void:
+	if _ambient == null:
+		return
+	if not bool(Prefs.get_value("classic", "ambient_sounds")) or muted or sound_id < 0:
+		stop_ambient()
+		return
+	var base: AudioStreamWAV = stream_for(sound_id)
+	if base == null:
+		stop_ambient()
+		return
+	var loop: AudioStreamWAV = base.duplicate() as AudioStreamWAV
+	loop.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	loop.loop_begin = 0
+	loop.loop_end = int(float(base.data.size()) / (4.0 if base.stereo else 2.0))
+	_ambient_id = sound_id
+	_ambient.stream = loop
+	_ambient.pitch_scale = 1.0
+	_ambient.volume_db = _db(1.0, false)
+	_ambient.play()
+
+
+func stop_ambient() -> void:
+	_ambient_id = -1
+	if _ambient != null:
+		_ambient.stop()
+
+
+## True while the spaceport loop is sounding (tests).
+func ambient_playing() -> bool:
+	return _ambient != null and _ambient.playing
+
+
+## `AppModel.returnToMainMenu` / game exit: every voice and the loop stop (stopAllLoops + stop(0)).
+func stop_all() -> void:
+	stop_ambient()
+	_was_landed = false
+	if _nova != null and _nova.has_method("sound_stop"):
+		_nova.sound_stop(0)
 
 
 ## Apply one drain_sound_cues() result. Public so a test can feed it directly.

@@ -213,7 +213,7 @@ func _open_modal(box: VBoxContainer, kind: String, buttons: Array, cancel: Calla
 	_modal_kind = kind
 	_modal_buttons = buttons
 	_modal_cancel = cancel
-	nova.sound_beep(2)
+	# (silent: story text, offers and movies have no sound site in the original)
 
 
 func _close_modal() -> void:
@@ -275,7 +275,6 @@ func _open_text() -> void:
 func _dismiss_text() -> void:
 	var t = _json(nova.story_text_info())
 	var clip: Dictionary = DescMovie.lookup(int(t.get("desc", -1))) if (t is Dictionary and not t.is_empty()) else {}
-	nova.sound_beep(3)
 	_close_modal()
 	if not clip.is_empty() and bool(clip.get("after", false)):
 		_play_movie(clip.info, _finish_text)   # Flags 0x0001: the movie follows the text
@@ -600,7 +599,7 @@ func _modal_host(d: Control, kind: String, buttons: Array, cancel: Callable) -> 
 	_modal_kind = kind
 	_modal_buttons = buttons
 	_modal_cancel = cancel
-	nova.sound_beep(2)
+	# (silent: story text, offers and movies have no sound site in the original)
 
 
 ## Three stacked PICTs as one frame (top / stretched middle / bottom) at `size`.

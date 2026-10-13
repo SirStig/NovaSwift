@@ -42,11 +42,13 @@ const Shell = preload("res://screens/Shell.gd")              # main menu, settin
 const NavScreens = preload("res://screens/NavScreens.gd")   # galaxy map + hyperjump
 const Interactions = preload("res://screens/Interactions.gd")   # hail, board/plunder, escorts
 const GameAudio = preload("res://audio/GameAudio.gd")          # snd playback (voice pool)
+const BrightnessVeil = preload("res://ui/BrightnessVeil.gd")      # Preferences brightness (gamma veil)
 const StoryScreens = preload("res://screens/StoryScreens.gd") # story texts, mission offers, Player/Mission Info
 const Spaceport = preload("res://screens/Spaceport.gd")     # landing, trade, outfitter, shipyard
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")   # Classic UI kit (original ïntf HUD, DLOG/DITL dialogs)
 const AuthenticHUD = preload("res://ui/classic/AuthenticHUD.gd")
 const DevTools = preload("res://debug/DevTools.gd")           # Debug suite (console, tools, bug report)
+const DescMovie = preload("res://ui/DescMovie.gd")             # dësc movies (gate / wormhole entry)
 const FlightRenderer = preload("res://flight/FlightRenderer.gd")   # the world drawn on screen (godot/flight/)
 
 var _dev: Node               # DevTools: debug suite host (always captures the log)
@@ -126,10 +128,13 @@ func _ready() -> void:
 	add_child(_audio)
 	_audio.setup(nova)
 	Prefs.apply_audio(_audio)
+	add_child(BrightnessVeil.new())   # the original Preferences brightness arrows (Package C2)
 
 	_nav = NavScreens.new()
 	add_child(_nav)
 	_nav.setup(nova)
+	if nova.has_method("set_gate_transport_deferred"):
+		nova.set_gate_transport_deferred(true)   # wormholes wait for the entry movie (_on_land)
 	_nav.log_message.connect(_push_log)
 	_nav.screen_closed.connect(_suppress_held)
 	_nav.arrived.connect(func(_n): _refresh_flight())
@@ -445,6 +450,15 @@ func _on_land() -> void:
 		"gate":
 			_suppress_held()
 			_nav.open_gate_picker()
+		"wormhole":
+			# Stellar_EnterWormhole 0x00456ca0: the dësc movie keyed to the wormhole's spöb id plays, then
+			# the transport (the bridge picked the exit already).
+			_suppress_held()
+			var ms: int = int(r.get("movie_desc", -1))
+			DescMovie.play_gate(self, ms, func():
+				if nova.has_method("wormhole_enter_pending"):
+					nova.wormhole_enter_pending()
+				_suppress_held())
 
 
 # Held this frame, unless still suppressed from before a screen change.

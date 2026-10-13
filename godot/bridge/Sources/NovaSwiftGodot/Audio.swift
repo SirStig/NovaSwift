@@ -27,6 +27,8 @@ struct SoundState {
     /// have raised in total (a test seam).
     var deaths = DeathBurstSounds()
     var deathCuesEmitted = 0
+    /// How many times the player's hull has begun to break up (keys `deaths` per death).
+    var playerDeaths = 0
     var rawCallAccumulator = 0.0
     var klaxxonOn = false
     var warpUpStarted = false
@@ -39,6 +41,7 @@ struct SoundState {
         chatterEnd = nil
         redAlert = RedAlertCue()
         deaths.reset()
+        playerDeaths = 0
         rawCallAccumulator = 0
         klaxxonOn = false
         warpUpStarted = false

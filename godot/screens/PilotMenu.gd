@@ -652,7 +652,7 @@ func _c_new() -> void:
 	var me := self
 	var d := ClassicDialog.from_ditl(_nova, 3101 if multi else 3102, {
 		"texts": {NP_NAME: keep_name, NP_NICK: keep_nick},
-		"default_item": NP_OK, "cancel_item": NP_CANCEL,
+		"default_item": NP_OK, "cancel_item": NP_CANCEL, "beep": true,
 		"fallback_size": Vector2i(326, 213),
 		"actions": {NP_OK: me._c_name_ok, NP_CANCEL: me._show_list,
 			NP_RANDOM: func(): me._name_edit.text = me._nova.pilot_random_name()},

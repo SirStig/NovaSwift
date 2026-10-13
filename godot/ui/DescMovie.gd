@@ -27,12 +27,31 @@ static func _plugins() -> Object:
 ## {"info": Movies.ready() result, "after": bool, "double": bool, "fill": bool, "path": String} for the
 ## movie `desc_id` names when it can play right now, else {}.
 static func lookup(desc_id: int) -> Dictionary:
+	return _lookup(desc_id, false)
+
+
+## The hypergate / wormhole entry movie for travel-target system `system_id` (Stellar_EnterHypergate
+## 0x00456480 / Stellar_EnterWormhole 0x00456ca0 -> FUN_0049e3c0(target + 0x80): the dësc whose id is
+## the target sÿst id, no text; shared Swift `GateTravelMovie`). Same result shape as `lookup`, {} when
+## there is nothing to play (no target, no such dësc, pref off, no ffmpeg / file).
+static func lookup_gate(system_id: int) -> Dictionary:
+	return _lookup(system_id, true)
+
+
+static func _lookup(desc_id: int, gate: bool) -> Dictionary:
+	if desc_id < 128 and gate:
+		return {}
 	if desc_id < 0 or not bool(Prefs.get_value("classic", "play_movies")):
 		return {}
 	var pl: Object = _plugins()
 	if pl == null:
 		return {}
-	var parsed: Variant = JSON.parse_string(str(pl.desc_movie(desc_id)))
+	var raw: String = ""
+	if gate and pl.has_method("gate_movie"):
+		raw = str(pl.gate_movie(desc_id))
+	else:
+		raw = str(pl.desc_movie(desc_id))
+	var parsed: Variant = JSON.parse_string(raw)
 	if not (parsed is Dictionary):
 		return {}
 	var dm: Dictionary = parsed
@@ -92,3 +111,13 @@ static func play(host: Node, clip: Dictionary, then: Callable) -> CanvasLayer:
 		layer.queue_free()
 		then.call())
 	return layer
+
+
+## Plays the gate-entry movie for `system_id` over `host` and runs `then` afterwards; with nothing to
+## play `then` runs at once. Returns the overlay (or null).
+static func play_gate(host: Node, system_id: int, then: Callable) -> CanvasLayer:
+	var clip: Dictionary = lookup_gate(system_id)
+	if clip.is_empty():
+		then.call()
+		return null
+	return play(host, clip, then)

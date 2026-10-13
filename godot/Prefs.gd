@@ -16,7 +16,8 @@
 #   [accessibility] larger_hud · high_contrast_hud · colorblind_mode
 #   [ui]      pad_keyboard (auto|off)
 #   [map]     gate_links — draw hypergate / wormhole spokes on the plain galaxy map (an
-#             enhancement; the original draws them only in the gate picker), default off
+#             enhancement; the original draws them only in the gate picker), default off;
+#             show_borders — the political overlay (Show/Hide Borders, STR# 150 #56/#57), default off
 #   [presentation] modern_menu · modern_dialogs · modern_hud · fullscreen_galaxy_map — Classic
 #             (all false, default) draws the original ïntf status bar, DLOG/DITL dialogs, main
 #             menu and framed galaxy map from the user's data (ui/classic/); Enhanced is Classic
@@ -44,7 +45,8 @@ const BASE_SIZE := Vector2i(1280, 720)
 const SCALES := [0.75, 1.0, 1.25, 1.5, 2.0]
 
 const DEFAULTS := {
-	"audio": {"master": 1.0, "sfx": 1.0, "ui": 1.0, "music": 0.7, "muted": false, "music_enabled": true},
+	# Defaults are the Apple app's: sound-volume step 5 (master 5/8), effects 0.9, interface 0.8.
+	"audio": {"master": 0.625, "sfx": 0.9, "ui": 0.8, "music": 0.7, "muted": false, "music_enabled": true},
 	"video": {"fullscreen": false, "vsync": true, "scale": 1.0},
 	# invert_turn / mouse_aiming: Apple invertTurn / mouseAiming (both off = the original's feel).
 	"input": {"deadzone": Controls.STICK_DEADZONE, "modern_keys": false, "invert_turn": false,
@@ -61,7 +63,7 @@ const DEFAULTS := {
 		"weapon_effects": true, "parallax_starfield": true, "ambient_sounds": true,
 		"hyperspace_effects": true, "check_for_updates": false,
 		"sound_volume_step": 5, "brightness_step": 3},
-	"map": {"gate_links": false},
+	"map": {"gate_links": false, "show_borders": false},
 	# Tutorial hints (Apple GameSettings.tutorialHints + the per-install UserDefaults seen flags):
 	# enabled gates the one-time hint cards, flight training offer; seen = the NovaHints storage keys
 	# already dismissed, flight_card = the first-flight "Getting started" card, completed = flight
@@ -276,11 +278,20 @@ static func apply_audio(audio: Object) -> void:
 	audio.muted = bool(get_value("audio", "muted"))
 
 
-## Linear gain for the title music: master × music, 0 when muted.
+## Linear gain for the title music while it plays: the sound-volume step (master = step / 8,
+## the original's `step x 0x20 / 256`), 0 when muted or the Music slider is at 0. Apple's
+## `GameAudio.musicEnabled` gates on `musicVolume > 0` and never scales by it.
 static func music_gain() -> float:
 	if bool(get_value("audio", "muted")) or not bool(get_value("audio", "music_enabled")):
 		return 0.0
-	return float(get_value("audio", "master")) * float(get_value("audio", "music"))
+	if float(get_value("audio", "music")) <= 0.0:
+		return 0.0
+	return clampf(float(get_value("audio", "master")), 0.0, 1.0)
+
+
+## The level the track starts at, before its first 40-tick service: `min(256, step x 0x30) / 256`.
+static func music_start_gain() -> float:
+	return minf(1.0, music_gain() * 1.5)
 
 
 static func apply_video() -> void:

@@ -395,6 +395,14 @@ class NovaWorld: Node2D {
                 sound.deaths.begin(entityID: entityID, at: at, boomID: boomID, game: game)
             } else {
                 sound.pending.append(contentsOf: SoundCues.cues(for: event, game: game))
+                if case .playerDying = event, let w = self.world {
+                    // The player's hull breaks up in the same ten staggered bursts as an NPC's
+                    // (`GameScene.beginPlayerDeathSequence`): nine jittered bööm sounds 0.2 s apart,
+                    // then the final blast. Each death gets its own key (an eject-and-die twice).
+                    sound.playerDeaths += 1
+                    sound.deaths.begin(entityID: -sound.playerDeaths, at: w.player.position,
+                                       boomID: w.player.explosionBoomID, game: game)
+                }
             }
             interactionsNote(event)       // tribute / lost escort -> pilot
             storyNote(event)              // mission ship goals / losses, fail-if-disabled
@@ -734,6 +742,9 @@ class NovaWorld: Node2D {
         storyLeavingSystem()                      // surviving aux ships go back to their budgets
         dockedSpobID = spobID
         sound.pending.append(SoundCues.docking)   // .shipLanded for entity 0: snd 390
+        // `Stellar_RunDockAndLaunchSequence` 0x00455e10: at an uninhabited stellar (no auto-refuel) the
+        // landing sounds snd 151 as well (Apple `SpaceportView.onAppear`).
+        if let spob = game?.spob(spobID), spob.isUninhabited { beep(2) }
         pilot.landedSpob = spobID
         // The landing pass: offer lists refresh, cargo is picked up / dropped, and a
         // mission whose objective is done here completes and pays (0x00443780).
@@ -3121,8 +3132,29 @@ class NovaWorld: Node2D {
             return landJSON("messages")
         }
         travel.openGates.insert(wormhole.id)
+        if travel.deferGateTransport {
+            // The entry movie (dësc = the wormhole's own spöb id, travel mode 2, 0x00456ca0) plays first;
+            // the frontend then calls `wormholeEnterPending()`.
+            travel.pendingWormhole = (dest.systemID, dest.gateSpobID)
+            return Self.json(["result": "wormhole", "spob": dest.gateSpobID, "name": "",
+                              "movie_desc": wormhole.id] as [String: Any])
+        }
         return transportThroughGate(destSystem: dest.systemID, destGate: dest.gateSpobID)
             ? landJSON("transported", spob: dest.gateSpobID) : landJSON("none")
+    }
+
+    /// Frontends that play the gate-entry movie themselves set this so a wormhole waits for
+    /// `wormholeEnterPending()` (default off: the wormhole transports inside `pressLand`).
+    @Callable(autoSnakeCase: true) func setGateTransportDeferred(on: Bool) {
+        travel.deferGateTransport = on
+        if !on { travel.pendingWormhole = nil }
+    }
+
+    /// Complete the wormhole transport `pressLand` reported as `wormhole`. False if none is pending.
+    @Callable(autoSnakeCase: true) func wormholeEnterPending() -> Bool {
+        guard let p = travel.pendingWormhole else { return false }
+        travel.pendingWormhole = nil
+        return transportThroughGate(destSystem: p.system, destGate: p.gate)
     }
 
     /// The hypergate picker, or `{}`: `{gate, name, here, destinations: [{gate, system,
@@ -5281,8 +5313,38 @@ class NovaWorld: Node2D {
     }
 
     /// Play `snd ` `id` as a menu sound (the main-menu click 600/601, shutter 602/603).
+    /// Priorities as the Apple app plays them: 600/601 (button press / release,
+    /// `FUN_0048bc20`) at 10, the 602/603 shutter slides at 0x32 (`playMenuSlide`).
     @Callable(autoSnakeCase: true) func soundMenu(id: Int) {
-        sound.pending.append(SoundCue(soundID: id, priority: OriginalAudio.Priority.menuTransition))
+        let slide = id == 602 || id == 603
+        sound.pending.append(SoundCue(soundID: id, priority: slide ? OriginalAudio.Priority.warpOut
+                                                                   : OriginalAudio.Priority.menuTransition))
+    }
+
+    /// The landed stellar's ambient loop (`spöb` CustSndID) as the Apple app starts it
+    /// (`GameAudio.startAmbient`): the snd id, or -1 when not docked / the stellar has none.
+    @Callable(autoSnakeCase: true) func landedAmbientSound() -> Int {
+        guard let id = dockedSpobID, let s = game?.spob(id)?.ambientSoundID, s >= 0 else { return -1 }
+        return s
+    }
+
+    /// Test seam: the cues raised so far and not yet drained, as JSON
+    /// `[{id, priority, onlyWhenSilent, interface, rate, x, y}]` (`x`/`y` only for a positional cue).
+    @Callable(autoSnakeCase: true) func debugPendingSounds() -> String {
+        Self.json(sound.pending.map { cue -> [String: Any] in
+            var row: [String: Any] = ["id": cue.soundID, "priority": cue.priority,
+                                      "onlyWhenSilent": cue.onlyWhenSilent, "interface": cue.interfaceVolume,
+                                      "rate": cue.rate]
+            if let at = cue.position { row["x"] = at.x; row["y"] = at.y }
+            return row
+        })
+    }
+
+    /// Test seam: `debug_pending_sounds()` and then forget them (the cues never reach the voice list).
+    @Callable(autoSnakeCase: true) func debugDrainSounds() -> String {
+        let out = debugPendingSounds()
+        sound.pending.removeAll(keepingCapacity: true)
+        return out
     }
 
     /// The original galaxy map's info text for system `id` (see `ClassicUIBackend.mapInfo`).
@@ -5555,6 +5617,69 @@ class NovaWorld: Node2D {
             flat += [Float(s.id), Float(c.r), Float(c.g), Float(c.b)]
         }
         return PackedFloat32Array(flat)
+    }
+
+    /// Show Borders (STR# 150 #56/#57): the original's political overlay (`PoliticalOverlay`, shared with
+    /// `GalaxyMapView`) for a map canvas of `canvasW` x `canvasH` px showing map coordinate
+    /// (`centerX`, `centerY`) in its middle at `pxPerUnit` pixels per map unit. Returns the 2 px cell grid
+    /// as RGBA8 (`cellsW * cellsH * 4` bytes, `cellsW = canvasW / 2`); empty with no game / no discs.
+    @Callable(autoSnakeCase: true) func navBorders(canvasW: Int, canvasH: Int, pxPerUnit: Double,
+                                                    centerX: Double, centerY: Double) -> PackedByteArray {
+        guard let game, let nv = navigator(), canvasW >= 2, canvasH >= 2, pxPerUnit > 0 else { return PackedByteArray() }
+        let known = knownSets()
+        let adjacent = nv.adjacentToKnown(explored: known.explored, charted: known.charted)
+        let w = canvasW / PoliticalOverlay.cellSize, h = canvasH / PoliticalOverlay.cellSize
+        func plot(_ x: Int, _ y: Int) -> (x: Double, y: Double) {
+            (Double(canvasW) / 2 + (Double(x) - centerX) * pxPerUnit, Double(canvasH) / 2 + (Double(y) - centerY) * pxPerUnit)
+        }
+        let discs = PoliticalOverlay.discs(
+            game: game, systems: game.systems(),
+            isKnown: { s in
+                guard !nav.hidden.contains(s.id), pilot.isSystemExplored(s.id),
+                      StarMapNavigator.visibility(of: s.id, explored: known.explored, adjacent: adjacent,
+                                                  charted: known.charted) != .unknown else { return false }
+                let p = plot(s.x, s.y)   // far off the canvas: no cell of its disc is visible
+                return p.x > -200 && p.y > -200 && p.x < Double(canvasW) + 200 && p.y < Double(canvasH) + 200
+            },
+            hasUsableStellar: { s in
+                s.spobs.compactMap { game.spob($0) }.contains {
+                    !$0.isUninhabited && $0.usableForTravel(destroyed: pilot.isStellarDestroyed($0.id))
+                }
+            },
+            plot: plot)
+        guard !discs.isEmpty else { return PackedByteArray() }
+        let grid = PoliticalOverlay.build(width: w, height: h, unitsPerPixel: 1 / pxPerUnit, discs: discs, game: game)
+        return PackedByteArray(grid.rgba(game: game))
+    }
+
+    /// The map's mission marks (`StoryEngine.missionDestinations`, the accepted missions' target systems)
+    /// as JSON `[{system, x, y, vis, names}]`; `vis` 0 = fogged out (the Classic map marks a mission target
+    /// regardless of fog, 0x004a8100), 1 adjacent, 2 charted, 3 explored. Story-hidden systems are skipped.
+    @Callable(autoSnakeCase: true) func navMissionTargets() -> String {
+        guard let game, let nv = navigator(), let engine = storyEngine() else { return "[]" }
+        let known = knownSets()
+        let adjacent = nv.adjacentToKnown(explored: known.explored, charted: known.charted)
+        let rows = engine.missionDestinations().compactMap { dest -> [String: Any]? in
+            guard let s = game.system(dest.systemID), !nav.hidden.contains(s.id) else { return nil }
+            let vis: Int
+            switch StarMapNavigator.visibility(of: s.id, explored: known.explored, adjacent: adjacent, charted: known.charted) {
+            case .unknown: vis = 0
+            case .adjacent: vis = 1
+            case .chartered: vis = 2
+            case .explored: vis = 3
+            }
+            return ["system": s.id, "x": s.x, "y": s.y, "vis": vis, "names": dest.names]
+        }
+        return Self.json(rows)
+    }
+
+    /// Tab / `\` on the open map (0x004a74f0 / 0x004a7710; Shift reverses): step the armed hyperspace link
+    /// through the current system's links, wrapping, and make it the map's selection. Returns the system
+    /// armed, or -1 without links.
+    @Callable(autoSnakeCase: true) func navCycleLink(forward: Bool) -> Int {
+        guard cycleHyperspaceLink(forward: forward), let id = nav.route.hops.first else { return -1 }
+        nav.selected = id
+        return id
     }
 
     /// The About Nova text exactly as `AboutNovaText.text(game:)` builds it: the

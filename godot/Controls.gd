@@ -171,7 +171,7 @@ const BINDINGS := {
 	"map_zoom_in": {"keys": [KEY_EQUAL, KEY_KP_ADD], "buttons": [JOY_BUTTON_RIGHT_SHOULDER]},
 	"map_zoom_out": {"keys": [KEY_MINUS, KEY_KP_SUBTRACT], "buttons": [JOY_BUTTON_LEFT_SHOULDER]},
 	"map_select": {"keys": [KEY_ENTER, KEY_KP_ENTER], "buttons": [JOY_BUTTON_A]},
-	"map_extend": {"keys": [KEY_TAB], "buttons": [JOY_BUTTON_Y]},
+	"map_extend": {"keys": [KEY_E], "buttons": [JOY_BUTTON_Y]},   # Tab / \ now cycle the armed link (0x004a7710)
 	"map_auto_route": {"keys": [KEY_T], "buttons": [JOY_BUTTON_X]},
 	"map_center": {"keys": [KEY_C], "buttons": [JOY_BUTTON_RIGHT_STICK]},
 	"map_find": {"keys": [KEY_F], "buttons": [JOY_BUTTON_LEFT_STICK]},

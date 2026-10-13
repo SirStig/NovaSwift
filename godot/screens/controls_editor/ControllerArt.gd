@@ -148,8 +148,8 @@ static func _sample_half(half: Array) -> Array:
 		var c1: Vector2 = half[i]
 		var c2: Vector2 = half[i + 1]
 		var e: Vector2 = half[i + 2]
-		for k in range(1, 13):
-			var t := float(k) / 12.0
+		for k in range(1, 25):
+			var t := float(k) / 24.0
 			var u := 1.0 - t
 			out.append(u * u * u * p0 + 3.0 * u * u * t * c1 + 3.0 * u * t * t * c2 + t * t * t * e)
 		p0 = e
@@ -213,22 +213,18 @@ static func _shoulder_poly(rg: PackedVector2Array, x0: float, x1: float, sgn: fl
 	return _stadium(Vector2(mid, top_y(rg, mid) - above), absf(x1 - x0), thick, angle)
 
 
-## Inset a screen-clockwise outline by `dist` mm along the averaged inward normal.
+## Shrink the outline toward a point a little above its centre. A normal-miter inset
+## crosses itself in the grip valley, and Godot will not fill that polygon. Scaling
+## keeps the silhouette and stays a simple polygon.
 static func _inset(poly: PackedVector2Array, dist: float) -> PackedVector2Array:
-	var n := poly.size()
+	var bb := _bbox(poly)
+	var c := bb.get_center() + Vector2(0, -bb.size.y * 0.05)
+	var kx := clampf(1.0 - dist / maxf(8.0, bb.size.x * 0.5), 0.86, 0.985)
+	var ky := clampf(1.0 - dist / maxf(8.0, bb.size.y * 0.5), 0.86, 0.985)
 	var out := PackedVector2Array()
-	for i in n:
-		var prev: Vector2 = poly[(i - 1 + n) % n]
-		var cur: Vector2 = poly[i]
-		var nxt: Vector2 = poly[(i + 1) % n]
-		var e1 := (cur - prev).normalized()
-		var e2 := (nxt - cur).normalized()
-		var n1 := Vector2(-e1.y, e1.x)
-		var n2 := Vector2(-e2.y, e2.x)
-		var nn := n1 + n2
-		nn = n1 if nn.length() < 0.001 else nn.normalized()
-		var miter := clampf(dist / maxf(0.45, nn.dot(n1)), 0.0, dist * 2.2)
-		out.append(cur + nn * miter)
+	for p in poly:
+		var d := p - c
+		out.append(c + Vector2(d.x * kx, d.y * ky) + Vector2(0, -0.35))
 	return out
 
 
@@ -283,11 +279,12 @@ static func layout(style: String) -> Dictionary:
 	# Triggers sit behind the bumpers; both are their own parts, not a smear along the outline.
 	var bump: Vector2 = sp.bump
 	var trig: Vector2 = sp.trig
-	var tilt := 0.05 if style == "deck" else 0.22
-	list.append(_ctl("lt", trigger_name(style, true), _shoulder_poly(rg, trig.x, trig.y, -1.0, 10.5, 11.5, tilt), false, "lt"))
-	list.append(_ctl("rt", trigger_name(style, false), _shoulder_poly(rg, trig.x, trig.y, 1.0, 10.5, 11.5, tilt), false, "rt"))
-	list.append(_ctl(JOY_BUTTON_LEFT_SHOULDER, button_name(style, JOY_BUTTON_LEFT_SHOULDER), _shoulder_poly(rg, bump.x, bump.y, -1.0, 3.0, 7.6, tilt * 0.8)))
-	list.append(_ctl(JOY_BUTTON_RIGHT_SHOULDER, button_name(style, JOY_BUTTON_RIGHT_SHOULDER), _shoulder_poly(rg, bump.x, bump.y, 1.0, 3.0, 7.6, tilt * 0.8)))
+	var tilt := 0.04 if style == "deck" else 0.1
+	# Bumpers overlap the top edge; triggers sit just behind them so only the top half shows.
+	list.append(_ctl("lt", trigger_name(style, true), _shoulder_poly(rg, trig.x, trig.y, -1.0, 6.2, 12.0, tilt), false, "lt"))
+	list.append(_ctl("rt", trigger_name(style, false), _shoulder_poly(rg, trig.x, trig.y, 1.0, 6.2, 12.0, tilt), false, "rt"))
+	list.append(_ctl(JOY_BUTTON_LEFT_SHOULDER, button_name(style, JOY_BUTTON_LEFT_SHOULDER), _shoulder_poly(rg, bump.x, bump.y, -1.0, -0.4, 8.2, tilt)))
+	list.append(_ctl(JOY_BUTTON_RIGHT_SHOULDER, button_name(style, JOY_BUTTON_RIGHT_SHOULDER), _shoulder_poly(rg, bump.x, bump.y, 1.0, -0.4, 8.2, tilt)))
 	var sr: float = sp.stick
 	list.append(_ctl(JOY_BUTTON_LEFT_STICK, "L3", _circle_pts(sp.ls, sr), true, "ls", "circle"))
 	list.append(_ctl(JOY_BUTTON_RIGHT_STICK, "R3", _circle_pts(sp.rs, sr), true, "rs", "circle"))
@@ -387,19 +384,11 @@ static func _body(ci: CanvasItem, rg: PackedVector2Array, top: Color, bottom: Co
 	ci.draw_colored_polygon(_scaled(rg, c, 1.035, Vector2(0, 8.0)), Color(0, 0, 0, 0.55))
 	_grad_poly(ci, wall, bottom.darkened(0.25), bottom.darkened(0.45))
 	_grad_poly(ci, rg, top, bottom)
-	ci.draw_polyline(_closed(rg), top.lightened(0.08), 1.5 * px, true)
+	ci.draw_polyline(_closed(rg), top.lightened(0.12), maxf(0.7, 2.0 * px), true)
 	var inner := _inset(rg, 3.6)
 	_grad_poly(ci, inner, top.lightened(0.1), bottom.lightened(0.16))
-	ci.draw_polyline(_closed(inner), Color(0, 0, 0, 0.4), 1.25 * px, true)
-	ci.draw_polyline(_closed(_inset(rg, 1.2)), Color(1, 1, 1, 0.14), 1.0 * px, true)
-	var n := rg.size()
-	for i in n:
-		var a: Vector2 = rg[i]
-		var b: Vector2 = rg[(i + 1) % n]
-		var yy := (a.y + b.y) * 0.5
-		if yy < bb.position.y + bb.size.y * 0.28:
-			var t := clampf(1.0 - (yy - bb.position.y) / (bb.size.y * 0.28), 0.0, 1.0)
-			ci.draw_line(a, b, Color(1, 1, 1, 0.06 + 0.34 * t), 2.0 * px, true)
+	ci.draw_polyline(_closed(inner), Color(0, 0, 0, 0.28), maxf(0.5, 1.2 * px), true)
+	ci.draw_polyline(_closed(_inset(rg, 1.15)), Color(1, 1, 1, 0.16), maxf(0.45, 1.1 * px), true)
 
 
 ## Domed cap. The highlight sits up-left; a crescent on the lower-right lip sells the curve.

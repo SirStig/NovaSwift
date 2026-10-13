@@ -8,8 +8,14 @@
 # plays it. Godot cannot decode QuickTime, so a ".mov" hit (or no hit) is simply
 # silence — never an error. No hover sounds anywhere in the menus.
 #
-# Volume follows Prefs (master × music, mute).
+# Playback is the original's (`FUN_004ab5d0` / `FUN_004ab8d0` / `FUN_004ab820`), as Apple's
+# GameAudio runs it: the track plays ONCE per main-menu visit (nothing rewinds it), starts at
+# min(256, step x 0x30)/256, drops to step x 0x20/256 at the first 40-tick service (2/3 s), and
+# leaving the menu fades it out 8/256 per 60 Hz tick. The sound-volume step is the master slider
+# (step / 8), so the playing level is `Prefs.music_gain()`; the Music slider only mutes at 0.
 extends AudioStreamPlayer
+
+signal faded   # the fade-out finished (the track is stopped)
 
 const Prefs = preload("res://Prefs.gd")
 
@@ -17,6 +23,9 @@ const FOLDERS := ["Nova Plug-ins", "Nova Files"]
 const EXTENSIONS := ["", ".mov", ".mp3"]
 
 var track_path := ""    # what was found (may be undecodable), for tests
+var _fading := false
+var _fade_gain := 0.0
+var _service := 0.0     # seconds since the track started; < 40/60 = still at the start level
 
 
 ## The folders the active plug-in set puts in front of the base data (selected total conversion's own
@@ -104,8 +113,10 @@ func start(nova: Object, data_dir: String) -> void:
 	var stream := AudioStreamMP3.load_from_file(track_path)
 	if stream == null:
 		return
-	stream.loop = true
+	stream.loop = false   # plays once per visit
 	self.stream = stream
+	_service = 0.0
+	set_process(true)
 	refresh_volume()
 	if is_inside_tree():
 		play()
@@ -113,6 +124,41 @@ func start(nova: Object, data_dir: String) -> void:
 		tree_entered.connect(play, CONNECT_ONE_SHOT)
 
 
+func _ready() -> void:
+	set_process(false)
+
+
+func _process(delta: float) -> void:
+	if _fading:
+		_fade_gain -= (8.0 / 256.0) * delta * 60.0
+		if _fade_gain <= 0.0:
+			_fading = false
+			set_process(false)
+			stop()
+			faded.emit()
+			return
+		volume_db = linear_to_db(_fade_gain)
+		return
+	if _service < 40.0 / 60.0:
+		_service += delta
+		if _service >= 40.0 / 60.0:
+			refresh_volume()   # the 40-tick service re-levels to the playing volume
+
+
 func refresh_volume() -> void:
-	var g := Prefs.music_gain()
+	if _fading:
+		return
+	var g := Prefs.music_gain() if _service >= 40.0 / 60.0 else Prefs.music_start_gain()
 	volume_db = linear_to_db(g) if g > 0.0 else -80.0
+
+
+## Leave the menu: step the volume down 8/256 per 60 Hz tick from its current level, then stop
+## and emit `faded`. Silent or finished tracks end at once.
+func fade_out() -> void:
+	if not playing or _fading:
+		if not _fading:
+			faded.emit()
+		return
+	_fade_gain = db_to_linear(volume_db)
+	_fading = true
+	set_process(true)

@@ -754,6 +754,8 @@ func _outfit_sell(n: int) -> void:
 	var it: Dictionary = _items[i]
 	var got: int = _nova.outfitter_sell(_sel_id, n)
 	_message = ("Sold %d× %s." % [got, it.name]) if got > 0 else "Can't sell that."
+	if got <= 0:
+		_nova.sound_beep(4)   # NovaUi_RunOutfitterInteractionLoop 0x0048ea70: a sale that fails sounds snd 153
 	_show_outfitter()
 
 

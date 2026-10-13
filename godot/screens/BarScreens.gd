@@ -64,7 +64,6 @@ func _begin(width: float) -> VBoxContainer:
 func open_hire() -> void:
 	_hire_sel = -1
 	_hire_msg = ""
-	_nova.sound_beep(2)
 	_show_hire()
 
 
@@ -174,17 +173,15 @@ func _hire_pressed() -> void:
 		if int(s.id) == _hire_sel:
 			name = str(s.name)
 	if _nova.hire_escort(_hire_sel):
-		_nova.sound_beep(2)
 		_hire_msg = "Hired the %s — it joins you on takeoff." % name
 	else:
-		_nova.sound_beep(4)
 		_hire_msg = "Can't hire that ship."
 	_sp._update_credits()
 	_show_hire()
 
 
 func _close_overlay_beep() -> void:
-	_nova.sound_beep(3)
+	# (silent: the bar, hiring and gambling windows have no sound sites in the original)
 	_sp._close_overlay()
 
 
@@ -193,7 +190,6 @@ func _close_overlay_beep() -> void:
 func open_gamble() -> void:
 	_pick = -1
 	_gamble_msg = ""
-	_nova.sound_beep(2)
 	# Convert the race clips in the background so the first bet can play one.
 	if _movies_on():
 		for i in range(1, 5):
@@ -295,7 +291,6 @@ func _bet(wager: int) -> void:
 		return
 	var r := _json(_nova.gamble_bet(_pick, wager))
 	if not bool(r.get("ok", false)):
-		_nova.sound_beep(4)
 		_gamble_msg = "You can't cover that bet."
 		_show_choose()
 		return
@@ -437,7 +432,6 @@ func _hire_classic() -> void:
 	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var hire := CS.button(d, str(labels.get("hire", "Hire Escort")), CS.rect(_nova, 1004, 0, Rect2i(365, 289, 109, 25)), 0,
 		_hire_pressed, true, "hire_button")
-	hire.refused.connect(func(): _nova.sound_beep(4))
 	CS.button(d, str(labels.get("done", "Done")), CS.rect(_nova, 1004, 6, Rect2i(480, 289, 109, 25)), 6, _close_overlay_beep, true, "hire_done")
 	var up := CS.button(d, "^", CS.rect(_nova, 1004, 11, Rect2i(141, 288, 25, 25)), 11, func(): grid.scroll(-1), true, "hire_up")
 	var down := CS.button(d, "&", CS.rect(_nova, 1004, 12, Rect2i(171, 288, 25, 25)), 12, func(): grid.scroll(1), true, "hire_down")
@@ -526,8 +520,6 @@ func _choose_classic() -> void:
 		func(): _bet(int(data.get("standard", 0))), _pick >= 0 and have_cash, "bet_standard")
 	var bet := CS.button(d, str(labels.get("bet", "Bet")), CS.rect(_nova, 1023, 0, Rect2i(243, 196, 99, 25)), 0,
 		func(): _show_amount(data), _pick >= 0 and have_cash, "bet_amount")
-	for b in [bet1, bet]:
-		b.refused.connect(func(): _nova.sound_beep(4))
 	var cr := CS.text(d, "%s cr" % CS.credits(int(data.get("credits", 0))), Rect2i(13, 203, 100, 14), 11, CS.GOLD,
 		HORIZONTAL_ALIGNMENT_CENTER)
 	cr.name = "gamble_credits"

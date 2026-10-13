@@ -14,6 +14,10 @@
 #   F / L3             find a system by name (the original's Find: longest common prefix
 #                      of the known systems' names; selects and centres, never plots)
 #   M / Back / B / Esc close
+#   Tab / \ (Shift: back)  step the armed link through the current system's links (0x004a74f0 /
+#                      0x004a7710), the selection follows; E / Y adds a hop (was Tab)
+#   B / the Show-Hide Borders button   the political overlay (PoliticalOverlay, 0x004a9d50), persisted
+#                      in [map] show_borders; mission targets carry cicn 15000 even through fog
 #
 # Nebulae (nëbu art, drawn the way the original's map does: only active ones the pilot
 # has explored, added over the dark background) are always shown. The hypergate /
@@ -34,6 +38,7 @@ extends CanvasLayer
 const Prefs = preload("res://Prefs.gd")
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
 const ClassicDialog = preload("res://ui/classic/ClassicDialog.gd")
+const DescMovie = preload("res://ui/DescMovie.gd")
 
 # Classic presentation (the default unless Prefs presentation/fullscreen_galaxy_map): the map
 # sits inside its original dialog -- DLOG/DITL 2000 on PICT 8509, as the Apple GalaxyMapView's
@@ -79,6 +84,12 @@ const COLOR_GATE_ROUTE := Color(0.25, 0.62, 1.0)
 var nova
 var _canvas: Control
 var _neb: Control                # nebula art, added over the background
+var _borders: Control            # the political overlay (Show Borders), between the nebulae and the canvas
+var _borders_tex: ImageTexture
+var _borders_key := ""
+var _borders_btn: Control        # the Classic frame's Show/Hide Borders button (DITL 2000 item 8)
+var _missions: Array = []        # [{system, x, y, vis, names}] from nav_mission_targets
+var _cicn_tex := {}              # cicn id -> Texture2D (or null)
 var _find_box: PanelContainer
 var _find_edit: LineEdit
 
@@ -143,6 +154,13 @@ func setup(world) -> void:
 	_neb.material = add_mat
 	_neb.draw.connect(_draw_nebulae)
 	add_child(_neb)
+	_borders = Control.new()
+	_borders.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_borders.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_borders.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST   # 2 px cells, no smoothing
+	_borders.visible = false
+	_borders.draw.connect(_draw_borders)
+	add_child(_borders)
 	_canvas = Control.new()
 	_canvas.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_canvas.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -168,6 +186,7 @@ func open() -> void:
 	_cursor = _canvas.size * 0.5
 	_hover = -1
 	_pad_mode = _pad_connected()
+	_borders_key = ""
 	visible = true
 	nova.sound_beep(3)   # the map window opens with snd 152 (0x0044b120)
 	_canvas.queue_redraw()
@@ -195,6 +214,7 @@ func open_gate() -> void:
 	_cursor = _canvas.size * 0.5
 	_hover = -1
 	_pad_mode = _pad_connected()
+	_borders_key = ""
 	visible = true
 	nova.sound_beep(3)
 	_canvas.queue_redraw()
@@ -248,7 +268,26 @@ func _reload() -> void:
 	_gate_links = nova.nav_gate_links() if bool(Prefs.get_value("map", "gate_links")) else PackedInt32Array()
 	var neb = JSON.parse_string(nova.nav_nebulae(false))
 	_nebulae = neb if neb is Array else []
+	_reload_missions()
 	_reload_route()
+
+
+# The Classic map marks every system an accepted mission targets, fog of war or not
+# (0x004a8100): such a system is drawn (dim, unnamed) and can be picked like the others.
+func _reload_missions() -> void:
+	_missions = []
+	if not nova.has_method("nav_mission_targets"):
+		return
+	var parsed = JSON.parse_string(nova.nav_mission_targets())
+	if not (parsed is Array):
+		return
+	_missions = parsed
+	for row in _missions:
+		var mid: int = int(row["system"])
+		if not _info.has(mid):
+			_ids.append(mid)
+			_info[mid] = {"pos": Vector2(float(row["x"]), float(row["y"])), "vis": 0, "color": Color(0.25, 0.25, 0.25)}
+			_names[mid] = ""
 
 
 func _reload_route() -> void:
@@ -347,6 +386,17 @@ func _input(event: InputEvent) -> void:
 		jump_requested.emit()
 		return
 
+	# Tab / \ cycle the armed link (Shift: back); B toggles the borders overlay.
+	if event is InputEventKey and event.pressed and not event.echo and _gate.is_empty():
+		if event.keycode == KEY_TAB or event.keycode == KEY_BACKSLASH:
+			get_viewport().set_input_as_handled()
+			cycle_link(not event.shift_pressed)
+			return
+		if event.keycode == KEY_B and not event.ctrl_pressed and not event.alt_pressed and not event.meta_pressed:
+			get_viewport().set_input_as_handled()
+			toggle_borders()
+			return
+
 	if event is InputEventMouseMotion:
 		_pad_mode = false
 		_cursor = _local(event.position)
@@ -414,6 +464,25 @@ func _input(event: InputEvent) -> void:
 			_plot(target2, true)
 
 
+## Tab / `\` on the map (0x004a74f0 / 0x004a7710): step the armed hyperspace link through the current
+## system's links and select it. Returns the system id, or -1 without links.
+func cycle_link(forward: bool) -> int:
+	if not nova.has_method("nav_cycle_link"):
+		return -1
+	var id: int = nova.nav_cycle_link(forward)
+	if id == -1:
+		return -1
+	_reload_route()
+	_hover = -1
+	if _info.has(id):
+		var p := _to_screen(_info[id]["pos"])
+		if not Rect2(Vector2.ZERO, _canvas.size).grow(-EDGE_PAN).has_point(p):
+			_center = _info[id]["pos"]
+	_update_classic()
+	_canvas.queue_redraw()
+	return id
+
+
 # D-pad: move the cursor to the nearest system roughly in that direction.
 func _step_direction(dir: Vector2) -> void:
 	_pad_mode = true
@@ -473,11 +542,20 @@ func _plot(id: int, extend: bool) -> void:
 func _pick_gate_destination(id: int) -> void:
 	if not _gate_dests.has(id):
 		return
-	if nova.gate_picker_choose(int(_gate_dests[id]["gate"])):
-		visible = false
-		_gate = {}
-		_find_box.visible = false
-		closed.emit()   # the bridge has already rebuilt the destination; Main resumes flight
+	var gate_id: int = int(_gate_dests[id]["gate"])
+	# Stellar_EnterHypergate 0x00456480: the dësc movie of the chosen system plays after the map
+	# closes and before the transport (DescMovie.play_gate; nothing to play = straight through).
+	visible = false
+	_gate = {}
+	_find_box.visible = false
+	var host: Node = get_parent() if get_parent() != null else self
+	DescMovie.play_gate(host, id, func(): _finish_gate_pick(gate_id))
+
+
+func _finish_gate_pick(gate_id: int) -> void:
+	if not nova.gate_picker_choose(gate_id):
+		nova.gate_picker_cancel()
+	closed.emit()   # the bridge has already rebuilt the destination; Main resumes flight
 
 
 # --- Find ------------------------------------------------------------------------
@@ -530,6 +608,92 @@ func _system_label(id: int) -> String:
 	return n if n != "" else "Unknown system"
 
 
+# MARK: Borders (Show / Hide Borders, STR# 150 #56 / #57)
+
+func borders_on() -> bool:
+	return bool(Prefs.get_value("map", "show_borders"))
+
+
+func toggle_borders() -> void:
+	Prefs.set_value("map", "show_borders", not borders_on())
+	Prefs.save()
+	_borders_key = ""
+	if _borders_btn != null:
+		_borders_btn.text = _borders_label()
+	_canvas.queue_redraw()
+
+
+func _borders_label() -> String:
+	return ClassicTheme.string_at(150, 57, "Hide Borders") if borders_on() else ClassicTheme.string_at(150, 56, "Show Borders")
+
+
+# Rebuilds the overlay texture when the view changed, then shows / hides its layer.
+func _sync_borders() -> void:
+	var on: bool = borders_on() and nova.has_method("nav_borders")
+	_borders.visible = on
+	if not on:
+		return
+	var sz := _canvas.size
+	var key := "%d|%d|%.3f|%.1f|%.1f" % [int(sz.x), int(sz.y), _zoom, _center.x, _center.y]
+	if key == _borders_key:
+		return
+	_borders_key = key
+	var cw: int = int(sz.x * 0.5)
+	var ch: int = int(sz.y * 0.5)
+	var bytes: PackedByteArray = nova.nav_borders(int(sz.x), int(sz.y), _zoom, _center.x, _center.y)
+	if cw < 1 or ch < 1 or bytes.size() < cw * ch * 4:
+		_borders_tex = null
+	else:
+		_borders_tex = ImageTexture.create_from_image(Image.create_from_data(cw, ch, false, Image.FORMAT_RGBA8, bytes))
+	_borders.queue_redraw()
+
+
+func _draw_borders() -> void:
+	if _borders_tex != null:
+		_borders.draw_texture_rect(_borders_tex, Rect2(Vector2.ZERO, _borders_tex.get_size() * 2.0), false)
+
+
+# MARK: Mission-target markers
+
+func _cicn(id: int) -> Texture2D:
+	if _cicn_tex.has(id):
+		return _cicn_tex[id]
+	var tex: Texture2D = null
+	if nova.has_method("cicn_info"):
+		var info: PackedInt32Array = nova.cicn_info(id)
+		if info.size() >= 2 and info[0] > 0 and info[1] > 0:
+			var bytes: PackedByteArray = nova.cicn_rgba(id)
+			if bytes.size() >= info[0] * info[1] * 4:
+				tex = ImageTexture.create_from_image(
+					Image.create_from_data(info[0], info[1], false, Image.FORMAT_RGBA8, bytes))
+	_cicn_tex[id] = tex
+	return tex
+
+
+# Each target system carries cicn 15000, 16 px up and to the left (0x004a8100); without that art the
+# small orange arrow (Apple drawMissionArrow). `labels`: the plain map also names the missions.
+func _draw_mission_marks(c: Control, labels: bool) -> void:
+	var view := Rect2(Vector2.ZERO, c.size).grow(60.0)
+	var icon: Texture2D = _cicn(15000)
+	for row in _missions:
+		var p := _to_screen(Vector2(float(row["x"]), float(row["y"])))
+		if not view.has_point(p):
+			continue
+		if icon != null and not labels:
+			c.draw_texture_rect(icon, Rect2(p + Vector2(-16.0, -16.0), Vector2(16.0, 16.0)), false)
+			continue
+		var tip := p + Vector2(-3.0, -6.0)
+		var base := tip + Vector2(-7.0, -9.0)
+		var axis := (base - tip).normalized()
+		var nrm := Vector2(-axis.y, axis.x) * 4.6
+		c.draw_colored_polygon(PackedVector2Array([tip, base + nrm, base - nrm]), Color(1.0, 0.55, 0.12))
+		if labels:
+			var names: Array = row["names"]
+			var text := ", ".join(PackedStringArray(names))
+			c.draw_string(ThemeDB.fallback_font, p + Vector2(10.0, -12.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1,
+				ThemeDB.fallback_font_size - 2, Color(1.0, 0.7, 0.3))
+
+
 # MARK: Drawing
 
 func _pict_tex(id: int) -> Texture2D:
@@ -577,6 +741,7 @@ func _visited(id: int) -> bool:
 
 
 func _draw_classic(c: Control, size: Vector2) -> void:
+	_sync_borders()
 	var view := Rect2(Vector2.ZERO, size).grow(60.0)
 	var gate_mode := not _gate.is_empty()
 	# Links: every one in theme grey 20000 (4000 in gate mode), 1 px; only those radiating
@@ -650,6 +815,7 @@ func _draw_classic(c: Control, size: Vector2) -> void:
 		# Geneva 9, white, pen at (x + 7, y + 4) on the baseline; explored / charted only.
 		if known and _names.get(id, "") != "" and (show_labels or id == selected):
 			c.draw_string(font, p + Vector2(7, 4), _names[id], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color.WHITE)
+	_draw_mission_marks(c, false)
 	if _pad_mode:
 		c.draw_arc(_cursor, 10.0, 0.0, TAU, 24, Color(0.4, 0.85, 1.0, 0.9), 1.0, true)
 
@@ -661,6 +827,7 @@ func _on_draw() -> void:
 	if _framed:
 		_draw_classic(c, size)
 		return
+	_sync_borders()
 	var font := ThemeDB.fallback_font
 	var fs := ThemeDB.fallback_font_size
 	var view := Rect2(Vector2.ZERO, size).grow(60.0)
@@ -748,6 +915,8 @@ func _on_draw() -> void:
 			c.draw_string(font, p + Vector2(radius + 5.0, 4.0), _names[id], HORIZONTAL_ALIGNMENT_LEFT,
 				-1, fs - 2, COLOR_TEXT if vis == VIS_EXPLORED else COLOR_DIM)
 
+	_draw_mission_marks(c, true)
+
 	# Cursor reticle (pad / mouse).
 	if _pad_mode:
 		c.draw_arc(_cursor, 10.0, 0.0, TAU, 24, Color(0.4, 0.85, 1.0, 0.9), 1.5, true)
@@ -790,7 +959,7 @@ func _draw_panel(c: Control, font: Font, fs: int, size: Vector2) -> void:
 
 	var hint := ("L-stick cursor · D-pad next system · A plot · Y add hop · X auto-route · L3 find · D-pad ↑ jump · "
 		+ "LB/RB zoom · R-stick pan · B close") if _pad_mode else (
-		"Click plot · Shift+click add hop · J jump · T auto-route · F find · wheel zoom · drag pan · C center · M/Esc close")
+		"Click plot · Shift+click/E add hop · Tab/\\ next link · B borders · J jump · T auto-route · F find · wheel zoom · drag pan · C center · M/Esc close")
 	c.draw_string(font, Vector2(20, size.y - 16), hint, HORIZONTAL_ALIGNMENT_LEFT, -1, fs - 2, COLOR_DIM)
 
 
@@ -828,13 +997,16 @@ func _apply_mode() -> void:
 	var want: bool = ClassicTheme.has_data() and not Prefs.fullscreen_map() and ClassicTheme.pict(FRAME_PICT) != null
 	if _frame != null:
 		_neb.reparent(self, false)
+		_borders.reparent(self, false)
 		_canvas.reparent(self, false)
+		_borders_btn = null
 		_frame.queue_free()
 		_frame = null
 		_clip = null
 	_framed = want
 	if not want:
 		_neb.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_borders.set_anchors_preset(Control.PRESET_FULL_RECT)
 		_canvas.set_anchors_preset(Control.PRESET_FULL_RECT)
 		if _hint != null:
 			_hint.visible = false
@@ -843,7 +1015,7 @@ func _apply_mode() -> void:
 	_frame = ClassicDialog.from_ditl(nova, 2000, {
 		"frame_pict": FRAME_PICT, "default_item": 0, "cancel_item": 0,
 		"actions": {0: me.close, 3: func(): me._step_zoom(0.75), 4: func(): me._step_zoom(1.0 / 0.75),
-			7: func(): me._clear_route(), 9: func(): me.open_find()},
+			7: func(): me._clear_route(), 8: func(): me.toggle_borders(), 9: func(): me.open_find()},
 		"custom": {
 			0: func(p, r): p.add_button(ClassicTheme.string_at(150, 5, "Done"), r, 0),
 			3: func(p, r): me._minus = p.add_button("-", r, 3),
@@ -851,6 +1023,7 @@ func _apply_mode() -> void:
 			7: func(p, r):
 				me._clear = p.add_button(ClassicTheme.string_at(150, 49, "Clear Route"), r, 7)
 				me._clear.refused.connect(func(): me.nova.sound_beep(4)),
+			8: func(p, r): me._borders_btn = p.add_button(me._borders_label(), r, 8),
 			9: func(p, r): p.add_button(ClassicTheme.string_at(150, 60, "Find"), r, 9),
 			2: func(p, r):
 				me._clip = Control.new()
@@ -863,8 +1036,10 @@ func _apply_mode() -> void:
 		}})
 	add_child(_frame)
 	_neb.reparent(_clip, false)
+	_borders.reparent(_clip, false)
 	_canvas.reparent(_clip, false)
 	_neb.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_borders.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_canvas.set_anchors_preset(Control.PRESET_FULL_RECT)
 	# Pointer-only buttons: pad A plots on the map, so none of them may hold focus.
 	for b in _frame.items.values():

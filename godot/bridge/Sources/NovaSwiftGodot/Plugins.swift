@@ -639,6 +639,16 @@ class NovaPlugins: RefCounted {
                           "fill": d.movieFillsScreen] as [String: Any])
     }
 
+    /// The hypergate / wormhole entry movie for the travel selection `system` (hypergate: destination sÿst id; wormhole: its spöb id) (shared `GateTravelMovie`;
+    /// `Stellar_EnterHypergate` 0x00456480): same JSON as `descMovie`, `movie` empty when there is none.
+    @Callable(autoSnakeCase: true) func gateMovie(system: Int) -> String {
+        guard let d = host?.dbgGame?.gateTravelMovieDesc(selection: system), let m = d.movieFilename?.trimmingCharacters(in: .whitespaces), !m.isEmpty else {
+            return Self.json(["movie": "", "after": false, "double": false, "fill": false] as [String: Any])
+        }
+        return Self.json(["movie": m, "after": d.moviePlaysAfterText, "double": d.movieDoubleSize,
+                          "fill": d.movieFillsScreen] as [String: Any])
+    }
+
     // MARK: Per-conversion add-ons (shared `TCAddOns`; the JSON in `plugins-state.json` under `tcAddOns`)
 
     /// `{tc,name,own,list,candidates,analysing}` for the selected total conversion (`{}` when none).

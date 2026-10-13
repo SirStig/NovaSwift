@@ -75,6 +75,8 @@ var _loading_label := ""
 func setup(world: Object, game_audio: Node) -> void:
 	nova = world
 	audio = game_audio
+	if audio != null and "menu_probe" in audio:
+		audio.menu_probe = in_menu   # no spaceport ambience behind a menu
 	Prefs.apply_saving(nova)
 	hints = Hints.new()
 	add_child(hints)
@@ -211,6 +213,8 @@ func is_loading() -> bool:
 # --- main menu --------------------------------------------------------------------
 
 func _open_main_menu() -> void:
+	if audio != null and audio.has_method("stop_all"):
+		audio.stop_all()   # AppModel.returnToMainMenu: no voice or loop bleeds from the game into the menu
 	main_menu = MainMenu.new()
 	add_child(main_menu)
 	main_menu.killed_id = killed_id
@@ -312,7 +316,7 @@ func start_training(exit_mode: String) -> void:
 		return
 	_training_exit = exit_mode
 	if main_menu != null:
-		main_menu.queue_free()   # also ends the title music
+		main_menu.leave()   # the title music fades out (FUN_004ab820), then the menu frees itself
 		main_menu = null
 	pilot_chosen.emit()          # Main builds the training world from the trainee
 	coach = Tutorial.new()
@@ -343,7 +347,7 @@ func _on_pilot_chosen() -> void:
 	pilot_menu = null
 	killed_id = ""
 	if main_menu != null:
-		main_menu.queue_free()   # also ends the title music
+		main_menu.leave()   # the title music fades out (FUN_004ab820), then the menu frees itself
 		main_menu = null
 	pilot_chosen.emit()
 

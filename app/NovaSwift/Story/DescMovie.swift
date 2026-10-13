@@ -34,6 +34,20 @@ final class DescMoviePlayback: ObservableObject {
                     doubleSize: d.movieDoubleSize, fillScreen: d.movieFillsScreen)
     }
 
+    /// The movie a hypergate / wormhole entry plays (`Stellar_EnterHypergate` 0x00456480,
+    /// `Stellar_EnterWormhole` 0x00456ca0 -> `FUN_0049e3c0(travelSelection + 0x80)`; see `GateTravelMovie`),
+    /// resolved to a file, or nil (no target / no dësc movie / pref off / file missing).
+    static func gateClip(selection: Int?, data: GameDataController) -> Clip? {
+        guard let d = data.game?.gateTravelMovieDesc(selection: selection),
+              let name = d.movieFilename?.trimmingCharacters(in: .whitespaces),
+              let url = data.videoURL(named: name) else { return nil }
+        return Clip(descID: d.id, url: url, afterText: d.moviePlaysAfterText,
+                    doubleSize: d.movieDoubleSize, fillScreen: d.movieFillsScreen)
+    }
+
+    /// Plays `c` now (modal, skippable); `then` runs when it ends or is skipped.
+    func play(_ c: Clip, then: (() -> Void)?) { start(c, then: then) }
+
     /// Plays a before-text movie as the text opens; an after-text movie waits for `finish`.
     /// `always`: play whatever the Flags say about "after the text" (docking, `FUN_0049e3c0`, plays at once).
     func begin(descID: Int?, data: GameDataController, always: Bool = false, then: (() -> Void)? = nil) {

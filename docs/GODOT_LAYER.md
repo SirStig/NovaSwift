@@ -746,11 +746,41 @@ PNG previews through `tests/UiCompose.gd`); `spaceport_menu_check` / `story_menu
   ring in the `OriginalMapMarker` colour (new shared `Sources/NovaSwiftStory/OriginalMapMarker.swift`, bridge
   `nav_marker_colors`), cyan current-system dot, eight green corner strokes on the selection, Geneva-9 white labels at
   (x+7, y+4) for explored / charted systems when zoom >= 1/1.1, linkGrey 1 px links from visited systems, green armed
-  link, 2 px green route, gate-picker barbs. No help line under the frame. Not ported: the political overlay
-  ("Show Borders"), mission-target cicn markers and their fog exception, the floatingMap frame border.
+  link, 2 px green route, gate-picker barbs. No help line under the frame. (Show Borders, mission-target markers and
+  the floatingMap frame border were ported afterwards: see "Galaxy map: borders, mission marks, Tab cycle" below.)
 * **No invented transaction text** in the Classic spaceport (no "Bought 3 t of ...", refuel, hire or gamble feedback):
   counts, credits and button states only.
 * Selfcheck: `godot/tests/ui_polish_selfcheck.gd` (also counts engine errors with an `OS.add_logger` logger).
+
+### Galaxy map: borders, mission marks, Tab cycle, gate-entry movie (2026-10-13)
+
+* **Show / Hide Borders** (D1): the original's political overlay, built by the shared `PoliticalOverlay`
+  (`Sources/NovaSwiftKit/PoliticalOverlay.swift`; new `discs(...)`, `build(...)`, `allied`, `rgba(game:)`, so Apple and Godot use one
+  rule set) behind bridge `nav_borders(canvas_w, canvas_h, px_per_unit, center_x, center_y) -> PackedByteArray` (RGBA8, 2 px cells,
+  `canvas/2` cells per axis; empty when nothing is painted). `GalaxyMap.gd` draws it nearest-filtered at 2x on a layer between the
+  nebulae and the canvas, rebuilt when the view changes. Toggle: the Classic frame's DITL 2000 item 8 button (label STR# 150 #56 / #57),
+  or `B` (also in the plain / fullscreen map, which uses the same overlay rather than Apple's soft glow). Persisted in `[map] show_borders`.
+* **Mission-target markers** (D2): bridge `nav_mission_targets()` (`StoryEngine.missionDestinations`) -> `[{system,x,y,vis,names}]`;
+  cicn 15000 drawn 16 px up and left of the system (`cicn_info` / `cicn_rgba`), the orange arrow when the art is absent. A target in the
+  fog (`vis` 0) is added to the map's system table, so it is drawn (dim, unnamed) and pickable, as the Classic map does (0x004a8100).
+  The plain map also prints the mission names next to the arrow. Apple's destination *preview* marker (cicn 15001) is not ported.
+* **Tab / `\` cycling** (D3): on the open map Tab and `\` (Shift reverses) step the armed hyperspace link through the current
+  system's links and select it (`GalaxyMap.cycle_link` -> bridge `nav_cycle_link(forward) -> system id | -1`, the in-flight step plus
+  `nav.selected`). Add-hop moved from Tab to `E` (pad Y unchanged). Apple: `GameContainerView.handleDiscrete` routes the cycle key
+  and the target-next/previous keys to `nav.cycleHyperspaceLink` while the map is open.
+* **Floating-map frame** (D4): the in-flight route mini map frame uses the cölr FloatingMap colour.
+* **Hypergate / wormhole entry movie**: decompiled `Stellar_EnterHypergate` 0x00456480 and `Stellar_EnterWormhole` 0x00456ca0 both call
+  `FUN_0049e3c0(ship+0x6c + 0x80)` (= `Ui_LoadSelectionDialogResource` then `Ui_PlayMovieFileModal` 0x0049db00 with the dësc Flags
+  0x0002 double size / 0x0004 blank screen) when the movies preference (`DAT_005914d3`) is on. `ship+0x6c` is the travel selection, so
+  the movie is the dësc with the id of the **destination sÿst** (hypergate, picked in the map) or of the **wormhole's own spöb**.
+  It plays *before* the transport (hypergate: right after the map closes; wormhole: right after the exit was chosen), is modal and
+  skippable, shows no text. Shared lookup `GateTravelMovie` / `NovaGame.gateTravelMovieDesc(selection:)`. Apple:
+  `DescMoviePlayback.gateClip` + `GameContainerView.performGateJump(movieSelection:)` (overlay `gateMovie`). Godot:
+  `DescMovie.lookup_gate` / `play_gate`, bridge `NovaPlugins.gate_movie(id)`; the hypergate picker (`GalaxyMap._pick_gate_destination`)
+  plays it before `gate_picker_choose`; wormholes use `set_gate_transport_deferred(true)` (set by `Main.gd`): `press_land` then returns
+  `{result: "wormhole", movie_desc}` and `wormhole_enter_pending()` performs the transport after the clip. Media resolves through
+  `TCAddOns.findMedia`. Base data has no such dësc records (TC / plug-in content), so nothing plays there.
+* Self-checks: `godot/tests/map_features_selfcheck.gd`; Swift `Tests/NovaSwiftKitTests/GateTravelMovieTests.swift`.
 
 ### Story Map / Story Guide (`screens/StoryGuide.gd`)
 

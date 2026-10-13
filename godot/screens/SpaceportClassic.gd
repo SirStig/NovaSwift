@@ -256,7 +256,7 @@ func trade() -> void:
 		sp._show_hub, true, "trade_done")
 	for k in ["buy", "sell"]:
 		var bb: TextureButton = buttons[k]
-		bb.refused.connect(func(): nova.sound_beep(4))
+		# (The trade centre makes no sound of its own in the original.)
 		# Right-click / Alt-click = the type-an-amount prompt (the original's Alt-click).
 		bb.gui_input.connect(func(e: InputEvent):
 			if e is InputEventMouseButton and e.pressed and (e.button_index == MOUSE_BUTTON_RIGHT or e.alt_pressed) \
@@ -329,7 +329,6 @@ func shop_window(kind: String, fresh: bool) -> void:
 		n.done = CS.button(d, label("done", "Done"), CS.rect(nova, did, 0, Rect2i(500, 289, 99, 25)), 0, sp._show_hub, true, "shop_done")
 		for k in ["buy", "sell"]:
 			var bb: TextureButton = n[k]
-			bb.refused.connect(func(): nova.sound_beep(4))
 			bb.gui_input.connect(func(e: InputEvent):
 				if e is InputEventMouseButton and e.pressed and (e.button_index == MOUSE_BUTTON_RIGHT or e.alt_pressed) \
 						and not bb.disabled:
@@ -428,7 +427,6 @@ func prompt(title: String, maxv: int, initial: int, on_ok: Callable, on_cancel :
 	var ok := func():
 		var q := int(edit.text)
 		if q > maxv:
-			nova.sound_beep(4)
 			edit.text = str(maxv)
 			return
 		sp._close_overlay()
@@ -535,7 +533,6 @@ func bar(b: Dictionary) -> void:
 	CS.button(d, str(b.get("gamble", "Gamble")), CS.rect(nova, 1013, 1, Rect2i(156, 125, 99, 26)), 1,
 		sp._bar_screens.open_gamble, true, "bar_gamble")
 	CS.button(d, str(b.get("leave", "Leave")), CS.rect(nova, 1013, 0, Rect2i(156, 154, 99, 26)), 0, sp._show_hub, true, "bar_leave")
-	hire.refused.connect(func(): nova.sound_beep(4))
 	msg_label = null
 	show_window(d)
 	_want_key = ""

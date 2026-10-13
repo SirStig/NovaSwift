@@ -68,6 +68,32 @@ addresses, today's NovaSwift code, its class, impact and confidence, and a test 
   original code runs once per *raw* ~21 ms call instead; FL-01 covers that.
 - Confidence describes the reading of the original. "Exe-verified" means the constant or branch
   was confirmed in the Ghidra export and the executable during this consolidation.
+- An item marked **OPEN** was checked again against the executable and does not match.
+  Its first paragraph is the current gap. An older Done or NovaSwift paragraph under the
+  same heading is historical and loses.
+
+## Reopened after the executable re-read
+
+A later read of the Ghidra export found **DONE** headings whose Original paragraph
+described NovaSwift's bug as the original, and others whose Original is roughly right
+while one slice of NovaSwift still differs. This list wins over those older paragraphs.
+
+Still open: OS-06 (wormhole exit draw), EC-04 (the clearance ladder also covers gates
+and wormholes), EC-05 (the landing fee also refuses a gate), EC-07 (outfitter sell
+refusals beyond the free-mass sign change), EC-09 (stock weapons counted as owned
+outfits), EC-10 (won't-attack and always-land spread), EC-11 (BuyRandom redrawn when
+a ship purchase is cancelled), EC-12 (RequireGovt bands), EC-25 (a paid bribe is one
+approach), EC-26 (the bar's previous winner resets when the bar opens), OS-08 (a bomb
+fuse is reseeded on every recompute), AI-44 (hail uses the cloak visibility thresholds),
+UI-06 (which body Land picks), MS-19 (odd negative CargoQty), EC-27 (commodity shrink),
+EC-28 (chart, paint, amnesty and Flags 0x0010 for the visit).
+
+Q-OS-02 is settled: the hypergate and wormhole branch adds no day. Q-EC-14 is settled:
+the modifier wager is `min(credits, 10000)`.
+
+Not recorded as gaps, because those routines were not re-read: a stale `<DL>` date
+after a timed mission, carrier-jump recovery beyond the question already in Q-OS-04,
+and whether a tractor refusal uses STR# 2002 #36. Q-OS-04 stays open.
 
 ---
 
@@ -200,9 +226,12 @@ which also hosts the separate Difficulty, System Aliveness and Auto-landing opti
 "Windows hyperspace look"), not an Enhancement: the Windows CE no-fade jump, with the Mac 1.5 s
 fade as the default (FL-04).
 
-**Map charts are not an enhancement.** The decomp confirms the existing user ruling is original:
-`Outfit_GrantOutfitToPlayer` 0x00427770 applies a ModType-16 map and flags the outfit consumed, so
-a chart never enters inventory and stays buyable.
+**Map charts are not an enhancement.** `Outfit_GrantOutfitToPlayer` 0x00427770 applies a
+ModType 0x10 chart. For the rest of that outfitter visit the chart is real inventory, and a
+second chart is refused once `DAT_007d4c08` is set (`NovaLanded_CanBuyOutfit` 0x00491950).
+Leaving the outfitter zeroes Flags 0x0010 counts (0x0048ea70). Paint (ModType 43) is a global
+5-bit RGB, not an owned outfit, and a ship purchase clears it (0x00492f30). A clean-record
+outfit (ModType 0x15) uses `DAT_007d4c09` the same way. See EC-28.
 
 | Toggle | Invented behaviour it preserves | Items |
 |---|---|---|
@@ -269,7 +298,9 @@ promoted to a toggle on request.
 | 5 | Mission lifecycle, ranks, crön, text, exploration | 21 + 3 = 24 | MS-24, UI-04, OS-14 | 0, 3, 4 |
 | 6 | Full AI state-machine port, escort AI | 24 | — | 1–5 |
 | 7 | **New:** player-facing rules: map, targeting, landing flow, HUD text, Player Info, keys, radar | 11 | UI-05, UI-06, UI-07, UI-08, UI-10, UI-11, UI-13, UI-14, UI-15, UI-18, OS-05 | 1 (FL-12), 2 (WP-03, OS-12), 3 (EC-02), 4 |
-| | **Total** | **177** (9 done) | **40** | |
+| | **Total** | **179** | **40** | |
+
+EC-27 and EC-28 were added after this table. Sixteen items are **OPEN** again; the list after "How to read an item" is the current reading. The second-pass column does not include those two.
 
 Items merged into existing ones rather than given IDs: outfits_special O12 (gravity flags →
 FL-19), O14 (fuel clamp, regen while disabled → FL-07; auto-refueller → EC-23); ui_rules B2/C1
@@ -1101,27 +1132,35 @@ models, so later batches can rely on them.
   mis-splits; read the parent and fragments together).
 - **Test.** Jumping with a hyperdrive-less escort shows one of STR# 2002 #160–163.
 
-#### OS-06 · Hypergate and wormhole transit — **DONE**
-- **Done.** Gate transit runs no daily tick. Arrival is at the destination gate's position, facing
-  its emergence angle (else `range(360)`), at 0.5 × effective top speed.
-  `NovaGame.wormholeExitCandidates(from:currentSystem:isVisible:)`: links filtered to visible
-  systems ("Unable to use this wormhole." when none); link-less picks other link-less wormholes
-  outside the current system in visible systems, with no fallback. Q-OS-02 stays a static read.
-- **Original.** `Stellar_EnterHypergate` 0x00456480 / `Stellar_EnterWormhole` 0x00456ca0 and the
-  shared arrival (decomp `NovaTravel_CompleteRestrictedTravel`): payroll periods are zeroed and no
-  daily tick runs, so gate and wormhole transit costs **0 days** (none of the seven daily-tick
-  callers in FL-05 is on this path). Arrival is at the destination stellar's exact position,
-  heading = its emergence angle when 0–359 (else random), speed 0.5 × max. A wormhole with links
-  picks uniformly among links whose system is visible; if it has links but none is visible,
-  travel fails with "Unable to use this wormhole". A link-less wormhole picks among other
-  available, link-less wormholes, excluding the current system and requiring a visible system.
-- **NovaSwift.** `advanceGameDay()` on every gate jump (`App/Game/GameContainerView.swift:1485`);
-  wormhole fallback is any other wormhole without the visibility or current-system filters
-  (`Kit/NovaModels.swift:1296–1305`); arrival is offset from the gate with speed capped at 160
-  (`App/Game/GameScene.swift:3510–3522`).
-- **Class.** FIX. **Impact** medium. **Confidence** medium-high (0 days inferred from the absence
-  of a tick; confirm in 0x00457580, Q-OS-02).
-- **Test.** A gate jump leaves the date unchanged; a wormhole whose only link is hidden refuses.
+#### OS-06 · Hypergate and wormhole transit — **OPEN**
+- **Still open (wormhole exit draw).** `NovaGame.wormholeExitCandidates` and
+  `beginWormholeTransport` (the Apple container and the Godot `NovaWorld` path) do not match
+  `Stellar_EnterWormhole` 0x00456ca0. Hypergate arrival routing and the zero-day cost still match.
+- **Original.** `Stellar_EnterHypergate` 0x00456480 clears player +0x6a and +0x6c, takes the first
+  hyperlink whose visible system equals the map pick, and emerges at the destination gate.
+  Heading is stellar +0x28, or `NovaRandom_Range(360)` when that angle is outside 0–359. Speed is
+  effective top speed times the float at 0x00575598 (both ports treat it as 0.5). No daily tick
+  runs on this branch (Q-OS-02, read in 0x00457580). `Stellar_EnterWormhole` 0x00456ca0 uses the
+  same emerge heading and speed and also adds no day.
+  - Linked: `FUN_0046ebb0` counts the eight HyperLink slots whose stellar id is in 0…2047. The
+    count of those slots whose destination system resolves visible must be at least one, or
+    travel fails with STR# 2002. Otherwise `NovaRandom_Range(8)` walks the raw slots until the
+    chosen slot's destination stellar raw system field (+0x14) is not −1. A hidden system can be
+    chosen, a duplicated slot weighs more, and the far stellar need not be a gate.
+  - Link-less: first count other available (byte +0x44) Flags2 0x2000 wormholes in a different
+    system whose `FUN_0046ebb0` returns 0 and whose system resolves visible. Zero fails. Then one
+    `NovaRandom_Range(0x800)` among available wormholes in other systems, linked or not. That hole
+    is used only when it is itself link-less and its system is visible. Otherwise the ship stays put.
+- **NovaSwift.** With links, `gateDestinations` keeps visible, de-duplicated destinations and
+  requires the linked stellar to be a gate. Without links, the only candidates are other link-less
+  visible wormholes outside the current system. `beginWormholeTransport` always leaves when that
+  list is non-empty. How often stock wormholes have HyperLink slots was not measured.
+- **Earlier.** Hypergate arrival position, heading and the 0.5 speed factor match, and so does
+  zero days. The older NovaSwift paragraph (a day on every gate jump, an offset arrival, a 160
+  speed cap) described code that has since been replaced. Its wormhole rule was also wrong.
+- **Class.** FIX. **Impact** medium. **Confidence** high on the exit draw.
+- **Test.** A linked wormhole can emerge in a hidden system, and a duplicated slot is twice as
+  likely. A link-less draw that lands on a linked hole stays put. A hypergate jump leaves the date unchanged.
 
 #### OS-11 · Mining scoop and resource boxes — **DONE**
 - **Done.** `FreeflightObject` pool (64; 300–499 tick life, random spin and drift); a player with
@@ -2188,28 +2227,44 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Test.** Medical at a Low world with rep < 0 costs trunc(750/1.1) = 681; at a dominated High
   world it costs 1125.
 
-#### EC-04 · Landing access — **DONE**
-- **Done (Batch 4).** `LandedServices.landingClearance` in the original order (fee, rep vs MinStatus, dominated/uninhabited/bribed, Require mask, mission travel/return stellar, allied AlwaysLand); STR# 2002 #81–83 refusals. The IFF-scrambler clearance waits for OS-10.
-- **Original.** `NovaTravel_PlayerMeetsStellarAccess` (in 0x00457580): a governed stellar is
-  landable when `rep ≥ MinStatus` or MinStatus = −32767, and never when MinStatus = 32767. It is
-  overridden by domination, an accepted bribe (engage timer > 0x2ed), the stellar being an active
-  mission's travel/return stellar, and the AlwaysLand rank privilege (allied governments
-  included). A government Require-mask failure denies. In the comm window the IFF scrambler clears
-  a denial.
-- **NovaSwift.** `App/Game/GameContainerView.swift:1379` `landingRefusalReason` with a hard-coded
-  `≤ −150` at `:1411`; MinStatus is read only for hypergates.
-- **Class.** FIX (needs EC-02). **Impact** high. **Confidence** high.
-- **Test.** MinStatus 32767 is never landable; a mission destination is landable despite a bad
-  record.
+#### EC-04 · Landing access — **OPEN**
+- **Still open (gates and wormholes).** The planet ladder in `LandedServices.landingClearance`
+  largely matches. `SpobRes.playerMayUseGate` does not, and every wormhole returns true immediately.
+  `Stellar_HandleStellarEntryAndExit` 0x00457580 runs the same first-press ladder before both
+  `Stellar_EnterHypergate` and `Stellar_EnterWormhole`. There is no Flags2 0x2000 exemption.
+- **Original.** MinStatus is stellar +0xc against `DAT_00733bc8` for the current system's
+  government. Pass when status ≥ min or min is −32767. Fail when min is 32767. The dominate byte
+  at stellar +0x46 forces a pass. Approach timer `DAT_00597a0e` > 0x2ed forces a MinStatus pass
+  (EC-25). A government Require mask can then force a fail. An active mission whose travel or
+  return stellar is the target forces a pass. `Government_HasRankPrivilege(govt, 1)` (AlwaysLand)
+  forces a pass. A refused gate uses STR# 2002 #0x51. Government id below 128 is not an automatic
+  pass, and a hostile owner is not an automatic fail.
+- **NovaSwift.** `playerMayUseGate` skips the fee, the Require mask, mission stellars, AlwaysLand
+  and domination. `minStatus ≥ 32767` opens when allied or standing > 0. `government < 128` is
+  always open. A hostile owner is always closed, even when MinStatus is −32767. `handleGateLanding`
+  uses `playerMayUseGate` and never `landingClearance`. Stock hypergates such as HG-V01 carry
+  MinStatus 32767 and government 183, so the inverted rules are player-visible there.
+  Stock wormhole MinStatus was not dumped. `SpaceObjectGateTests` currently locks the inverted rules in.
+- **Earlier.** Planet clearance (fee, reputation against MinStatus, dominated, bribed, Require,
+  mission stellar, allied AlwaysLand, STR# 2002 #81–83) was the Batch 4 work. The old NovaSwift
+  line (a hard-coded ≤ −150, MinStatus read only for hypergates) is stale for planets.
+- **Class.** FIX. **Impact** high on stock hypergates. **Confidence** high on the shared ladder.
+  Stock wormhole field values are unmeasured.
+- **Test.** A hypergate with MinStatus 32767 refuses unless a waiver in the ladder applies.
+  A wormhole with the same MinStatus uses that ladder. Government below 128 does not open a restricted gate by itself.
 
-#### EC-05 · Landing fee gate — **DONE**
-- **Done (Batch 4).** Unpayable fee refuses with STR# 2002 #61+#62–64; dominated waives; full fee deducted on touchdown.
-- **Original.** 0x00457580: when the fee > 0 and the stellar is not dominated, `credits < fee`
-  **denies landing**; otherwise the full fee is deducted. Dominated stellars waive it.
-- **NovaSwift.** `App/Game/GameContainerView.swift:1930` `chargeLandingFee` charges
-  `min(fee, credits)` and never denies or waives.
-- **Class.** FIX. **Impact** medium. **Confidence** high.
-- **Test.** 10 credits against a fee of 50 → landing refused.
+#### EC-05 · Landing fee gate — **OPEN**
+- **Still open (gates).** The planet fee matches. The same block in 0x00457580 runs before the
+  hypergate and wormhole calls. A positive fee, a body that is not dominated, and credits below
+  the fee refuse entry and clear the selection. Flags2 0x1000 only changes the message to #0x3e.
+  On a successful entry the fee is subtracted and credits are clamped at 0, including gates.
+- **NovaSwift.** `handleGateLanding` never reads the fee. `playerMayUseGate` skips it.
+- **Earlier.** An unpayable planet fee refuses with STR# 2002 #61 and #62–64; domination waives
+  it; the full fee is deducted on planet touchdown. The old NovaSwift line (`chargeLandingFee`
+  takes `min(fee, credits)` and never denies) is stale for planets.
+- **Class.** FIX. **Impact** medium where a gate carries a fee. **Confidence** high on the code
+  path. Stock wormhole fees were not dumped.
+- **Test.** Credits below a hypergate's fee refuse entry and clear the selection. A successful gate entry deducts the fee.
 
 #### EC-06 · Free repair and refill on launch — **DONE**
 - **Done (Batch 4).** Shields and armor refilled free on docking for every stellar; paid repair removed.
@@ -2220,15 +2275,23 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Class.** FIX. **Impact** medium-high. **Confidence** high.
 - **Test.** Launch with 10 % armor → 100 %, credits unchanged.
 
-#### EC-07 · Outfit resale at half price — **DONE**
-- **Done (Batch 4).** `PilotEconomy.outfitSalePrice`: half (truncated) unless owned > count at outfitter open (newest first); sale refused if free mass would go from ≥ 0 to < 0; sell rule `owned && !(Flags & 0x0008)`.
-- **Original.** 0x0048ea70 (exe-verified): units owned when the outfitter opened sell for
-  `trunc(unscaledPrice × 0.5)`; units bought in the same session refund in full. A sale that would
-  push free mass negative is refused.
-- **NovaSwift.** `Story/PilotEconomy.swift:383` `sellOutfit` always refunds the full effective
-  cost (the comment at `:380` says this is the original rule, which is wrong).
-- **Class.** FIX. **Impact** high (economy exploit). **Confidence** high.
-- **Test.** Buy, leave, re-enter, sell → 50 %; buy then sell in the same session → 100 %.
+#### EC-07 · Outfit resale at half price — **OPEN**
+- **Still open (sell refusals beyond the free-mass sign change).** Half price for units owned
+  when the outfitter opened, and a full refund for units bought in the same visit, match.
+  `sellOutfitUnit` still completes three sales that 0x0048ea70 refuses outright: a ModType 27
+  sale that would leave its target above `(expanders left) × target.Max`; a ModType 1 weapon
+  whose ammo, plus live non-mission non-disabled behavior-5 fighters of a mode-99 bay, would
+  exceed `MaxAmmo × launchers left`; and any sale from a ship whose free mass is already below 0.
+  `Ship_ComputeShipFreeMass` 0x00463470 clamps free mass at 0, so an over-mass ship cannot sell a
+  negative-mass expansion. `rawFreeMass` refuses only when unclamped free mass crosses from ≥ 0 to < 0.
+- **Original.** Units owned at open sell for `trunc(unscaledPrice × 0.5)`. Units bought in the
+  visit refund in full. The three refusals above are separate from that price. A one-credit
+  residual from the x87 half-price product is not a headline gap.
+- **Earlier.** `PilotEconomy.outfitSalePrice` and the Flags 0x0008 rule landed in Batch 4. The
+  old NovaSwift line (always a full refund) is stale.
+- **Class.** FIX. **Impact** medium. **Confidence** high.
+- **Test.** Selling the last expander while the expanded stat is still over the new cap is refused.
+  Selling a negative-mass outfit from an already over-mass ship is refused. Buy, leave, re-enter, sell → 50 %.
 
 #### EC-08 · Free mass includes the stock loadout — **DONE**
 - **Done (Batch 4).** `NovaGame.stockFittingMass` (stock weapons, AmmoLoad, DefaultItems, TechLevel < 32767) added to `massCapacity`.
@@ -2241,63 +2304,86 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
   **Impact** high. **Confidence** medium-high (the loader port is tagged 68 %).
 - **Test.** A new Shuttle shows free mass equal to shïp FreeMass.
 
-#### EC-09 · Ship price, trade-in and hire price — **DONE**
-- **Done (Batch 4).** `LandedServices.scaledPurchasePrice` (oracle-pinned table: double-precision products on a single-precision scale, e.g. 14,000 × 0.9 → 12,500), trade-in = scaled twice, ½ non-persistent outfits; purchase credits trade-in, OnRetire, charges price, OnPurchase, redraws the class roll; hire = trunc(price × 0.1).
-- **Original.** `Outfit_ComputeScaledPurchasePrice` 0x0049d640:
-  - Tech markdown: if item tech < 6, stellar tech < 6, item < stellar and base > 99, then
-    `trunc(base × (100 − 3 × (stellar − item)) × 0.01)` (a known original cap; keep it).
-  - Then `max(1, trunc(price × rankScale))`.
-  - Prices > 100 are truncated to a multiple of 10 (≤ 10k), 100 (≤ 100k) or 1000.
+#### EC-09 · Ship price, trade-in and hire price — **OPEN**
+- **Still open (stock fittings are owned outfits).** Price scaling, the double-scaled trade-in
+  and the 10 % hire price match. `PilotEconomy.grantHullFittings` adds the class WeapType and
+  AmmoLoad to owned counts immediately, so they enter the 50 % trade-in and Contribute before
+  the first outfitter visit.
+- **Original.** 0x004b3350 copies class WeapType and ammo into the weapon banks and does not grant
+  them as owned outfits. 0x00492f30 adds DefaultItems to owned counts, then raises the banks to at
+  least the class arrays. When the outfitter opens, 0x00462ec0 promotes leftover bank counts onto
+  the first matching outfit, and only the first modifier slot. A completed purchase also
+  deactivates behavior-5 non-mission ships in slots 1…63, clears paint, and clears the
+  weapon-selection fields. Whether those bay fighters are still live ship records while docked
+  is medium confidence. The cancelled-purchase BuyRandom write is EC-11.
+- **Earlier.** `LandedServices.scaledPurchasePrice`, trade-in scaled twice, half of non-persistent
+  outfits, and hire = `trunc(price × 0.1)` landed in Batch 4. The old NovaSwift line (25 % of
+  everything, persistent included) is stale for the price formula.
+- **Class.** FIX. **Impact** medium. **Confidence** high on the bank-versus-owned split.
+- **Test.** A new hull's stock weapon is in the bank and absent from owned outfits until the outfitter promotes a leftover.
 
-  Trade-in (`Ship_ComputeTradeInValue` 0x00469100) is `trunc(0.25 × hull)` plus `0.5 × price` per
-  owned **non-persistent** outfit, and the total is scaled twice. On purchase (0x00492f30): credit
-  the trade-in, run OnRetire, charge the full price, then add 4 days (FL-05). Hire price is
-  `trunc(scaledPrice × 0.1)`.
-- **NovaSwift.** `Story/PilotEconomy.swift:425` `tradeInValue` (25 % of everything, persistent
-  included), `:447` `buyShip` (`cost × rankMult` rounded), `Kit/NovaModels.swift:474`
-  `escortHireFee = max(1, cost/10)`.
-- **Class.** FIX. **Impact** high. **Confidence** high.
-- **Test.** A tech-3 ship at a tech-5 port costs 94 % of base, rounded to the table.
-
-#### EC-10 · Rank effects: scope, stacking, revocation — **DONE**
-- **Done (Batch 4).** Product over allied ranks (PriceMod < 1 → 100, Float like the original) for ships, trade-ins and hire; never commodities or outfits; AlwaysLand allied.
-- **Done (cleanup 1).** Crime revocation (`Government_ProcessFactionCombatEvent` 0x00466fc0):
-  after the flood, every active non-permanent rank allied with the victim (or its own) with Flags
-  0x0040, or 0x0004 on a disable or kill, is deactivated in id order with the `L` cascade
-  (`PlayerState.revokeRanks`); a derelict victim or a mission ship changes nothing. In flight
-  `Diplomacy` queues its crimes and the host applies them at its sync points.
-- **Original.**
-  - PriceMod is the **product** over every active rank whose government is allied (or the same)
-    to the landed stellar's government. It applies to ships, trade-ins and hire; not to
-    commodities; and not to outfits (the price is computed and discarded, exe-verified).
-  - No-auto-attack (0x0100) and AlwaysLand (0x0200) extend to allied governments.
-  - Crimes revoke non-permanent allied ranks: 0x0040 on any crime, 0x0004 on disable or kill
-    (decomp `government.cpp`).
-- **NovaSwift.** `Story/PilotEconomy.swift:265` `rankPriceMultiplier` takes the minimum over
-  exact-government ranks and applies it to commodities, outfits and ships;
-  `App/Game/GameContainerView.swift:126` uses the exact government only; no revocation.
+#### EC-10 · Rank effects: scope, stacking, revocation — **OPEN**
+- **Still open (who the two privilege bits cover).** PriceMod as a product over allied ranks,
+  applied to ships, trade-ins and hire and not to commodities or outfits, matches. Crime
+  revocation matches. Flags 0x0100 and the consumers of Flags 0x0200 do not.
+- **Original.** Flags 0x0100 (won't attack) is rebuilt on every derived-state recompute for every
+  government allied with the rank's government (`Government_AreGovtsAllied` 0x0046bc90).
+  `Government_HasRankPrivilege` 0x0046e860 is privilege 0 at +0x84 (won't attack) and privilege 1
+  at +0x85 (always land). Landing (0x00457580), radar colour (0x00466030) and map colour
+  (0x00466260) all call it, so AlwaysLand spreads to the map and the radar as well as to landing.
+  Alliance: the same id is allied; if either side has Flags 0x0800 (derelict, starts disabled)
+  the result is not allied; otherwise any overlap in the 4×4 class slots, either way. Xenophobe
+  is Flags 0x0001 and is not this test.
+- **NovaSwift.** `WorldPilotLink.seedDiplomacy` puts only the rank's own government in
+  `dip.rankProtectedGovts`. `World`, `OriginalAIHost` and `Diplomacy.playerShielded` read that set.
+  `LandedServices.landingClearance` and `StellarComm.open` spread AlwaysLand through
+  `Diplomacy.areAllied`, which does not exclude derelicts. `GovtRelations.allied` does exclude
+  them and matches 0x0046bc90. `RadarIFF.stellarColor` and `OriginalMapMarker.kind` test only the
+  rank's own government, so the map and the radar do not spread AlwaysLand even though landing does (OS-05).
+- **Earlier.** The PriceMod product and the crime-revocation cascade landed in Batch 4. The old
+  NovaSwift line (a minimum over the exact government, applied to commodities and outfits, no
+  revocation) is stale for those two.
 - **Class.** FIX. **Impact** medium. **Confidence** high.
-- **Test.** Two allied 0.9 ranks give 0.81 on ships; outfit prices are unchanged.
+- **Test.** A rank with Flags 0x0100 on government A stops government B when A and B share a class
+  slot, and does not stop a derelict government. The same rank's Flags 0x0200 colours B's planets on the map and the radar.
 
-#### EC-11 · Daily stock rolls for outfits and ships — **DONE**
-- **Done (Batch 4).** `NovaGame.dailyStockRoll`: one roll per item per day shared by every port (derived from the date), owned outfits skip it, a ship purchase redraws its class (`PlayerState.stockRerolls`).
-- **Original.** One roll per outfit and per ship class per **day**, shared by every port, redrawn
-  at the daily tick (`ShipClass_RerollShipClassAvailabilityChances` 0x00466cb0). An item shows when
-  BuyRandom ≥ 1 and roll ≤ BuyRandom (0 = never; LD-01). Owning a visible item zeroes its roll.
-  Buying a ship re-rolls its class.
-- **NovaSwift.** `Kit/NovaEconomy.swift:325` `onOfferToday` (a per-day, per-spöb FNV hash; ≤ 0 =
-  always).
-- **Class.** FIX. **Impact** medium. **Confidence** medium-high.
-- **Test.** Two outfitters on the same day list the same random-stock items.
+#### EC-11 · Daily stock rolls for outfits and ships — **OPEN**
+- **Still open (a cancelled ship purchase still redraws BuyRandom).** One roll per item per day,
+  shared by every port, and owning a visible outfit zeroing its roll, match. `PilotEconomy.buyShip`
+  calls `state.rerollStock` only after a successful buy. 0x00492f30 writes
+  `NovaRandom_Range(100) + 1` into that class's BuyRandom even when the confirm dialog is cancelled.
+  Comparing the daily FNV hash with the saved NovaRandom sequence, draw for draw, is not the headline.
+- **Original.** `ShipClass_RerollShipClassAvailabilityChances` 0x00466cb0 draws one roll per outfit
+  and per ship class per day, shared by every port. An item shows when BuyRandom ≥ 1 and the roll
+  ≤ BuyRandom. Below 1 means never, for outfits and for ships (LD-01). Owning a visible item zeroes
+  its roll. Starting a ship purchase re-rolls that class whether or not the confirm is accepted.
+- **Earlier.** `NovaGame.dailyStockRoll` replaced the per-spöb hash. The old NovaSwift line
+  (`onOfferToday`, a value ≤ 0 means always) is stale on both the shared roll and the zero rule.
+- **Class.** FIX. **Impact** medium. **Confidence** high on the cancel write.
+- **Test.** Open the shipyard and cancel the confirm. That class's BuyRandom has still changed.
 
-#### EC-12 · RequireGovt band — **DONE**
-- **Done (Batch 4).** Outside the RequireGovt band the outfit is locked; Require bits checked everywhere.
-- **Original.** `NovaLanded_CanBuyOutfit` 0x00491950: outside the RequireGovt band the item
-  **cannot be bought**; the Require bits are checked everywhere.
-- **NovaSwift.** `App/Spaceport/ItemLocking.swift:~48–71` (outside the band the gate is skipped, which is
-  the Bible's wording).
-- **Class.** FIX. **Impact** low-medium. **Confidence** medium.
-- **Test.** An item with RequireGovt is unbuyable at an out-of-band port.
+#### EC-12 · RequireGovt band — **OPEN**
+- **Still open.** The Batch 4 Original paragraph is the inversion of 0x00491950. A skipped mask
+  is a failed require in NovaSwift, and already owning one skips the test entirely.
+- **Original.** `NovaLanded_CanBuyOutfit` 0x00491950, while docked and the stellar is not −1.
+  The bands are resource ids. 128–383 enforce the bits only at that government or an ally.
+  1128–1383 also enforce at an independent. 2128–2383 waive the bits at that government or an
+  ally and enforce them everywhere else, including an independent. 3128–3383 also waive at an
+  independent. Outside every band, and whenever the player is not docked, the bits are always
+  enforced. Inside a waived scope the bit test is skipped and the buy is allowed. Owning one
+  does not skip tech, Require or Availability.
+- **NovaSwift.** `ItemLocking.requireGovtApplies` returns false for a waived port and for a port
+  outside an enforce band's active scope. `outfitRequirePasses` ANDs that result with the bit
+  test, so the skipped mask becomes a failed require: locked, and hidden when Flags 0x0100 is set.
+  The `default` arm returns true, so a value outside every band does enforce the bits. A negative
+  RequireGovt, including −1, also enforces. `lockState` returns `.available` as soon as
+  `pilot.hasOutfit` is true. `SpaceportShops.canBuyOutfit` treats that as permission to buy.
+  The comment on `requireGovtApplies` says that outside the band the original refuses outright. That comment describes the bug.
+- **Class.** FIX. **Impact** medium for a waive band, and for an enforce band at a port outside
+  its scope. **Confidence** high.
+- **Test.** RequireGovt in 2128–2383 is buyable at that government without the Require bits, and
+  locked at an unrelated government when the bits fail. A value outside all four bands is enforced
+  at every port. Already owning one does not skip the bits.
 
 #### EC-13 · Ammo purchase cap — **DONE**
 - **Done (Batch 4).** `PilotEconomy.ammoLimit`: MaxAmmo × mounted launchers when the first modifier is ModType 3.
@@ -2529,21 +2615,19 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Class.** FIX. **Impact** medium (flavour). **Confidence** high.
 - **Test.** A düde with only 0x1000 always gives a trade tip.
 
-#### AI-44 · Hail eligibility — **DONE**
-- **Done (AI pass 2).** `OriginalAI.hailCheck` (0x00454910): beep while the player is cloaked, dead or jumping; #54 for a ship spinning up (#53 if it is also disabled); #53 for a Flags-0x0400 government or hull inherent government (përs included) unless the ship is the player's non-mission escort, for class 0x2ff, a disabled ship and the Enforcer përs; the player's behavior-6 escorts open the escort window. The app routes hails through it under the original AI.
-- **Original.** Government Flags 0x400 (or the class inherent government's 0x400) blocks hailing
-  any ship not attached to the player, përs included. Disabled ships, class 0x2ff and përs 0x3ff
-  cannot be hailed. flags_secondary 0x1 hides assistance (Greetings answers "No response."), and
-  0x8 makes assistance answer "No response.".
-- **NovaSwift.** `App/Game/GameContainerView.swift:~2787–2795` (përs exempt, disabled hailable,
-  inherent-government and flags2 0x8 ignored; 0x10 reused for roadside assistance).
-- **Also (ui_rules A14).** The player cannot hail (beep only) while cloaked, destroyed or
-  jumping. A jumping target answers "Unable to send hail - target ship is entering hyperspace."
-  (STR# 2002 #54); a disabled jumping target "No response." (#53). NovaSwift's "No response to your
-  hail." (`App/Game/GameContainerView.swift:2791`) is not an original string. Escorts of the
-  player (behavior 6, leader 0, non-mission) open the escort window DLOG 1022 instead of comms.
+#### AI-44 · Hail eligibility — **OPEN**
+- **Still open (cloak threshold).** `OriginalAIComms.hailCheck` beeps when `player.cloakLevel > 0`,
+  when the player is dead, or when `playerJump != nil`. 0x00454910 beeps when
+  `Ship_IsShipCloakVisibilityThresholdActive` 0x0046c7a0 is set, or the player is destroyed, or
+  the jump timer at ship +0x50 is > 0. The threshold is: fading in, past 24/32; fading out, until
+  under 8/32; at rest, past 16/32. `Ship.cloakHides` already implements 24/8/16 and is not what hail uses.
+- **Earlier.** Government Flags 0x400, disabled ships, class 0x2ff, the Enforcer përs,
+  flags_secondary 0x1 and 0x8, the jumping-target strings, and the escort window for behavior-6
+  escorts were the earlier hail work and are not this gap. The old NovaSwift line (përs exempt,
+  disabled ships hailable) is stale for those.
 - **Class.** FIX. **Impact** low. **Confidence** high.
-- **Test.** A disabled ship cannot be hailed.
+- **Test.** A cloak fading in does not beep the hail until it passes 24/32. A cloak fading out
+  still beeps until it is under 8/32. A resting cloak beeps only past 16/32.
 
 #### UI-09 · Stellar hail window — ui_rules A8 — **DONE**
 - **Done (Batch 4).** No window for uninhabited stellars or gates (STR# 2002 #53 — `StellarComm.open` returning nil is the one implementation; Batch 7's duplicate was dropped in the merge); STR# 3002/3000 lines by prompt×5 + variant; status Dominated/Owned/Hostile/Forbidden; class fragment STR 7000+graphic / STR# 1100; buttons Greetings|Offer Bribe, Demand Tribute|Release, Close. Request Landing only under `forgivingLanding`.
@@ -2586,53 +2670,76 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Test.** One tribble type with 10 t free grows 5 t per 1025 raw frames; a full hold stops
   perishable decay.
 
-#### EC-25 · Planetary bribe — settles Q-EC-06 — **DONE**
-- **Done (Batch 4).** `StellarComm` + `PaymentWindow`: price per OQ C3, per-jump latch, 0x8000 always bribable, paid → landing granted until the jump, refused/failed haggle → latch 0 and price + 1000; haggle 36 %, ×0.75 then to the hundred, a second haggle ends the deal.
-- **Original (OQ C3).** Computed when the stellar comm window opens (0x00480030): `n = max(1,
-  trunc(credits × 1e−6))`, `cost = Rand(n) × 1000 + 3000`, ×1.5 (truncated) for government Flags
-  0x8000, capped at `trunc(credits × 0.333)`, floored to a multiple of 1000 and clamped
-  **[1000, 900000]**. The planet is bribable when a per-jump latch `Rand(100)` (reset to −1 on
-  every jump) is > 30 and the stellar is ungoverned or its government has Flags 0x4000;
-  government 0x8000 is always bribable. The button works only when landing is refused (record <
-  MinStatus, or MinStatus 32767) and the stellar is not dominated. Payment goes through the
-  shared window (AI-42): paid → landing granted (EC-04) and credits debited; refused or failed
-  haggle → price + 1000 and no further bribe until the next jump.
-- **NovaSwift.** No planetary bribe (`NegotiationView` #1008 unwired).
-- **Class.** FIX (needs EC-02, EC-04). **Impact** medium. **Confidence** high.
-- **Test.** At 2,000,000 credits the offer lies in {3000, 4000} (× 1.5 for 0x8000 worlds);
-  refusing blocks the button until the next jump.
+#### EC-25 · Planetary bribe — settles Q-EC-06 — **OPEN**
+- **Still open (one approach, not a permit).** The price formula matches. A paid bribe does not
+  last until the next system.
+- **Original.** A successful confirm in 0x00480030 sets `DAT_00597a0e` to 0x2ef, `DAT_00597a10`
+  to the current stellar, and zeroes player +0x4c. The next Land press in 0x00457580 sees a timer
+  above 0x2ed and waives MinStatus for whichever body is selected. The timer check does not
+  compare `DAT_00597a10` first. Require can still refuse. The timer is then consumed. While the
+  selection is still that stellar, the timer is at least 0x2ee, +0x4c ≤ 0, and both |vx| and |vy|
+  are within the float at 0x00575640, that press docks without the ±250 arm. Coming within 250 px
+  rewrites the timer to 0x2ed and ends the waiver. The price, the per-jump offer latch, Flags
+  0x8000 and the haggle are the Batch 4 formula and still match.
+- **NovaSwift.** `settlePlanetBribe` inserts the stellar into `bribedStellars` (`GameContainerView`,
+  `FlightComm`). The set lasts until the system changes. `LandedServices.landingClearance` treats
+  membership as lasting clearance. `pressLand` still runs the two-press ±250 flow after payment.
+  Gate landing never reads the set. The old line "No planetary bribe" is stale.
+- **Class.** FIX. **Impact** medium. **Confidence** high.
+- **Test.** After paying, the next Land press waives MinStatus and, while still on that stellar
+  and nearly stopped, docks without the ±250 arm. Entering 250 px, or pressing Land on another body, ends the waiver. A hypergate ignores the payment.
 
-#### EC-26 · Bar gambling — from the coverage map — **DONE**
-- **Done (Batch 4).** `LandedServices.RaceBet`. Q-EC-14 settled from 0x0047dc50: the standard wager is min(credits, 1000); the modifier opens an amount prompt capped at min(credits, 10000) — "Bet 5000" is not what the window does. Payout 4×; repeat-winner re-roll excludes the pick.
-- **Original.** `NovaUi_RunBarGamblingWindow` 0x0047dc50 / `NovaUi_DrawBarGamblingWindow`
-  0x0047e1e0, buttons 0x004a2c30 / 0x004a2de0 (named-only; wraitii: "not reconstructed"). The
-  wager is `min(credits, 1000)`, or `min(credits, 10000)` with the Bet modifier, deducted up
-  front. The machine rolls `rand(4)`; quirk: if the first roll equals the previous round's roll,
-  re-rolls exclude both that roll **and** the player's pick, so the round is a guaranteed loss. A
-  match pays 4× the wager (STR# 2002 #370). The outcome dësc is 0x7ff8 + roll.
-- **NovaSwift.** `App/Story/GamblingView.swift:178–185`: fixed 1000 / 5000 stakes (refused if
-  credits are short), uniform `Int.random(1...4)`, and a 3× return documented as "this port's own
-  reasonable choice".
-- **Contradiction.** STR# 150 labels the second button "Bet 5000", while the coverage audit reads
-  the modifier wager as `min(credits, 10000)`. Re-read 0x0047dc50 before porting (Q-EC-14).
-- **Class.** FIX. **Impact** low. **Confidence** medium (named-only function; payout and quirk
-  read from Ghidra).
-- **Test.** After a round whose roll was r, picking a colour ≠ r on a first roll of r always
-  loses; a win returns 4× the stake.
+#### EC-26 · Bar gambling — from the coverage map — **OPEN**
+- **Still open (the previous winner resets when the bar opens).** The in-visit math matches.
+  Q-EC-14 is settled: the modifier cap is `min(credits, 10000)`. STR# 150's "Bet 5000" is a label.
+- **Original.** 0x0047c8e0 sets `DAT_007d17a8` to 0xffff every time the services window opens, so
+  the repeat-winner exclusion does not leave the visit. `FUN_0047dc50` wagers `min(credits, 1000)`,
+  or `min(credits, 10000)` with the modifier prompt. `NovaRandom_Range(4)`; a repeat of the previous
+  winner re-rolls until the roll is neither that winner nor the player's pick. A match pays 4×.
+- **NovaSwift.** `LandedServices.RaceBet.race` matches that math and starts `lastWinner` at −1.
+  `GamblingView` keeps one static `RaceBet` for the app's lifetime. Its comment that this matches
+  the original's global is wrong. The old line (fixed 1000/5000 stakes and a 3× return) is stale.
+- **Class.** FIX. **Impact** low. **Confidence** high.
+- **Test.** Win on a colour, leave the bar, and re-enter: that colour is not excluded. Stay in the bar and it is.
 
-#### OS-08 · Bombs (ModType 47 lethal, 50 nonlethal) — **DONE**
-- **Done (Batch 4).** Fuse from rand(100) counting sim ticks to 300; lethal bomb is a pod-less game over (STR# 2002 #38 or the dësc); nonlethal removes all units, impact `ModVal − 128`, armor-only damage.
-- **Original.** Each derived-state recompute (0x0046d4b0) seeds a timer at `rand(100)`; it counts
-  30 Hz ticks to 300, so a bomb goes off 6.7–10 s after acquisition (0x0044b3d4). Lethal (47,
-  0x0044daa0): shields and armor set to −1, overlay "You <outfit> detonated" or STR# 2002 #0x26,
-  then **back to the main menu**: game over, no escape pod. Nonlethal (50, 0x0044b446): removes
-  **all** units, spawns spöb impact effect `ModVal − 128`, and deals armor-only damage
-  `base_armor + rand(base_armor × 0.5 + 1)` (as ported; see Q-OS-01).
-- **NovaSwift.** `App/Game/GameContainerView.swift:2348–2385`: lethal after a 3–8 s wall-clock
-  `DispatchQueue` delay with 1e6 damage through the normal death path (a pod can save it);
-  nonlethal 3 % per heartbeat, removes one unit, 30 % shield + 12 % armor, never fatal.
-- **Class.** FIX. **Impact** medium-low (plug-in content). **Confidence** high.
-- **Test.** A lethal bomb ends the game 6.7–10 s of game time after purchase, pod or not.
+#### EC-27 · Commodity overflow shrinks the six ordinary bins — **OPEN**
+- **Original.** `Outfit_RecomputeOutfitDerivedState` 0x0046d4b0. When fleet cargo capacity is
+  below the cargo-plus-junk total, the six ordinary commodity bins at player +0x7a are scaled by
+  capacity/total, using the executable's x87 round-and-correct idiom. Mission cargo and junk are
+  in the denominator and are not reduced. One pass. Negative bins and junk are then clamped to 0.
+  `transferCargoToEscort` 0x00469810 is a different function.
+- **NovaSwift.** `PilotEconomy.buyShip` and `sellOutfit` do not scale the bins.
+- **Class.** FIX. **Impact** medium. **Confidence** high.
+- **Test.** Capacity 10 against 20 tons of one commodity and 10 tons of junk leaves about 5 tons of that commodity and all 10 tons of junk.
+
+#### EC-28 · Chart, paint, amnesty and Flags 0x0010 last for the visit — **OPEN**
+- **Original.** In 0x00491950 a ModType 0x10 chart is refused for the rest of the visit once
+  `DAT_007d4c08` is set. ModType 0x15 (clean record) uses `DAT_007d4c09` the same way. During the
+  visit the chart is real inventory. The outfitter loop 0x0048ea70 zeroes Flags 0x0010 counts on
+  exit. Paint, ModType 43, is a global 5-bit RGB, not an owned outfit, and a ship purchase clears
+  it (0x00492f30).
+- **NovaSwift.** `PilotEconomy.buyOutfitUnit` removes Flags 0x0010 and any pure chart at the moment
+  of purchase, so another chart can be bought in the same visit. Paint and the clean-record outfit
+  stay in the outfit list.
+- **Class.** FIX. **Impact** medium. **Confidence** high.
+- **Test.** Buy a chart: it occupies a slot until the outfitter closes, and a second chart is
+  refused. Leave and it is gone. Buy a ship and the paint colour clears. A clean-record outfit fires once per visit.
+
+#### OS-08 · Bombs (ModType 47 lethal, 50 nonlethal) — **OPEN**
+- **Still open (the fuse is reseeded).** The two blast classes match the shape below. The timer
+  is not seeded once at acquisition, and it is not kept across a jump.
+- **Original.** ModType 0x2f (47) is class 1. ModType 0x32 (50) is class 2 only when the class is
+  still below 1. Every derived-state recompute (0x0046d4b0) with class ≠ 0 and a timer at or below
+  the float at 0x00575744 (0.0) reseeds `NovaRandom_Range(100)`. `Ship_HandlePlayerShipCore`
+  0x0044aa70 adds the frame scale and detonates when the timer exceeds 300. Class 1 is lethal and
+  grants no pod. Class 2 removes the outfit and damages armor. Whether that armor damage is
+  clamped is still Q-OS-01.
+- **NovaSwift.** `HazardOutfits.tick` seeds once when the fuse is nil, and the fuse is kept across
+  jumps (`GameContainerView`'s `bombFuse`; Godot `gaps.bombFuse`). The sentence "seeded once at
+  acquisition" described this bug. The older wall-clock `DispatchQueue` delay has been replaced by that persisted fuse.
+- **Class.** FIX. **Impact** medium-low (plug-in content). **Confidence** high on the reseed.
+- **Test.** A recompute while the timer is still 0 draws a new fuse. A jump does not keep a fuse
+  the original would have cleared. A lethal bomb grants no pod.
 
 ### Batch 5 — missions, ranks, crön, text
 
@@ -2893,12 +3000,18 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Test.** `F123` leaves the mission listed as failed. A `Q` fired by OnShipDone in flight
   appears immediately; one fired while landed closes the bar and shows at launch.
 
-#### MS-19 · Random cargo quantity — **DONE**
-- **Done.** `specialCount`: −1 → 0, −N → ceil(N/2) + rand(N).
-- **Original.** 0x0043d4c0: −1 → 0; −N → `ceil(N/2) + rand(N)`.
-- **NovaSwift.** `Story/StoryEngine.swift:1175` gives `[N − N/2, N + N/2]`.
-- **Class.** FIX. **Impact** low. **Confidence** high.
-- **Test.** CargoQty −10 yields 5..14.
+#### MS-19 · Random cargo quantity — **OPEN**
+- **Still open.** The negative formula is `floor`, and a −10 test cannot see it.
+- **Original.** `Mission_ResolveMissionSpecialShipCount` 0x0043d4c0. Its only resolve caller is
+  0x0043d240 on `DAT_0077f636`, which 0x0043bbb0 loads from mïsn +0x12 (CargoQty). The ship-count
+  field at offset 32 does not use this function. A non-negative quantity is kept. −1 is 0. For a
+  magnitude n ≤ −2, the result is `NovaRandom_Range(n) + floor(n/2)`. CargoQty −5 is 2…6. Even
+  magnitudes agree with the ceil formula, so −10 is still 5…14. The same count is the tons, the
+  `<CQ>` text, and the accept cargo-space check.
+- **NovaSwift.** `MissionOffers.specialCount` is `(n + 1) / 2 + random(n)`, so −5 is 3…7.
+  The StoryEngine range this item used to cite is gone. The comment on `specialCount` still states the ceil formula.
+- **Class.** FIX. **Impact** low, except where CargoQty is an odd negative. **Confidence** high.
+- **Test.** CargoQty −5 yields 2…6. CargoQty −10 still yields 5…14.
 
 #### MS-20 · crön news — **DONE**
 - **Done.** `stationNews` returns one body by the original's local/independent rule; the Holovid falls back to STR# 8101. The disaster-report body is not composed (economy).
@@ -3349,23 +3462,24 @@ resources have no effect. Every string fix below reads the resource, never a cop
 - **Test.** Clicking a system two jumps away arms nothing; Shift+clicking it after its neighbour
   builds a 2-hop route; a 32nd hop is refused.
 
-#### UI-06 · Ship and stellar selections are independent; Land uses the selection — ui_rules A3 — **DONE**
-- **Done.** `GameScene.selectShip`/`selectPlanet` no longer clear each other; `attemptLand` uses the
-  selected stellar (nearest body only under `forgivingLanding`); a click on empty space clears the
-  stellar, on the player's own ship the ship target; Alt+Y (`hailStellar`), 1–4 (`selectNav1–4`),
-  N clears the travel selection, Alt+N the ship target. Q-UI-03 (60-frame re-pick) not modelled.
-- **Original.** Two channels: the ship target (+0x70) and the travel stellar (+0x6c, mode 2).
-  Selecting one leaves the other. Land works on the **selected** stellar through the arrival gate
-  (FL-12); with none selected it auto-picks the nearest available one (0x00462db0). Alt+Y hails
-  the stellar even while a ship is targeted (0x00454910). Number keys 1–4 pick nav stellars;
-  clear-target (slot 8) clears the travel selection, or the ship target with Alt.
-- **NovaSwift.** `selectPlanet` clears the ship target and vice versa
-  (`App/Game/GameScene.swift:1629–1642`); `attemptLand()` lands on the nearest landable body
-  whatever is selected (:472, 1517–1534); no Alt+Y, no number keys.
-- **Class.** FIX (nearest-body landing survives only under `forgivingLanding`). **Impact** high.
-  **Confidence** high (the 60-frame nearest re-pick while armed is Q-UI-03).
-- **Test.** With a ship targeted, selecting a planet keeps the ship target; Land with the far
-  planet selected lands there, not on the nearer one.
+#### UI-06 · Ship and stellar selections are independent; Land uses the selection — ui_rules A3 — **OPEN**
+- **Still open (which body Land picks).** The two selection channels staying independent matches.
+  The nearest-land search does not. `forgivingLanding` and `autoLanding` default off and are not this gap.
+- **Original.** With nothing selected, 0x00462db0 searches only the current system's 16 nav slots.
+  A slot counts when the available byte at stellar +0x44 is nonzero and flags +0x30 bit 0x1 is set.
+  A hypergate or wormhole (availability +0x34 masked with 0x3000) counts only when dist² is below
+  the fixed float at 0x00575750. That constant was not dumped, so a 1000² claim is not confirmed.
+  The 60-frame land block is tutorial text, not a second nearest search (Q-UI-03).
+- **NovaSwift.** `GameScene.isPlayerLandTarget` is landable or a gate at any range, with no
+  available or destroyed test. `updateLanding` picks the nearest such body.
+  `selectNearestLandableIfNoneSelected` runs from Land on `GameContainerView` when nothing is selected.
+- **Earlier.** Independent ship and stellar selections, Alt+Y, nav keys 1–4, and N clearing the
+  travel selection landed with this item. The old NovaSwift line (the two selections clear each
+  other, and there is no Alt+Y) is stale for the channels.
+- **Class.** FIX. **Impact** high when a gate or a destroyed stellar is the nearest body.
+  **Confidence** high. The numeric gate radius is not confirmed.
+- **Test.** With nothing selected, Land ignores a destroyed stellar and ignores a hypergate past
+  the fixed radius. A selected far planet is still the one that is landed on.
 
 #### UI-07 · Target cycling and nearest-target commands — ui_rules A4 — **DONE**
 - **Done.** `Engine/PlayerTargeting.swift`: `cyclePlayerTarget(forward:squad:)` in `npcs` (spawn)
@@ -3607,8 +3721,10 @@ resources have no effect. Every string fix below reads the resource, never a cop
 - **Done.** `World.effectiveSensorRange` no longer shrinks with interference (radar and AI);
   `World.radarStaticChance` drives an all-static radar refresh at most every 250 ms (a display roll,
   off the sim RNG); without IFF every blip is DimRadar and only the target blinks BrightRadar; the
-  density scanner draws ≥ 100 t ships as 3×3 boxes and no longer reveals cargo. The IFF stellar
-  colour scheme was not re-checked.
+  density scanner draws ≥ 100 t ships as 3×3 boxes and no longer reveals cargo. IFF stellar
+  colour still tests AlwaysLand on the rank's own government. Landing spreads it to allies.
+  Radar colour 0x00466030 and map colour 0x00466260 both call `Government_HasRankPrivilege`,
+  so the original spreads it too (EC-10).
 - **Original.** Each radar refresh (≥ 250 ms) shows `ppat` static over the whole scope (no
   contacts) with probability `clamp(sÿst.Interference − clamp(Σ ModType 24 × owned, −100, 100),
   0, 100) %` (0x0045d030, 0x0046abb0). There is **no range reduction**, and AI is unaffected.
@@ -3658,9 +3774,7 @@ stock-data pass. "Decision" means it is not an RE question.
 | Q-AI-13 | Combat chatter, acknowledgement sounds, the +0xC4 cohort gate, the fleet 0x400 "on my way" arm | Ghidra |
 | Q-GEN-1 | IsShipDisabled exempts NPCs whose field +0x8c ≠ −1. What is +0x8c? | Ghidra (writers) |
 | Q-MS-05 | Duplicate `S` behaviour is settled (MS-17); does any stock flow depend on it? | Data |
-| Q-EC-14 | **New:** gambling modifier wager `min(credits, 10000)` (coverage audit) vs the "Bet 5000" button label in STR# 150 (EC-26) | Ghidra 0x0047dc50 |
 | Q-OS-01 | Nonlethal bomb damage `base_armor + rand(base_armor/2 + 1)` armor-only would be fatal; is it clamped, or misread by the decomp? (OS-08) | Ghidra 0x0044aa70 at the 0x0044b446 call |
-| Q-OS-02 | Confirm no daily tick on the hypergate/wormhole branch (OS-06) | Ghidra 0x00457580 |
 | Q-OS-03 | Which stock hulls carry cloak, jammer, scoop or repair DefaultItems, and which have PodCount > 0 (sizes the OS-01 / OS-02 impact) | Data (`novaswift-extract`) |
 | Q-OS-04 | NPC carrier jumps: are can't-jump fighters lost or recovered first? (OS-03) | Ghidra |
 | Q-UI-02 | Does the pod respawn really ignore the chär ship and use class 0 for a total conversion? (OS-02) | Ghidra 0x0044d570 |
@@ -3694,7 +3808,13 @@ code and is copied as is. Settled during the first consolidation (§1): the esco
 the capture-odds escort filter, outfitter and shipyard day costs, the AvailRecord comparand
 (EC-02), and, by the ruling, the tech-markdown cap and the shareware items. Batch 1b settled
 Q-FL-12 (oracle: the caller's signed short makes a negative ModType 22 subtract; FL-05) and Q-UI-01
-(the ammo reconcile; UI-02). Cleanup 1 settled Q-EC-11 (+0xa4 is the jump's spin-up start; EC-15).
+(the ammo reconcile; UI-02). Cleanup 1 settled Q-EC-11 (+0xa4 is the jump's spin-up start; EC-15). The executable re-read settled Q-OS-02 (no day on a hypergate or wormhole; OS-06) and Q-EC-14 (the gambling modifier caps at `min(credits, 10000)`; EC-26).
+
+**Quirks kept on purpose.** The original executable is ground truth, including behaviour a
+reimplementation called a bug and "fixed". A `DeathDelay` of 0 or 1 does not leave an immortal
+ghost: NovaSwift uses a 1.8 s death instead, on purpose. Ships with `shän` Flags 0x0002 do not
+fold or unfold for hyperspace or landing (`HullAnim.baseSet`). That unfold is still missing.
+Fleet ships are spawned with empty holds.
 
 ## 7. Coverage
 
@@ -3756,83 +3876,3 @@ default and permadeath scope (FL-03), and the hyperspace fade (FL-04).
    NovaSwift save slots with it (FL-03).
 5. Hitch behaviour (Q-FL-13) and persisting offer rolls / aux ships in `.evpilot` (Q-MS-06).
 6. Whether any FIX-only item listed at the end of §3 should be kept as a toggle instead.
-
-## Star map / HUD / input sweep (fix/ui-starmap)
-
-Done: classic star map zoom steps and button gates, route drawing, Find (0x004aab30) selecting only, political
-overlay, route mini map in flight (H and hop arrival), shipyard/hire list order and per-flag hide rules (0x00469e90),
-bar Hire Escort gate, one-shot quantity prompt, trade-center status strip and keys, shop grid arrow keys, bribe prompt
-wording and amount format, news headline, comm middle button rules, self-destruct docked boarders, landing PICT fallback.
-Also done: trade strip with escort free space and the disaster sentence (exe separators), route mini map with its
-original size, cycle key and zoom keys (60 Hz ticks confirmed), tractor-beam lock (jump gate, drag, speed/turn cut),
-squad-jump push sync, StellarAnimator port incl. hypergate open/close, deadly-stellar pixel masks, the run-walk
-abutment quirk (oracle-confirmed), "no hyperspace effects" preference.
-Closed after the merge with main: D-7 (MapReveal returns the first visible twin; test fixtures given distinct positions), the deadly-stellar mask uses the current animated frame, and a light tractor owner is pulled toward a heavy victim (sign confirmed with the oracle). The mini map keys were checked against the exe: `\` is bindable slot 0x0d (DIK 0x2b), `-` / `=` are fixed DIK 0x0c / 0x0d tests with no modifier held.
-
-## Missions / economy sweep (fix/missions-economy)
-
-Done: the missions_session and economy_save reports' offers, cargo, special-ship, BBS, status-bar
-cargo panel, hire/shipyard list, pilot-open items, murk as a per-sprite distance fog (`MurkFog`,
-0x00438db0), background-sprite murk level (0x0042e590; the tiled star layers keep their own
-wrap), debris puffs (`DebrisPuffs.swift`, 0x00428090 / 0x0043b170; drawn as grey dots, the puff
-art is not identified) and the ambush hail quote's 'STR ' override. Offer movies autoplay with Skip.
-Left: hail-quote wildcard expansion (rides on main's `expandStatusText`).
-## AI / spawn / weapons sweep fixes (fix/ai-combat)
-
-Done from `ai_spawn_comm.md` and `weapons_flight.md`: A1, A2, A3, A4, A5/A6/B-13, A7, A8, B-1 to B-6, B-8 to B-12, B-14, C-1, C-2, D-1 to D-4, and ai_spawn_comm #2, #4, #6, #9 to #19 and #20 (hull availability, gate hold). Pinned by `AICombatFidelityTests`, `BoardingTests`, `ShipSystemTests`.
-Also done: chatter categories 0 and 2, the capture name prompt (#119), comm and capture window text and keys (#22), A9 (area blasts, pod debris), C-3, C-4, and the B-7 test. Not done: #20's RNG draw shapes (they change only the random stream), the pod-debris sound (DAT_00591a80, id unknown) and the pers-flag debris arm at 0x00433050 l.904.
-
-### Fidelity gap pass (radar IFF, chatter, Escort Commands panel, input flush) — FIXED
-- Radar IFF: ship/stellar colours follow 0x00465f00 / 0x00466030; with IFF the player dot is cyan and the target dot alternates its IFF colour with BrightRadar (0x0045d600), no extra ring.
-- Combat chatter: `queueCombatChatter` / `updateCombatChatter` play the snd 1000+ voice banks on order acks, target picks and kills (0x00426ce0/0x004311f0); it is audio only, not a message line.
-- Escort Commands panel: E / 1–5 / F D V C(Alt-C) with number-key suppression while open (0x0049e430, 0x00469ca0); touch builds tap rows and order buttons on the panel.
-- Input flush: held keyboard state is cleared whenever flight controls hand over to or back from a dialog (0x004b68d0).
-
-### Presentation fidelity fixes (ionization look, screen shake, cloak sound, hull blast)
-- **Ionization look: FIXED.** The hull now takes a flat colour blend of the weapon's IonizeColor (no halo, scale, additive or pulse), as `Ship_UpdateVisualState` 0x00428340 does through the shared fog slot. It shows from intensity 0.33; blend = (clamp(round(intensity x 0.24), 16, 24) + Random(5) - 2) / 32, re-rolled every frame. It overrides murk only where its level is higher (or murk is under 8); the gate fade is applied last. `GameScene.applyIonize`. The 0.24 factor is read from the exe constants (24.0 x 0.01), so in practice the level is 16 +/- 2.
-- **Screen shake: FIXED.** The original never moves the camera. It is now the `screenShake` Enhancement (off), no longer a Graphics toggle, and no presentation preset touches it.
-- **Cloak sounds 380/381: FIXED.** Already wired (player only, plain `nv_PlaySound`); now played at the original's priority 8 instead of 1.
-- **Hull blast on death: already DONE** (WP-13, `World.deathBlast`); the audit's MISSING row was stale. Debris puffs (`syncDebrisPuffs`) also exist.
-
-### Open-gap reconciliation (2026-10-12)
-The 26 sweep rows that still said `PORT: OPEN` were checked against the current code. Each row in `audit/sweep` now says FIXED or REPLACED.
-- 0x410110 Ship_IsThreatenedByEnemyOfShip: FIXED now. `isThreatenedByEnemy` asks whether the supporter attacks the third ship (argument order was reversed); the old test that pinned the wrong order was rewritten.
-- 0x415b00 self-destruct docked boarders: STALE, already fixed in `stepSelfDestruct`; a stale "not modelled" comment was corrected.
-- 0x41c9f0 Dude_SpawnShipFromDudeDefInSystem: FIXED now for defenders (available hull first, then any; stellar govt raw, -1 for independent). Aux ships were already done.
-- 0x4211d0 area-impact booms: FIXED now. `wëap` ExplodType outside 0..63 / 1000..1063 draws nothing; the extra small booms were already scattered.
-- 0x421500 bööm pool: STALE, 32-slot cap and start delay exist.
-- 0x422400 hired escort placement: REPLACED. Pilot-load polar offset and govt -1 exist; a fresh hire is spawned at takeoff, when the player is already on the stellar.
-- 0x426d10 mission ship announcement: STALE, `{G..}` and `<..>` expansion runs through the HUD text pass; ambush path has the 'STR ' override and 0x1a4 duration.
-- 0x42e590 background sprites: REPLACED. Tiled star layers keep their own wrap; the murk level now reads the raw system murk.
-- 0x4313c0 cancel combat chatter: FIXED now on landing (jump already cleared it).
-- 0x438db0 murk fog: STALE, per-sprite distance fog (`MurkFog`).
-- 0x440c90 mission BBS keys: FIXED now (Return/Esc/l leave, a accepts, Tab/Down/Up step).
-- 0x446e00 mission computer window: STALE, QuickBrief only, date, "Abort" #35; header is in the PICT.
-- 0x447170 mission offer keys: FIXED now (Return and first letters of the accept/refuse labels) in both offer dialogs.
-- 0x45ea66 shield bar: STALE, tall rects fill bottom-up in whole pixels.
-- 0x45efe0 / 0x45f086 fuel bar: STALE, empty while disabled, vertical supported.
-- 0x466810 key capture: STALE, `KeyBindings.isCapturable` skips 1-4, Caps Lock, F1-F5.
-- 0x46a220 outfit list order: FIXED now. New `NovaEconomy.outfitList` follows the original order (tech 0 allowed, 32767 not, Availability/Require/BuyRandom before 0x1000 suppression, sell-back merged and sorted); the outfitter uses it.
-- 0x46c5c0 exit point to world offset: STALE, sprite-frame angle, near/far pair, drop.
-- 0x46ede0 starfield hide: FIXED now; it tests the raw system murk.
-- 0x48d6f0 trade center strip: STALE, `LandedServices.tradeStatus`.
-- 0x4b68d0 / 0x4f1940 input flush: STALE, held keys cleared whenever flight controls hand over to or from a dialog.
-- 0x4ceac0 CNTL/MENU popup: REPLACED, SwiftUI dialogs.
-- 0x4d2010 NovaList_Draw: REPLACED, SwiftUI lists.
-- 0x4d6900 IMA4 decode: REPLACED, per-packet reseed tracks the true waveform; PCM stays lossless.
-- 0x428090 / 0x43b170 debris puffs: tag fixed, verdict now `DIVERGES ... PORT: FIXED`.
-Still open: none from this list. Not changed: the added spark and flash accent on bööm sprites (presentation).
-
-### Original-quirk audit (2026-10-12)
-The roughly 106 documented quirks in wraitii's `known_original_bugs.md` were checked against the code and the decompile (`~/Projects/evnova-re/audit/quirks.md`). Policy: the original executable is ground truth, so a quirk wraitii "fixed" is still reproduced by default. Before this pass the audit counted 82 REPRODUCES, 9 DIVERGES, 12 UNCLEAR and 10 N/A. This pass fixed 6 divergences, kept 3 on purpose, and resolved 8 of the unclear rows (4 now REPRODUCES, 1 now DIVERGES, 3 still unclear with the open question written down); 5 low-impact unclear rows were not looked at.
-- Fixed, carried fighters (row 26): a new pilot and `Hxxx`/`Exxx` ship changes leave a fighter bay empty unless the pilot owns the fighter ammo outfit (`PilotEconomy.grantHullFittings(seedBayFighters:)`). Shipyard purchase and captured hulls keep their fighters, as in the decompile.
-- Fixed, tractor beam (row 29): the drag step is a quarter of the player's thrust for every ship (`World.updateBeamLock`).
-- Fixed, multi-ship cargo (row 23): later special ships need the same free hold space but load nothing (`MissionLifecycle.missionShipBoarded`).
-- Fixed, ionized hull in heavy murk (row 62): the fog colour becomes near-black blue (`GameScene.applyIonize`).
-- Fixed, NPC lights and glow in murk (row 64): lights get a third of the hull fog and both obey the murk intensity cap (`GameScene.npcHullFog`).
-- Fixed, fleet random-cargo flag (row 61): fleet ships have empty holds (`Spawner`, `OriginalSpawning`).
-- Fixed on resolving the unclear rows: the starfield tint follows the raw murk, `trunc(murk x 0.9)` in 2...29, additive (row 19, `MurkFog.backgroundLevel`, `GameScene.updateMurkFog`); an escort of a never-attacks-the-player government hits nothing (row 65, `World.canShotHit`).
-- Kept, DeathDelay 0/1 (row 7): a 1.8 s death replaces the immortal ghost.
-- Kept, `OnAccept` double briefing (row 58): the nested script runs separately, so the second briefing shows once.
-- Kept, random stellar after a next-day system change (row 38): twin systems are approximated; waiting for an oracle case.
-- Open, folding hulls (Q8): `shän` Flags 0x0002 is not wired to hyperspace or landing at all (`HullAnim.baseSet`), so the unfold is missing rather than misapplied.

@@ -21,6 +21,10 @@ struct TravelState {
     var openGates: Set<Int> = []
     /// While a hypergate's destination picker is up: the gate being used.
     var gatePicker: Int?
+    /// The frontend plays the gate-entry movie itself (`GateTravelMovie`): a wormhole then picks its exit
+    /// but waits in `pendingWormhole` for `wormholeEnterPending()` instead of transporting at once.
+    var deferGateTransport = false
+    var pendingWormhole: (system: Int, gate: Int)?
     /// Status-line lines raised here, drained by GDScript.
     var messages: [String] = []
 
