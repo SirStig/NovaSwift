@@ -293,6 +293,29 @@ PadKeyboard) and **synthesises mouse events** (`Input.parse_input_event`), so ho
   (`input/cursor_speed`, 0.4-2.0, default 1.0).
 - Test: `tests/pad_cursor_selfcheck.gd` (hooks `debug_move_to`, `debug_press_a`, `debug_scroll`).
 
+### Action wheels (`godot/ActionWheels.gd`, `godot/ui/ActionWheel.gd`)
+
+Steam-style radial menus so the whole flight action set is reachable from a pad (mirrors the Apple app's
+`ActionWheels.swift` / `ActionWheelOverlay.swift`; user-facing notes in docs/CONTROLS.md). LB = Combat & Fleet, RB = Targeting & Nav,
+Back = Info & View.
+
+- **Data** (`ActionWheels.gd`): `wheels` (id, title, trigger, slots 4..12, anchor), `uncovered()` (Flight actions with no pad
+  button/axis and in no slot; the defaults leave it empty), slot angle math (slot 0 on top, clockwise), persistence in
+  `settings.cfg [wheels]` (only customised wheels + `pause`; `Prefs.load_all/save`).
+- **Tap vs hold**: `Controls.register` strips each trigger button off the Flight-group actions (`Controls.wheel_triggers`, recorded
+  in `Controls.wheel_taps`); `ActionWheel.gd` owns the button. Release < 0.22 s without the stick = tap, fired with
+  `Input.action_press` and released next frame (node priority -100, so Main's `is_action_just_pressed` sees it once);
+  held, or the right stick pushed past 0.5 after the press = open. B cancels (Main keeps `fire_secondary` suppressed),
+  self-destruct latches until any pad press. Map zoom (LB/RB) and docked `shop_sell_qty` are untouched (not Flight group);
+  `map_close` gained Back so it still closes the map.
+- **Main hooks**: `_wheel = ActionWheel.new()` in `_ready` (+ three Callables, `fired`/`cancelled` signals); in `_process` `_wheel.live`
+  is cleared at the top and set right after `_cursor_state(true)`; `_wheel.pausing()` returns early like the map does (sim
+  stopped, wheel keeps running), and an open wheel suspends right-stick aim.
+- **Escort groups**: while the Escort Commands panel is up, the wheel containing `escort_panel` becomes `ESCORT_WHEEL`
+  (groups 1-5 + panel), which is how a pad picks a group.
+- **Editor**: Controls Editor tab "Action Wheels" (`screens/controls_editor/WheelsPage.gd`).
+- Check: `tests/action_wheel_selfcheck.gd`.
+
 ### Flight travel (selected stellar · landing clearance · gates · escorts across jumps)
 
 NovaWorld's `// MARK: Flight travel` (state in `Flight.swift`) mirrors what the Apple

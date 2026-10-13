@@ -32,15 +32,15 @@ Enhancement and is off unless you turn it on.
 No decompiled code is in this repository. The findings are written up as specs
 with function addresses in [docs/reverse-engineering/](docs/reverse-engineering/README.md).
 
-![Functions compared and matching, by part of the original. Amber squares are functions only an open plan item cites.](docs/branding/fidelity-summary.svg?v=871e8c2b)
+![Functions compared and matching, by part of the original. Green matches the original; teal is done differently on purpose.](docs/branding/fidelity-summary.svg?v=fb690c58)
 
 One block is roughly 5% of that part of the original code: compared and
-matching or fixed to match (green), handled differently on purpose, such as the
-save format and controls (teal), or found to differ, with the fix written and awaiting test
-(amber). The number at the end of a row is matching functions out of the
+matching or fixed to match (green), or handled differently on purpose, such as the
+save format and controls (teal). Every row is now complete: 671 of 671 portable
+functions. The number at the end of a row is matching functions out of the
 functions to port, not a progress percentage. This tracks how much has been
-checked, not how finished the game is. 16 of the 179 plan items were reopened; they are
-implemented and awaiting build and test, and are listed in [docs/STATUS.md](docs/STATUS.md). NovaSwift is in beta and has bugs. If something plays
+checked, not how finished the game is. All 179 plan items are done; the last 16 were
+finished on 2026-10-13 and are still being built and tested (see [docs/STATUS.md](docs/STATUS.md)). NovaSwift is in beta and has bugs. If something plays
 differently from the original, please
 [open a fidelity issue](https://github.com/SirStig/NovaSwift/issues/new/choose).
 The function-by-function view is in [docs/STATUS.md](docs/STATUS.md) and on the

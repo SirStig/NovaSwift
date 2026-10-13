@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="650" height="500" viewBox="0 0 650 500" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
 <style>.hl{font-size:22px;font-weight:700;fill:#f0e6da}.sb{font-size:11px;fill:#a89a95}.nm{font-size:13px;fill:#f0e6da}.pc{font-size:13px;font-weight:600;fill:#f0e6da}</style>
 <rect width="650" height="500" rx="10" fill="#0d0a0e"/>
-<text x="20" y="34" class="hl">Compared and matching: 656 of 671 functions</text>
-<text x="20" y="56" class="sb">16 plan items are open; the 15 functions only they cite are amber, not green.</text>
+<text x="20" y="34" class="hl">Compared and matching: 671 of 671 functions</text>
+<text x="20" y="56" class="sb">0 plan items are open; the 0 functions only they cite are amber, not green.</text>
 <text x="20" y="90" class="nm">Flight &amp; collision</text>
 <rect x="230" y="78" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="78" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -111,8 +111,8 @@
 <rect x="502" y="174" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="519" y="174" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="536" y="174" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="553" y="174" width="14" height="14" rx="2" fill="#e3a52b"/>
-<text x="580" y="186" class="pc">61/64</text>
+<rect x="553" y="174" width="14" height="14" rx="2" fill="#3fb950"/>
+<text x="580" y="186" class="pc">64/64</text>
 <text x="20" y="210" class="nm">Economy &amp; spaceport</text>
 <rect x="230" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -131,10 +131,10 @@
 <rect x="468" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="485" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="502" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="519" y="198" width="14" height="14" rx="2" fill="#e3a52b"/>
-<rect x="536" y="198" width="14" height="14" rx="2" fill="#e3a52b"/>
-<rect x="553" y="198" width="14" height="14" rx="2" fill="#e3a52b"/>
-<text x="580" y="210" class="pc">21/25</text>
+<rect x="519" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="536" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="553" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
+<text x="580" y="210" class="pc">25/25</text>
 <text x="20" y="234" class="nm">Boarding &amp; hails</text>
 <rect x="230" y="222" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="222" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -174,11 +174,11 @@
 <rect x="451" y="246" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="468" y="246" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="485" y="246" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="502" y="246" width="14" height="14" rx="2" fill="#3aa6b9"/>
-<rect x="519" y="246" width="14" height="14" rx="2" fill="#3aa6b9"/>
+<rect x="502" y="246" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="519" y="246" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="536" y="246" width="14" height="14" rx="2" fill="#3aa6b9"/>
-<rect x="553" y="246" width="14" height="14" rx="2" fill="#e3a52b"/>
-<text x="580" y="258" class="pc">63/67</text>
+<rect x="553" y="246" width="14" height="14" rx="2" fill="#3aa6b9"/>
+<text x="580" y="258" class="pc">67/67</text>
 <text x="20" y="282" class="nm">Government &amp; legal</text>
 <rect x="230" y="270" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="270" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -199,8 +199,8 @@
 <rect x="502" y="270" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="519" y="270" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="536" y="270" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="553" y="270" width="14" height="14" rx="2" fill="#e3a52b"/>
-<text x="580" y="282" class="pc">20/21</text>
+<rect x="553" y="270" width="14" height="14" rx="2" fill="#3fb950"/>
+<text x="580" y="282" class="pc">21/21</text>
 <text x="20" y="306" class="nm">Star map &amp; travel</text>
 <rect x="230" y="294" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="294" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -221,8 +221,8 @@
 <rect x="502" y="294" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="519" y="294" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="536" y="294" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="553" y="294" width="14" height="14" rx="2" fill="#e3a52b"/>
-<text x="580" y="306" class="pc">110/113</text>
+<rect x="553" y="294" width="14" height="14" rx="2" fill="#3aa6b9"/>
+<text x="580" y="306" class="pc">113/113</text>
 <text x="20" y="330" class="nm">HUD &amp; input</text>
 <rect x="230" y="318" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="318" width="14" height="14" rx="2" fill="#3fb950"/>

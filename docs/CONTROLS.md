@@ -85,7 +85,27 @@ computes it, and the tests assert the defaults leave nothing out.
 
 ### Godot (Linux / Windows / Steam Deck)
 
-Same wheels and defaults; see GODOT_LAYER.md.
+Same idea and the same hold/tap/cancel behaviour, in `godot/ActionWheels.gd`
+(data) and `godot/ui/ActionWheel.gd` (input + overlay).
+
+- **Buttons.** LB = Combat & Fleet, RB = Targeting & Nav, **Back/View = Info &
+  View** (Player/Mission Info, dismiss message, route-map zoom, pause menu).
+  Taps still do LB/RB = previous/next secondary and Back = galaxy map, fired on
+  release (those buttons are stripped from the Flight actions in
+  `Controls.register`; the wheel node re-fires the action).
+- **Placement.** Each wheel sits low on the side of its trigger (LB and Back
+  bottom-left, RB bottom-right), 32 px from the edges and clear of the Classic
+  status bar / message line.
+- **Pause.** The game pauses while a wheel is open (Settings key `[wheels]
+  pause`, default on; the editor page has the switch). The pad cursor stays
+  suppressed.
+- **Escort groups.** While the Escort Commands panel is up, the wheel that holds
+  *Escort commands* swaps to a six-slot Escort Groups wheel (groups 1-5 + close),
+  so a pad can pick a group.
+- **Editor.** Controls Editor ▸ **Action Wheels** tab (LB/RB flip tabs): trigger
+  button, side, slots (4-12, change / up / down / remove / add), reset, and the
+  live "unreachable on the pad" warning. Saved in `settings.cfg` `[wheels]`.
+- Check: `godot/tests/action_wheel_selfcheck.gd`.
 
 ## The UI cursor
 

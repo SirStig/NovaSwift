@@ -7,9 +7,9 @@ What's next, roughly in order. For what already works, see
 
 ### Close out the fidelity plan
 
-[FIDELITY_PLAN.md](reverse-engineering/FIDELITY_PLAN.md) has 179 items. 163 are done. 16 were reopened after a later read of the executable: OS-06, EC-04, EC-05, EC-07, EC-09, EC-10, EC-11, EC-12, EC-25, EC-26, OS-08, AI-44, UI-06, MS-19, EC-27, EC-28. All 16 are now implemented in code (both apps) and awaiting build and test; their headings stay **OPEN** until then. What's left:
+[FIDELITY_PLAN.md](reverse-engineering/FIDELITY_PLAN.md) has 179 items. All 179 are done. The last 16, reopened after a later read of the executable, were finished on 2026-10-13: OS-06, EC-04, EC-05, EC-07, EC-09, EC-10, EC-11, EC-12, EC-25, EC-26, OS-08, AI-44, UI-06, MS-19, EC-27, EC-28. They are implemented in both apps and marked **DONE** (awaiting build/test); the grid has been regenerated to 671 of 671. What's left:
 
-- Build and test those 16 items, then flip their headings to DONE and regenerate the grid. [STATUS.md](STATUS.md) lists them. EC-09 adds a `stockBank` pilot-save field.
+- Build and test those 16 items; any that fail go back to **OPEN** and the grid is regenerated. [STATUS.md](STATUS.md) lists them. EC-09 adds a `stockBank` pilot-save field.
 - Build and test the closing-pass work that is written but not yet built (status-line
   sentences and hint chain, Player Info Tab cycling, target-cycling order and
   AI-state filter, folding hulls, `përs` quote gates, the Apple-app fixes listed

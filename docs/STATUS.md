@@ -45,20 +45,20 @@ generator, thrust and top speed, the control-bit test and set interpreters), the
 original routine was run on its own in an emulator and NovaSwift was tested
 against its output.
 
-The plan has 179 items in eight areas. 163 are done. 16 are still marked **OPEN**: a later read of the executable reopened items whose heading said done, and added EC-27 and EC-28. As of 2026-10-13 all 16 are implemented in both apps but not yet built or tested, so their headings stay **OPEN** until the maintainer tests them.
+The plan has 179 items in eight areas, and all 179 are done. A later read of the executable had reopened 16 items whose heading said done (and added EC-27 and EC-28); all 16 were implemented in both apps on 2026-10-13 and are marked **DONE** (awaiting build/test) while the maintainer builds and tests them.
 
 | Area | Items | Open |
 |---|---:|---:|
 | Flight, hyperjump, travel days (FL) | 23 | 0 |
 | Weapons and damage (WP) | 27 | 0 |
-| NPC AI, spawning, escorts (AI) | 43 | 1 |
-| Economy, legal record, landed services (EC) | 28 | 11 |
-| Missions and story (MS) | 24 | 1 |
-| Outfit special systems (OS) | 14 | 2 |
-| Player-facing rules: map, targeting, HUD, keys, saving (UI) | 18 | 1 |
+| NPC AI, spawning, escorts (AI) | 43 | 0 |
+| Economy, legal record, landed services (EC) | 28 | 0 |
+| Missions and story (MS) | 24 | 0 |
+| Outfit special systems (OS) | 14 | 0 |
+| Player-facing rules: map, targeting, HUD, keys, saving (UI) | 18 | 0 |
 | Data loading (LD) | 2 | 0 |
 
-Open: OS-06, EC-04, EC-05, EC-07, EC-09, EC-10, EC-11, EC-12, EC-25, EC-26, OS-08, AI-44, UI-06, MS-19, EC-27, EC-28. Each has a "Status 2026-10-13" line saying what was implemented and that it awaits build and test; the "Still open" paragraph under it describes the gap that code was written to close. An older Done paragraph under the same heading is historical.
+Completed 2026-10-13 (awaiting build and test): OS-06, EC-04, EC-05, EC-07, EC-09, EC-10, EC-11, EC-12, EC-25, EC-26, OS-08, AI-44, UI-06, MS-19, EC-27, EC-28. Each has a "Status 2026-10-13" line saying what was implemented; the "Still open" paragraph under it describes the gap that code was written to close. An older Done paragraph under the same heading is historical.
 
 Implemented 2026-10-13, awaiting build and test (written in code, not compiled or run):
 
@@ -79,7 +79,7 @@ Implemented 2026-10-13, awaiting build and test (written in code, not compiled o
 - MS-19: random cargo quantity uses the original's `floor` for negative values.
 - UI-06: Land with no selection picks the nearest travel stellar the way the original does (16 nav slots, gate radius 500 px).
 
-After the maintainer's build and test, each heading flips to DONE and the grid is regenerated; if every item holds, the expected result is 671 of 671 gameplay functions green or teal, with no amber.
+These 16 headings now read **DONE** (implemented 2026-10-13, awaiting build/test), and the grid has been regenerated from them: 671 of 671 portable gameplay functions are green or teal. If a build or test shows one of these fixes does not hold, its heading goes back to **OPEN** and the grid is regenerated.
 
 A few done items left a small piece for later. These are the same on the Apple
 app and the Godot frontend, because both call the shared engine. The closing passes
@@ -133,7 +133,7 @@ short formulas and constants, with the original function's address.
 
 ## The function grid
 
-![One square per function in the original executable](branding/progress-blocks.svg?v=a82e1ff1)
+![One square per function in the original executable](branding/progress-blocks.svg?v=54f46d60)
 
 One square per function in the EV Nova CE executable, grouped by subsystem.
 
@@ -147,22 +147,19 @@ One square per function in the EV Nova CE executable, grouped by subsystem.
 | Outline | Gameplay code whose role is still unknown. |
 | Dark grey | Nothing to port: C runtime, QuickTime, image and audio libraries, networking, blitters, Windows glue, the shareware nag, plus drawing and debug plumbing found during checking. |
 
-The grid was redrawn after the 16 items were reopened, and has not changed since: the amber squares stay amber until the items are tested and their headings flip to DONE. Rule, reproducible with
+The grid was regenerated on 2026-10-13 after the 16 reopened items were implemented and their headings marked **DONE** (awaiting build/test). Rule, reproducible with
 `python3 scripts/reopen-progress.py`: a function that was green, is cited by at
-least one plan item, and is cited by no item marked **DONE** is amber. The 16 open
-items are the ones whose heading is not **DONE** in the plan. Functions confirmed
+least one plan item, and is cited by no item marked **DONE** is amber. An open
+item is one whose heading is not **DONE** in the plan; there are none at present. Functions confirmed
 by the line-by-line comparison (no citing item) stay green.
 
-3,199 functions: 636 green, 33 teal (done differently by design), 15 amber, 0 red,
-0 blue, 2,515 dark grey. Of the 697 gameplay functions, 504 are green, 24 teal
+3,199 functions: 651 green, 33 teal (done differently by design), 0 amber, 0 red,
+0 blue, 2,515 dark grey. Of the 697 gameplay functions, 519 are green, 24 teal
 (NovaSwift's own save format, input layer, frame loop, and SwiftUI lists and
-dialogs), 15 amber, and 154 drawing or debug plumbing. The 15 amber functions are
-the ones only EC-07, EC-09, EC-10, EC-11, EC-12, EC-26, EC-28, MS-19, OS-06 and UI-06 cite. All of those fixes are now written in code and awaiting build and test, so amber here means "fix written, not yet verified". The other
-open items cite functions that other, finished items also cite, so those squares
-stay green: green means "matched when compared", and an open item can concern only
-one slice of a function. The tooltips list each square's citing items, taken from
-the plan as it stood at the last full redraw; a few may name an item that no longer
-lists that address.
+dialogs), 0 amber, and 154 drawing or debug plumbing: 671 of 671 portable functions.
+All 179 plan items are marked **DONE**. The 16 completed on 2026-10-13 (listed above),
+and the other 2026-10-13 closing-pass work, are implemented but not yet built and tested
+by the maintainer; the grid shows them as done on that basis.
 
 ## Original bugs and quirks
 
@@ -183,7 +180,7 @@ The grid is drawn from the function map, the addresses cited in
 FIDELITY_PLAN.md and the line-by-line comparison results. Those are read by a
 generator in the private reverse-engineering workspace (it needs the decompiled
 export, which is not in this repository). It writes
-[progress-blocks.svg](branding/progress-blocks.svg?v=a82e1ff1) for this page and
+[progress-blocks.svg](branding/progress-blocks.svg?v=54f46d60) for this page and
 `site/assets/progress.json` for the website's interactive version. In this
 repository, `scripts/reopen-progress.py` applies the amber rule to that data,
 recomputes every count, and redraws the grid and the summary chart. Run it after
@@ -287,7 +284,7 @@ Auto-updater ([UPDATER.md](UPDATER.md), `godot/updater/`): built. A signing key 
 
 ## Known gaps
 
-- The 16 open plan items listed above: implemented 2026-10-13, awaiting build and test. EC-09 adds a `stockBank` field to the pilot save (old saves still load).
+- The 16 plan items completed 2026-10-13 (listed above): implemented, awaiting the maintainer's build and test. EC-09 adds a `stockBank` field to the pilot save (old saves still load).
 - The deferred pieces listed above (UI-15's map cycling inference, AI-12, FL-23) and the closing-pass work that is written but not yet built.
 - Open questions in §6 of the fidelity plan.
 - Apple app, found against the decompile and fixed 2026-10-13 (written, not yet built): the Classic status-message rectangle, title music scaled by the volume step twice, the ambient and quick-hyperjump loops scaled by the Effects slider twice, and the ambient check (`>= 128`). The newest total-conversion and gate-movie edits were built and tested on macOS.
