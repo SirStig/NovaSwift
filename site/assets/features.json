@@ -258,6 +258,11 @@
      "where": "GameLibrary PluginLoadFailureSink"
     },
     {
+     "name": "Per-total-conversion add-on lists (both apps)",
+     "status": "done",
+     "where": "Sources/NovaSwiftKit/TCAddOns.swift, Plugins/TCAddOnsSection.swift, godot/screens/Plugins.gd"
+    },
+    {
      "name": "Import local files and old Mac .sit/.hqx/.bin",
      "status": "partial",
      "where": "StuffIt methods 13/15 not supported"
@@ -276,6 +281,11 @@
      "name": "Plug-ins bundled with the app",
      "status": "partial",
      "where": "hooks exist, none ship"
+    },
+    {
+     "name": "Zip import of game-folder style packs (ARPIA2 layout)",
+     "status": "done",
+     "where": "GameLibrary.bundles(forFolder:), godot Plugins.swift installDir"
     }
    ]
   },
@@ -351,6 +361,11 @@
      "name": "Keyboard remapping",
      "status": "done",
      "where": "Input/KeyBindings.swift"
+    },
+    {
+     "name": "Controls editor with keyboard and controller diagrams",
+     "status": "done",
+     "where": "app/NovaSwift/Launcher/ControlsEditor/; godot/screens/controls_editor/"
     }
    ]
   },
@@ -410,6 +425,11 @@
      "name": "Sensitivity and invert",
      "status": "done",
      "where": "GameSettings.controlSensitivity"
+    },
+    {
+     "name": "On-screen layout editor with presets",
+     "status": "done",
+     "where": "Input/TouchLayout.swift, Launcher/ControlsEditor/TouchTab.swift"
     },
     {
      "name": "Pinch zoom on the galaxy map",
@@ -506,6 +526,11 @@
      "name": "Sidebar pause menu",
      "status": "done",
      "where": "GameSettings.sidebarPauseMenu"
+    },
+    {
+     "name": "Flight camera views (Classic, Look ahead, Ship up, Chase)",
+     "status": "done",
+     "where": "app/NovaSwift/Game/CameraRig.swift"
     }
    ]
   },
@@ -665,7 +690,7 @@
     {
      "name": "HUD, radar, targeting",
      "status": "done",
-     "where": "Main.gd"
+     "where": "godot/Main.gd, godot/ui/classic/AuthenticHUD.gd"
     },
     {
      "name": "Landing and launch",
@@ -679,8 +704,8 @@
     },
     {
      "name": "Hyperjump and galaxy map",
-     "status": "partial",
-     "where": "jump and map work, tested on macOS; borders, mission markers, Tab/backslash cycling and gate-entry movies are written, not yet built or tested"
+     "status": "done",
+     "where": "godot/screens/GalaxyMap.gd, NavScreens.gd, HyperjumpFx.gd"
     },
     {
      "name": "Outfitter, shipyard, bar, missions",
@@ -688,9 +713,9 @@
      "where": "godot/screens/SpaceportClassic.gd, StoryScreens.gd"
     },
     {
-     "name": "Sound",
-     "status": "partial",
-     "where": "plays through the shared voice list; parity fixes, ambient loop and brightness are written, not yet built or tested; title music from .mov is silent"
+     "name": "Sound, spaceport ambient loop, brightness",
+     "status": "done",
+     "where": "godot/audio/GameAudio.gd, tests/sound_parity_selfcheck.gd"
     },
     {
      "name": "Saving and loading pilots",
@@ -703,14 +728,114 @@
      "where": "godot/bridge Story.swift, StoryScreens.gd"
     },
     {
+     "name": "Live-world wiring (rating, legal record, përs gating, mining, boarding, garrisons, bombs, Strict Play)",
+     "status": "done",
+     "where": "Sources/NovaSwiftStory/WorldPilotLink.swift, tests/live_wiring_selfcheck.gd"
+    },
+    {
+     "name": "Status line, arrival and launch lines, HUD icons",
+     "status": "done",
+     "where": "godot/bridge StatusLine.swift, tests/status_line_selfcheck.gd"
+    },
+    {
      "name": "Gamepad input",
      "status": "done",
      "where": "godot/Controls.gd"
     },
     {
+     "name": "Controls and targeting checklist (Tab and ` cycle, \\ link cycle, route mini map)",
+     "status": "done",
+     "where": "godot/Controls.gd, screens/RouteMiniMap.gd, tests/controls_selfcheck.gd"
+    },
+    {
      "name": "Packaged builds",
      "status": "partial",
-     "where": "export presets and package-linux.sh exist; no Linux, Windows or Steam Deck build has been run"
+     "where": "export presets and scripts/package-linux.sh exist; no Linux, Windows or Steam Deck build has been run"
+    },
+    {
+     "name": "Performance: release bridge, sprite cache with prewarm, disk cache",
+     "status": "done",
+     "where": "scripts/build-gdextension.sh, godot/bridge Perf.swift, godot/flight/FlightSprites.gd"
+    },
+    {
+     "name": "Galaxy map: drag and trackpad pan, borders, mission markers, Tab and \\ cycle",
+     "status": "done",
+     "where": "godot/screens/GalaxyMap.gd, tests/map_features_selfcheck.gd, map_drag_selfcheck.gd"
+    },
+    {
+     "name": "Hypergate and wormhole entry movies",
+     "status": "done",
+     "where": "godot/ui/DescMovie.gd play_gate, Sources/NovaSwiftKit/GateTravelMovie.swift"
+    },
+    {
+     "name": "Race and dësc movies (through ffmpeg)",
+     "status": "done",
+     "where": "godot/Movies.gd, ui/MoviePlayer.gd, ui/DescMovie.gd; needs ffmpeg installed"
+    },
+    {
+     "name": "Title music from a .mov file",
+     "status": "partial",
+     "where": "godot/audio/TitleMusic.gd is silent for .mov"
+    },
+    {
+     "name": "About dialog picture",
+     "status": "done",
+     "where": "godot/ui/classic/ClassicMainMenu.gd, screens/MainMenu.gd"
+    },
+    {
+     "name": "NovaSwift UI kit: Settings (8 pages), Plug-ins, pause sidebar, pilot screens",
+     "status": "done",
+     "where": "godot/ui/novaswift/, screens/Settings.gd, Plugins.gd, PauseMenu.gd, PilotMenu.gd"
+    },
+    {
+     "name": "Overlay stacking (screens open over the menu or pause sidebar)",
+     "status": "done",
+     "where": "godot/screens/Shell.gd _overlay_push, tests/shell_selfcheck.gd"
+    },
+    {
+     "name": "Story Map",
+     "status": "done",
+     "where": "godot/screens/StoryGuide.gd, tests/story_map_selfcheck.gd"
+    },
+    {
+     "name": "Debug suite",
+     "status": "done",
+     "where": "godot/debug/, bridge Debug.swift, tests/debug_suite_selfcheck.gd"
+    },
+    {
+     "name": "Plug-in loading parity harness",
+     "status": "done",
+     "where": "scripts/plugins-check.sh, tests/plugins_load_selfcheck.gd (13 catalog plug-ins match the shared merge)"
+    },
+    {
+     "name": "Key Settings dialog (original DITL 4002)",
+     "status": "partial",
+     "where": "Preferences opens the NovaSwift Controls page instead; the original 34-key table is not drawn"
+    },
+    {
+     "name": "Murk fog (per-sprite fade to the system murk colour)",
+     "status": "partial",
+     "where": "godot/flight: star tint only"
+    },
+    {
+     "name": "LAN and IP:port multiplayer",
+     "status": "planned",
+     "where": "docs/MULTIPLAYER.md"
+    },
+    {
+     "name": "Plug-in editor on Linux and Windows",
+     "status": "planned",
+     "where": "macOS only today"
+    },
+    {
+     "name": "HD graphics packs",
+     "status": "planned",
+     "where": "NovaSwiftHD is Apple-only"
+    },
+    {
+     "name": "Steam Deck build and flight visuals on a real GPU",
+     "status": "planned",
+     "where": "nothing has been run on a Deck or checked on a real GPU"
     }
    ]
   },
@@ -733,11 +858,13 @@
     },
     {
      "name": "Particles, bloom, post effects",
-     "status": "planned"
+     "status": "partial",
+     "where": "GameSettings.particleDensity only; no bloom or post effects"
     },
     {
-     "name": "Performance tiers",
-     "status": "planned"
+     "name": "Graphics quality presets",
+     "status": "done",
+     "where": "GameSettings.GraphicsQuality (Low, Medium, High, Ultra, Custom)"
     },
     {
      "name": "Smooth rotation, frame interpolation",
@@ -871,6 +998,21 @@
      "where": "docs/HD_PIPELINE.md"
     },
     {
+     "name": "Total-conversion intro movies and GIFs",
+     "status": "done",
+     "where": "app/NovaSwift/Pilots/IntroSequenceView.swift, godot/screens/IntroSequence.gd"
+    },
+    {
+     "name": "Total-conversion fonts",
+     "status": "done",
+     "where": "Sources/NovaSwiftKit/TCAddOns.swift, godot ClassicTheme.font_for"
+    },
+    {
+     "name": "Mission, docking and intro dësc movies",
+     "status": "done",
+     "where": "app/NovaSwift/Story/DescMovie.swift, godot/ui/DescMovie.gd"
+    },
+    {
      "name": "Change the game's fixed rules and limits from a plug-in",
      "status": "planned",
      "where": ""
@@ -975,8 +1117,9 @@
      "status": "planned"
     },
     {
-     "name": "Live 3D with real-time lighting",
-     "status": "planned"
+     "name": "Live 3D hulls with a frame-rate budget",
+     "status": "partial",
+     "where": "Sources/NovaSwiftHD/LiveHull.swift (SK3DNode, frame-rate budget); not yet checked on real devices"
     },
     {
      "name": "Lighting from nearby stars",
@@ -993,6 +1136,11 @@
     {
      "name": "HD on Linux and Windows",
      "status": "planned"
+    },
+    {
+     "name": "Graphics quality presets for HD detail and 3D",
+     "status": "done",
+     "where": "GameSettings.GraphicsQuality, Launcher/SettingsView.swift"
     }
    ]
   }

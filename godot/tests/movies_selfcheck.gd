@@ -33,6 +33,9 @@ func _init() -> void:
 	_check("forced-missing: transcode returns {}", Movies.transcode(src).is_empty())
 	Movies.convert_async(src)
 	_check("forced-missing: async is a no-op", not Movies.is_pending(src) and Movies.ready(src).is_empty())
+	_check("forced-missing: audio extraction is a no-op", Movies.transcode_audio(src) == "" and Movies.audio_ready(src) == "")
+	Movies.convert_audio_async(src)
+	_check("forced-missing: async audio is a no-op", not Movies.audio_pending(src))
 	Movies.ffmpeg_override = ""
 
 	if not Movies.available():
@@ -49,6 +52,12 @@ func _init() -> void:
 		var t2: int = Time.get_ticks_msec()
 		_check("second call is a cache hit", b == a and (t2 - t1) < 100, "%d ms" % (t2 - t1))
 		_check("ready() agrees", Movies.ready(src) == a)
+		# Title music named as a .mov (C5): audio-only extraction, cached, loadable.
+		var wav: String = Movies.transcode_audio(src)
+		_check("extracts the .mov audio track to a WAV (or the clip has none)", wav == "" or FileAccess.file_exists(wav), wav)
+		if wav != "":
+			_check("the WAV loads as an AudioStreamWAV", AudioStreamWAV.load_from_file(wav) != null)
+			_check("audio_ready agrees; second call is a cache hit", Movies.audio_ready(src) == wav and Movies.transcode_audio(src) == wav)
 		# Background path on another clip.
 		var src2: String = Movies.find_movie("Race 2.mov", Movies.search_roots(data))
 		Movies.convert_async(src2)

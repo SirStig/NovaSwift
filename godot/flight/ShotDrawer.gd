@@ -88,12 +88,25 @@ func draw_projectiles(ci: CanvasItem) -> void:
 				var deg: float = ex[n * 3 + 2] if n * 3 + 2 < ex.size() else rad_to_deg(facing)
 				var f := mini(maxi(int(floorf(fposmod(deg, 360.0) * frames / 360.0 + 1e-9)), 0), frames - 1)
 				Sprites.draw(ci, entry, pos, f, tint)
+				_fog(entry, pos, f, NAN, n, tint.a)
 			else:
 				var af: int = int(ex[n * 3 + 1]) if n * 3 + 1 < ex.size() else 0
 				var frame := (af % maxi(frames, 1)) if spins else 0
 				Sprites.draw_rotated(ci, base, entry, pos, frame, facing, tint)
+				_fog(entry, pos, frame, facing, n, tint.a)
 		i += 3
 		n += 1
+
+
+## Murk (GameScene.applyMurk on shots): a shot with its own art mixes toward the system backdrop colour by
+## its distance from the player (`MurkFog.level / 32`); the generic additive bolt is left alone.
+func _fog(entry: Dictionary, pos: Vector2, frame: int, angle: float, n: int, alpha: float) -> void:
+	if n >= r.shot_fog.size():
+		return
+	var level: float = r.shot_fog[n]
+	if level > 0.0:
+		r.fog_shots.append([entry, pos, frame, Color(r.background.r, r.background.g, r.background.b, 1.0),
+			level / 32.0 * alpha, angle])
 
 
 ## Shots with no authored art: the generic additive bolt.

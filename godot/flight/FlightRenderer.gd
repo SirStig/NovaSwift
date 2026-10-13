@@ -67,6 +67,7 @@ var selected_spob := -1
 var target_id := -1
 var fog_world: Array = []
 var fog_ships: Array = []
+var fog_shots: Array = []             # murk on shots with spïn art: [entry, pos, frame, colour, alpha, angle]
 
 # Per-frame snapshot of the bridge readbacks.
 var ship_xf: PackedFloat32Array
@@ -78,6 +79,7 @@ var ship_layers: PackedFloat32Array
 var shot_xf: PackedFloat32Array
 var shot_style: PackedInt32Array
 var shot_extra: PackedFloat32Array
+var shot_fog: PackedFloat32Array     # murk fog level 0-31 per shot (empty = no murk)
 var beams: PackedFloat32Array
 var beam_weapons: PackedInt32Array
 var roid_xf: PackedFloat32Array
@@ -115,6 +117,7 @@ func setup(world: Object) -> void:
 	_add_layer("fill", _draw_fog_ships)
 	_add_layer("add", _draw_glows)
 	_add_layer("mix", _draw_shots)
+	_add_layer("fill", _draw_fog_shots)
 	_add_layer("add", _draw_fx_add)
 	_add_layer("add", _draw_beams)
 	_add_layer("mix", _draw_fx)
@@ -277,6 +280,7 @@ func frame(delta: float, bar_width: float, advance_sim_effects: bool = true) -> 
 	ships.build_order()
 	fog_world.clear()
 	fog_ships.clear()
+	fog_shots.clear()
 	for l in _layers:
 		l.queue_redraw()
 	queue_redraw()
@@ -309,6 +313,7 @@ func _snapshot() -> void:
 	shot_xf = nova.projectile_transforms()
 	shot_style = nova.projectile_styles()
 	shot_extra = nova.projectile_extra()
+	shot_fog = nova.projectile_fog() if nova.has_method("projectile_fog") else PackedFloat32Array()
 	beams = nova.beam_segments()
 	beam_weapons = nova.beam_weapons()
 	roid_xf = nova.asteroid_transforms()
@@ -358,6 +363,25 @@ func _draw_world(ci: CanvasItem) -> void:
 
 func _draw_fog_world(ci: CanvasItem) -> void:
 	_draw_fog(ci, fog_world)
+
+
+func _draw_fog_shots(ci: CanvasItem) -> void:
+	if not _ready_to_draw():
+		return
+	ci.draw_set_transform_matrix(base_xf)
+	for f in fog_shots:
+		var c: Color = f[3]
+		var e: Dictionary = f[0]
+		var size := Vector2(e["fw"], e["fh"])
+		var angle: float = f[5]
+		if is_nan(angle):
+			ci.draw_texture_rect_region(e["tex"], Rect2(f[1] - size * 0.5, size), Sprites.src(e, f[2]),
+				Color(c.r, c.g, c.b, clampf(f[4], 0.0, 1.0)))
+		else:
+			ci.draw_set_transform_matrix(base_xf * Transform2D(angle, f[1]))
+			ci.draw_texture_rect_region(e["tex"], Rect2(-size * 0.5, size), Sprites.src(e, f[2]),
+				Color(c.r, c.g, c.b, clampf(f[4], 0.0, 1.0)))
+			ci.draw_set_transform_matrix(base_xf)
 
 
 func _draw_hulls(ci: CanvasItem) -> void:

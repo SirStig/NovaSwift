@@ -13,6 +13,7 @@ extends Node
 const GalaxyMap = preload("res://screens/GalaxyMap.gd")
 const HyperjumpFx = preload("res://screens/HyperjumpFx.gd")
 const RouteMiniMap = preload("res://screens/RouteMiniMap.gd")
+const Prefs = preload("res://Prefs.gd")
 
 signal log_message(text: String)
 signal arrived(system_name: String)
@@ -84,9 +85,21 @@ func engage_hyperjump() -> void:
 	# "" = engaged (or a silent refusal); otherwise the original's status text:
 	# #29 no course, #10 out of fuel, #42 too close to the system centre.
 	var refusal: String = nova.begin_hyperjump()
+	if refusal == "" and nova.hyperjump_active():
+		return
+	# The `autoRoutePlotting` enhancement turns a refused J into the map, silently (Apple
+	# GameContainerView .hyperjump: `if !attemptJump() { if autoRoutePlotting { showingMap = true } ... }`).
+	if auto_route_enabled():
+		_map.open(true)
+		return
 	if refusal != "":
 		nova.sound_beep(4)   # the refused jump sounds snd 153 (0x0044b120)
 		log_message.emit(refusal)
+
+
+## The Settings > Gameplay "Automatic route plotting" enhancement (off by default).
+static func auto_route_enabled() -> bool:
+	return bool(Prefs.get_value("gameplay", "auto_route_plotting"))
 
 
 func _on_arrived(system_name: String) -> void:

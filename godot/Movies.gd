@@ -251,6 +251,68 @@ static func convert_async(src: String) -> void:
 	_jobs[key] = WorkerThreadPool.add_task(func(): transcode(src))
 
 
+# --- audio-only extraction (title music named as a ".mov") -----------------------------------
+# Apple plays the STR# 130 #2 track through AVFoundation, which decodes a QuickTime file's audio
+# track. Godot can't, so the audio track is pulled out once into a cached 16-bit WAV
+# (AudioStreamWAV.load_from_file) and played like an mp3. No ffmpeg / no audio track = silence.
+
+static func audio_key(src: String) -> String:
+	return "a_" + cache_key(src)
+
+
+## The cached audio WAV for `src`, or "". Never converts.
+static func audio_ready(src: String) -> String:
+	if src == "" or not FileAccess.file_exists(src):
+		return ""
+	var p: String = cache_dir().path_join(cache_key(src) + ".music.wav")
+	return p if FileAccess.file_exists(p) else ""
+
+
+## Extract now (blocking). Returns audio_ready(src) or "".
+static func transcode_audio(src: String) -> String:
+	var hit: String = audio_ready(src)
+	if hit != "":
+		return hit
+	var ff: String = find_ffmpeg()
+	if ff == "" or not FileAccess.file_exists(src):
+		return ""
+	var base: String = cache_dir().path_join(cache_key(src) + ".music")
+	var part: String = base + ".part.wav"
+	var args: Array = ["-y", "-v", "error", "-i", src, "-map", "0:a:0", "-vn", "-ac", "2", "-ar", "44100",
+		"-c:a", "pcm_s16le", part]
+	if OS.execute(ff, PackedStringArray(args), [], true) == 0 and FileAccess.file_exists(part):
+		DirAccess.rename_absolute(part, base + ".wav")
+	else:
+		DirAccess.remove_absolute(part)
+	return audio_ready(src)
+
+
+static func audio_pending(src: String) -> bool:
+	var key: String = audio_key(src)
+	if not _jobs.has(key):
+		return false
+	if WorkerThreadPool.is_task_completed(int(_jobs[key])):
+		WorkerThreadPool.wait_for_task_completion(int(_jobs[key]))
+		_jobs.erase(key)
+		return false
+	return true
+
+
+## Extract in the background (no-op if cached, in flight, or ffmpeg is unavailable).
+static func convert_audio_async(src: String) -> void:
+	if src == "" or find_ffmpeg() == "" or audio_ready(src) != "" or audio_pending(src):
+		return
+	_jobs[audio_key(src)] = WorkerThreadPool.add_task(func(): transcode_audio(src))
+
+
+## Block until a background extraction of `src` finishes (tests only).
+static func wait_audio(src: String) -> void:
+	var key: String = audio_key(src)
+	if _jobs.has(key):
+		WorkerThreadPool.wait_for_task_completion(int(_jobs[key]))
+		_jobs.erase(key)
+
+
 ## Block until a background conversion of `src` finishes (tests only).
 static func wait(src: String) -> void:
 	var key: String = cache_key(src)

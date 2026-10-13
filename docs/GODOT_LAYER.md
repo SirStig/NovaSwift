@@ -571,6 +571,18 @@ Classic also draws the original's ambient starfield (`Main._draw_original_stars`
 sprites, `star_count`, drift factor `star_factor`, wrapped across the view, `star_tint(system_murk())`,
 hidden while murk < 0); Nova Swift keeps the plain dot field.
 
+Murk (F1, `flight/`): every sprite Apple fogs is fogged by `MurkFog.level / 32` toward `sÿst.BkgndColor` through the `fill` layers:
+stellars (`stellar_states` column 2), ship hulls (`ship_layers` 14/15, one blend slot shared with ionize and the gate wash) and,
+since 2026-10-13, shots with their own art (bridge `projectile_fog()`, `FlightRenderer.fog_shots`, the `fill` layer after the shots
+layer). The generic bolt, asteroids, cargo and effects are unfogged, as in Apple. Hyperspace warp-in and warp-out draw nothing
+(Apple `applyEntrance(.warpIn)` / `warpOutNode`); only the gate fade (columns 19 / 20) and the launch / landing animations exist.
+Test: `tests/murk_warp_selfcheck.gd`.
+
+Title music named as a `.mov` (C5): `Movies.transcode_audio` / `convert_audio_async` / `audio_ready` pull the first audio track into
+a cached WAV with ffmpeg and `TitleMusic` plays it once ready (silent without ffmpeg). The `playMovies` pref gates every movie path
+(E3, `tests/play_movies_gate_selfcheck.gd`). S26: J refused while "Automatic route plotting" is on opens the map silently
+(`NavScreens.engage_hyperjump`, `GalaxyMap.open(true)`).
+
 ### Main menu, pilot dialogs, galaxy map (Classic reskins)
 
 * **Main menu** -- `ui/classic/ClassicMainMenu.gd` (a port of `AuthenticMainMenuView`): PICT 8000, logo
@@ -632,9 +644,14 @@ Use the Default) above the Support/Developer block. **Original Preferences Windo
 game data) opens `screens/ClassicPreferences.gd`: DLOG/DITL 4003 through `ClassicDialog.from_ditl`, wired to
 `Prefs [classic]` (Apple defaults: volume 5, brightness 3, all on but update checks). Live effects: the volume
 arrows are the master volume in 1/8 steps (snd 154), Intro Music gates the title music; the other flags are stored
-only (the Godot renderer has no counterpart yet). Key Settings opens the NovaSwift Controls page -- the
-34-cell DITL 4002 dialog is not ported. The arrows are mouse-only (as in the original); pad players use the
-Audio sliders.
+only (the Godot renderer has no counterpart yet). Key Settings opens the original's key table
+(`screens/ClassicKeySettings.gd`, DLOG/DITL 4002 over backdrop PICT 139/133; WRITTEN, NOT BUILT): 34 cells = DITL items 4-37
+in the Apple cell order (`ClassicKeySettings.CELLS`), a click selects, the next key press binds that cell's `Controls` action
+(plain key, Alt chord, Shift chord or a bare modifier, written to `Controls.overrides`) and the selection steps on; duplicates are
+allowed while editing and OK is refused with the first clashing cell outlined red; Cancel / Esc restores the overrides snapshot, Set
+Default previews `overrides = {}`, 1-4, Caps Lock and F1-F5 are not capturable; OK saves (`Prefs.save()`) and re-registers the
+InputMap. Cells for actions the port lacks (autopilot, two spares) stay blank; "More keys..." opens the NovaSwift Controls page.
+The arrows are mouse-only (as in the original); pad players use the Audio sliders.
 
 **Loading screen** (`screens/LoadingScreen.gd`, a port of Apple `LoadingView` + `Branding`): the launch key art
 drifting behind seeded parallax stars (3 depths), the fire-lit gunmetal NOVA SWIFT wordmark with flickering

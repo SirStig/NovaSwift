@@ -168,19 +168,19 @@ costing a day.
 
 ## Beyond the original
 
-![NovaSwift's own features](branding/feature-blocks.svg?v=39e4d242)
+![NovaSwift's own features](branding/feature-blocks.svg?v=5aa50c06)
 
 NovaSwift's own features, one square per task: green done, amber partly done,
-outline planned. Currently 138 done, 19 partly done, 27 planned. The list is kept
+outline planned. Currently 163 done, 22 partly done, 28 planned. The list is kept
 by hand in `site/assets/features.json`, with a pointer to the code for each
 task. After editing it, run `python3 scripts/render-progress.py` to redraw
-[feature-blocks.svg](branding/feature-blocks.svg?v=39e4d242) and the summary graphic.
+[feature-blocks.svg](branding/feature-blocks.svg?v=5aa50c06) and the summary graphic.
 
 Partly done, in short: the public online lobby list and iCloud game-data upload
 need the CloudKit schema promoted to Production; multiplayer host migration
 rebuilds the world rather than handing over; the `carryEncounter` session rule
 is not used yet; no plug-ins ship inside the app; the Godot port's Linux and Windows builds
-are not verified yet (table below). Multiplayer has not yet
+are not verified yet (table below); the Godot port's Key Settings dialog, `.mov` title music, shot murk fog and the S26 map rule are written but not yet built, and its LAN multiplayer, plug-in editor and HD packs are planned. Live 3D hulls are written but not yet checked on real devices. Multiplayer has not yet
 been played end to end on two real devices. The plug-in importer can't open
 StuffIt archives that use the newer compression methods, and most catalog
 entries have no icon yet. Classic Mac pilot import still needs testing against
@@ -226,11 +226,12 @@ Everything has been built and run on macOS only. No Linux, Windows or Steam Deck
 | Controls and targeting checklist, performance (release bridge, sprite cache and prewarm, asteroid layout) | Done |
 | Plug-ins: all 13 catalog plug-ins load with the same counts as the shared merge and pass `scripts/plugins-check.sh` | Done |
 | Total-conversion add-on lists, `dësc` movies, intro movie and GIF, total-conversion fonts, bar race movies | Done, in both apps |
-| Hypergate and wormhole entry movies | Written, not yet built or tested (both apps) |
-| Galaxy map: borders, mission markers, Tab and backslash link cycle | Written, not yet built or tested. The cycle is an inference (handlers not decompiled) |
-| Sound-parity fixes, spaceport ambient loop, brightness veil | Written, not yet built or tested |
-| About-dialog picture | Written, not yet built or tested |
-| Key Settings dialog (DITL 4002), title music from a `.mov`, murk fog, NPC warp-effect check, sound items S12, S25, S26 | Open |
+| Hypergate and wormhole entry movies | Done, built and run on macOS (both apps) |
+| Galaxy map: borders, mission markers, Tab and backslash link cycle | Done, built and run on macOS. The cycle is an inference (handlers not decompiled) |
+| Sound-parity fixes, spaceport ambient loop, brightness veil | Done, built and run on macOS |
+| About-dialog picture | Done, built and run on macOS |
+| Key Settings dialog (DITL 4002), title music from a `.mov`, shot murk fog, `playMovies` gate audit, NPC warp-effect check, map link-cycle and silent-J sounds (S25, S26) | Written 2026-10-13, not yet built or run (self-checks in `godot/tests/`) |
+| Sound S12 (`quickHyperjump` charge loop) | Open: the enhancement itself is not ported to Godot |
 | Linux, Windows and Steam Deck builds; flight visuals on a real GPU | Not verified |
 
 ## Known gaps

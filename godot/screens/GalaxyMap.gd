@@ -173,7 +173,8 @@ func is_open() -> bool:
 	return visible
 
 
-func open() -> void:
+## `silent`: no snd 152 (J with no route under the auto-route enhancement opens the map without a beep).
+func open(silent: bool = false) -> void:
 	if nova == null or not nova.has_game():
 		return
 	nova.nav_refresh()
@@ -188,7 +189,8 @@ func open() -> void:
 	_pad_mode = _pad_connected()
 	_borders_key = ""
 	visible = true
-	nova.sound_beep(3)   # the map window opens with snd 152 (0x0044b120)
+	if not silent:
+		nova.sound_beep(3)   # the map window opens with snd 152 (0x0044b120)
 	_canvas.queue_redraw()
 
 

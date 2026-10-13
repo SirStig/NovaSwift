@@ -5,8 +5,10 @@
 # then in Nova Files, each as the bare name, ".mov", then ".mp3" — the candidate
 # order is `OriginalAudio.musicCandidates`. The bridge hands over the name
 # (`title_music_name()`); this node does the lookup and, if the file is an mp3,
-# plays it. Godot cannot decode QuickTime, so a ".mov" hit (or no hit) is simply
-# silence — never an error. No hover sounds anywhere in the menus.
+# plays it. Godot cannot decode QuickTime, so a ".mov" hit has its audio track extracted ONCE by
+# Movies.gd's ffmpeg path (cached WAV; Apple's AVFoundation plays the .mov's audio directly) and
+# starts as soon as that finishes, in the background; with no ffmpeg (or no audio track), or no hit,
+# it is silence — never an error. No hover sounds anywhere in the menus.
 #
 # Playback is the original's (`FUN_004ab5d0` / `FUN_004ab8d0` / `FUN_004ab820`), as Apple's
 # GameAudio runs it: the track plays ONCE per main-menu visit (nothing rewinds it), starts at
@@ -18,6 +20,7 @@ extends AudioStreamPlayer
 signal faded   # the fade-out finished (the track is stopped)
 
 const Prefs = preload("res://Prefs.gd")
+const Movies = preload("res://Movies.gd")
 
 const FOLDERS := ["Nova Plug-ins", "Nova Files"]
 const EXTENSIONS := ["", ".mov", ".mp3"]
@@ -26,6 +29,7 @@ var track_path := ""    # what was found (may be undecodable), for tests
 var _fading := false
 var _fade_gain := 0.0
 var _service := 0.0     # seconds since the track started; < 40/60 = still at the start level
+var _waiting_mov := ""  # a .mov whose audio is being extracted in the background
 
 
 ## The folders the active plug-in set puts in front of the base data (selected total conversion's own
@@ -103,17 +107,37 @@ static func _find_nested(dir: String, file: String, depth: int) -> String:
 ## Start the title music for the loaded game, if there is a playable file.
 func start(nova: Object, data_dir: String) -> void:
 	stop()
+	_waiting_mov = ""
 	if nova == null or not nova.has_method("title_music_name"):
 		return
 	track_path = locate(data_dir, str(nova.title_music_name()))
 	if not bool(Prefs.get_value("classic", "intro_music")):   # the original Preferences window's "Intro Music"
 		return
-	if track_path == "" or track_path.get_extension().to_lower() != "mp3":
+	if track_path == "":
 		return
-	var stream := AudioStreamMP3.load_from_file(track_path)
-	if stream == null:
-		return
-	stream.loop = false   # plays once per visit
+	var ext: String = track_path.get_extension().to_lower()
+	if ext == "mp3":
+		var stream := AudioStreamMP3.load_from_file(track_path)
+		if stream != null:
+			stream.loop = false   # plays once per visit
+			_begin(stream)
+	elif ext == "mov":
+		var wav: String = Movies.audio_ready(track_path)
+		if wav != "":
+			_begin_wav(wav)
+		elif Movies.available():
+			_waiting_mov = track_path
+			Movies.convert_audio_async(track_path)
+			set_process(true)
+
+
+func _begin_wav(path: String) -> void:
+	var w: AudioStreamWAV = AudioStreamWAV.load_from_file(path)
+	if w != null:
+		_begin(w)
+
+
+func _begin(stream: AudioStream) -> void:
 	self.stream = stream
 	_service = 0.0
 	set_process(true)
@@ -129,6 +153,17 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if _waiting_mov != "":
+		if Movies.audio_pending(_waiting_mov):
+			return
+		var src: String = _waiting_mov
+		_waiting_mov = ""
+		var wav: String = Movies.audio_ready(src)
+		if wav != "" and not _fading and src == track_path:
+			_begin_wav(wav)
+		else:
+			set_process(false)
+		return
 	if _fading:
 		_fade_gain -= (8.0 / 256.0) * delta * 60.0
 		if _fade_gain <= 0.0:
@@ -155,6 +190,7 @@ func refresh_volume() -> void:
 ## Leave the menu: step the volume down 8/256 per 60 Hz tick from its current level, then stop
 ## and emit `faded`. Silent or finished tracks end at once.
 func fade_out() -> void:
+	_waiting_mov = ""   # a track still being extracted never starts after the menu is left
 	if not playing or _fading:
 		if not _fading:
 			faded.emit()

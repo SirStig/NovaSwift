@@ -70,6 +70,7 @@ func _run() -> void:
 	_flight_keys()
 	_landing()
 	_jump()
+	_map_sounds()
 	await _ambient()
 	_combat()
 	_finish()
@@ -259,6 +260,44 @@ func _jump() -> void:
 		not seen_up.is_empty() and int(seen_up.priority) == P_WARP_UP and bool(seen_up.onlyWhenSilent)) and ok
 	ok = _check("arrival: Warp out snd 130, priority 0x32, only when silent",
 		not seen_out.is_empty() and int(seen_out.priority) == P_WARP_OUT and bool(seen_out.onlyWhenSilent)) and ok
+
+
+# --- S25 / S26: the open map's link cycle, and J with no route under auto-route ------------------
+
+func _map_sounds() -> void:
+	var Nav = load("res://screens/NavScreens.gd")
+	if nova.hyperjump_active():
+		print("  SKIP map sounds: a jump is still running")
+		return
+	nova.make_world(-1)
+	nova.nav_clear_route()
+	var nav: Node = Nav.new()
+	root.add_child(nav)
+	nav.setup(nova)
+	_drain()
+	# S26 off: a refused J beeps snd 153 and the map stays shut.
+	Prefs.set_value("gameplay", "auto_route_plotting", false)
+	nav.engage_hyperjump()
+	var cues: Array = _drain()
+	ok = _check("S26: J with no route (auto-route off) beeps 153", _count(cues, 153) == 1) and ok
+	ok = _check("S26: ... and does not open the map", not nav.blocks_flight()) and ok
+	# S26 on: the map opens silently.
+	Prefs.set_value("gameplay", "auto_route_plotting", true)
+	nav.engage_hyperjump()
+	cues = _drain()
+	ok = _check("S26: J with no route (auto-route on) opens the map", nav.blocks_flight()) and ok
+	ok = _check("S26: ... silently (no 153, no 152)", _count(cues, 153) == 0 and _count(cues, 152) == 0) and ok
+	# S25: Tab / \ on the open map step the armed link with snd 152 (the bridge beeps once per cycle).
+	var id: int = nav._map.cycle_link(true)
+	cues = _drain()
+	if id != -1:
+		ok = _check("S25: map link cycle sounds snd 152 once", _count(cues, 152) == 1) and ok
+	else:
+		print("  SKIP S25: the start system has no visible links")
+	nav._map.close()
+	_drain()
+	Prefs.set_value("gameplay", "auto_route_plotting", false)
+	nav.queue_free()
 
 
 # --- the spaceport ambient loop (Package C3) ---------------------------------------------------

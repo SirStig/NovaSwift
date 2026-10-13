@@ -4018,6 +4018,22 @@ class NovaWorld: Node2D {
         return PackedFloat32Array(flat)
     }
 
+    /// Per live shot, SAME order as `projectileTransforms()`: the murk fog level 0...31 (`MurkFog.level`) of the
+    /// shot's sprite from the player (Apple `applyMurk` on shots). Empty when there is no murk (every level 0).
+    @Callable(autoSnakeCase: true) func projectileFog() -> PackedFloat32Array {
+        guard let world = self.world else { return PackedFloat32Array() }
+        let murk = world.effectiveMurk(for: world.player)
+        guard murk > 0 else { return PackedFloat32Array() }
+        let o = renderPosition(of: world.player)
+        var flat: [Float] = []
+        flat.reserveCapacity(world.projectiles.count)
+        for shot in world.projectiles {
+            let r = renderPosition(of: shot)
+            flat.append(Float(MurkFog.level(murk: murk, dx: r.x - o.x, dy: r.y - o.y)))
+        }
+        return PackedFloat32Array(flat)
+    }
+
     /// Per live beam, SAME order as `beamSegments()`: the `wëap` id.
     @Callable(autoSnakeCase: true) func beamWeapons() -> PackedInt32Array {
         guard let world = self.world else { return PackedInt32Array() }

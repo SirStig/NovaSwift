@@ -49,7 +49,7 @@ The function-by-function view is in [docs/STATUS.md](docs/STATUS.md) and on the
 <details>
 <summary>Features beyond the original, and parts of the original that aren't needed</summary>
 
-![NovaSwift's own features](docs/branding/features-summary.svg?v=292e29b2)
+![NovaSwift's own features](docs/branding/features-summary.svg?v=e39be2d2)
 
 ![Parts of the original NovaSwift doesn't need](docs/branding/not-needed-summary.svg?v=0f518ead)
 

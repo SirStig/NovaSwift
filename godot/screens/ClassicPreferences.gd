@@ -12,18 +12,20 @@
 #
 # Wired: the sound-volume arrows are the Settings master volume (step 0...8 = master 0...1) and
 # Intro Music gates the title music; the rest are stored (so the dialog round-trips and the Apple
-# defaults hold) but the Godot renderer has no counterpart yet. Key Settings opens the NovaSwift
-# Controls page (the 34-cell DITL 4002 key dialog is not ported). The arrows are mouse-only in the
+# defaults hold) but the Godot renderer has no counterpart yet. Key Settings opens the original's
+# 34-cell key table (DLOG/DITL 4002, screens/ClassicKeySettings.gd); its "More keys..." leads on to
+# the NovaSwift Controls page. The arrows are mouse-only in the
 # original too; the same levels are sliders on the Settings Audio page for pad players.
 extends CanvasLayer
 
 const ClassicDialog = preload("res://ui/classic/ClassicDialog.gd")
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
 const Prefs = preload("res://Prefs.gd")
+const ClassicKeySettings = preload("res://screens/ClassicKeySettings.gd")
 
 ## OK / Esc / B.
 signal closed
-## "Key Settings": the host shows the NovaSwift Controls page.
+## "More keys..." in the Key Settings window: the host shows the NovaSwift Controls page.
 signal key_settings
 ## A preference changed (Shell re-applies audio / music).
 signal changed
@@ -61,7 +63,7 @@ func _build() -> void:
 	if _host != null and is_instance_valid(_host):
 		_host.queue_free()
 	var me := self
-	var actions := {0: me._close, 15: func(): me.key_settings.emit(); me._close(),
+	var actions := {0: me._close, 15: me._open_key_settings,
 		5: func(): me._volume(-1), 6: func(): me._volume(1),
 		24: func(): me._brightness(-1), 25: func(): me._brightness(1)}
 	for idx in CHECKS:
@@ -115,6 +117,23 @@ func _brightness(delta: int) -> void:
 	Prefs.save()
 	dialog.set_text(23, _label(139, b) if b < 7 else "")
 	changed.emit()
+
+
+## Key Settings (DLOG 4002) over this window; the Preferences window hides until it closes.
+func _open_key_settings() -> void:
+	var ks: Node = ClassicKeySettings.new()
+	add_child(ks)
+	ks.setup(_nova)
+	if _host != null and is_instance_valid(_host):
+		_host.visible = false
+	ks.changed.connect(func(): changed.emit())
+	ks.more_keys.connect(func():
+		key_settings.emit()
+		_close())
+	ks.closed.connect(func():
+		if _host != null and is_instance_valid(_host):
+			_host.visible = true
+			(func(): if is_instance_valid(dialog): dialog.focus_first()).call_deferred())
 
 
 func _close() -> void:
