@@ -26,14 +26,75 @@ var nova
 var _cache := {}
 ## Keys (Vector2i(kind, id)) whose lookup found no graphic -- read by tests/plugins_load_selfcheck.gd.
 var misses: Dictionary = {}
+var _gen := 0                       # world-rebuild counter: entries are evicted after MAX_IDLE_GENERATIONS unused rebuilds
+var _mlist: Array = []              # the queued manifest, in the bridge's decode order (Vector2i(kind, id))
+var _mpos := 0                      # next _mlist index to build
+const MAX_IDLE_GENERATIONS := 4
 
 
 func setup(world: Object) -> void:
 	nova = world
 
 
+## Drop everything (a different data set / plug-in set was loaded). A world rebuild does NOT call this:
+## sprite art is keyed by resource id, so it stays valid across launches and jumps and rebuilding it is the
+## launch / arrival hitch (a decode + RGBA copy + texture upload per sprite, on the main thread).
 func clear() -> void:
 	_cache.clear()
+	_mlist.clear()
+	_mpos = 0
+
+
+## A world was rebuilt: age the cache and evict what the last few systems did not use (bounds VRAM on a long
+## session). Manifest entries are re-stamped by queue_manifest, so the live system's art is always kept.
+func new_generation() -> void:
+	_gen += 1
+	var drop: Array = []
+	for key in _cache.keys():
+		if int(key.x) == CICN:
+			continue
+		var e = _cache[key]
+		if e != null and int(e.get("gen", _gen)) < _gen - MAX_IDLE_GENERATIONS:
+			drop.append(key)
+	for key in drop:
+		_cache.erase(key)
+		misses.erase(key)
+
+
+## Queue the sprites a system needs (the bridge's flat [kind, id, kind, id ...] manifest) so they are built
+## before the first frame that draws them.
+func queue_manifest(manifest: PackedInt32Array) -> void:
+	_mlist.clear()
+	_mpos = 0
+	var i := 0
+	while i + 1 < manifest.size():
+		var key := Vector2i(manifest[i], manifest[i + 1])
+		_mlist.append(key)
+		if _cache.has(key):
+			var e = _cache[key]
+			if e != null:
+				e["gen"] = _gen
+		i += 2
+
+
+## Build queued sprites, but only the first `limit` manifest entries (the bridge's background decode has
+## finished those, so the bridge call is a cache hit), until `budget_ms` of wall time is spent
+## (<= 0: no limit). Returns how many entries remain.
+func pump(budget_ms: float, limit: int) -> int:
+	var t0 := Time.get_ticks_usec()
+	var end: int = mini(limit, _mlist.size())
+	while _mpos < end:
+		var key: Vector2i = _mlist[_mpos]
+		_mpos += 1
+		if not _cache.has(key):
+			entry(key.x, key.y)
+		if budget_ms > 0.0 and float(Time.get_ticks_usec() - t0) / 1000.0 >= budget_ms:
+			break
+	return _mlist.size() - _mpos
+
+
+func pending() -> int:
+	return _mlist.size() - _mpos
 
 
 func entry(kind: int, id: int):
@@ -41,6 +102,8 @@ func entry(kind: int, id: int):
 	if _cache.has(key):
 		return _cache[key]
 	var e = _build(kind, id)
+	if e != null:
+		e["gen"] = _gen
 	_cache[key] = e
 	if e == null:
 		misses[key] = true

@@ -103,4 +103,15 @@ public extension NovaGame {
     func interface(_ id: Int = 128) -> IntfRes? {
         resources.resource(NovaType.intf, id).map(IntfRes.init)
     }
+
+    /// Font names the data itself asks for (every `ïntf` status font), de-duplicated, in id order.
+    /// A total conversion that ships its own font file (EV Classic / EV Override: Sillycon.ttf) names it here.
+    var referencedFontNames: [String] {
+        var out: [String] = []
+        for r in resources.resources(of: NovaType.intf).sorted(by: { $0.id < $1.id }) {
+            let f = IntfRes(r).statusFont.trimmingCharacters(in: .whitespaces)
+            if !f.isEmpty, !out.contains(where: { $0.caseInsensitiveCompare(f) == .orderedSame }) { out.append(f) }
+        }
+        return out
+    }
 }

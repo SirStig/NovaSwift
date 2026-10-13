@@ -1,28 +1,52 @@
-# NOVA Swift — Controls Editor controller art: four procedurally drawn pad silhouettes (Xbox,
-# PlayStation, Nintendo Switch Pro, Steam Deck) in a 1000 x 640 design space. Vector paths only —
-# Catmull-Rom body outlines with grips, vertex-gradient shading, stick wells, a d-pad cross,
-# coloured face buttons, bumpers and triggers. No vendor bitmaps or logos.
+# NOVA Swift — Controls Editor controller art: four procedurally drawn pads (Xbox Series, DualSense,
+# Switch Pro, Steam Deck) in MILLIMETRES, built from the real proportions (Xbox ~153 x 105, DualSense
+# ~160 x 106, Switch Pro ~152 x 106, Deck ~298 x 117 with a 7" screen). Origin = the pad's centre,
+# +y down. Bodies are smooth cubic béziers (sampled to polygons) with grips that flare down and out;
+# bumpers and triggers hug the top contour and tuck behind the body. Vector paths only, no bitmaps.
 #
-# layout(style)  -> {"size": Vector2, "controls": [ {id, name, kind, c, size, side, bindable, role} ]}
-#   id is a JoyButton (bindable) or a String ("lt" "rt" "ls" "rs" "l4"...), `role` a fixed-role key.
-# draw(ci, style) draws the static art with `ci` (a CanvasItem whose transform maps design space).
+# layout(style) -> {"body": Rect2, "extent": Rect2, "controls": [ {id, name, kind, c, outline, bbox,
+#                   bindable, role, side} ]}   (all mm; id = JoyButton int or a String)
+# draw(ci, style, states, px, texts) draws the art in mm space (the caller maps mm -> screen with
+#   draw_set_transform); `states` = id -> {tint, live, pulse, sel, focus, hover}; `px` = mm per screen
+#   pixel (so strokes stay a constant pixel width); glyph jobs go into `texts` (drawn by the caller at
+#   screen scale so text stays crisp).
 #
 # Loaded with preload() (no class_name), like Controls.gd.
 extends RefCounted
 
 const T = preload("res://ui/novaswift/NovaTheme.gd")
 
-const SIZE := Vector2(1000, 640)
+# Right half of each body outline: start point, then cubic segments (c1, c2, end) top-centre -> bottom-centre.
+const HALF := {
+	"xbox": [Vector2(0, -38), Vector2(24, -39.5), Vector2(50, -41), Vector2(66, -33), Vector2(74, -28), Vector2(77, -12), Vector2(75, 6),
+		Vector2(74, 20), Vector2(72, 40), Vector2(66, 56), Vector2(63, 64), Vector2(55, 68), Vector2(48, 66), Vector2(41, 64), Vector2(38, 56), Vector2(35, 46),
+		Vector2(32, 34), Vector2(27, 25), Vector2(14, 24), Vector2(8, 24), Vector2(4, 24), Vector2(0, 24)],
+	"playstation": [Vector2(0, -36), Vector2(30, -38), Vector2(56, -40), Vector2(70, -32), Vector2(79, -26), Vector2(80, -10), Vector2(78, 8),
+		Vector2(76, 26), Vector2(74, 44), Vector2(70, 56), Vector2(67, 64), Vector2(56, 69), Vector2(49, 66), Vector2(42, 63), Vector2(40, 55), Vector2(37, 46),
+		Vector2(34, 44), Vector2(30, 38), Vector2(20, 38), Vector2(12, 38), Vector2(5, 38), Vector2(0, 38)],
+	"switch": [Vector2(0, -38), Vector2(26, -39), Vector2(52, -40), Vector2(67, -32), Vector2(75, -27), Vector2(76, -10), Vector2(74, 8),
+		Vector2(73, 24), Vector2(72, 42), Vector2(66, 57), Vector2(62, 67), Vector2(52, 70), Vector2(46, 66), Vector2(40, 62), Vector2(38, 54), Vector2(35, 45),
+		Vector2(31, 32), Vector2(27, 26), Vector2(14, 25), Vector2(8, 25), Vector2(4, 25), Vector2(0, 25)],
+	"deck": [Vector2(0, -57), Vector2(50, -57.5), Vector2(110, -56), Vector2(132, -50), Vector2(144, -46), Vector2(149, -34), Vector2(149, -18),
+		Vector2(149, 0), Vector2(148, 24), Vector2(144, 40), Vector2(141, 52), Vector2(133, 58), Vector2(120, 58), Vector2(108, 58), Vector2(96, 52), Vector2(80, 52),
+		Vector2(50, 52), Vector2(25, 53), Vector2(0, 53)],
+}
 
-const BODY_XBOX := [Vector2(0, 150), Vector2(120, 140), Vector2(250, 150), Vector2(330, 175), Vector2(380, 230),
-	Vector2(415, 320), Vector2(445, 420), Vector2(450, 490), Vector2(425, 540), Vector2(375, 552), Vector2(335, 520),
-	Vector2(300, 460), Vector2(260, 420), Vector2(190, 405), Vector2(90, 400), Vector2(0, 402)]
-const BODY_PS := [Vector2(0, 168), Vector2(110, 152), Vector2(230, 156), Vector2(310, 176), Vector2(365, 222),
-	Vector2(400, 300), Vector2(425, 400), Vector2(440, 480), Vector2(425, 540), Vector2(385, 562), Vector2(345, 536),
-	Vector2(320, 480), Vector2(285, 432), Vector2(215, 408), Vector2(110, 400), Vector2(0, 398)]
-const BODY_SWITCH := [Vector2(0, 155), Vector2(130, 148), Vector2(260, 155), Vector2(335, 180), Vector2(385, 235),
-	Vector2(418, 320), Vector2(440, 410), Vector2(443, 490), Vector2(420, 538), Vector2(375, 548), Vector2(338, 520),
-	Vector2(305, 462), Vector2(265, 425), Vector2(190, 408), Vector2(90, 402), Vector2(0, 404)]
+# Control placements (mm from the pad centre) and sizes. Bumper / trigger x ranges are |x|.
+const SPEC := {
+	"xbox": {"ls": Vector2(-41, -14), "rs": Vector2(19, 11), "dpad": Vector2(-19, 11), "face": Vector2(41, -14), "fo": 10.5, "fr": 6.0,
+		"back": Vector2(-12.5, -14), "start": Vector2(12.5, -14), "guide": Vector2(0, -28), "stick": 10.0, "well": 13.0, "cross": 25.0,
+		"bump": Vector2(28, 64), "trig": Vector2(34, 60)},
+	"playstation": {"ls": Vector2(-21, 17), "rs": Vector2(21, 17), "dpad": Vector2(-41, -8), "face": Vector2(41, -8), "fo": 10.0, "fr": 5.8,
+		"back": Vector2(-31, -29), "start": Vector2(31, -29), "guide": Vector2(0, 10), "stick": 9.5, "well": 12.0, "cross": 25.0,
+		"bump": Vector2(26, 62), "trig": Vector2(30, 58)},
+	"switch": {"ls": Vector2(-41, -15), "rs": Vector2(21, 12), "dpad": Vector2(-21, 12), "face": Vector2(41, -15), "fo": 10.5, "fr": 6.0,
+		"back": Vector2(-13, -25), "start": Vector2(13, -25), "guide": Vector2(13, -12), "stick": 10.0, "well": 13.0, "cross": 24.0,
+		"bump": Vector2(28, 62), "trig": Vector2(32, 58)},
+	"deck": {"ls": Vector2(-112, -26), "rs": Vector2(112, 6), "dpad": Vector2(-112, 8), "face": Vector2(112, -26), "fo": 9.5, "fr": 5.5,
+		"back": Vector2(-89, -14), "start": Vector2(89, -14), "guide": Vector2(-89, 9), "stick": 9.5, "well": 12.0, "cross": 22.0,
+		"bump": Vector2(92, 134), "trig": Vector2(98, 128)},
+}
 
 const FIXED_ROLES := {
 	"Flight": {"lt": "Reverse / brake", "rt": "Thrust", "ls": "Steer / Thrust", "rs": "Aim"},
@@ -30,9 +54,13 @@ const FIXED_ROLES := {
 	"Galaxy map": {"lt": "", "rt": "", "ls": "Cursor", "rs": "Pan"},
 }
 
+## Every JoyButton the editor can bind (same on all styles).
+const BINDABLE := [JOY_BUTTON_A, JOY_BUTTON_B, JOY_BUTTON_X, JOY_BUTTON_Y, JOY_BUTTON_LEFT_SHOULDER,
+	JOY_BUTTON_RIGHT_SHOULDER, JOY_BUTTON_LEFT_STICK, JOY_BUTTON_RIGHT_STICK, JOY_BUTTON_BACK, JOY_BUTTON_START,
+	JOY_BUTTON_DPAD_UP, JOY_BUTTON_DPAD_DOWN, JOY_BUTTON_DPAD_LEFT, JOY_BUTTON_DPAD_RIGHT]
 
-static func style_index(style: String) -> int:
-	return maxi(0, ["xbox", "playstation", "switch", "deck"].find(style))
+static var _rings: Dictionary = {}
+static var _layouts: Dictionary = {}
 
 
 # --- control names per style ---------------------------------------------------------------
@@ -63,182 +91,305 @@ static func trigger_name(style: String, left: bool) -> String:
 	return "L2" if left else "R2"
 
 
-## Every JoyButton the editor can bind (same on all styles).
-const BINDABLE := [JOY_BUTTON_A, JOY_BUTTON_B, JOY_BUTTON_X, JOY_BUTTON_Y, JOY_BUTTON_LEFT_SHOULDER,
-	JOY_BUTTON_RIGHT_SHOULDER, JOY_BUTTON_LEFT_STICK, JOY_BUTTON_RIGHT_STICK, JOY_BUTTON_BACK, JOY_BUTTON_START,
-	JOY_BUTTON_DPAD_UP, JOY_BUTTON_DPAD_DOWN, JOY_BUTTON_DPAD_LEFT, JOY_BUTTON_DPAD_RIGHT]
+## A fixed analog input of an action (Controls axes pair) named for the style: "Left stick up", "RT"...
+static func axis_name(style: String, axis: int, sign_v: float) -> String:
+	match axis:
+		JOY_AXIS_TRIGGER_RIGHT: return trigger_name(style, false)
+		JOY_AXIS_TRIGGER_LEFT: return trigger_name(style, true)
+		JOY_AXIS_LEFT_X: return "L-stick " + ("left" if sign_v < 0.0 else "right")
+		JOY_AXIS_LEFT_Y: return "L-stick " + ("up" if sign_v < 0.0 else "down")
+		JOY_AXIS_RIGHT_X: return "R-stick " + ("left" if sign_v < 0.0 else "right")
+		JOY_AXIS_RIGHT_Y: return "R-stick " + ("up" if sign_v < 0.0 else "down")
+	return ""
 
 
-# --- layout --------------------------------------------------------------------------------
+# --- geometry ------------------------------------------------------------------------------
 
-static func _ctl(id: Variant, nm: String, kind: String, c: Vector2, sz: Vector2, bindable := true, role := "") -> Dictionary:
-	return {"id": id, "name": nm, "kind": kind, "c": c, "size": sz,
-		"side": "L" if c.x < SIZE.x * 0.5 else "R", "bindable": bindable, "role": role}
+static func _sample_half(half: Array) -> Array:
+	var out: Array = []
+	var p0: Vector2 = half[0]
+	out.append(p0)
+	var i := 1
+	while i + 2 < half.size():
+		var c1: Vector2 = half[i]
+		var c2: Vector2 = half[i + 1]
+		var e: Vector2 = half[i + 2]
+		for k in range(1, 13):
+			var t := float(k) / 12.0
+			var u := 1.0 - t
+			out.append(u * u * u * p0 + 3.0 * u * u * t * c1 + 3.0 * u * t * t * c2 + t * t * t * e)
+		p0 = e
+		i += 3
+	return out
+
+
+## The closed body outline polygon (mm), clockwise from the top centre.
+static func ring(style: String) -> PackedVector2Array:
+	if _rings.has(style):
+		return _rings[style]
+	var right: Array = _sample_half(HALF[style])
+	var pts := PackedVector2Array()
+	for p in right:
+		pts.append(p)
+	for i in range(right.size() - 2, 0, -1):
+		var v: Vector2 = right[i]
+		pts.append(Vector2(-v.x, v.y))
+	_rings[style] = pts
+	return pts
+
+
+## y of the body's top edge at x (the smallest y the outline reaches there).
+static func top_y(rg: PackedVector2Array, x: float) -> float:
+	var best := 1e9
+	var n := rg.size()
+	for i in n:
+		var a: Vector2 = rg[i]
+		var b: Vector2 = rg[(i + 1) % n]
+		if (a.x <= x and x <= b.x) or (b.x <= x and x <= a.x):
+			if absf(b.x - a.x) < 0.0001:
+				best = minf(best, minf(a.y, b.y))
+			else:
+				best = minf(best, a.y + (b.y - a.y) * (x - a.x) / (b.x - a.x))
+	return best
+
+
+## A band hugging the top contour between |x| in [x0, x1] (mirrored by `sgn`), `rise` mm above the edge,
+## tucked `tuck` mm below it (the body is drawn over the tucked part).
+static func _band(rg: PackedVector2Array, x0: float, x1: float, sgn: float, rise: float, tuck: float) -> PackedVector2Array:
+	var up: Array = []
+	var down: Array = []
+	var n := 16
+	for k in n + 1:
+		var t := float(k) / float(n)
+		var x := lerpf(x0, x1, t) * sgn
+		var ty := top_y(rg, x)
+		var bulge := 0.4 + 0.6 * sqrt(sin(PI * t))
+		up.append(Vector2(x, ty - rise * bulge))
+		down.append(Vector2(x, ty + tuck))
+	var poly := PackedVector2Array()
+	for p in up:
+		poly.append(p)
+	for i in range(down.size() - 1, -1, -1):
+		poly.append(down[i])
+	return poly
+
+
+static func _circle_pts(c: Vector2, r: float, n := 40) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	for i in n:
+		var a := TAU * float(i) / float(n)
+		out.append(c + Vector2(cos(a), sin(a)) * r)
+	return out
+
+
+static func _rect_pts(c: Vector2, sz: Vector2, rad: float) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	var h := sz * 0.5 - Vector2(rad, rad)
+	for q in 4:
+		var cc: Vector2 = c + Vector2(h.x if q == 0 or q == 3 else -h.x, h.y if q < 2 else -h.y)
+		var a0: float = float([0.0, 0.5, 1.0, 1.5][q]) * PI
+		for k in 7:
+			var a: float = a0 + float(k) / 6.0 * PI * 0.5
+			out.append(cc + Vector2(cos(a), sin(a)) * rad)
+	return out
+
+
+static func _bbox(poly: PackedVector2Array) -> Rect2:
+	var r := Rect2(poly[0], Vector2.ZERO)
+	for p in poly:
+		r = r.expand(p)
+	return r
+
+
+static func _ctl(id: Variant, nm: String, outline: PackedVector2Array, bindable := true, role := "", kind := "poly") -> Dictionary:
+	var bb := _bbox(outline)
+	var c := bb.get_center()
+	return {"id": id, "name": nm, "kind": kind, "c": c, "outline": outline, "bbox": bb, "bindable": bindable,
+		"role": role, "side": "L" if c.x < 0.0 else "R"}
+
+
+static func _cross_pts(c: Vector2, size_v: float, w: float) -> PackedVector2Array:
+	var a := size_v * 0.5
+	var b := w * 0.5
+	return PackedVector2Array([c + Vector2(-b, -a), c + Vector2(b, -a), c + Vector2(b, -b), c + Vector2(a, -b), c + Vector2(a, b), c + Vector2(b, b),
+		c + Vector2(b, a), c + Vector2(-b, a), c + Vector2(-b, b), c + Vector2(-a, b), c + Vector2(-a, -b), c + Vector2(-b, -b)])
 
 
 static func layout(style: String) -> Dictionary:
+	if _layouts.has(style):
+		return _layouts[style]
+	var sp: Dictionary = SPEC[style]
+	var rg := ring(style)
+	var body := _bbox(rg)
 	var list: Array = []
-	var s := style
-	var lstick := Vector2.ZERO
-	var rstick := Vector2.ZERO
-	var dpad := Vector2.ZERO
-	var face := Vector2.ZERO
-	var fo := 40.0
-	var back := Vector2.ZERO
-	var start := Vector2.ZERO
-	var l1 := Vector2(350, 122)
-	var l2 := Vector2(350, 68)
-	var shoulder := Vector2(170, 34)
-	match style:
-		"xbox":
-			lstick = Vector2(345, 255); rstick = Vector2(575, 365); dpad = Vector2(425, 365)
-			face = Vector2(655, 255); back = Vector2(450, 255); start = Vector2(550, 255)
-		"playstation":
-			l1 = Vector2(320, 128); l2 = Vector2(320, 72); shoulder = Vector2(160, 30)
-			lstick = Vector2(385, 395); rstick = Vector2(615, 395); dpad = Vector2(300, 270)
-			face = Vector2(700, 270); back = Vector2(420, 205); start = Vector2(580, 205)
-		"switch":
-			lstick = Vector2(330, 255); rstick = Vector2(590, 380); dpad = Vector2(410, 380)
-			face = Vector2(670, 255); back = Vector2(440, 215); start = Vector2(560, 215)
-		"deck":
-			l1 = Vector2(165, 120); l2 = Vector2(165, 72); shoulder = Vector2(190, 30)
-			lstick = Vector2(170, 230); rstick = Vector2(830, 330); dpad = Vector2(170, 335)
-			face = Vector2(830, 230); fo = 38.0; back = Vector2(255, 262); start = Vector2(745, 262)
-	var r_l2 := Vector2(SIZE.x - l2.x, l2.y)
-	var r_l1 := Vector2(SIZE.x - l1.x, l1.y)
-	list.append(_ctl("lt", trigger_name(s, true), "rrect", l2, Vector2(shoulder.x * 0.7, 54), false, "lt"))
-	list.append(_ctl("rt", trigger_name(s, false), "rrect", r_l2, Vector2(shoulder.x * 0.7, 54), false, "rt"))
-	list.append(_ctl(JOY_BUTTON_LEFT_SHOULDER, button_name(s, JOY_BUTTON_LEFT_SHOULDER), "rrect", l1, shoulder))
-	list.append(_ctl(JOY_BUTTON_RIGHT_SHOULDER, button_name(s, JOY_BUTTON_RIGHT_SHOULDER), "rrect", r_l1, shoulder))
-	list.append(_ctl(JOY_BUTTON_LEFT_STICK, "L3", "circle", lstick, Vector2(92, 92), true, "ls"))
-	list.append(_ctl(JOY_BUTTON_RIGHT_STICK, "R3", "circle", rstick, Vector2(92, 92), true, "rs"))
-	var dsz := Vector2(38, 38)
-	list.append(_ctl(JOY_BUTTON_DPAD_UP, "D-pad up", "rrect", dpad + Vector2(0, -36), dsz))
-	list.append(_ctl(JOY_BUTTON_DPAD_DOWN, "D-pad down", "rrect", dpad + Vector2(0, 36), dsz))
-	list.append(_ctl(JOY_BUTTON_DPAD_LEFT, "D-pad left", "rrect", dpad + Vector2(-36, 0), dsz))
-	list.append(_ctl(JOY_BUTTON_DPAD_RIGHT, "D-pad right", "rrect", dpad + Vector2(36, 0), dsz))
-	var fsz := Vector2(42, 42)
-	list.append(_ctl(JOY_BUTTON_A, button_name(s, JOY_BUTTON_A), "circle", face + Vector2(0, fo), fsz))
-	list.append(_ctl(JOY_BUTTON_B, button_name(s, JOY_BUTTON_B), "circle", face + Vector2(fo, 0), fsz))
-	list.append(_ctl(JOY_BUTTON_X, button_name(s, JOY_BUTTON_X), "circle", face + Vector2(-fo, 0), fsz))
-	list.append(_ctl(JOY_BUTTON_Y, button_name(s, JOY_BUTTON_Y), "circle", face + Vector2(0, -fo), fsz))
-	list.append(_ctl(JOY_BUTTON_BACK, button_name(s, JOY_BUTTON_BACK), "circle", back, Vector2(28, 28)))
-	list.append(_ctl(JOY_BUTTON_START, button_name(s, JOY_BUTTON_START), "circle", start, Vector2(28, 28)))
+	# triggers + bumpers hugging the top contour
+	var bump: Vector2 = sp.bump
+	var trig: Vector2 = sp.trig
+	var trig_rise := 15.0 if style != "deck" else 13.0
+	list.append(_ctl("lt", trigger_name(style, true), _band(rg, trig.x, trig.y, -1.0, trig_rise, 5.0), false, "lt"))
+	list.append(_ctl("rt", trigger_name(style, false), _band(rg, trig.x, trig.y, 1.0, trig_rise, 5.0), false, "rt"))
+	list.append(_ctl(JOY_BUTTON_LEFT_SHOULDER, button_name(style, JOY_BUTTON_LEFT_SHOULDER), _band(rg, bump.x, bump.y, -1.0, 7.5, 6.0)))
+	list.append(_ctl(JOY_BUTTON_RIGHT_SHOULDER, button_name(style, JOY_BUTTON_RIGHT_SHOULDER), _band(rg, bump.x, bump.y, 1.0, 7.5, 6.0)))
+	var sr: float = sp.stick
+	list.append(_ctl(JOY_BUTTON_LEFT_STICK, "L3", _circle_pts(sp.ls, sr), true, "ls", "circle"))
+	list.append(_ctl(JOY_BUTTON_RIGHT_STICK, "R3", _circle_pts(sp.rs, sr), true, "rs", "circle"))
+	# d-pad arms (the cross itself is drawn once; each arm tints inside it)
+	var dc: Vector2 = sp.dpad
+	var cs: float = sp.cross
+	var w: float = cs * 0.34
+	var a := cs * 0.5
+	var b := w * 0.5
+	list.append(_ctl(JOY_BUTTON_DPAD_UP, "D-pad up", PackedVector2Array([dc + Vector2(-b, -a), dc + Vector2(b, -a), dc + Vector2(b, -b), dc + Vector2(-b, -b)])))
+	list.append(_ctl(JOY_BUTTON_DPAD_DOWN, "D-pad down", PackedVector2Array([dc + Vector2(-b, b), dc + Vector2(b, b), dc + Vector2(b, a), dc + Vector2(-b, a)])))
+	list.append(_ctl(JOY_BUTTON_DPAD_LEFT, "D-pad left", PackedVector2Array([dc + Vector2(-a, -b), dc + Vector2(-b, -b), dc + Vector2(-b, b), dc + Vector2(-a, b)])))
+	list.append(_ctl(JOY_BUTTON_DPAD_RIGHT, "D-pad right", PackedVector2Array([dc + Vector2(b, -b), dc + Vector2(a, -b), dc + Vector2(a, b), dc + Vector2(b, b)])))
+	var fc: Vector2 = sp.face
+	var fo: float = sp.fo
+	var fr: float = sp.fr
+	list.append(_ctl(JOY_BUTTON_A, button_name(style, JOY_BUTTON_A), _circle_pts(fc + Vector2(0, fo), fr), true, "", "circle"))
+	list.append(_ctl(JOY_BUTTON_B, button_name(style, JOY_BUTTON_B), _circle_pts(fc + Vector2(fo, 0), fr), true, "", "circle"))
+	list.append(_ctl(JOY_BUTTON_X, button_name(style, JOY_BUTTON_X), _circle_pts(fc + Vector2(-fo, 0), fr), true, "", "circle"))
+	list.append(_ctl(JOY_BUTTON_Y, button_name(style, JOY_BUTTON_Y), _circle_pts(fc + Vector2(0, -fo), fr), true, "", "circle"))
+	list.append(_ctl(JOY_BUTTON_BACK, button_name(style, JOY_BUTTON_BACK), _circle_pts(sp.back, 3.6, 24), true, "", "circle"))
+	list.append(_ctl(JOY_BUTTON_START, button_name(style, JOY_BUTTON_START), _circle_pts(sp.start, 3.6, 24), true, "", "circle"))
 	if style == "deck":
-		list.append(_ctl("l4", "L4 (back grip)", "rrect", Vector2(46, 270), Vector2(28, 56), false, "steam"))
-		list.append(_ctl("l5", "L5 (back grip)", "rrect", Vector2(46, 340), Vector2(28, 56), false, "steam"))
-		list.append(_ctl("r4", "R4 (back grip)", "rrect", Vector2(954, 270), Vector2(28, 56), false, "steam"))
-		list.append(_ctl("r5", "R5 (back grip)", "rrect", Vector2(954, 340), Vector2(28, 56), false, "steam"))
-		list.append(_ctl("tl", "Left trackpad", "circle", Vector2(240, 425), Vector2(84, 84), false, "steam"))
-		list.append(_ctl("tr", "Right trackpad", "circle", Vector2(760, 425), Vector2(84, 84), false, "steam"))
-	return {"size": SIZE, "controls": list}
+		list.append(_ctl("l4", "L4 (back grip)", _rect_pts(Vector2(-151.5, -10), Vector2(5, 16), 2.0), false, "steam"))
+		list.append(_ctl("l5", "L5 (back grip)", _rect_pts(Vector2(-151.5, 14), Vector2(5, 16), 2.0), false, "steam"))
+		list.append(_ctl("r4", "R4 (back grip)", _rect_pts(Vector2(151.5, -10), Vector2(5, 16), 2.0), false, "steam"))
+		list.append(_ctl("r5", "R5 (back grip)", _rect_pts(Vector2(151.5, 14), Vector2(5, 16), 2.0), false, "steam"))
+		list.append(_ctl("tl", "Left trackpad", _circle_pts(Vector2(-88, 36), 15.0), false, "steam", "circle"))
+		list.append(_ctl("tr", "Right trackpad", _circle_pts(Vector2(88, 36), 15.0), false, "steam", "circle"))
+	var ext := body
+	for c in list:
+		ext = ext.merge(c.bbox)
+	var out := {"body": body, "extent": ext, "controls": list}
+	_layouts[style] = out
+	return out
 
 
 # --- drawing -------------------------------------------------------------------------------
 
-static func _spline(pts: Array, seg := 8) -> PackedVector2Array:
+static func _closed(p: PackedVector2Array) -> PackedVector2Array:
+	var q := p.duplicate()
+	q.append(p[0])
+	return q
+
+
+static func _fill(base: Color, s: Dictionary) -> Color:
+	var col := base
+	if s.has("tint"):
+		col = base.lerp(s.tint, 0.5)
+	if s.get("pulse", 0.0) > 0.0:
+		col = col.lerp(Color(1.0, 0.7, 0.28), 0.55 * float(s.pulse))
+	if s.get("live", false):
+		col = Color(1.0, 0.82, 0.35)
+	return col
+
+
+## Edge strokes on a control's own outline: category tint, selection, focus, hover.
+static func _edges(ci: CanvasItem, outline: PackedVector2Array, s: Dictionary, px: float) -> void:
+	var cl := _closed(outline)
+	if s.has("tint"):
+		ci.draw_polyline(cl, Color(s.tint.r, s.tint.g, s.tint.b, 0.95), 2.0 * px, true)
+	if s.get("sel", false):
+		ci.draw_colored_polygon(outline, Color(1.0, 0.7, 0.28, 0.2))
+		ci.draw_polyline(cl, Color(1.0, 0.72, 0.3), 3.0 * px, true)
+	if s.get("pulse", 0.0) > 0.0:
+		ci.draw_polyline(cl, Color(1.0, 0.8, 0.4, 0.4 + 0.6 * float(s.pulse)), 3.0 * px, true)
+	if s.get("focus", false):
+		ci.draw_polyline(cl, Color(1, 1, 1, 0.97), 2.5 * px, true)
+	elif s.get("hover", false):
+		ci.draw_polyline(cl, Color(1, 1, 1, 0.6), 1.5 * px, true)
+
+
+static func _grad_poly(ci: CanvasItem, poly: PackedVector2Array, top: Color, bottom: Color) -> void:
+	var ymin := 1e9
+	var ymax := -1e9
+	for p in poly:
+		ymin = minf(ymin, p.y)
+		ymax = maxf(ymax, p.y)
+	var cols := PackedColorArray()
+	for p in poly:
+		cols.append(top.lerp(bottom, clampf((p.y - ymin) / maxf(0.001, ymax - ymin), 0.0, 1.0)))
+	ci.draw_polygon(poly, cols)
+
+
+static func _scaled(poly: PackedVector2Array, c: Vector2, k: float, off: Vector2) -> PackedVector2Array:
 	var out := PackedVector2Array()
-	var n := pts.size()
-	for i in n:
-		var p0: Vector2 = pts[(i - 1 + n) % n]
-		var p1: Vector2 = pts[i]
-		var p2: Vector2 = pts[(i + 1) % n]
-		var p3: Vector2 = pts[(i + 2) % n]
-		for j in seg:
-			var t := float(j) / float(seg)
-			var t2 := t * t
-			var t3 := t2 * t
-			out.append(0.5 * ((2.0 * p1) + (-p0 + p2) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
-				+ (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3))
+	for p in poly:
+		out.append(c + (p - c) * k + off)
 	return out
 
 
-## Right half (top-centre -> bottom-centre) mirrored about x = 500 into a closed ring.
-static func _ring(half: Array) -> PackedVector2Array:
-	var pts: Array = []
-	for p in half:
-		var v: Vector2 = p
-		pts.append(Vector2(500.0 + v.x, v.y))
-	for i in range(half.size() - 2, 0, -1):
-		var v2: Vector2 = half[i]
-		pts.append(Vector2(500.0 - v2.x, v2.y))
-	return _spline(pts, 8)
+static func _body(ci: CanvasItem, rg: PackedVector2Array, base: Color, px: float) -> void:
+	var bb := _bbox(rg)
+	var c := bb.get_center()
+	# soft drop shadow under the whole pad
+	ci.draw_colored_polygon(_scaled(rg, c, 1.04, Vector2(0, 5.5)), Color(0, 0, 0, 0.16))
+	ci.draw_colored_polygon(_scaled(rg, c, 1.015, Vector2(0, 3.0)), Color(0, 0, 0, 0.26))
+	# outer shell: vertical gradient, darker toward the bottom
+	_grad_poly(ci, rg, base.lightened(0.04), base.darkened(0.55))
+	# inner face: lighter, so the bottom rim reads as an inner shadow
+	var inner := _scaled(rg, c, 0.955, Vector2(0, -1.4))
+	_grad_poly(ci, inner, base.lightened(0.16), base.darkened(0.06))
+	ci.draw_polyline(_closed(rg), base.lightened(0.05), 1.0 * px, true)
+	# soft rim highlight along the top edge
+	var n := rg.size()
+	for i in n:
+		var a: Vector2 = rg[i]
+		var b: Vector2 = rg[(i + 1) % n]
+		var yy := (a.y + b.y) * 0.5
+		if yy < c.y - bb.size.y * 0.06:
+			var t := clampf(1.0 - (yy - bb.position.y) / (bb.size.y * 0.5), 0.0, 1.0)
+			ci.draw_line(a + Vector2(0, 0.9), b + Vector2(0, 0.9), Color(1, 1, 1, 0.10 + 0.32 * t), 2.2 * px, true)
 
 
-static func _shaded(ci: CanvasItem, ring: PackedVector2Array, base: Color, lift := 0.12) -> void:
-	var sh := PackedVector2Array()
-	for p in ring:
-		sh.append(p + Vector2(0, 12))
-	ci.draw_colored_polygon(sh, Color(0, 0, 0, 0.38))
-	ci.draw_colored_polygon(ring, base.darkened(0.45))
-	var c := Vector2.ZERO
-	var ymin := 1e9
-	var ymax := -1e9
-	for p in ring:
-		c += p
-		ymin = minf(ymin, p.y)
-		ymax = maxf(ymax, p.y)
-	c /= float(ring.size())
-	var inner := PackedVector2Array()
-	var cols := PackedColorArray()
-	for p in ring:
-		var q := c + (p - c) * 0.965 + Vector2(0, -3)
-		inner.append(q)
-		var t := clampf((p.y - ymin) / maxf(1.0, ymax - ymin), 0.0, 1.0)
-		cols.append(base.lightened(lift * (1.0 - t)).darkened(0.1 * t))
-	ci.draw_polygon(inner, cols)
-	var closed := ring.duplicate()
-	closed.append(ring[0])
-	ci.draw_polyline(closed, base.lightened(0.28), 2.0, true)
+static func _stick(ci: CanvasItem, c: Vector2, r: float, well: float, s: Dictionary, px: float, outline: PackedVector2Array) -> void:
+	# recessed well: dark ring with a lit lower lip
+	ci.draw_circle(c, well + 1.6, Color(0, 0, 0, 0.35))
+	ci.draw_circle(c, well, Color(0.02, 0.02, 0.025))
+	ci.draw_arc(c, well - 0.4, PI * 0.05, PI * 0.95, 24, Color(1, 1, 1, 0.13), 1.2 * px, true)
+	ci.draw_arc(c, well - 0.4, PI * 1.05, PI * 1.95, 24, Color(0, 0, 0, 0.6), 1.2 * px, true)
+	# cap: concave dish - dark centre, lighter rim, top-left highlight
+	var base := _fill(Color(0.19, 0.195, 0.215), s)
+	ci.draw_circle(c, r, base)
+	for i in 5:
+		var k := 1.0 - float(i) * 0.17
+		ci.draw_circle(c + Vector2(0, 0.25 * float(i)), r * k, base.darkened(0.08 * float(i + 1)).lerp(base.lightened(0.05), 0.0))
+	ci.draw_arc(c, r * 0.9, 0.0, TAU, 40, Color(1, 1, 1, 0.16), 0.9 * px, true)       # grip ring
+	ci.draw_arc(c, r * 0.58, 0.0, TAU, 32, Color(1, 1, 1, 0.06), 0.8 * px, true)
+	ci.draw_arc(c, r * 0.82, PI * 1.05, PI * 1.55, 14, Color(1, 1, 1, 0.34), 1.6 * px, true)
+	_edges(ci, outline, s, px)
 
 
-static func _rrect(ci: CanvasItem, c: Vector2, sz: Vector2, rad: int, col: Color, border := Color(0, 0, 0, 0)) -> void:
-	var r := Rect2(c - sz * 0.5, sz)
-	ci.draw_style_box(T.box(col, rad, border, 2 if border.a > 0.0 else 0), r)
-
-
-static func _well(ci: CanvasItem, c: Vector2, r: float) -> void:
-	ci.draw_circle(c + Vector2(0, 3), r + 12.0, Color(0, 0, 0, 0.35))
-	ci.draw_circle(c, r + 12.0, Color(0.03, 0.03, 0.035))
-	ci.draw_arc(c, r + 12.0, 0.0, TAU, 40, Color(1, 1, 1, 0.14), 2.0, true)
-	ci.draw_circle(c, r, Color(0.17, 0.17, 0.19))
-	ci.draw_circle(c + Vector2(0, -2), r * 0.82, Color(0.23, 0.23, 0.26))
-	ci.draw_arc(c, r * 0.62, 0.0, TAU, 32, Color(0.09, 0.09, 0.1), 3.0, true)
-	ci.draw_arc(c, r * 0.9, PI * 1.05, PI * 1.55, 14, Color(1, 1, 1, 0.22), 2.5, true)
-
-
-static func _dpad(ci: CanvasItem, c: Vector2) -> void:
-	ci.draw_circle(c, 62.0, Color(0, 0, 0, 0.25))
-	var col := Color(0.12, 0.12, 0.14)
-	_rrect(ci, c + Vector2(0, 3), Vector2(40, 112), 8, Color(0, 0, 0, 0.4))
-	_rrect(ci, c + Vector2(0, 3), Vector2(112, 40), 8, Color(0, 0, 0, 0.4))
-	_rrect(ci, c, Vector2(40, 112), 8, col, Color(1, 1, 1, 0.18))
-	_rrect(ci, c, Vector2(112, 40), 8, col, Color(1, 1, 1, 0.18))
-	_rrect(ci, c, Vector2(36, 36), 4, col)
+static func _dpad(ci: CanvasItem, c: Vector2, cs: float, ctls: Dictionary, states: Dictionary, px: float) -> void:
+	var w := cs * 0.34
+	var cross := _cross_pts(c, cs, w)
+	ci.draw_colored_polygon(_scaled(cross, c, 1.1, Vector2(0, 1.2)), Color(0, 0, 0, 0.45))
+	_grad_poly(ci, cross, Color(0.21, 0.215, 0.235), Color(0.10, 0.10, 0.115))
+	ci.draw_polyline(_closed(cross), Color(1, 1, 1, 0.2), 1.0 * px, true)
+	# embossed centre dish and arrowheads
+	ci.draw_circle(c, w * 0.34, Color(0, 0, 0, 0.35))
+	ci.draw_arc(c, w * 0.34, PI * 1.1, PI * 1.9, 12, Color(1, 1, 1, 0.14), 1.0 * px, true)
 	for d in [Vector2(0, -1), Vector2(0, 1), Vector2(-1, 0), Vector2(1, 0)]:
 		var dv: Vector2 = d
-		var tip := c + dv * 44.0
 		var perp := Vector2(-dv.y, dv.x)
-		ci.draw_colored_polygon(PackedVector2Array([tip + dv * 4.0, tip - dv * 8.0 + perp * 8.0, tip - dv * 8.0 - perp * 8.0]),
+		var tip := c + dv * (cs * 0.5 - 2.6)
+		ci.draw_colored_polygon(PackedVector2Array([tip + dv * 1.4, tip - dv * 1.6 + perp * 2.0, tip - dv * 1.6 - perp * 2.0]),
 			Color(1, 1, 1, 0.28))
+	for id in [JOY_BUTTON_DPAD_UP, JOY_BUTTON_DPAD_DOWN, JOY_BUTTON_DPAD_LEFT, JOY_BUTTON_DPAD_RIGHT]:
+		var s: Dictionary = states.get(id, {})
+		if s.is_empty():
+			continue
+		var outline: PackedVector2Array = ctls[id].outline
+		if s.has("tint") or s.get("live", false) or s.get("pulse", 0.0) > 0.0:
+			ci.draw_colored_polygon(outline, Color(_fill(Color(0.2, 0.2, 0.22), s), 0.85))
+		_edges(ci, outline, s, px)
 
 
-static func _small_btn(ci: CanvasItem, c: Vector2, r: float) -> void:
-	ci.draw_circle(c + Vector2(0, 2), r + 1.0, Color(0, 0, 0, 0.4))
-	ci.draw_circle(c, r, Color(0.2, 0.2, 0.22))
-	ci.draw_arc(c, r, 0.0, TAU, 20, Color(1, 1, 1, 0.25), 1.5, true)
-
-
-static func _glyph(ci: CanvasItem, c: Vector2, text: String, size: int, col: Color) -> void:
-	var f := T.font("body", "bold")
-	var w := f.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size)
-	ci.draw_string(f, c + Vector2(-w.x * 0.5, size * 0.36), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
-
-
-static func _face(ci: CanvasItem, c: Vector2, style: String, id: int) -> void:
-	var r := 21.0
-	var fill := Color(0.14, 0.14, 0.16)
-	var rim := Color(1, 1, 1, 0.22)
+static func _face(ci: CanvasItem, style: String, id: int, c: Vector2, r: float, s: Dictionary, px: float,
+		outline: PackedVector2Array, texts: Array) -> void:
+	var fill := Color(0.15, 0.15, 0.17)
 	var col := Color(1, 1, 1, 0.9)
 	var xbox_cols := {JOY_BUTTON_A: Color(0.36, 0.78, 0.38), JOY_BUTTON_B: Color(0.92, 0.32, 0.30),
 		JOY_BUTTON_X: Color(0.30, 0.55, 0.95), JOY_BUTTON_Y: Color(0.96, 0.78, 0.22)}
@@ -252,108 +403,122 @@ static func _face(ci: CanvasItem, c: Vector2, style: String, id: int) -> void:
 		"playstation":
 			col = ps_cols[id]
 		"switch":
-			fill = Color(0.78, 0.78, 0.8)
-			col = Color(0.12, 0.12, 0.14)
-			rim = Color(1, 1, 1, 0.6)
-	ci.draw_circle(c + Vector2(0, 3), r + 1.0, Color(0, 0, 0, 0.45))
-	ci.draw_circle(c, r, fill)
-	ci.draw_circle(c + Vector2(0, -2), r * 0.82, fill.lightened(0.07))
-	ci.draw_arc(c, r, 0.0, TAU, 28, rim, 2.0, true)
+			fill = Color(0.74, 0.74, 0.77)
+			col = Color(0.1, 0.1, 0.12)
+	fill = _fill(fill, s)
+	ci.draw_circle(c + Vector2(0, 0.9), r + 0.7, Color(0, 0, 0, 0.5))
+	# domed: stacked discs, lighter and shifted toward the light
+	for i in 6:
+		var k := 1.0 - float(i) * 0.13
+		ci.draw_circle(c + Vector2(-0.12, -0.16) * float(i), r * k, fill.lightened(0.045 * float(i)))
+	ci.draw_arc(c, r, 0.0, TAU, 32, Color(1, 1, 1, 0.22), 1.0 * px, true)
+	ci.draw_arc(c, r * 0.8, PI * 1.1, PI * 1.5, 10, Color(1, 1, 1, 0.3), 1.4 * px, true)
 	if style == "playstation":
-		var k := r * 0.42
+		var k2 := r * 0.42
+		var w := 1.5 * px * 1.0
 		match id:
 			JOY_BUTTON_A:
-				ci.draw_line(c + Vector2(-k, -k), c + Vector2(k, k), col, 3.0, true)
-				ci.draw_line(c + Vector2(-k, k), c + Vector2(k, -k), col, 3.0, true)
+				ci.draw_line(c + Vector2(-k2, -k2), c + Vector2(k2, k2), col, w + 0.5, true)
+				ci.draw_line(c + Vector2(-k2, k2), c + Vector2(k2, -k2), col, w + 0.5, true)
 			JOY_BUTTON_B:
-				ci.draw_arc(c, k * 1.1, 0.0, TAU, 24, col, 3.0, true)
+				ci.draw_arc(c, k2 * 1.15, 0.0, TAU, 24, col, w + 0.5, true)
 			JOY_BUTTON_X:
-				ci.draw_rect(Rect2(c - Vector2(k, k), Vector2(k, k) * 2.0), col, false, 3.0)
+				ci.draw_rect(Rect2(c - Vector2(k2, k2), Vector2(k2, k2) * 2.0), col, false, w + 0.5)
 			JOY_BUTTON_Y:
-				var tri := PackedVector2Array([c + Vector2(0, -k * 1.25), c + Vector2(k * 1.2, k * 0.85),
-					c + Vector2(-k * 1.2, k * 0.85), c + Vector2(0, -k * 1.25)])
-				ci.draw_polyline(tri, col, 3.0, true)
+				ci.draw_polyline(PackedVector2Array([c + Vector2(0, -k2 * 1.25), c + Vector2(k2 * 1.2, k2 * 0.85),
+					c + Vector2(-k2 * 1.2, k2 * 0.85), c + Vector2(0, -k2 * 1.25)]), col, w + 0.5, true)
 	else:
-		_glyph(ci, c, button_name(style, id), 20, col)
+		texts.append({"pos": c, "text": button_name(style, id), "size": r * 1.25, "col": col})
+	_edges(ci, outline, s, px)
 
 
-static func _pill(ci: CanvasItem, c: Vector2, sz: Vector2, col: Color, rad := 12) -> void:
-	_rrect(ci, c + Vector2(0, 3), sz, rad, Color(0, 0, 0, 0.4))
-	_rrect(ci, c, sz, rad, col, Color(1, 1, 1, 0.2))
+static func _small(ci: CanvasItem, c: Vector2, r: float, s: Dictionary, px: float, outline: PackedVector2Array) -> void:
+	ci.draw_circle(c + Vector2(0, 0.6), r + 0.5, Color(0, 0, 0, 0.45))
+	var base := _fill(Color(0.22, 0.225, 0.25), s)
+	ci.draw_circle(c, r, base)
+	ci.draw_circle(c + Vector2(-0.1, -0.15), r * 0.72, base.lightened(0.08))
+	ci.draw_arc(c, r, 0.0, TAU, 20, Color(1, 1, 1, 0.26), 0.9 * px, true)
+	_edges(ci, outline, s, px)
 
 
-## The static art. `ci` must already map design space (draw_set_transform) to the screen.
-static func draw(ci: CanvasItem, style: String) -> void:
+static func _shoulder(ci: CanvasItem, poly: PackedVector2Array, base: Color, s: Dictionary, px: float) -> void:
+	var fill := _fill(base, s)
+	_grad_poly(ci, poly, fill.lightened(0.12), fill.darkened(0.2))
+	ci.draw_polyline(_closed(poly), Color(1, 1, 1, 0.22), 1.0 * px, true)
+	_edges(ci, poly, s, px)
+
+
+## The art. `ci` already maps mm to the screen (draw_set_transform); `px` = mm per screen pixel.
+static func draw(ci: CanvasItem, style: String, states: Dictionary, px: float, texts: Array) -> void:
 	var lay := layout(style)
+	var sp: Dictionary = SPEC[style]
+	var rg := ring(style)
 	var cs: Dictionary = {}
 	for e in lay.controls:
 		cs[e.id] = e
+	var st: Dictionary = states
 	var body_col := Color(0.20, 0.21, 0.24)
-	var bump_col := Color(0.26, 0.27, 0.30)
-	var trig_col := Color(0.15, 0.155, 0.175)
-	# triggers + bumpers sit behind / above the body edge
+	if style == "switch":
+		body_col = Color(0.15, 0.155, 0.175)
+	elif style == "deck":
+		body_col = Color(0.17, 0.18, 0.2)
+	# triggers (furthest back), then bumpers, then the body over their tucked edges
 	for id in ["lt", "rt"]:
-		var t: Dictionary = cs[id]
-		_pill(ci, t.c, t.size, trig_col, 16)
-		ci.draw_arc(t.c + Vector2(0, 8), t.size.x * 0.42, PI * 1.1, PI * 1.9, 16, Color(1, 1, 1, 0.12), 3.0, true)
+		_shoulder(ci, cs[id].outline, Color(0.13, 0.135, 0.15), st.get(id, {}), px)
+	for id2 in [JOY_BUTTON_LEFT_SHOULDER, JOY_BUTTON_RIGHT_SHOULDER]:
+		_shoulder(ci, cs[id2].outline, Color(0.25, 0.26, 0.29), st.get(id2, {}), px)
+	_body(ci, rg, body_col, px)
+	# style details
 	match style:
-		"xbox", "playstation", "switch":
-			var half: Array = BODY_XBOX if style == "xbox" else (BODY_PS if style == "playstation" else BODY_SWITCH)
-			if style == "switch":
-				body_col = Color(0.15, 0.15, 0.17)
-			_shaded(ci, _ring(half), body_col)
-			if style == "playstation":
-				ci.draw_style_box(T.box(Color(0.12, 0.125, 0.14), 26, Color(1, 1, 1, 0.14), 2),
-					Rect2(Vector2(385, 192), Vector2(230, 128)))
-				ci.draw_line(Vector2(500, 200), Vector2(500, 312), Color(1, 1, 1, 0.07), 2.0)
-				_small_btn(ci, Vector2(500, 408), 14.0)
-			else:
-				_small_btn(ci, Vector2(500, 212 if style == "xbox" else 270), 17.0)
-				if style == "switch":
-					ci.draw_rect(Rect2(Vector2(432, 258), Vector2(20, 20)), Color(0.2, 0.2, 0.22), true)
+		"playstation":
+			var tp := _rect_pts(Vector2(0, -24), Vector2(50, 25), 7.0)
+			_grad_poly(ci, tp, Color(0.13, 0.135, 0.15), Color(0.09, 0.09, 0.105))
+			ci.draw_polyline(_closed(tp), Color(1, 1, 1, 0.16), 1.0 * px, true)
+			ci.draw_line(Vector2(0, -34), Vector2(0, -15), Color(1, 1, 1, 0.05), 1.0 * px, true)
+			_small(ci, sp.guide, 4.4, {}, px, PackedVector2Array([sp.guide, sp.guide]))
+		"xbox":
+			_small(ci, sp.guide, 6.2, {}, px, PackedVector2Array([sp.guide, sp.guide]))
+		"switch":
+			_small(ci, sp.guide, 4.4, {}, px, PackedVector2Array([sp.guide, sp.guide]))
+			var cap := _rect_pts(Vector2(-13, -12), Vector2(8, 8), 1.2)
+			ci.draw_colored_polygon(cap, Color(0.22, 0.225, 0.25))
+			ci.draw_polyline(_closed(cap), Color(1, 1, 1, 0.22), 1.0 * px, true)
 		"deck":
-			var body := PackedVector2Array()
-			for p in _spline([Vector2(70, 160), Vector2(160, 138), Vector2(500, 132), Vector2(840, 138), Vector2(930, 160),
-					Vector2(968, 250), Vector2(965, 380), Vector2(930, 470), Vector2(860, 500), Vector2(780, 482),
-					Vector2(700, 470), Vector2(500, 466), Vector2(300, 470), Vector2(220, 482), Vector2(140, 500),
-					Vector2(70, 470), Vector2(35, 380), Vector2(32, 250)], 10):
-				body.append(p)
-			_shaded(ci, body, Color(0.17, 0.18, 0.2), 0.10)
-			# screen
-			ci.draw_style_box(T.box(Color(0, 0, 0, 0.5), 22), Rect2(Vector2(286, 186), Vector2(428, 268)))
-			ci.draw_style_box(T.box(Color(0.03, 0.035, 0.05), 20, Color(1, 1, 1, 0.16), 2), Rect2(Vector2(290, 180), Vector2(420, 262)))
-			var sheen := PackedVector2Array([Vector2(300, 190), Vector2(520, 190), Vector2(420, 430), Vector2(300, 430)])
-			ci.draw_colored_polygon(sheen, Color(0.35, 0.5, 0.8, 0.07))
-			_glyph(ci, Vector2(500, 312), "Steam Deck", 24, Color(1, 1, 1, 0.12))
-			for tp in ["tl", "tr"]:
-				var t2: Dictionary = cs[tp]
-				ci.draw_circle(t2.c, 42.0, Color(0.1, 0.1, 0.115))
-				ci.draw_arc(t2.c, 42.0, 0.0, TAU, 32, Color(1, 1, 1, 0.16), 2.0, true)
-				ci.draw_arc(t2.c, 30.0, 0.0, TAU, 28, Color(1, 1, 1, 0.06), 1.5, true)
+			var scr := _rect_pts(Vector2(0, -2), Vector2(155, 97), 5.5)
+			var bez := _rect_pts(Vector2(0, -2), Vector2(161, 103), 8.0)
+			ci.draw_colored_polygon(bez, Color(0.025, 0.027, 0.032))
+			ci.draw_polyline(_closed(bez), Color(1, 1, 1, 0.12), 1.0 * px, true)
+			_grad_poly(ci, scr, Color(0.07, 0.085, 0.12), Color(0.02, 0.025, 0.04))
+			ci.draw_colored_polygon(PackedVector2Array([Vector2(-70, -46), Vector2(-5, -46), Vector2(-35, 40), Vector2(-70, 40)]), Color(0.4, 0.55, 0.9, 0.06))
+			ci.draw_polyline(_closed(scr), Color(1, 1, 1, 0.1), 0.8 * px, true)
+			texts.append({"pos": Vector2(0, -2), "text": "Steam Deck", "size": 11.0, "col": Color(1, 1, 1, 0.12)})
+			for tp2 in ["tl", "tr"]:
+				var t2: Dictionary = cs[tp2]
+				var c2: Vector2 = t2.c
+				ci.draw_circle(c2, 15.8, Color(0, 0, 0, 0.4))
+				ci.draw_circle(c2, 15.0, Color(0.09, 0.095, 0.11))
+				ci.draw_arc(c2, 15.0, 0.0, TAU, 32, Color(1, 1, 1, 0.16), 1.0 * px, true)
+				ci.draw_arc(c2, 10.0, 0.0, TAU, 28, Color(1, 1, 1, 0.06), 0.8 * px, true)
 			for gid in ["l4", "l5", "r4", "r5"]:
 				var g: Dictionary = cs[gid]
-				_pill(ci, g.c, g.size, Color(0.12, 0.125, 0.14), 10)
-	# bumpers on top
-	for id2 in [JOY_BUTTON_LEFT_SHOULDER, JOY_BUTTON_RIGHT_SHOULDER]:
-		var b: Dictionary = cs[id2]
-		_pill(ci, b.c, b.size, bump_col, 14)
-		ci.draw_line(b.c + Vector2(-b.size.x * 0.4, -4), b.c + Vector2(b.size.x * 0.4, -4), Color(1, 1, 1, 0.12), 2.0, true)
-	_well(ci, cs[JOY_BUTTON_LEFT_STICK].c, 38.0)
-	_well(ci, cs[JOY_BUTTON_RIGHT_STICK].c, 38.0)
-	var dc: Vector2 = (cs[JOY_BUTTON_DPAD_UP].c + cs[JOY_BUTTON_DPAD_DOWN].c) * 0.5
-	_dpad(ci, dc)
+				ci.draw_colored_polygon(g.outline, Color(0.11, 0.115, 0.13))
+				ci.draw_polyline(_closed(g.outline), Color(1, 1, 1, 0.2), 1.0 * px, true)
+	_stick(ci, sp.ls, sp.stick, sp.well, st.get(JOY_BUTTON_LEFT_STICK, {}), px, cs[JOY_BUTTON_LEFT_STICK].outline)
+	_stick(ci, sp.rs, sp.stick, sp.well, st.get(JOY_BUTTON_RIGHT_STICK, {}), px, cs[JOY_BUTTON_RIGHT_STICK].outline)
+	_dpad(ci, sp.dpad, sp.cross, cs, st, px)
 	for fid in [JOY_BUTTON_A, JOY_BUTTON_B, JOY_BUTTON_X, JOY_BUTTON_Y]:
-		_face(ci, cs[fid].c, style, fid)
-	_small_btn(ci, cs[JOY_BUTTON_BACK].c, 12.0)
-	_small_btn(ci, cs[JOY_BUTTON_START].c, 12.0)
-	# Back / Start icons
-	var bc: Vector2 = cs[JOY_BUTTON_BACK].c
-	var sc: Vector2 = cs[JOY_BUTTON_START].c
-	if style == "switch":
-		ci.draw_line(bc + Vector2(-5, 0), bc + Vector2(5, 0), Color(1, 1, 1, 0.8), 2.0, true)
-		ci.draw_line(sc + Vector2(-5, 0), sc + Vector2(5, 0), Color(1, 1, 1, 0.8), 2.0, true)
-		ci.draw_line(sc + Vector2(0, -5), sc + Vector2(0, 5), Color(1, 1, 1, 0.8), 2.0, true)
-	else:
-		ci.draw_rect(Rect2(bc - Vector2(5, 4), Vector2(8, 8)), Color(1, 1, 1, 0.75), false, 1.5)
-		for i in 3:
-			ci.draw_line(sc + Vector2(-5, -4.0 + 4.0 * i), sc + Vector2(5, -4.0 + 4.0 * i), Color(1, 1, 1, 0.75), 1.5, true)
+		var fc: Dictionary = cs[fid]
+		_face(ci, style, fid, fc.c, sp.fr, st.get(fid, {}), px, fc.outline, texts)
+	for sid in [JOY_BUTTON_BACK, JOY_BUTTON_START]:
+		var sc: Dictionary = cs[sid]
+		_small(ci, sc.c, 3.6, st.get(sid, {}), px, sc.outline)
+		var cc: Vector2 = sc.c
+		if style == "switch":
+			ci.draw_line(cc + Vector2(-1.5, 0), cc + Vector2(1.5, 0), Color(1, 1, 1, 0.85), 0.9, true)
+			if sid == JOY_BUTTON_START:
+				ci.draw_line(cc + Vector2(0, -1.5), cc + Vector2(0, 1.5), Color(1, 1, 1, 0.85), 0.9, true)
+		elif sid == JOY_BUTTON_BACK:
+			ci.draw_rect(Rect2(cc - Vector2(1.5, 1.2), Vector2(2.4, 2.4)), Color(1, 1, 1, 0.8), false, 0.5)
+		else:
+			for i in 3:
+				ci.draw_line(cc + Vector2(-1.6, -1.3 + 1.3 * float(i)), cc + Vector2(1.6, -1.3 + 1.3 * float(i)), Color(1, 1, 1, 0.8), 0.5, true)

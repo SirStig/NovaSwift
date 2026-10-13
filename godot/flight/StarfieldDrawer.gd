@@ -91,4 +91,5 @@ func _draw_plain(ci: CanvasItem, stars: PackedVector2Array, cam: Vector2, parall
 		var p := Vector2(fposmod(s.x + offset.x, vp.x), fposmod(s.y + offset.y, vp.y))
 		if rot != 0.0:
 			p = center + (p - center).rotated(rot)
-		ci.draw_circle(p, radius, col)
+		# A 2-3 px dot: a quad batches with its neighbours; draw_circle tessellates a fan per star per frame.
+		ci.draw_rect(Rect2(p.x - radius, p.y - radius, radius * 2.0, radius * 2.0), col)

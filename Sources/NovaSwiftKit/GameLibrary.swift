@@ -81,6 +81,11 @@ public struct PluginBundle: Identifiable, Codable, Hashable, Sendable {
     /// The plug-in's folder, for a graphics-only plug-in (it has no files to
     /// locate it by): its HD packs load only while it's switched on.
     public var folderURL: URL?
+    /// Total conversions only: the ids of the installed plug-ins the user switched
+    /// on *for this conversion* (`TCAddOns`), in load order. They load after the
+    /// conversion's own `Plug-Ins` files, as if copied into that folder; empty by
+    /// default, so a conversion nobody customised loads exactly like the original.
+    public var addOnIDs: [String] = []
 
     public var isTotalConversion: Bool { !novaFilesURLs.isEmpty }
     /// Every container the bundle owns (TC base files first).
@@ -328,12 +333,14 @@ public enum GameLibrary {
         let enabled = plugins.filter(\.isEnabled)
         var base = baseFiles
         var layered: [PluginBundle]
+        var tcAddOns: [PluginBundle] = []
         if let tc = enabled.last(where: \.isTotalConversion) {
             let shared = baseFiles.filter { $0.lastPathComponent.uppercased() == "NOVA.REZ" }
             base = (shared.isEmpty ? baseFiles : shared) + tc.novaFilesURLs
             var own = tc
             own.novaFilesURLs = []
             layered = [own]
+            tcAddOns = tc.addOnIDs.compactMap { id in plugins.first { $0.id == id && !$0.isTotalConversion } }
         } else {
             layered = enabled
         }
@@ -347,6 +354,9 @@ public enum GameLibrary {
                 return ka != kb ? ka < kb : a.offset < b.offset
             }.map(\.element)
         }
+        // Per-conversion add-ons (an enhancement, empty unless the user added some): after the
+        // conversion's own Plug-Ins, in list order, each plug-in's files by name.
+        for p in tcAddOns { for u in p.fileURLs.sorted(by: nameOrder) { files.append((p.id, u)) } }
         return (base, files)
     }
 

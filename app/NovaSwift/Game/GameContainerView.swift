@@ -259,6 +259,35 @@ final class GameHost {
             for (spobID, count) in changes { garrisons[spobID] = count }
             seedPilot.state.stellarGarrisons = garrisons.isEmpty ? nil : garrisons
         }
+        // pêrs / shïp.AppearOn gates + hold/stellar hooks: installed BEFORE configure
+        // builds (and populates) the first world, so the very first fill already obeys
+        // them (`GameSession.makeWorld(configure:)` applies them pre-population).
+        scene.persGrudges = model.pilot.state.persGrudges ?? []
+        if let scanGame = aiGame {
+            let pilotStore = model.pilot
+            // A damaged destroyable stellar is still damaged on return (OS-13).
+            scene.stellarStrengthLeft = { [weak pilotStore] in pilotStore?.state.stellarStrengthLeft ?? [:] }
+            scene.persSpawnEligible = { [weak pilotStore] id in
+                guard let store = pilotStore else { return true }
+                return WorldPilotLink.persSpawnEligible(id, pilot: store.state, game: scanGame)
+            }
+            // shïp.AppearOn: a hull with a non-blank AppearOn test only appears in
+            // düde spawns while its control-bit expression passes against live bits.
+            scene.shipSpawnEligible = { [weak pilotStore] id in
+                guard let store = pilotStore else { return true }
+                return WorldPilotLink.shipSpawnEligible(id, pilot: store.state, game: scanGame)
+            }
+            scene.missionBoardStandsDown = { id in
+                guard let m = scanGame.mission(id) else { return false }
+                return m.flags1 & 0x0001 != 0 && m.shipCount == 1
+            }
+            if let holdGalaxy = aiGalaxy {
+                scene.playerHoldHasRoom = { [weak pilotStore] in
+                    guard let store = pilotStore else { return false }
+                    return PilotEconomy.cargoFree(store.state, galaxy: holdGalaxy) > 0
+                }
+            }
+        }
         scene.configure(player: ship, textures: textures, engineTextures: engineTextures,
                         shieldTextures: shieldTextures,
                         lightTextures: lightTextures, weaponGlowTextures: weaponGlowTextures,
@@ -326,29 +355,12 @@ final class GameHost {
 
             // pêrs (named characters): seed grudges, gate appearances on their
             // ActiveOn NCB + not-yet-defeated, and persist grudge/defeat outcomes.
-            scene.persGrudges = model.pilot.state.persGrudges ?? []
             scene.destroyedStellarIDs = model.pilot.state.destroyedStellars ?? []
-            // A damaged destroyable stellar is still damaged on return (OS-13).
-            scene.stellarStrengthLeft = { [weak pilotStore] in pilotStore?.state.stellarStrengthLeft ?? [:] }
-            scene.persSpawnEligible = { [weak pilotStore] id in
-                guard let store = pilotStore else { return true }
-                return WorldPilotLink.persSpawnEligible(id, pilot: store.state, game: scanGame)
-            }
-            // shïp.AppearOn: a hull with a non-blank AppearOn test only appears in
-            // düde spawns while its control-bit expression passes against live bits.
-            scene.shipSpawnEligible = { [weak pilotStore] id in
-                guard let store = pilotStore else { return true }
-                return WorldPilotLink.shipSpawnEligible(id, pilot: store.state, game: scanGame)
-            }
             // The status bar's cargo panel (0x004612c0): the commodity bins,
             // the Special line, and the fleet's capacity for Free.
             scene.cargoPanelProvider = { [weak pilotStore] in
                 guard let state = pilotStore?.state else { return ([], "", 0) }
                 return GameContainerView.cargoPanel(state, game: scanGame)
-            }
-            scene.missionBoardStandsDown = { id in
-                guard let m = scanGame.mission(id) else { return false }
-                return m.flags1 & 0x0001 != 0 && m.shipCount == 1
             }
             // Mining: the player's scoop collected a destroyed asteroid's yield —
             // add it to cargo (clamped to free hold) and report what was stowed.
@@ -363,12 +375,6 @@ final class GameHost {
             // Tribbles breed and perishables rot in flight (EC-24).
             scene.onJunkCargoEvent = { [weak pilotStore] in
                 _ = pilotStore?.runJunkCargoEvent(galaxy: Galaxy(game: scanGame))
-            }
-            if let holdGalaxy = aiGalaxy {
-                scene.playerHoldHasRoom = { [weak pilotStore] in
-                    guard let store = pilotStore else { return false }
-                    return PilotEconomy.cargoFree(store.state, galaxy: holdGalaxy) > 0
-                }
             }
             scene.onPersGrudge = { [weak pilotStore] pid in
                 pilotStore?.state.recordPersGrudge(pid); pilotStore?.save()
@@ -400,9 +406,6 @@ final class GameHost {
             scene.gameSpeedMultiplierOverride = {
                 model.session.isActive ? model.session.rules.gameSpeedMultiplier : nil
             }
-            // The world was already built by `configure` above — push the pilot's
-            // existing grudges/eligibility onto it now.
-            scene.syncPersStateToWorld()
         }
         startMemoryPressureMonitoring()
     }
@@ -477,7 +480,8 @@ final class GameHost {
          shieldTextures: [SKTexture] = [], lightTextures: [SKTexture] = [],
          weaponGlowTextures: [SKTexture] = [], altTextures: [SKTexture] = [],
          hullAnim: HullAnim = HullAnim(),
-         playerDamageScale: Double? = 0, muted: Bool = false) {
+         playerDamageScale: Double? = 0, muted: Bool = false,
+         prepareScene: ((GameScene) -> Void)? = nil) {
         controller = GameControllerInput(input: input)
         controller.bindings = model.padBindings
         self.game = game
@@ -488,6 +492,7 @@ final class GameHost {
         hud.shipName = shipName
         hud.systemName = systemName
         scene.scaleMode = .resizeFill
+        prepareScene?(scene)   // spawn gates must exist before the first world is populated
         scene.configure(player: ship, textures: textures, engineTextures: engineTextures,
                         shieldTextures: shieldTextures,
                         lightTextures: lightTextures, weaponGlowTextures: weaponGlowTextures,

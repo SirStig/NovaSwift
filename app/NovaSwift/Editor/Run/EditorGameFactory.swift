@@ -264,6 +264,9 @@ struct EditorHostOptions {
     var invulnerable: Bool = false
     /// No sound (live preview).
     var muted: Bool = false
+    /// Runs on the scene BEFORE it builds (and populates) its first world, so
+    /// spawn gates (përs ActiveOn, shïp AppearOn) govern the initial fill.
+    var prepareScene: ((GameScene) -> Void)? = nil
     /// Hide the player's ship sprite (live preview flies an invisible camera ship).
     var hidePlayer: Bool = false
     var shipName: String? = nil
@@ -299,7 +302,7 @@ extension GameHost {
                             weaponGlowTextures: art.weaponGlow, altTextures: art.alt,
                             hullAnim: art.hullAnim,
                             playerDamageScale: o.invulnerable ? 0 : nil,
-                            muted: o.muted)
+                            muted: o.muted, prepareScene: o.prepareScene)
         if o.hidePlayer { host.scene.editorSetPlayerVisible(false) }
         return host
     }

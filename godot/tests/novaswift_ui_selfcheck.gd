@@ -83,7 +83,7 @@ func _init() -> void:
 		"Presentation": ["Presentation", "Interface Options", "HUD & Interface", "Full-screen galaxy map", "Modern main menu", "Modern dialog chrome", "Modern HUD", "Sidebar pause menu", "Show mission storyline tags", "Show radar", "Show planet names", "Hull / shield bars", "HUD opacity", "Larger HUD", "High-contrast HUD", "Overall UI scale", "Show FPS counter", "Classic", "Enhanced", "Custom"],
 		"Gameplay": ["Gameplay", "Auto-target after firing", "Confirm before landing", "Tutorial hints", "Pause when app loses focus", "Authentic"],
 		"Enhancements": ["Enhancements", "Port Options", "Manual plug-in order", "Tight formations", "Forgiving landing", "Quick hyperjump", "Frequent autosave", "Automatic route plotting", "Nearest-first targeting", "Modern key layout", "Screen shake", "Difficulty", "System Aliveness", "Auto-landing"],
-		"Controls": ["Controls", "Stick dead zone", "Controller cursor speed", "Invert turn direction", "Haptic feedback", "Keyboard & Controller Bindings — Flight"],
+		"Controls": ["Controls", "Stick dead zone", "Controller cursor speed", "Invert turn direction", "Haptic feedback", "Key & Button Bindings"],
 		"Video": ["Graphics", "Starfield density", "Camera zoom", "Camera view", "Frame rate limit", "Smooth sprite scaling", "HD graphics from plug-ins", "Particle effects", "Engine & weapon glow", "Windows hyperspace look", "Hyperspace effects", "Window", "Fullscreen", "VSync", "Window scale", "Low", "Medium", "High", "Ultra"],
 		"Audio": ["Audio", "Mute all", "Master", "Music", "Effects", "Interface", "Background music", "Test Beep"],
 		"Accessibility": ["Accessibility", "Reduce flashing & motion", "Colorblind mode"],

@@ -449,6 +449,10 @@ public struct DescRes: Sendable {
     public let flags: Int
     /// The movie plays after the text is dismissed (Flags 0x0001).
     public var moviePlaysAfterText: Bool { flags & 0x0001 != 0 }
+    /// Flags 0x0002: the movie plays at double size (`Ui_PlayMovieFileModal` 0x0049db00 `param_2`).
+    public var movieDoubleSize: Bool { flags & 0x0002 != 0 }
+    /// Flags 0x0004: the movie blanks the whole screen first (`param_3`).
+    public var movieFillsScreen: Bool { flags & 0x0004 != 0 }
 
     public init(_ r: Resource) {
         id = r.id

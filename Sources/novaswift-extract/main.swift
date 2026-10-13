@@ -21,6 +21,7 @@ func usage() -> Never {
       \(name) sprites <file> [outDir]     Decode rlëD sprites → PNG sheets
       \(name) library <baseDir> [plugDir] Discover base + plug-ins; show override effect
       \(name) merged-counts <baseDir> <plugDir> [enableIds]  JSON per-type counts of base + plug-ins (Godot parity reference)
+      \(name) desc-movies <baseDir> <plugDir> [enableIds]  JSON of every dësc that names a movie + whether the file resolves (env NOVASWIFT_TC_ADDONS=id,id puts those plug-ins on the selected TC)
       \(name) ship    <baseDir> [id]      Decode ship stats + full loadout + sprite → PNG
       \(name) outfit  <baseDir> [id]      List outfits, or one outfit's modifiers
       \(name) govt    <baseDir> [id]      List governments, or one govt's decoded fields
@@ -310,7 +311,12 @@ case "merged-counts":
     // (everything loads) with the first total conversion selected, as the Godot self-check does.
     let mcIDs = args.count == 4 ? args[3].split(separator: ",").map(String.init) : []
     let mcManual = !mcIDs.isEmpty
-    mcPlugins = PluginSet.arrange(discovered: mcPlugins, persisted: [], manual: mcManual)
+    var mcLists: TCAddOns.Lists = [:]
+    if let ids = ProcessInfo.processInfo.environment["NOVASWIFT_TC_ADDONS"], !ids.isEmpty,
+       let tc = mcPlugins.first(where: \.isTotalConversion) {
+        for id in ids.split(separator: ",") { TCAddOns.add(&mcLists, tc: tc.id, id: String(id)) }
+    }
+    mcPlugins = PluginSet.arrange(discovered: mcPlugins, persisted: [], manual: mcManual, tcAddOns: mcLists)
     for id in mcIDs { PluginSet.setEnabled(&mcPlugins, id: id, enabled: true, manual: true) }
     if !mcManual, let tc = mcPlugins.first(where: \.isTotalConversion) {
         PluginSet.setEnabled(&mcPlugins, id: tc.id, enabled: true, manual: false)
@@ -325,6 +331,44 @@ case "merged-counts":
                                   "failures": sink.failures.map { "\($0.pluginID)/\($0.fileName): \($0.message)" }]
         let d = try JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys])
         print(String(data: d, encoding: .utf8) ?? "{}")
+    } catch {
+        FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1)
+    }
+
+case "desc-movies":
+    // Every dësc that names a movie (and its Flags), and whether the file resolves in the media folders the
+    // frontends search ("Nova Plug-ins" first, then "Nova Files"; a TC's own folders under a TC).
+    guard args.count == 3 || args.count == 4 else { usage() }
+    let dmBase = URL(fileURLWithPath: args[1])
+    let dmBaseFiles = GameLibrary.discoverResourceFiles(in: dmBase)
+    var dmPlugins = GameLibrary.discoverPlugins(in: URL(fileURLWithPath: args[2]))
+    let dmIDs = args.count == 4 ? args[3].split(separator: ",").map(String.init) : []
+    let dmManual = !dmIDs.isEmpty
+    var dmLists: TCAddOns.Lists = [:]
+    if let ids = ProcessInfo.processInfo.environment["NOVASWIFT_TC_ADDONS"], !ids.isEmpty,
+       let tc = dmPlugins.first(where: \.isTotalConversion) {
+        for id in ids.split(separator: ",") { TCAddOns.add(&dmLists, tc: tc.id, id: String(id)) }
+    }
+    dmPlugins = PluginSet.arrange(discovered: dmPlugins, persisted: [], manual: dmManual, tcAddOns: dmLists)
+    for id in dmIDs { PluginSet.setEnabled(&dmPlugins, id: id, enabled: true, manual: true) }
+    if !dmManual, let tc = dmPlugins.first(where: \.isTotalConversion) {
+        PluginSet.setEnabled(&dmPlugins, id: tc.id, enabled: true, manual: false)
+    }
+    do {
+        let merged = try GameLibrary.merge(baseFiles: dmBaseFiles, plugins: dmPlugins, flatPluginOrder: !dmManual)
+        let game = NovaGame(merged)
+        let dirs = TCAddOns.mediaDirectories(plugins: dmPlugins, baseDir: dmBase)
+        var rows: [[String: Any]] = []
+        for r in merged.resources(of: NovaType.desc).sorted(by: { $0.id < $1.id }) {
+            guard let d = game.desc(r.id), let m = d.movieFilename else { continue }
+            let hit = TCAddOns.findMedia(named: m, in: dirs)
+            rows.append(["id": d.id, "movie": m, "flags": d.flags, "found": hit != nil, "path": hit?.path ?? ""])
+        }
+        let obj: [String: Any] = ["count": rows.count, "found": rows.filter { ($0["found"] as? Bool) == true }.count,
+                                  "movies": rows, "enabled": dmPlugins.filter(\.isEnabled).map(\.id),
+                                  "fontNames": game.referencedFontNames,
+                                  "fontFiles": TCAddOns.fontFiles(in: dirs).map(\.path)]
+        print(String(data: try JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]), encoding: .utf8) ?? "{}")
     } catch {
         FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1)
     }

@@ -91,6 +91,9 @@ var target_reticle: PackedFloat32Array
 
 var _layers: Array = []
 var _weapon_cache := {}
+var _data_gen := -1
+var _span := Vector2(-1.0, -1.0)
+var _prewarm_sys := -2               # the system whose sprite manifest is queued
 var _frame_dt := 0.016
 var _settings_age := 999
 
@@ -103,6 +106,8 @@ func setup(world: Object) -> void:
 	ships.setup(self)
 	shots.setup(self)
 	fx.setup(self)
+	if is_inside_tree():
+		_push_view_span(get_viewport_rect().size)
 	show_behind_parent = true      # the world draws under Main's HUD
 	_add_layer("mix", _draw_world)
 	_add_layer("fill", _draw_fog_world)
@@ -145,8 +150,22 @@ func refresh_settings() -> void:
 ## The system was rebuilt (launch, jump arrival, new pilot): drop transient state and snap the camera.
 func reset_world() -> void:
 	fx.clear()
-	sprites.clear()
-	_weapon_cache.clear()
+	# Sprite art is keyed by resource id: it survives launches and jumps (clearing it here made every
+	# launch / arrival re-decode and re-upload every sprite on the main thread -- the hitch and the pop-in).
+	# Only a different data set / plug-in set (the bridge's data_generation) invalidates it.
+	if nova.has_method("data_generation"):
+		var dg: int = nova.data_generation()
+		if dg != _data_gen:
+			_data_gen = dg
+			sprites.clear()
+			_weapon_cache.clear()
+	else:
+		sprites.clear()
+		_weapon_cache.clear()
+	_push_view_span(get_viewport_rect().size)
+	sprites.new_generation()
+	_prewarm_world(-1)
+	sprites.pump(0.0, 1 << 30)   # whatever the docked / in-jump prewarm did not get to, before the first frame
 	ships.reticle_zoom = 0.0
 	ships.launches.clear()
 	ships.ghosts.clear()
@@ -162,6 +181,32 @@ func refresh_background() -> void:
 		background = Color(rgb[0], rgb[1], rgb[2])
 	else:
 		background = Color(0.02, 0.02, 0.06)   # pure black lifted a hair so the starfield has something to sit on
+
+
+# MARK: Prewarm
+
+## Queue (and start the bridge's background decode of) the sprites system `system_id` needs; -1 = the live
+## system. A no-op when that manifest is already queued.
+func _prewarm_world(system_id: int) -> void:
+	if not has_data or nova == null or not nova.has_method("sprite_manifest"):
+		return
+	var sys: int = system_id if system_id >= 0 else int(nova.nav_current_system())
+	if sys == _prewarm_sys and system_id >= 0:
+		return
+	_prewarm_sys = sys
+	sprites.queue_manifest(nova.sprite_manifest(sys, system_id >= 0))
+
+
+## Called every frame while docked or hyperjumping (Main): decode the destination system's art off-thread in
+## the bridge and upload what is ready, a few ms per frame, so the launch / arrival frame finds it cached.
+func prewarm_step(budget_ms: float) -> void:
+	if not has_data or nova == null or not nova.has_method("prewarm_target"):
+		return
+	var target: int = nova.prewarm_target()
+	if target >= 0:
+		_prewarm_world(target)
+	if sprites.pending() > 0:
+		sprites.pump(budget_ms, nova.prewarm_progress())
 
 
 # MARK: Coordinates
@@ -212,6 +257,7 @@ func frame(delta: float, bar_width: float, advance_sim_effects: bool = true) -> 
 	play_bar = bar_width
 	var vp := get_viewport_rect().size
 	play_ctr = play_center(vp)
+	_push_view_span(vp)
 	_snapshot()
 	var pw: Vector2 = nova.player_position()
 	var vel: Vector2 = nova.player_velocity()
@@ -234,6 +280,23 @@ func frame(delta: float, bar_width: float, advance_sim_effects: bool = true) -> 
 	for l in _layers:
 		l.queue_redraw()
 	queue_redraw()
+
+
+## Tell the engine how much of space the window shows (Apple GameScene.viewSpan -> world.viewportHalfExtent):
+## the asteroid field scatters, recycles and re-enters relative to it. Left at the engine's 640x600 default it
+## spawned and culled rocks INSIDE a larger window -- visible pop-in at the edges of a 1080p view.
+func _push_view_span(vp: Vector2) -> void:
+	if not nova.has_method("set_view_span"):
+		return
+	var w: float = vp.x * zoom
+	var h: float = vp.y * zoom
+	if cam.rotation != 0.0:
+		var d: float = Vector2(w, h).length()
+		w = d
+		h = d
+	if absf(w - _span.x) > 0.5 or absf(h - _span.y) > 0.5:
+		_span = Vector2(w, h)
+		nova.set_view_span(w, h)
 
 
 func _snapshot() -> void:

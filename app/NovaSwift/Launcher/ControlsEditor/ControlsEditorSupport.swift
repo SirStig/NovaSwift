@@ -2,12 +2,11 @@ import SwiftUI
 import GameController
 
 /// What the visual Controls editor remembers between launches: which keyboard
-/// size/ISO variant and which controller style the player picked. `nil` means
-/// "auto" (Mac laptop on a Mac, Full elsewhere; the connected pad's family,
+/// size and which controller style the player picked. `nil` means
+/// "auto" (Compact on a Mac, Full elsewhere; the connected pad's family,
 /// else Xbox) so a fresh install picks sensibly and a deliberate choice sticks.
 struct ControlsEditorPrefs: Codable, Equatable {
     var keyboardSize: KeyboardSize?
-    var iso = false
     var padStyle: PadStyle?
 
     static let storageKey = "com.novaswift.controlseditor.v1"

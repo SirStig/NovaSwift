@@ -23,6 +23,8 @@ struct StatusLineState {
     var busy = false
     /// The sound volume is below 2 of 7 (Red Alert shows the cicn blink then).
     var lowVolume = false
+    /// Test seam (status_line_selfcheck): the 1-in-140 roll always passes.
+    var forceRoll = false
     /// Per-ship HailQuote latches and the original's rate gates.
     let quotes = PersQuoteBroadcaster()
 

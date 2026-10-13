@@ -2294,6 +2294,13 @@ public final class World {
              OriginalClock.perSecond(Double(rng.range(400) - 200) * 0.01))
     }
 
+    /// Lay the field out now rather than at the first `step` (which does the same). A host that rebuilds
+    /// the world mid-session (a hyperjump arrival, a launch) calls this so the rocks exist on the very
+    /// first frame it draws instead of appearing one tick after the flash. No-op once scattered.
+    public func prepareAsteroidField() {
+        if !asteroidFieldScattered, asteroidFieldSize > 0 { scatterAsteroidField() }
+    }
+
     /// The first-step scatter: each rock within `(half + 128) / 2` of the
     /// player on each axis, with a fresh drift.
     private func scatterAsteroidField() {

@@ -92,7 +92,7 @@ func engage_hyperjump() -> void:
 func _on_arrived(system_name: String) -> void:
 	if nova.nav_route().size() > 0:   # the jump sequence redraws the route map when a route remains
 		_mini.show_map()
-	log_message.emit("Arrived in " + system_name)
+	# The arrival status line (buoy / "Arriving in the X system on <date>.") is the bridge's now (B1).
 	arrived.emit(system_name)
 
 

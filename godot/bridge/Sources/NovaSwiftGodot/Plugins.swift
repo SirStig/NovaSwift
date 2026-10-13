@@ -33,6 +33,11 @@ final class PluginRuntime: @unchecked Sendable {
     /// Whether `plugins` was arranged under manual order (Apple `pluginsAreManual`): only then
     /// does the in-memory enabled set carry over a rescan.
     private var pluginsAreManual = false
+    /// Per-total-conversion add-on lists (`TCAddOns`), persisted under `tcAddOns` in the state file.
+    private var tcLists: TCAddOns.Lists = [:]
+    /// `"<tc>|<plugin>"` -> record-overlap verdict (filled by `tcAnalyze`, in the background).
+    private var tcOverlap: [String: TCAddOns.Compatibility] = [:]
+    private var tcAnalysing = false
     private(set) var failures: [PluginLoadFailure] = []
     private(set) var baseDir: URL?
     private var extraDirs: [URL] = []
@@ -118,6 +123,7 @@ final class PluginRuntime: @unchecked Sendable {
     private struct StateFile: Codable {
         var manual: Bool
         var plugins: [PluginEnableState]
+        var tcAddOns: TCAddOns.Lists?
     }
 
     private func loadState() -> [PluginEnableState] {
@@ -126,7 +132,7 @@ final class PluginRuntime: @unchecked Sendable {
             if !stateLoaded { stateLoaded = true }
             return []
         }
-        if !stateLoaded { manual = s.manual; stateLoaded = true }
+        if !stateLoaded { manual = s.manual; tcLists = s.tcAddOns ?? [:]; stateLoaded = true }
         return s.plugins
     }
 
@@ -134,7 +140,7 @@ final class PluginRuntime: @unchecked Sendable {
         // Switching the manual flag must not freeze the original rule's "everything loads"
         // into the per-plug-in state (Apple only saves the list on a toggle / move).
         let list = keepPlugins ? loadState() : PluginSet.persistedState(of: plugins)
-        let s = StateFile(manual: manual, plugins: list)
+        let s = StateFile(manual: manual, plugins: list, tcAddOns: tcLists.isEmpty ? nil : tcLists)
         try? FileManager.default.createDirectory(at: stateFile.deletingLastPathComponent(), withIntermediateDirectories: true)
         if let data = try? JSONEncoder().encode(s) { try? data.write(to: stateFile, options: .atomic) }
     }
@@ -150,7 +156,8 @@ final class PluginRuntime: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         let persisted = loadState()
         let inMemory = Set(pluginsAreManual ? plugins.filter(\.isEnabled).map(\.id) : [])
-        plugins = PluginSet.arrange(discovered: discovered, persisted: persisted, inMemoryEnabled: inMemory, manual: manual)
+        plugins = PluginSet.arrange(discovered: discovered, persisted: persisted, inMemoryEnabled: inMemory, manual: manual,
+                                    tcAddOns: tcLists)
         pluginsAreManual = manual
         baseDir = base
         searchedDirs = dirs
@@ -205,6 +212,73 @@ final class PluginRuntime: @unchecked Sendable {
         guard PluginSet.move(&plugins, id: id, by: offset, manual: manual) else { return false }
         saveState(); needsReload = true
         return true
+    }
+
+    // MARK: Per-TC add-ons (`TCAddOns`)
+
+    private func tcMutate(_ body: (inout TCAddOns.Lists) -> Bool) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        _ = loadState()
+        guard body(&tcLists) else { return false }
+        TCAddOns.apply(tcLists, to: &plugins)
+        saveState(); needsReload = true
+        return true
+    }
+    func tcAdd(tc: String, id: String) -> Bool { tcMutate { TCAddOns.add(&$0, tc: tc, id: id) } }
+    func tcRemove(tc: String, id: String) -> Bool { tcMutate { TCAddOns.remove(&$0, tc: tc, id: id) } }
+    func tcSetEnabled(tc: String, id: String, enabled: Bool) -> Bool { tcMutate { TCAddOns.setEnabled(&$0, tc: tc, id: id, enabled: enabled) } }
+    func tcMove(tc: String, id: String, by o: Int) -> Bool { tcMutate { TCAddOns.move(&$0, tc: tc, id: id, by: o) } }
+
+    /// `{tc,name,own:[file],list:[row],candidates:[row]}` for the selected conversion, else `{}`.
+    /// Row: `{id,name,enabled,kind,compat,reason,installed}`. `list` is the TC's add-on list in load
+    /// order (an id no longer installed shows `installed:false`); `candidates` are installed
+    /// non-conversion plug-ins not in it, suggested ones first.
+    func tcInfo() -> [String: Any] {
+        lock.lock(); defer { lock.unlock() }
+        guard let tc = TCAddOns.selectedTC(plugins) else { return [:] }
+        let others = plugins.filter { $0.isTotalConversion && $0.id != tc.id }
+        func row(_ p: PluginBundle, enabled: Bool, installed: Bool = true) -> [String: Any] {
+            var c = TCAddOns.compatibility(of: p, with: tc, others: others)
+            if let o = tcOverlap[tc.id + "|" + p.id] { c = TCAddOns.combine(c, o) }
+            return ["id": p.id, "name": p.name, "enabled": enabled, "kind": p.kind.rawValue, "installed": installed,
+                    "compat": c.key, "reason": c.reason, "optional": p.isOptional]
+        }
+        let entries = tcLists[tc.id] ?? []
+        var list: [[String: Any]] = []
+        for e in entries {
+            if let p = plugins.first(where: { $0.id == e.id && !$0.isTotalConversion }) { list.append(row(p, enabled: e.isEnabled)) }
+            else { list.append(["id": e.id, "name": e.id, "enabled": e.isEnabled, "kind": "unknown", "installed": false,
+                                "compat": "neutral", "reason": "", "optional": false]) }
+        }
+        let inList = Set(entries.map(\.id))
+        var cands = plugins.filter { !$0.isTotalConversion && !inList.contains($0.id) && ($0.folderURL != nil || !$0.fileURLs.isEmpty) }
+            .map { row($0, enabled: false) }
+        let rank = ["recommended": 0, "neutral": 1, "unlikely": 2]
+        cands = cands.enumerated().sorted { a, b in
+            let ra = rank[a.element["compat"] as? String ?? ""] ?? 1, rb = rank[b.element["compat"] as? String ?? ""] ?? 1
+            return ra != rb ? ra < rb : a.offset < b.offset
+        }.map(\.element)
+        return ["tc": tc.id, "name": tc.name, "own": tc.fileURLs.map(\.lastPathComponent), "list": list,
+                "candidates": cands, "analysing": tcAnalysing]
+    }
+
+    /// Background record-overlap analysis of every installed plug-in against the selected conversion's
+    /// own data; results appear in `tcInfo` (`compat`/`reason`) when done.
+    func tcAnalyze() {
+        lock.lock()
+        guard !tcAnalysing, let tc = TCAddOns.selectedTC(plugins), let base = baseDir else { lock.unlock(); return }
+        tcAnalysing = true
+        var own = tc; own.addOnIDs = []
+        let cands = plugins.filter { !$0.isTotalConversion && !$0.fileURLs.isEmpty && tcOverlap[tc.id + "|" + $0.id] == nil }
+        lock.unlock()
+        Task.detached { [self] in
+            let baseFiles = GameLibrary.discoverResourceFiles(in: base)
+            var results: [String: TCAddOns.Compatibility] = [:]
+            if let res = try? GameLibrary.merge(baseFiles: baseFiles, plugins: [own]) {
+                for p in cands { results[tc.id + "|" + p.id] = TCAddOns.overlap(of: p, in: res) }
+            }
+            lock.lock(); tcOverlap.merge(results) { _, new in new }; tcAnalysing = false; lock.unlock()
+        }
     }
 
     func addDir(_ d: URL) { lock.lock(); extraDirs.append(d); needsReload = true; lock.unlock() }
@@ -537,6 +611,13 @@ class NovaPlugins: RefCounted {
         }
         let active = rt.plugins.filter(\.isEnabled)
         if let tc = active.last(where: \.isTotalConversion) {
+            // The conversion's add-ons (later in the list wins, so search them first).
+            for id in tc.addOnIDs.reversed() {
+                if let p = active.first(where: { $0.id == id }) ?? rt.plugins.first(where: { $0.id == id }) {
+                    for u in p.allFileURLs { add(u.deletingLastPathComponent()) }
+                    add(p.folderURL)
+                }
+            }
             for u in tc.fileURLs { add(u.deletingLastPathComponent()) }
             for u in tc.novaFilesURLs { add(u.deletingLastPathComponent()) }
         } else {
@@ -555,6 +636,21 @@ class NovaPlugins: RefCounted {
         guard let d = host?.dbgGame?.desc(id), let m = d.movieFilename else { return Self.json(["movie": "", "after": false] as [String: Any]) }
         return Self.json(["movie": m, "after": d.moviePlaysAfterText] as [String: Any])
     }
+
+    // MARK: Per-conversion add-ons (shared `TCAddOns`; the JSON in `plugins-state.json` under `tcAddOns`)
+
+    /// `{tc,name,own,list,candidates,analysing}` for the selected total conversion (`{}` when none).
+    @Callable(autoSnakeCase: true) func tcAddons() -> String { Self.json(PluginRuntime.shared.tcInfo()) }
+    @Callable(autoSnakeCase: true) func tcAddonAdd(tc: String, id: String) -> Bool { PluginRuntime.shared.tcAdd(tc: tc, id: id) }
+    @Callable(autoSnakeCase: true) func tcAddonRemove(tc: String, id: String) -> Bool { PluginRuntime.shared.tcRemove(tc: tc, id: id) }
+    @Callable(autoSnakeCase: true) func tcAddonSetEnabled(tc: String, id: String, enabled: Bool) -> Bool {
+        PluginRuntime.shared.tcSetEnabled(tc: tc, id: id, enabled: enabled)
+    }
+    @Callable(autoSnakeCase: true) func tcAddonMove(tc: String, id: String, offset: Int) -> Bool {
+        PluginRuntime.shared.tcMove(tc: tc, id: id, by: offset)
+    }
+    /// Start the background record-overlap compatibility check; poll `tc_addons().analysing`.
+    @Callable(autoSnakeCase: true) func tcAddonsAnalyze() { PluginRuntime.shared.tcAnalyze() }
 
     // MARK: Folders (tests, "add folder")
 

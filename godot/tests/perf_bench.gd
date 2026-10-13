@@ -12,6 +12,7 @@ const FlightRenderer = preload("res://flight/FlightRenderer.gd")
 var nova
 var fr: Node2D
 var layer_ms: Array = []
+var _prewarm := OS.get_environment("PERF_PREWARM") != "0"
 var layer_names: Array = ["world", "fogW", "hulls", "fogS", "glows", "shots", "fxAdd", "beams", "fx"]
 
 
@@ -106,6 +107,7 @@ func _run() -> void:
 		quit(0)
 		return
 	print("load_game               %8.1f ms" % _ms(t))
+	print("prewarm: ", _prewarm, "   bridge: ", "release" if nova.has_method("prewarm_target") else "old")
 	var scen = _j(nova.pilot_scenarios())
 	var pid: String = nova.pilot_create(dir, int(scen[0].id), "Perf", true, "", "")
 	t = Time.get_ticks_usec()
@@ -130,7 +132,10 @@ func _run() -> void:
 			print("  no landable stellar")
 			break
 		nova.debug_dock_at(lands[0])
-		for i in 3:
+		# A docked player spends seconds in the spaceport: the renderer warms the launch system meanwhile.
+		for i in 60:
+			if _prewarm:
+				fr.prewarm_step(4.0)
 			await process_frame
 		t = Time.get_ticks_usec()
 		nova.launch()
@@ -169,6 +174,9 @@ func _run() -> void:
 			var t0 := Time.get_ticks_usec()
 			nova.step(1.0 / 30.0)
 			var dt := _ms(t0)
+			if _prewarm and nova.hyperjump_active():
+				fr.prewarm_step(3.0)
+			await process_frame   # the maneuver takes seconds of wall time in the game
 			worst = maxf(worst, dt)
 			ticks += 1
 			if nova.take_jump_arrival() != "":

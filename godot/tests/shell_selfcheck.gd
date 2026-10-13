@@ -122,7 +122,9 @@ func _init() -> void:
 	tab.grab_focus()
 	var n := tab.find_valid_focus_neighbor(SIDE_BOTTOM)
 	_ok(n != null, "tab has a focus neighbour below (%s)" % (n.name if n else "none"))
-	_ok(st.rebind_buttons.size() >= 40, "Controls page lists %d actions" % st.rebind_buttons.size())
+	var ed: Node = st.open_controls_editor()
+	await process_frame
+	_ok(ed.rows.size() >= 40, "Controls Editor lists %d actions" % ed.rows.size())
 	var missing := []
 	for g in Controls.GROUPS:
 		for a in Controls.GROUPS[g]:
@@ -132,30 +134,33 @@ func _init() -> void:
 
 	# --- rebinding -------------------------------------------------------------------
 	_ok(_keys_of("land") == [KEY_L], "land default key is L")
-	st._begin_capture("land", "keys", st.rebind_buttons["land"].key)
-	_ok(st.capture_event(_key(KEY_H)), "capture consumes a key")
+	ed._on_row("land")
+	_ok(ed.capture_event(_key(KEY_H)), "capture consumes a key")
 	_ok(_keys_of("land") == [KEY_H], "InputMap: land now H")
 	_ok(Controls.overrides["land"]["keys"] == [KEY_H], "override recorded")
 	# conflict swap: give 'galaxy_map' (M) the key H -> land receives M
-	st._begin_capture("galaxy_map", "keys", st.rebind_buttons["galaxy_map"].key)
-	st.capture_event(_key(KEY_H))
+	ed._on_row("galaxy_map")
+	ed.capture_event(_key(KEY_H))
 	_ok(_keys_of("galaxy_map") == [KEY_H] and _keys_of("land") == [KEY_M], "conflict swaps: galaxy_map=H, land=M")
 	# cancel with Esc
-	st._begin_capture("hyperjump", "keys", st.rebind_buttons["hyperjump"].key)
-	st.capture_event(_key(KEY_ESCAPE))
+	ed._on_row("hyperjump")
+	ed.capture_event(_key(KEY_ESCAPE))
 	_ok(_keys_of("hyperjump") == [KEY_J], "Esc cancels a capture")
 	# pad button
-	st._begin_capture("fire_primary", "buttons", st.rebind_buttons["fire_primary"].pad)
+	ed.set_tab(1)
+	ed._on_row("fire_primary")
 	var jb := InputEventJoypadButton.new()
 	jb.button_index = JOY_BUTTON_RIGHT_SHOULDER
 	jb.pressed = true
-	st.capture_event(jb)
+	ed.capture_event(jb)
 	var padbtns := []
 	for e in InputMap.action_get_events("fire_primary"):
 		if e is InputEventJoypadButton:
 			padbtns.append(e.button_index)
 	_ok(padbtns == [JOY_BUTTON_RIGHT_SHOULDER], "pad rebind lands in InputMap (RB)")
-	_ok(st.rebind_buttons["fire_primary"].pad.text == "Pad: RB", "row text refreshed: " + st.rebind_buttons["fire_primary"].pad.text)
+	_ok(ed.chip_text("fire_primary") == "RB", "row chip refreshed: " + ed.chip_text("fire_primary"))
+	ed.close()
+	await process_frame
 
 	# --- persist + reload --------------------------------------------------------------
 	st.close()

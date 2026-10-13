@@ -4,25 +4,22 @@ import SwiftUI
 /// "units" (1u = a standard key), so every preset scales to whatever space the
 /// editor has.
 enum KeyboardSize: String, Codable, CaseIterable, Identifiable {
-    case full, tkl, seventyFive, sixtyFive, sixty, macLaptop
+    case full, tenkeyless, compact
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .full: return "Full (100%)"
-        case .tkl: return "TKL (80%)"
-        case .seventyFive: return "75%"
-        case .sixtyFive: return "65%"
-        case .sixty: return "60%"
-        case .macLaptop: return "Mac laptop"
+        case .full: return "Full"
+        case .tenkeyless: return "Tenkeyless"
+        case .compact: return "Compact"
         }
     }
 
-    /// Mac → its built-in layout, everywhere else a full-size board.
+    /// Compact (laptop-style) on a Mac, Full elsewhere.
     static var automatic: KeyboardSize {
         #if os(macOS)
-        return .macLaptop
+        return .compact
         #else
         return .full
         #endif
@@ -45,7 +42,6 @@ enum KeyLayer: String, CaseIterable, Identifiable {
 
 /// One physical key on the drawn board.
 struct KeyCap: Identifiable, Equatable {
-    enum Shape { case rect, isoEnter }
 
     let id: String
     /// The base `KeyToken` this key produces; empty = decorative (Print Screen,
@@ -53,7 +49,6 @@ struct KeyCap: Identifiable, Equatable {
     let token: String
     let legend: String
     var frame: CGRect
-    var shape: Shape = .rect
 
     var isBindable: Bool { !token.isEmpty }
 
@@ -146,10 +141,10 @@ enum KeyboardLayouts {
         var width: CGFloat = 0, height: CGFloat = 0
 
         mutating func add(_ token: String, _ legend: String?, x: CGFloat, y: CGFloat, w: CGFloat = 1,
-                          h: CGFloat = 1, shape: KeyCap.Shape = .rect) {
+                          h: CGFloat = 1) {
             keys.append(KeyCap(id: "k\(keys.count)", token: token,
                                legend: legend ?? KeyboardLayouts.legend(for: token),
-                               frame: CGRect(x: x, y: y, width: w, height: h), shape: shape))
+                               frame: CGRect(x: x, y: y, width: w, height: h)))
             width = max(width, x + w); height = max(height, y + h)
         }
 
@@ -186,19 +181,10 @@ enum KeyboardLayouts {
               + [k("delete", 2)], x: x, y: y)
     }
 
-    private static func mainRows(_ b: inout Builder, x: CGFloat, y: CGFloat, iso: Bool, rightShift: CGFloat = 2.75) {
-        // Tab row; the ISO Enter hangs down from here.
-        let tabEnd = b.row([k("tab", 1.5)] + (letters1 + ["[", "]"]).map { k($0) }
-                           + (iso ? [] : [k("\\", 1.5)]), x: x, y: y)
-        if iso {
-            b.add("return", "return", x: tabEnd, y: y, w: 1.5, h: 2, shape: .isoEnter)
-        }
-        // Home row.
-        b.row([k("capslock", 1.75)] + (letters2 + [";", "'"]).map { k($0) }
-                            + (iso ? [k("\\")] : [k("return", 2.25)]), x: x, y: y + 1)
-        // Shift row.
-        b.row([k("shift", iso ? 1.25 : 2.25)] + (iso ? [k("§")] : [])
-              + (letters3 + [",", ".", "/"]).map { k($0) } + [k("shift", rightShift)], x: x, y: y + 2)
+    private static func mainRows(_ b: inout Builder, x: CGFloat, y: CGFloat) {
+        b.row([k("tab", 1.5)] + (letters1 + ["[", "]"]).map { k($0) } + [k("\\", 1.5)], x: x, y: y)
+        b.row([k("capslock", 1.75)] + (letters2 + [";", "'"]).map { k($0) } + [k("return", 2.25)], x: x, y: y + 1)
+        b.row([k("shift", 2.25)] + (letters3 + [",", ".", "/"]).map { k($0) } + [k("shift", 2.75)], x: x, y: y + 2)
     }
 
     private static func bottomRow(_ b: inout Builder, x: CGFloat, y: CGFloat) {
@@ -215,14 +201,14 @@ enum KeyboardLayouts {
 
     // MARK: Presets
 
-    static func layout(_ size: KeyboardSize, iso: Bool) -> KeyboardLayout {
+    static func layout(_ size: KeyboardSize) -> KeyboardLayout {
         var b = Builder()
         switch size {
-        case .full, .tkl:
+        case .full, .tenkeyless:
             functionRow(&b, x: 0, y: 0)
             b.row([d("prt"), d("scr"), d("pause")], x: 15.5, y: 0)
             numberRow(&b, x: 0, y: 1.5)
-            mainRows(&b, x: 0, y: 2.5, iso: iso)
+            mainRows(&b, x: 0, y: 2.5)
             bottomRow(&b, x: 0, y: 5.5)
             b.row([d("ins"), k(KeyboardLayouts.home), k(KeyboardLayouts.pageUp)], x: 15.5, y: 1.5)
             b.row([k(KeyboardLayouts.forwardDelete), k(KeyboardLayouts.end), k(KeyboardLayouts.pageDown)], x: 15.5, y: 2.5)
@@ -239,47 +225,19 @@ enum KeyboardLayouts {
                 b.add("", "0", x: 19, y: 5.5, w: 2)
                 b.add("", ".", x: 21, y: 5.5)
             }
-        case .seventyFive:
-            b.row([k("escape")] + (1...12).map { k(fKey($0)) } + [k(KeyboardLayouts.forwardDelete), d("ins")], x: 0, y: 0)
-            numberRow(&b, x: 0, y: 1.25)
-            mainRows(&b, x: 0, y: 2.25, iso: iso, rightShift: 1.75)
-            compactBottom(&b, y: 5.25)
-            navColumn(&b, y: 1.25)
-            b.add("up", nil, x: 14, y: 4.25)
-            b.add(end, nil, x: 15, y: 4.25)
-        case .sixtyFive:
-            numberRow(&b, x: 0, y: 0)
-            mainRows(&b, x: 0, y: 1, iso: iso, rightShift: 1.75)
-            compactBottom(&b, y: 4)
-            navColumn(&b, y: 0)
-            b.add("up", nil, x: 14, y: 3)
-            b.add(end, nil, x: 15, y: 3)
-        case .sixty:
-            numberRow(&b, x: 0, y: 0)
-            mainRows(&b, x: 0, y: 1, iso: iso)
-            bottomRow(&b, x: 0, y: 4)
-        case .macLaptop:
+        case .compact:
+            // Laptop style: half-height F-row, arrows squeezed into the bottom
+            // row (inverted T, half-height up/down), no nav cluster or numpad.
             b.row([k("escape", 1.5)] + (1...12).map { k(fKey($0)) } + [d("⏻", 1.5)], x: 0, y: 0, h: 0.65)
             numberRow(&b, x: 0, y: 0.75)
-            mainRows(&b, x: 0, y: 1.75, iso: iso)
+            mainRows(&b, x: 0, y: 1.75)
             b.row([d("fn"), k("control"), k("option"), k("command", 1.25), k("space", 5.5),
                    k("command", 1.25), k("option")], x: 0, y: 4.75)
-            // Inverted-T arrows with half-height up/down keys.
             b.add("left", nil, x: 12, y: 5.25, h: 0.5)
             b.add("up", nil, x: 13, y: 4.75, h: 0.5)
             b.add("down", nil, x: 13, y: 5.25, h: 0.5)
             b.add("right", nil, x: 14, y: 5.25, h: 0.5)
         }
         return KeyboardLayout(keys: b.keys, size: CGSize(width: b.width, height: b.height))
-    }
-
-    /// 65%/75% bottom row: modifiers, then the left/down/right arrows.
-    private static func compactBottom(_ b: inout Builder, y: CGFloat) {
-        b.row([k("control", 1.25), k("option", 1.25), k("command", 1.25), k("space", 6.25),
-               k("command"), k("option"), .gap(1), k("left"), k("down"), k("right")], x: 0, y: y)
-    }
-
-    private static func navColumn(_ b: inout Builder, y: CGFloat) {
-        for (i, t) in [pageUp, pageDown, home].enumerated() { b.add(t, nil, x: 15, y: y + CGFloat(i)) }
     }
 }

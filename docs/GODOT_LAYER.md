@@ -836,6 +836,63 @@ Godot loads plug-ins exactly like the Apple app; the rules are shared code.
 * `NOVA_PLUGIN_OFFLINE=1` stops the catalog from touching the network (CI, self-checks).
 * Check: `NOVA_PLUGIN_OFFLINE=1 NOVA_DATA_DIR=$PWD/data/base godot --headless --path godot -s res://tests/plugins_selfcheck.gd`.
 
+### Real plug-in verification (2026-10-13): `scripts/plugins-check.sh`
+
+`scripts/plugins-check.sh [filter]` stages each plug-in of `data/plugins/` in a scratch folder (symlinks only; `data/`, the user's pilots,
+prefs and `~/Library/Application Support/NovaSwift` are never touched; `Shields.zip` is unzipped to scratch) and runs
+`godot/tests/plugins_load_selfcheck.gd` headless, parameterised by env vars (`NOVA_PLUGINS_DIR`, `NOVA_PLUGCHECK_ENABLE`, ...). Per scenario:
+
+1. **Install/enable like the Plugins screen**: found through the plug-in folder rules, total conversions switched on with `set_enabled`,
+   optional sub-items (EVO Extras, rEV Optionals) via manual order; then `reload()`.
+2. **Parity with the shared Swift merge**: `novaswift-extract merged-counts <base> <plugdir> [ids]` (new subcommand, same
+   `discoverPlugins -> PluginSet.arrange -> GameLibrary.merge` the Apple app runs) prints per-type counts; Godot must match the total, all 39
+   type counts and the enabled set exactly.
+3. **Assets**: every PICT / cicn / snd / shïp / spöb / bööm / röid the plug-in supplies (everything, under a TC) decodes through the bridge;
+   shän overlay layers (shield / engine / lights / weapon / alt) are counted; title music and every dësc movie file resolve in the plug-in folders.
+4. **Pilot flow** (`PLUGCHECK_ALL=1`: every chär start): new pilot, make world, take off, draw flight frames (missing hull / stellar / rock /
+   starfield graphic or unplayable sound cue fails), land, open trade / outfitter / shipyard / bar / mission BBS through the real Spaceport
+   screen, launch, open the galaxy map, hyperjump. No SCRIPT ERROR / engine ERROR or WARNING that the no-plug-in run does not also print.
+5. **Phase 2, import**: each `*.zip` (and loose `.rez`) in `data/plugins` is installed through `NovaPlugins.import_from` and must reproduce the
+   folder scenario's counts.
+
+Results (all PASS after the fixes; "before" = first run of this harness on the tree as it was):
+
+| Plug-in | Before | After | Notes |
+|---|---|---|---|
+| ARPIA2 | counts OK; ship 464 flagged | PASS | 10109 resources; 84 shïp, 153 spöb, 138 PICT; `shïp 464` has no shän in the data (warn, same in Apple); `gasminer.mov`/`credits.mov` are only inside ARPIA2.zip, not in the unpacked folder |
+| Cold Fusion 1.0.1 | PASS | PASS | 8483; 96 stellar sprites, 204 PICT, 27 cicn |
+| Collision Damage | PASS | PASS | 8493 |
+| Dodge That | flow FAIL (2nd start has no hyperlink) | PASS | the 'Dodge That' start is a self-contained arena: jump is skipped with a warning |
+| EV Classic (TC) | music not found in the TC folder | PASS | 2135; TC's own Plug-Ins (AI Rocket Hack, Manual Flares) load; `Nova Music.mp3` now comes from the TC's Nova Files |
+| EV Override (TC) | music not found | PASS | 3454; also with EVO Facelift (+ FL Extras) placed in its Plug-Ins: 3602 / 3835 |
+| EVO Extras (with / without Facelift) | PASS | PASS | optional sub-items, loaded by enabling them (manual order) |
+| EVO Facelift 1.0.7 | PASS | PASS | 8534; 164 rlëD, engine/lights/weapon layers decode |
+| Femme Fatale (TC) | music not found | PASS | 3245 |
+| Polycon EV (TC) | music not found; 4 röid flagged | PASS | 4837; 41 shield layers; 4 röid types (135, 139, 142, 143) have no spïn 807/811/814/815 in the data (warn) |
+| Preambles & Walkthrough | n/a | PASS | docs only, loads nothing (== base 8476) |
+| The Frozen Heart (TC) | music / movies not found | PASS | 2754; its 43 dësc movies resolve in the TC's Nova Files |
+| rEV 1.1 (+ Optionals) | PASS | PASS | 8580 / 8642 |
+| Shields | PASS | PASS | 340 shän shield layers decode (`sprite_info(SHIELD, id)`); with ARPIA2: 341 |
+| import of each zip / .rez | every zip FAILED ("Couldn't open this file as a plug-in") when the target path had a `//` | PASS | see fixes |
+
+Fixes made for this:
+
+* **Bridge `Plugins.swift`**: `NovaPlugins.media_dirs()` (the selected TC's own `Plug-Ins` + `Nova Files`, else the enabled plug-ins' folders,
+  then the base data) and `desc_movie(id)`. `TitleMusic.locate` and `Movies.search_roots` use them, so a TC's `Nova Music.mp3` and the
+  plug-in `.mov` files are found where Apple's `musicTrackURL`/`videoURL(named:)` find them (plug-ins before Nova Files). Before, Godot only
+  looked under the base data folder, so every TC played the base music/none.
+* **Zip import**: the install folder is now standardised (`PluginRuntime.installDir`). ZIPFoundation refuses entries whose path does not
+  start with the normalised destination, so `NOVA_PLUGIN_HOME`/`set_install_dir` values containing `//` or `..` failed every zip install with a
+  misleading "unsupported archive" message.
+* **Shared `GameLibrary.bundles(forFolder:)`** (Apple behaviour change, intended): a game-folder style pack with no files of its own and no
+  `Nova Files/` but a `Plug-Ins/` folder (ARPIA2.zip: `Play ARPIA2.nplay`, `Plug-Ins/`, `Extra ARPIA2 add-ons/`, `Pilots/`) now treats `Plug-Ins/`
+  as the plug-in (loads by default, its `.mov` files are findable); the other subfolders stay opt-in. Before, everything in such a zip was an
+  opt-in sub-item and nothing loaded. Test: `PluginCompatTests.testGameFolderStylePackLoadsItsPlugInsFolder`. `swift test` (427 tests) and the macOS
+  `xcodebuild` (CODE_SIGNING_ALLOWED=NO) pass.
+* **StoryScreens**: a mission offer whose dësc names a movie plays it (before the text, or after the button when dësc Flags 0x0001), skippable,
+  needs ffmpeg (as `Movies.gd`); first sight starts the background conversion, like the race clips. Matches Apple `MissionBoardView`.
+* `FlightSprites.misses` / `GameAudio.missing_sounds` record absent art and undecodable sounds for the harness.
+
 
 ## Flight rendering (`godot/flight/`) -- Apple Classic parity pass
 

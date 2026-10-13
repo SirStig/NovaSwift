@@ -10,7 +10,7 @@
 #   Presentation -> Interface      Presentation preset, Interface Options, HUD & Interface
 #   Gameplay                       speed, auto-target, landing confirm, tutorial hints, flight training
 #   Enhancements                   the GameplayEnhancements catalog + Port Options
-#   Controls                       sticks, rebinding (inline: the Apple app's ControlsView sheet)
+#   Controls                       sticks, toggles, the full-window Controls Editor
 #   Video -> Graphics              quality, camera, particles ... + Window
 #   Audio                          mute + the four volume sliders
 #   Accessibility                  reduce flashing & motion, colourblind mode
@@ -31,9 +31,9 @@
 # The original Preferences window (DLOG 4003, screens/ClassicPreferences.gd) opens only from the
 # button in the Presentation section -- it never replaces this screen.
 #
-# Controls page: every rebindable action from Controls.BINDINGS with its key and pad button.
-# Activate either to rebind: the next key (or pad button) pressed is captured, Esc cancels (a pad
-# press that is not wanted times out after 6 s). A binding already held by another action in the
+# Controls page: sticks / toggles, then "Open Controls Editor" -> screens/controls_editor (a visual
+# keyboard + controller over Controls.BINDINGS). There the next key (or pad button) pressed is
+# captured, Esc cancels (an unanswered capture times out after 6 s). A binding already held by another action in the
 # same group is swapped onto it (PadBindings.bind). Re-applied immediately (Controls.register());
 # written to user://settings.cfg when the screen closes.
 extends CanvasLayer
@@ -44,6 +44,7 @@ const Chrome = preload("res://ui/novaswift/NovaChrome.gd")
 const Alert = preload("res://ui/novaswift/NovaAlert.gd")
 const Inert = preload("res://ui/novaswift/NovaInert.gd")
 const Controls = preload("res://Controls.gd")
+const ControlsEditor = preload("res://screens/controls_editor/ControlsEditor.gd")
 const Prefs = preload("res://Prefs.gd")
 const PilotFiles = preload("res://screens/PilotFiles.gd")
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
@@ -59,7 +60,6 @@ signal training_requested
 ## Settings and opens the data-setup screen.
 signal data_setup_requested
 
-const CAPTURE_TIMEOUT := 6.0
 ## Page keys in sidebar order (Apple SettingsView category order), and what the sidebar calls them.
 const PAGES := ["Presentation", "Gameplay", "Enhancements", "Controls", "Video", "Audio", "Accessibility", "Support"]
 const PAGE_TITLES := {"Presentation": "Interface", "Gameplay": "Gameplay", "Enhancements": "Enhancements",
@@ -73,7 +73,7 @@ const AMBER := T.AMBER
 var page := "Presentation"
 var tab_buttons := {}          # page name -> Button (the sidebar entries)
 var sliders := {}              # "section.key" -> HSlider
-var rebind_buttons := {}       # action -> {"key": Button, "pad": Button}
+var controls_editor: Node      # the visual Controls Editor while it is open
 var first_control: Control
 ## Set by the host before setup(): Settings was opened from the main menu, so Flight Training can run.
 var allow_training := false
@@ -89,8 +89,6 @@ var _group: NC.Group           # the section group rows are added to
 var _status: Label
 var _scroll: ScrollContainer
 var _reset_all_btn: Button
-var _capture := {}             # {action, field, button} while waiting for an input
-var _capture_serial := 0
 var _dirty := false
 var _pl: Object                # NovaPlugins handle (the Manual plug-in order enhancement)
 
@@ -173,7 +171,6 @@ func _exit_tree() -> void:
 
 
 func close() -> void:
-	_cancel_capture()
 	if _dirty:
 		Prefs.save()
 		_dirty = false
@@ -194,7 +191,6 @@ func _on_tab_focus(p: String) -> void:
 
 
 func show_page(p: String) -> void:
-	_cancel_capture()
 	page = p
 	for tab in tab_buttons:
 		tab_buttons[tab].set_pressed_no_signal(tab == p)
@@ -202,7 +198,6 @@ func show_page(p: String) -> void:
 		_content.remove_child(c)
 		c.queue_free()
 	sliders.clear()
-	rebind_buttons.clear()
 	todo_rows.clear()
 	_status.text = ""
 	first_control = null
@@ -545,13 +540,8 @@ func _build_controls() -> void:
 	_check("Aim toward mouse cursor", "input", "mouse_aiming")
 	var modern := _check("Modern key layout (the port's earlier keys)", "input", "modern_keys")
 	modern.toggled.connect(func(_on: bool): _rebuild())
-	var first := true
-	for group in Controls.GROUPS:
-		_section("Keyboard & Controller Bindings — " + group if first else group,
-			"Activate a key or pad button to rebind it (Esc cancels)." if first else "", "keyboard" if first else "")
-		first = false
-		for action in Controls.GROUPS[group]:
-			_rebind_row(_group, action)
+	_section("Key & Button Bindings", "A visual editor: a rendered keyboard (Full, Tenkeyless or Compact) and a controller (Xbox, PlayStation, Switch Pro or Steam Deck). Pick a key or button to see and change what it does, or pick an action and press the key or button you want.", "keyboard")
+	_button("Open Controls Editor", open_controls_editor, "keyboard")
 	_section("")
 	_button("Reset Controls to Defaults", func():
 		Prefs.reset_section("input")
@@ -561,50 +551,24 @@ func _build_controls() -> void:
 		show_page("Controls"), "arrow.counterclockwise")
 
 
-func _rebind_row(list: NC.Group, action: String) -> void:
-	var r := HBoxContainer.new()
-	r.add_theme_constant_override("separation", 8)
-	var l := NC.label(r, str(Controls.ACTION_LABELS.get(action, action)), "body")
-	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var kb := NC.button("", "bordered")
-	kb.custom_minimum_size = Vector2(170, 30)
-	kb.pressed.connect(_begin_capture.bind(action, _key_field(action), kb))
-	r.add_child(kb)
-	var pb := NC.button("", "bordered")
-	pb.custom_minimum_size = Vector2(130, 30)
-	pb.pressed.connect(_begin_capture.bind(action, "buttons", pb))
-	r.add_child(pb)
-	list.add_row(r)
-	rebind_buttons[action] = {"key": kb, "pad": pb}
-	_note_first(kb)
-	_refresh_row(action)
-
-
-static func _key_field(action: String) -> String:
-	# Which key field this row edits: the one the action is bound through right now
-	# (so the layout switch, which moves some actions between plain and chord keys,
-	# edits the field the player sees), else the one it is declared with.
-	var spec: Dictionary = Controls.effective(action)
-	for f in ["keys", "shift_keys", "alt_keys"]:
-		if not (spec.get(f, []) as Array).is_empty():
-			return f
-	var base: Dictionary = Controls.BINDINGS[action]
-	if base.has("keys"):
-		return "keys"
-	return "shift_keys" if base.has("shift_keys") else ("alt_keys" if base.has("alt_keys") else "keys")
-
-
-func _refresh_row(action: String) -> void:
-	var row: Dictionary = rebind_buttons.get(action, {})
-	if row.is_empty():
-		return
-	row.key.text = "Key: " + Controls.describe_keys(action)
-	row.pad.text = "Pad: " + Controls.describe_buttons(action)
-
-
-func _refresh_all_rows() -> void:
-	for action in rebind_buttons:
-		_refresh_row(action)
+## Opens the full-window Controls Editor over Settings (hidden meanwhile); returns it.
+func open_controls_editor() -> Node:
+	if controls_editor != null and is_instance_valid(controls_editor):
+		return controls_editor
+	var ed: Node = ControlsEditor.new()
+	controls_editor = ed
+	_root.visible = false
+	ed.closed.connect(func():
+		controls_editor = null
+		if is_instance_valid(_root):
+			_root.visible = true
+		_dirty = true
+		changed.emit()
+		if page == "Controls":
+			show_page("Controls"))
+	add_child(ed)
+	ed.setup()
+	return ed
 
 
 # --- Graphics ------------------------------------------------------------------------
@@ -757,77 +721,6 @@ func _reset_all() -> void:
 	changed.emit()
 	show_page(page)
 	_status.text = "All settings restored to their defaults."
-
-
-# --- rebinding -----------------------------------------------------------------
-
-func _begin_capture(action: String, field: String, button: Button) -> void:
-	_cancel_capture()
-	_capture = {"action": action, "field": field, "button": button}
-	_capture_serial += 1
-	button.text = "Press a key…" if field != "buttons" else "Press a pad button…"
-	_status.text = "Waiting for input — Esc cancels."
-	var serial := _capture_serial
-	get_tree().create_timer(CAPTURE_TIMEOUT).timeout.connect(func():
-		if _capture_serial == serial and not _capture.is_empty():
-			_cancel_capture())
-
-
-func _cancel_capture() -> void:
-	if _capture.is_empty():
-		return
-	var action: String = _capture.action
-	_capture = {}
-	_status.text = ""
-	_refresh_row(action)
-
-
-## Feed an event to the capture. Public so a test can drive it (parse_input_event
-## is not delivered headless). Returns true if the event was consumed.
-func capture_event(event: InputEvent) -> bool:
-	if _capture.is_empty():
-		return false
-	var field: String = _capture.field
-	var code := -1
-	if field == "buttons":
-		if event is InputEventKey and event.pressed and event.physical_keycode == KEY_ESCAPE:
-			_cancel_capture()
-			return true
-		if event is InputEventJoypadButton and event.pressed:
-			code = event.button_index
-	elif event is InputEventKey and event.pressed and not event.echo:
-		if event.physical_keycode == KEY_ESCAPE:
-			_cancel_capture()
-			return true
-		code = event.physical_keycode
-	if code < 0:
-		return false
-	_apply_rebind(_capture.action, field, code)
-	return true
-
-
-func _apply_rebind(action: String, field: String, code: int) -> void:
-	_capture = {}
-	var swapped := Controls.rebind(action, field, code)
-	Controls.register()
-	_dirty = true
-	_refresh_all_rows()
-	if swapped != "":
-		_status.text = "Swapped with \"%s\"." % Controls.ACTION_LABELS.get(swapped, swapped)
-	else:
-		_status.text = ""
-	changed.emit()
-
-
-func _input(event: InputEvent) -> void:
-	if not _capture.is_empty() and (event is InputEventKey or event is InputEventJoypadButton):
-		if capture_event(event):
-			get_viewport().set_input_as_handled()
-		elif event is InputEventKey or event is InputEventJoypadButton:
-			# Anything else pressed while waiting is swallowed so it can't also
-			# navigate or activate the focused button.
-			if event.is_pressed():
-				get_viewport().set_input_as_handled()
 
 
 func _unhandled_input(event: InputEvent) -> void:

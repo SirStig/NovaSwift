@@ -20,6 +20,9 @@ struct ControllerTab: View {
     private var detected: PadStyle? { pad == nil ? nil : PadStyle.detect(GCController.current) }
     private var style: PadStyle { prefs.padStyle ?? detected ?? .xbox }
 
+    /// Flown with the left stick; never rebindable (thrust/reverse may also take a button).
+    static let stickActions: Set<GameAction> = [.turnLeft, .turnRight, .accelerate, .decelerate]
+
     var body: some View {
         EditorSplit {
             VStack(spacing: 8) {
@@ -43,6 +46,7 @@ struct ControllerTab: View {
                 guard let b = bindings.button(for: a) else { return nil }
                 return detected == style ? b.displayName(on: pad) : style.name(b)
             }, symbol: { a in bindings.button(for: a)?.symbolName(on: pad) },
+               fixedText: { a in Self.stickActions.contains(a) ? "Left stick" : nil },
                selected: capturing, hovered: $hoveredAction, conflicts: [],
                prompt: pad == nil ? "Click a control" : "Press a button…",
                onTap: onActionTap, onUnbind: onUnbind) {

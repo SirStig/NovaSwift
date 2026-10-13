@@ -35,7 +35,7 @@ struct EditorSplit<Device: View, Side: View>: View {
     }
 }
 
-/// The Keyboard tab: a drawn keyboard (size preset + ISO + modifier layer) next
+/// The Keyboard tab: a drawn keyboard (size preset + modifier layer) next
 /// to the shared action list.
 struct KeyboardTab: View {
     let keys: KeyBindings
@@ -51,7 +51,7 @@ struct KeyboardTab: View {
     let onUnbind: (GameAction) -> Void
 
     private var size: KeyboardSize { prefs.keyboardSize ?? .automatic }
-    private var layout: KeyboardLayout { KeyboardLayouts.layout(size, iso: prefs.iso) }
+    private var layout: KeyboardLayout { KeyboardLayouts.layout(size) }
 
     private var holders: [String: [GameAction]] {
         Dictionary(grouping: GameAction.allCases.filter { !keys.token(for: $0).isEmpty },
@@ -91,10 +91,6 @@ struct KeyboardTab: View {
             HStack(spacing: 12) {
                 NovaMenuPicker(title: "Size", selection: Binding(get: { size }, set: { prefs.keyboardSize = $0 }),
                                options: KeyboardSize.allCases) { $0.title }
-                CursorButton { prefs.iso.toggle() } label: {
-                    EditorChip(text: "ISO", highlighted: prefs.iso)
-                }
-                .accessibilityLabel("ISO layout")
             }
             NovaSegmentedPicker(selection: $layer, options: KeyLayer.allCases) { $0.rawValue }
         }

@@ -388,7 +388,8 @@ final class GameDataController: ObservableObject {
         let inMemory = Set(pluginsAreManual ? plugins.filter(\.isEnabled).map(\.id) : [])
         plugins = PluginSet.arrange(discovered: discovered,
                                     persisted: persisted.map { PluginEnableState(id: $0.id, isEnabled: $0.isEnabled) },
-                                    inMemoryEnabled: inMemory, manual: manualPluginOrder)
+                                    inMemoryEnabled: inMemory, manual: manualPluginOrder,
+                                    tcAddOns: tcAddOnLists)
         pluginsAreManual = manualPluginOrder
         Log.data.debug("reload: \(self.plugins.count, privacy: .public) plug-in(s) discovered, \(self.plugins.filter(\.isEnabled).count, privacy: .public) enabled")
 
@@ -508,6 +509,45 @@ final class GameDataController: ObservableObject {
         guard PluginSet.setEnabled(&plugins, id: id, enabled: enabled, manual: manualPluginOrder) else { return }
         Self.savePluginState(plugins)
         reload()
+    }
+
+    // MARK: Per-total-conversion add-on lists (`TCAddOns`)
+
+    /// The plug-ins the player put on each total conversion (an enhancement: the original needs the
+    /// files copied into the conversion's own Plug-Ins folder). Same JSON as Godot's `tcAddOns`.
+    @Published private(set) var tcAddOnLists: TCAddOns.Lists = GameDataController.loadTCAddOnLists()
+    private static let tcAddOnsKey = "com.novaswift.plugins.tcaddons.v1"
+
+    private static func loadTCAddOnLists() -> TCAddOns.Lists {
+        guard let data = UserDefaults.standard.data(forKey: tcAddOnsKey),
+              let l = try? JSONDecoder().decode(TCAddOns.Lists.self, from: data) else { return [:] }
+        return l
+    }
+
+    private func commitTCAddOns(_ changed: Bool) {
+        guard changed else { return }
+        if let data = try? JSONEncoder().encode(tcAddOnLists) { UserDefaults.standard.set(data, forKey: Self.tcAddOnsKey) }
+        TCAddOns.apply(tcAddOnLists, to: &plugins)
+        reload()
+    }
+    func addOnAdd(tc: String, id: String) { var l = tcAddOnLists; let c = TCAddOns.add(&l, tc: tc, id: id); tcAddOnLists = l; commitTCAddOns(c) }
+    func addOnRemove(tc: String, id: String) { var l = tcAddOnLists; let c = TCAddOns.remove(&l, tc: tc, id: id); tcAddOnLists = l; commitTCAddOns(c) }
+    func addOnSetEnabled(tc: String, id: String, enabled: Bool) {
+        var l = tcAddOnLists; let c = TCAddOns.setEnabled(&l, tc: tc, id: id, enabled: enabled); tcAddOnLists = l; commitTCAddOns(c)
+    }
+    func addOnMove(tc: String, id: String, by offset: Int) {
+        var l = tcAddOnLists; let c = TCAddOns.move(&l, tc: tc, id: id, by: offset); tcAddOnLists = l; commitTCAddOns(c)
+    }
+
+    /// Where loose media (music, `dësc` movies, fonts) is looked up: the selected conversion's own
+    /// folders (+ its add-ons), else the enabled plug-ins' and every installed plug-in folder, then
+    /// the base data. "Nova Plug-ins" before "Nova Files", as the original.
+    func mediaDirectories() -> TCAddOns.MediaDirectories {
+        var m = TCAddOns.mediaDirectories(plugins: plugins, baseDir: resolveBaseDir())
+        if TCAddOns.selectedTC(plugins) == nil {
+            for d in resolvePluginDirs() where !m.plugIns.contains(d.standardizedFileURL) { m.plugIns.append(d.standardizedFileURL) }
+        }
+        return m
     }
 
     /// Moves the plug-in at `id` `offset` places within the load-order list
@@ -634,8 +674,8 @@ final class GameDataController: ObservableObject {
     func musicTrackURL() -> URL? {
         guard let name = game?.stringList(130)?.string(at: 2), !name.isEmpty else { return nil }
         let fm = FileManager.default
-        let baseDirs: [URL] = resolveBaseDir().map { [$0.appendingPathComponent("Nova Files"), $0] } ?? []
-        let folders: [String: [URL]] = ["Nova Plug-ins": resolvePluginDirs(), "Nova Files": baseDirs]
+        let media = mediaDirectories()
+        let folders: [String: [URL]] = ["Nova Plug-ins": media.plugIns, "Nova Files": media.novaFiles]
         for candidate in OriginalAudio.musicCandidates(name: name) {
             for dir in folders[candidate.folder] ?? [] {
                 let direct = dir.appendingPathComponent(candidate.file)
@@ -670,20 +710,6 @@ final class GameDataController: ObservableObject {
         // "QuickTime Movies" preference being off.
         guard GameSettings.load().playMovies else { return nil }
         // Ui_PlayMovieFileModal (0x0049db00): "Nova Plug-ins" first, then "Nova Files".
-        let dirs = (resolvePluginDirs() + [resolveBaseDir()]).compactMap { $0 }
-        let fm = FileManager.default
-        for dir in dirs {   // flat, case-insensitive
-            if let names = try? fm.contentsOfDirectory(atPath: dir.path),
-               let hit = names.first(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) {
-                return dir.appendingPathComponent(hit)
-            }
-        }
-        for dir in dirs {   // nested folders (enhancement over the flat original)
-            guard let e = fm.enumerator(at: dir, includingPropertiesForKeys: nil) else { continue }
-            if let hit = e.compactMap({ $0 as? URL }).first(where: { $0.lastPathComponent.caseInsensitiveCompare(name) == .orderedSame }) {
-                return hit
-            }
-        }
-        return nil
+        return TCAddOns.findMedia(named: name, in: mediaDirectories())
     }
 }

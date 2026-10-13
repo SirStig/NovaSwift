@@ -236,7 +236,7 @@ struct ControlsView: View {
     /// to that key; otherwise it arms capture for the next key press.
     private func keyActionTapped(_ action: GameAction) {
         if let id = selectedKey,
-           let cap = KeyboardLayouts.layout(prefs.keyboardSize ?? .automatic, iso: prefs.iso).keys.first(where: { $0.id == id }) {
+           let cap = KeyboardLayouts.layout(prefs.keyboardSize ?? .automatic).keys.first(where: { $0.id == id }) {
             assignKey(cap, to: action)
             selectedKey = nil
             return
@@ -294,6 +294,8 @@ struct ControlsView: View {
     /// A row picked in the list: with a pad button selected on the art it
     /// binds to that button; otherwise it arms capture.
     private func padActionTapped(_ action: GameAction) {
+        // Turning is the (fixed) left stick; nothing to bind.
+        if action == .turnLeft || action == .turnRight { return }
         if let button = selectedPad {
             model.padBindings.rebind(action, to: button)
             model.commitPadBindings()

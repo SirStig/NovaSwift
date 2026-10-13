@@ -1,7 +1,7 @@
 # NOVA Swift — Controls Editor (Godot): the visual replacement for Settings -> Controls' per-action
 # rebind rows (docs/CONTROLS_EDITOR.md). A NovaSwift settings screen, not an original dialog.
 #
-#   Keyboard tab    a rendered keyboard (Full / TKL / 75% / 65% / 60% / Mac laptop, ISO toggle) with a
+#   Keyboard tab    a rendered keyboard (Full / Tenkeyless / Compact) with a
 #                   Base · Shift · Alt layer selector; bound keys are tinted by action category.
 #   Controller tab  a procedurally drawn pad (Xbox / PlayStation / Switch Pro / Steam Deck) with
 #                   callout labels; pressing a physical button lights it on the art.
@@ -35,7 +35,7 @@ const AMBER := T.AMBER
 
 var tab := 0                        # 0 keyboard, 1 controller
 var group := "Flight"
-var layer := 0                      # index into Model.LAYERS
+var kb_layer := 0                      # index into Model.LAYERS
 var rows: Dictionary = {}           # action -> Button
 var kb: Control
 var pad: Control
@@ -50,7 +50,6 @@ var _layer_seg: HBoxContainer
 var _opts_kb: Control
 var _opts_pad: Control
 var _preset_opt: OptionButton
-var _iso_chip: Button
 var _style_opt: OptionButton
 var _kb_box: Control
 var _strip: VBoxContainer
@@ -60,7 +59,9 @@ var _bar_label: Label
 var _assign_opt: OptionButton
 var _unbind_btn: Button
 var _status: Label
-var _list: VBoxContainer
+var _list: HFlowContainer
+var _body: BoxContainer
+var _right: PanelContainer
 var _search := ""
 var _capture_serial := 0
 var _bar_actions: Array = []
@@ -114,8 +115,11 @@ func _build() -> void:
 	var opts := HBoxContainer.new()
 	opts.add_theme_constant_override("separation", 12)
 	main.add_child(opts)
-	NC.label(opts, "Context", "caption", "semibold", T.SECONDARY)
-	_group_seg = NC.segmented(opts, Model.GROUP_NAMES, 0, _on_group)
+	var ctx := HBoxContainer.new()
+	ctx.add_theme_constant_override("separation", 10)
+	opts.add_child(ctx)
+	_opt_label(ctx, "Context")
+	_group_seg = NC.segmented(ctx, Model.GROUP_NAMES, 0, _on_group)
 	_group_seg.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_group_seg.custom_minimum_size = Vector2(300, 0)
 	var vsep := ColorRect.new()
@@ -125,21 +129,17 @@ func _build() -> void:
 	_opts_kb = HBoxContainer.new()
 	_opts_kb.add_theme_constant_override("separation", 10)
 	opts.add_child(_opts_kb)
-	NC.label(_opts_kb, "Layer", "caption", "semibold", T.SECONDARY)
+	_opt_label(_opts_kb, "Layer")
 	_layer_seg = NC.segmented(_opts_kb, ["Base", "Shift", "Alt"], 0, _on_layer)
 	_layer_seg.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_layer_seg.custom_minimum_size = Vector2(210, 0)
-	NC.label(_opts_kb, "Size", "caption", "semibold", T.SECONDARY)
-	var preset_names: Array = ["Auto (%s)" % Model.PRESET_NAMES[Model.PRESETS.find(_auto_preset())]]
-	preset_names.append_array(Model.PRESET_NAMES)
-	var cur_p := str(Prefs.get_value("input", "ctl_preset"))
-	_preset_opt = NC.option_chip(preset_names, Model.PRESETS.find(cur_p) + 1 if cur_p in Model.PRESETS else 0, _on_preset)
+	_opt_label(_opts_kb, "Size")
+	_preset_opt = NC.option_chip(Model.PRESET_NAMES, Model.PRESETS.find(Model.preset()), _on_preset)
 	_opts_kb.add_child(_preset_opt)
-	_iso_chip = NC.chip(_opts_kb, "ISO", Model.iso(), _on_iso)
 	_opts_pad = HBoxContainer.new()
 	_opts_pad.add_theme_constant_override("separation", 10)
 	opts.add_child(_opts_pad)
-	NC.label(_opts_pad, "Style", "caption", "semibold", T.SECONDARY)
+	_opt_label(_opts_pad, "Style")
 	var style_names: Array = ["Auto (%s)" % Model.PAD_STYLE_NAMES[Model.PAD_STYLES.find(Model.detect_pad_style())]]
 	style_names.append_array(Model.PAD_STYLE_NAMES)
 	var cur_s := str(Prefs.get_value("input", "ctl_pad_style"))
@@ -147,13 +147,15 @@ func _build() -> void:
 	_opts_pad.add_child(_style_opt)
 
 	# body: device column + action list
-	var body := HBoxContainer.new()
-	body.add_theme_constant_override("separation", 14)
+	_body = BoxContainer.new()
+	var body := _body
+	body.add_theme_constant_override("separation", 12)
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	main.add_child(body)
 	var left := VBoxContainer.new()
 	left.add_theme_constant_override("separation", 8)
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	body.add_child(left)
 	var holder := PanelContainer.new()
 	holder.add_theme_stylebox_override("panel", T.box(Color(0.075, 0.08, 0.095), 18, Color(1, 1, 1, 0.08), 1, Vector2(6, 6)))
@@ -208,10 +210,13 @@ func _build() -> void:
 		h.add_child(sw)
 		NC.label(h, str(Model.CATEGORIES[cid][0]), "caption", "regular", T.SECONDARY)
 		legend.add_child(h)
-	_status = NC.label(left, "", "caption", "regular", Color(1.0, 0.75, 0.4), true)
+	_status = NC.label(legend, "", "caption", "regular", Color(1.0, 0.75, 0.4))
+	_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_status.clip_text = true
 
 	var right := PanelContainer.new()
-	right.custom_minimum_size = Vector2(340, 0)
+	_right = right
 	right.add_theme_stylebox_override("panel", T.box(Color(1, 1, 1, 0.04), 14, Color(1, 1, 1, 0.08), 1, Vector2(10, 10)))
 	body.add_child(right)
 	var rv := VBoxContainer.new()
@@ -223,18 +228,25 @@ func _build() -> void:
 	scroll.follow_focus = true
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	rv.add_child(scroll)
-	_list = VBoxContainer.new()
+	_list = HFlowContainer.new()
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_list.add_theme_constant_override("separation", 3)
+	_list.add_theme_constant_override("h_separation", 18)
+	_list.add_theme_constant_override("v_separation", 10)
 	scroll.add_child(_list)
 
 	pad.set_style(Model.pad_style())
-	kb.set_layout(Model.preset(), Model.iso())
+	kb.set_layout(Model.preset())
 	_apply_tab()
 
 
-static func _auto_preset() -> String:
-	return "mac" if OS.get_name() == "macOS" else "full"
+## A caption label that keeps its natural width (never squeezed by a neighbouring segmented control).
+static func _opt_label(parent: Node, text: String) -> Label:
+	var l := NC.label(parent, text, "caption", "semibold", T.SECONDARY)
+	l.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var w := T.font("caption", "semibold").get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, T.size_of("caption")).x
+	l.custom_minimum_size = Vector2(ceilf(w) + 4.0, 0)
+	return l
 
 
 # --- public (tests / Settings) -------------------------------------------------------------------
@@ -263,8 +275,8 @@ func set_group(g: String) -> void:
 	_refresh_all()
 
 
-func set_layer(i: int) -> void:
-	layer = i
+func set_kb_layer(i: int) -> void:
+	kb_layer = i
 	NC.segmented_select(_layer_seg, i)
 	if armed:
 		_arm(sel_action)
@@ -273,14 +285,25 @@ func set_layer(i: int) -> void:
 
 
 func current_field() -> String:
-	return "buttons" if tab == 1 else str(Model.LAYER_FIELDS[layer])
+	return "buttons" if tab == 1 else str(Model.LAYER_FIELDS[kb_layer])
+
+
+## True when the pad chip shows only fixed analog roles (sticks / triggers), which can't be rebound.
+func chip_fixed_only(action: String) -> bool:
+	var spec := Controls.effective(action)
+	return tab == 1 and (spec.get("buttons", []) as Array).is_empty() and not (spec.get("axes", []) as Array).is_empty()
 
 
 func chip_text(action: String) -> String:
 	if tab == 1:
 		var parts: Array[String] = []
-		for b in Controls.effective(action).get("buttons", []):
+		var spec1 := Controls.effective(action)
+		for b in spec1.get("buttons", []):
 			parts.append(Art.button_name(pad.style, int(b)))
+		for ap in spec1.get("axes", []):
+			var nm := Art.axis_name(pad.style, int(ap[0]), float(ap[1]))
+			if nm != "" and not parts.has(nm):
+				parts.append(nm)
 		return " / ".join(parts) if not parts.is_empty() else "-"
 	var spec := Controls.effective(action)
 	var ps: Array[String] = []
@@ -309,6 +332,9 @@ func _apply_tab() -> void:
 	_opts_kb.visible = tab == 0
 	_opts_pad.visible = tab == 1
 	_strip.visible = false
+	# The action list sits to the right on both tabs (a strip under the board left too few rows visible).
+	_body.vertical = false
+	_right.custom_minimum_size = Vector2(380, 0)
 	if tab == 1:
 		pad.set_group(group)
 
@@ -323,7 +349,7 @@ func _on_group(i: int) -> void:
 
 
 func _on_layer(i: int) -> void:
-	layer = i
+	kb_layer = i
 	if armed:
 		_arm(sel_action)
 	sel_input = null
@@ -331,14 +357,8 @@ func _on_layer(i: int) -> void:
 
 
 func _on_preset(i: int) -> void:
-	Prefs.set_value("input", "ctl_preset", "auto" if i == 0 else Model.PRESETS[i - 1])
-	kb.set_layout(Model.preset(), Model.iso())
-	_refresh_all()
-
-
-func _on_iso() -> void:
-	Prefs.set_value("input", "ctl_iso", _iso_chip.button_pressed)
-	kb.set_layout(Model.preset(), Model.iso())
+	Prefs.set_value("input", "ctl_preset", Model.PRESETS[i])
+	kb.set_layout(Model.preset())
 	_refresh_all()
 
 
@@ -374,10 +394,13 @@ func _build_list() -> void:
 	for cid in Model.CATEGORY_ORDER:
 		if not by_cat.has(cid):
 			continue
-		var hdr := NC.label(_list, str(Model.CATEGORIES[cid][0]).to_upper(), "caption", "bold", Model.CATEGORIES[cid][1])
-		hdr.add_theme_constant_override("line_spacing", 0)
+		var block := VBoxContainer.new()
+		block.add_theme_constant_override("separation", 3)
+		block.custom_minimum_size = Vector2(300, 0)
+		_list.add_child(block)
+		NC.label(block, str(Model.CATEGORIES[cid][0]).to_upper(), "caption", "bold", Model.CATEGORIES[cid][1])
 		for action in by_cat[cid]:
-			_list.add_child(_make_row(str(action)))
+			block.add_child(_make_row(str(action)))
 
 
 func _make_row(action: String) -> Button:
@@ -391,9 +414,11 @@ func _make_row(action: String) -> Button:
 	T.style_text(b, "body", "regular", T.WHITE, 14)
 	var chip := Label.new()
 	chip.name = "Chip"
-	chip.set_anchors_preset(Control.PRESET_FULL_RECT)
-	chip.offset_right = -10
-	chip.offset_left = 150
+	chip.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
+	chip.offset_left = -124
+	chip.offset_right = -8
+	chip.offset_top = 0
+	chip.offset_bottom = 0
 	chip.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	chip.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -429,6 +454,7 @@ func _style_row(action: String) -> void:
 		sb.border_width_left = 4
 		sb.border_color = border if not selected else AMBER
 		sb.content_margin_left = 14
+		sb.content_margin_right = 124
 		return sb
 	b.add_theme_stylebox_override("normal", mk.call(bg))
 	b.add_theme_stylebox_override("hover", mk.call(Color(1, 1, 1, 0.13)))
@@ -443,7 +469,10 @@ func _style_row(action: String) -> void:
 		b.add_theme_color_override(st, fc)
 	var chip: Label = b.get_node("Chip")
 	chip.text = ("Press a key..." if tab == 0 else "Press a button...") if (selected and armed) else chip_text(action)
-	chip.add_theme_color_override("font_color", AMBER if (selected and armed) else (T.RED if conflict else (Color(1, 1, 1, 0.35) if not bound else Color(1, 1, 1, 0.85))))
+	var chip_col := Color(1, 1, 1, 0.35) if not bound else Color(1, 1, 1, 0.85)
+	if chip_fixed_only(action):
+		chip_col = Color(1, 1, 1, 0.42)
+	chip.add_theme_color_override("font_color", AMBER if (selected and armed) else (T.RED if conflict else chip_col))
 
 
 # --- selection / capture (action first) -----------------------------------------------------------
@@ -456,8 +485,8 @@ func _on_row(action: String) -> void:
 		return
 	if tab == 0:
 		var f := Model.field_of(action)
-		layer = Model.layer_of_field(f)
-		NC.segmented_select(_layer_seg, layer)
+		kb_layer = Model.layer_of_field(f)
+		NC.segmented_select(_layer_seg, kb_layer)
 	sel_input = null
 	_arm(action)
 	_refresh_all()
@@ -599,8 +628,8 @@ func _update_bar() -> void:
 		_bar_actions = []
 		return
 	var nm: String = Model.key_name(int(sel_input)) if tab == 0 else Art.button_name(pad.style, int(sel_input))
-	if tab == 0 and layer > 0:
-		nm = Model.LAYERS[layer] + "+" + nm
+	if tab == 0 and kb_layer > 0:
+		nm = Model.LAYERS[kb_layer] + "+" + nm
 	var acts := _acts_on(sel_input)
 	var names: Array = []
 	for a in acts:
@@ -693,8 +722,8 @@ func _refresh_all() -> void:
 		_build_list()
 	_restyle_rows()
 	# keyboard art
-	var km := Model.key_map(group, str(Model.LAYER_FIELDS[layer]))
-	var dots := Model.other_layer_codes(group, str(Model.LAYER_FIELDS[layer]))
+	var km := Model.key_map(group, str(Model.LAYER_FIELDS[kb_layer]))
+	var dots := Model.other_layer_codes(group, str(Model.LAYER_FIELDS[kb_layer]))
 	var info: Dictionary = {}
 	for code in km:
 		info[code] = {"acts": km[code], "tint": Model.cat_color(str(km[code][0])), "dot": dots.has(code)}
@@ -712,9 +741,9 @@ func _refresh_all() -> void:
 
 ## Actions of this group + layer bound to keys the chosen size does not draw.
 func off_keyboard() -> Array:
-	var have := Layouts.codes(Model.preset(), Model.iso())
+	var have := Layouts.codes(Model.preset())
 	var out: Array = []
-	var field := str(Model.LAYER_FIELDS[layer])
+	var field := str(Model.LAYER_FIELDS[kb_layer])
 	for action in Controls.GROUPS.get(group, []):
 		for c in Controls.effective(action).get(field, []):
 			if not have.has(int(c)):

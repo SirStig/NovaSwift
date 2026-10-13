@@ -269,6 +269,7 @@ final class EditorTestSession: ObservableObject {
         var opts = EditorHostOptions(systemID: systemID, shipID: shipID)
         opts.outfits = pilot.state.outfits
         opts.shipName = pilot.state.shipName
+        opts.prepareScene = { [weak self] scene in self?.installSpawnGates(on: scene) }
         if let pose { opts.position = pose.position; opts.angle = pose.angle; opts.velocity = pose.velocity }
         guard let newHost = GameHost.makeEditorHost(model: app, build: build, options: opts) else { return }
         let god = debug.godMode, fuel = debug.infiniteFuel, ai = debug.aiDebugEnabled
@@ -301,6 +302,15 @@ final class EditorTestSession: ObservableObject {
         scene.onPlayerDestroyed = { [weak self] in self?.playerDestroyed() }
         scene.onAutoLandArrived = { [weak self] id in self?.land(id) }
         scene.onMissionShipGoalReached = { [weak self] mid, goal, _ in self?.missionGoal(mid, goal) }
+        installSpawnGates(on: scene)
+        scene.isPaused = paused
+        nav.attachShip(scene.playerShip)
+        wireStoryCallbacks(host)
+    }
+
+    /// përs ActiveOn / shïp AppearOn gates against the sandbox pilot. Installed before the
+    /// host's first world is populated (`prepareScene`) and again in `wire`.
+    func installSpawnGates(on scene: GameScene) {
         scene.persSpawnEligible = { [weak self] id in
             guard let self, let game = self.game else { return true }
             guard let pers = game.pers(id), !pers.activeOn.isEmpty else { return true }
@@ -311,9 +321,6 @@ final class EditorTestSession: ObservableObject {
             guard let ship = game.ship(id), !ship.appearOn.isEmpty else { return true }
             return StoryEngine(game: game, player: self.pilot.state).evaluate(test: ship.appearOn)
         }
-        scene.isPaused = paused
-        nav.attachShip(scene.playerShip)
-        wireStoryCallbacks(host)
     }
 
     func applyPause() {

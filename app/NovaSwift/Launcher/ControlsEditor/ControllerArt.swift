@@ -118,11 +118,13 @@ struct PadDecor: Identifiable {
     enum Kind { case circle, roundRect(CGFloat) }
     let id: Int
     let kind: Kind
-    let rect: CGRect
+    var rect: CGRect
     var top: Color = Color(white: 0.2)
     var bottom: Color = Color(white: 0.1)
     var label: String?
     var dashed = false
+    /// False for parts sized in absolute terms (the d-pad cross).
+    var scalesWithBody = true
 }
 
 /// A greyed callout for something the editor shows but can't bind (back grips,
@@ -195,6 +197,15 @@ struct PadArt {
                 arm(.dpadLeft, .left, -off, 0), arm(.dpadRight, .right, off, 0)]
     }
 
+    /// The d-pad plate: one cross (two overlapping bars), drawn once; the four
+    /// arm hit-targets only tint it.
+    private static func dpadCross(_ art: inout PadArt, _ c: CGPoint, id: inout Int) {
+        for rect in [CGRect(x: c.x - 22, y: c.y - 66, width: 44, height: 132), CGRect(x: c.x - 66, y: c.y - 22, width: 132, height: 44)] {
+            art.decor.append(PadDecor(id: id, kind: .roundRect(10), rect: rect, top: Color(white: 0.36), bottom: Color(white: 0.22), scalesWithBody: false))
+            id += 1
+        }
+    }
+
     private static func face(at c: CGPoint, offset: CGFloat, radius r: CGFloat, style: PadStyle,
                              fills: [PadButton: Color], glyphColors: [PadButton: Color]) -> [PadControl] {
         let spots: [(PadButton, CGFloat, CGFloat)] = [(.buttonY, 0, -offset), (.buttonA, 0, offset),
@@ -217,8 +228,8 @@ struct PadArt {
         func make(_ l: PadButton, _ t: PadButton, x: CGFloat) -> [PadControl] {
             [PadControl(button: t, kind: .trigger, center: CGPoint(x: x, y: triggerY),
                         size: CGSize(width: 138, height: 84), glyph: style.glyph(t), behindBody: true),
-             PadControl(button: l, kind: .bumper, center: CGPoint(x: x - 4 * (x < 500 ? 1 : -1), y: bumperY),
-                        size: CGSize(width: 200, height: 44), glyph: style.glyph(l))]
+             PadControl(button: l, kind: .bumper, center: CGPoint(x: x - 4 * (x < 500 ? 1 : -1), y: bumperY + 6),
+                        size: CGSize(width: 200, height: 46), glyph: style.glyph(l), behindBody: true)]
         }
         return make(.leftShoulder, .leftTrigger, x: inset) + make(.rightShoulder, .rightTrigger, x: 1000 - inset)
     }
@@ -237,13 +248,50 @@ struct PadArt {
 
     // MARK: Styles
 
+    /// Each layout is authored on a generous grid, then squeezed to the real
+    /// device's aspect (Xbox ≈153×105 mm, DualSense ≈160×106, Switch Pro
+    /// ≈152×106, Steam Deck ≈298×117). Positions scale; control sizes don't,
+    /// so buttons stay round.
     static func make(_ style: PadStyle) -> PadArt {
         switch style {
-        case .xbox: return xboxLike(.xbox)
-        case .switchPro: return xboxLike(.switchPro)
-        case .playstation: return playstation()
-        case .steamDeck: return deck()
+        case .xbox: return xboxLike(.xbox).squeezed(kx: 0.79, ky: 1)
+        case .switchPro: return xboxLike(.switchPro).squeezed(kx: 0.78, ky: 1)
+        case .playstation: return playstation().squeezed(kx: 0.83, ky: 1)
+        case .steamDeck: return deck().squeezed(kx: 1, ky: 0.76)
         }
+    }
+
+    private func squeezed(kx: CGFloat, ky: CGFloat) -> PadArt {
+        let cx: CGFloat = 500, cy: CGFloat = 352
+        func pt(_ p: CGPoint) -> CGPoint { CGPoint(x: cx + (p.x - cx) * kx, y: cy + (p.y - cy) * ky) }
+        var art = self
+        art.body = body.applying(CGAffineTransform(translationX: -cx, y: -cy).concatenating(CGAffineTransform(scaleX: kx, y: ky))
+            .concatenating(CGAffineTransform(translationX: cx, y: cy)))
+        art.decor = decor.map { d in
+            var d = d
+            let c = pt(CGPoint(x: d.rect.midX, y: d.rect.midY))
+            var size = d.rect.size
+            if case .roundRect = d.kind, d.scalesWithBody { size = CGSize(width: size.width * kx, height: size.height * ky) }
+            d.rect = CGRect(x: c.x - size.width / 2, y: c.y - size.height / 2, width: size.width, height: size.height)
+            return d
+        }
+        art.controls = controls.map { c in
+            PadControl(button: c.button, kind: c.kind, center: pt(c.center),
+                       size: { if case .trigger = c.kind { return CGSize(width: c.size.width * kx, height: c.size.height) }
+                               if case .bumper = c.kind { return CGSize(width: c.size.width * kx, height: c.size.height) }
+                               return c.size }(),
+                       glyph: c.glyph, symbol: c.symbol, fill: c.fill, glyphColor: c.glyphColor,
+                       behindBody: c.behindBody, fixedRole: c.fixedRole)
+        }
+        art.notes = notes.map { PadFixedNote(text: $0.text, anchor: pt($0.anchor)) }
+        return art
+    }
+
+    /// Everything drawn, in art space — the canvas fits this, not the whole grid.
+    var bounds: CGRect {
+        var r = body.boundingRect
+        for c in controls { r = r.union(c.frame) }
+        return r.insetBy(dx: -6, dy: -6)
     }
 
     private static let xboxFills: [PadButton: Color] = [
@@ -259,8 +307,8 @@ struct PadArt {
                          bodyTop: pro ? Color(white: 0.30) : Color(white: 0.27),
                          bodyBottom: pro ? Color(white: 0.13) : Color(white: 0.10))
         var id = 0
-        func deco(_ kind: PadDecor.Kind, _ rect: CGRect, label: String? = nil,
-                  top: Color = Color(white: 0.2), bottom: Color = Color(white: 0.09)) {
+        func deco(_ kind: PadDecor.Kind, _ rect: CGRect, top: Color = Color(white: 0.2),
+                  bottom: Color = Color(white: 0.09), label: String? = nil) {
             art.decor.append(PadDecor(id: id, kind: kind, rect: rect, top: top, bottom: bottom, label: label)); id += 1
         }
         let ls = CGPoint(x: 272, y: 262), rs = CGPoint(x: 612, y: 398)
@@ -269,7 +317,7 @@ struct PadArt {
         deco(.circle, CGRect(x: ls.x - 64, y: ls.y - 64, width: 128, height: 128), top: Color(white: 0.05), bottom: Color(white: 0.16))
         deco(.circle, CGRect(x: rs.x - 64, y: rs.y - 64, width: 128, height: 128), top: Color(white: 0.05), bottom: Color(white: 0.16))
         deco(.circle, CGRect(x: dp.x - 78, y: dp.y - 78, width: 156, height: 156), top: Color(white: 0.06), bottom: Color(white: 0.15))
-        deco(.circle, CGRect(x: dp.x - 26, y: dp.y - 26, width: 52, height: 52), top: Color(white: 0.3), bottom: Color(white: 0.2))
+        dpadCross(&art, dp, id: &id)
         if pro {
             deco(.roundRect(5), CGRect(x: 424, y: 296, width: 30, height: 30), top: Color(white: 0.22), bottom: Color(white: 0.12))   // capture
             deco(.circle, CGRect(x: 546, y: 294, width: 34, height: 34), top: Color(white: 0.24), bottom: Color(white: 0.12))        // home
@@ -301,8 +349,7 @@ struct PadArt {
         grip.footInner = 252; grip.cutY = 470; grip.cutHalf = 160
         var art = PadArt(body: grip.path(), bodyTop: Color(white: 0.92), bodyBottom: Color(white: 0.62))
         var id = 0
-        func deco(_ kind: PadDecor.Kind, _ rect: CGRect, label: String? = nil,
-                  top: Color, bottom: Color) {
+        func deco(_ kind: PadDecor.Kind, _ rect: CGRect, top: Color, bottom: Color, label: String? = nil) {
             art.decor.append(PadDecor(id: id, kind: kind, rect: rect, top: top, bottom: bottom, label: label)); id += 1
         }
         let ls = CGPoint(x: 386, y: 424), rs = CGPoint(x: 614, y: 424)
@@ -315,7 +362,7 @@ struct PadArt {
         deco(.circle, CGRect(x: rs.x - 64, y: rs.y - 64, width: 128, height: 128), top: Color(white: 0.04), bottom: Color(white: 0.15))
         deco(.circle, CGRect(x: dp.x - 80, y: dp.y - 80, width: 160, height: 160), top: dark.0, bottom: dark.1)
         deco(.circle, CGRect(x: fc.x - 92, y: fc.y - 92, width: 184, height: 184), top: dark.0, bottom: dark.1)
-        deco(.circle, CGRect(x: dp.x - 26, y: dp.y - 26, width: 52, height: 52), top: Color(white: 0.4), bottom: Color(white: 0.24))
+        dpadCross(&art, dp, id: &id)
         deco(.circle, CGRect(x: 484, y: 358, width: 32, height: 32), top: Color(white: 0.42), bottom: Color(white: 0.2))   // system button
         let tints: [PadButton: Color] = [.buttonA: Color(red: 0.45, green: 0.62, blue: 1), .buttonB: Color(red: 1, green: 0.42, blue: 0.42),
                                          .buttonX: Color(red: 0.96, green: 0.52, blue: 0.82), .buttonY: Color(red: 0.36, green: 0.86, blue: 0.62)]
@@ -333,7 +380,7 @@ struct PadArt {
             .path(in: CGRect(x: 40, y: 112, width: 920, height: 480))
         var art = PadArt(body: body, bodyTop: Color(white: 0.24), bodyBottom: Color(white: 0.09))
         var id = 0
-        func deco(_ kind: PadDecor.Kind, _ rect: CGRect, label: String? = nil, top: Color, bottom: Color, dashed: Bool = false) {
+        func deco(_ kind: PadDecor.Kind, _ rect: CGRect, top: Color, bottom: Color, label: String? = nil, dashed: Bool = false) {
             art.decor.append(PadDecor(id: id, kind: kind, rect: rect, top: top, bottom: bottom, label: label, dashed: dashed)); id += 1
         }
         let ls = CGPoint(x: 150, y: 250), rs = CGPoint(x: 850, y: 400)
@@ -344,7 +391,7 @@ struct PadArt {
         deco(.circle, CGRect(x: ls.x - 64, y: ls.y - 64, width: 128, height: 128), top: Color(white: 0.04), bottom: Color(white: 0.15))
         deco(.circle, CGRect(x: rs.x - 64, y: rs.y - 64, width: 128, height: 128), top: Color(white: 0.04), bottom: Color(white: 0.15))
         deco(.circle, CGRect(x: dp.x - 78, y: dp.y - 78, width: 156, height: 156), top: Color(white: 0.05), bottom: Color(white: 0.14))
-        deco(.circle, CGRect(x: dp.x - 26, y: dp.y - 26, width: 52, height: 52), top: Color(white: 0.3), bottom: Color(white: 0.2))
+        dpadCross(&art, dp, id: &id)
         // Trackpads: greyed — Steam Input's, not bindable here.
         deco(.circle, CGRect(x: 205, y: 450, width: 130, height: 130), top: Color(white: 0.16), bottom: Color(white: 0.08), label: "pad", dashed: true)
         deco(.circle, CGRect(x: 665, y: 450, width: 130, height: 130).offsetBy(dx: 0, dy: 0), top: Color(white: 0.16), bottom: Color(white: 0.08), label: "pad", dashed: true)

@@ -1,49 +1,12 @@
 import SwiftUI
 
-/// The ISO Enter: a tall key whose lower half is narrower than its upper half
-/// (an inverted L), the one non-rectangular cap on the board.
-struct IsoEnterShape: Shape {
-    var radius: CGFloat
-    func path(in rect: CGRect) -> Path {
-        let notch = rect.width / 6          // 0.25u of a 1.5u-wide key
-        let r = min(radius, rect.width / 4)
-        var p = Path()
-        p.move(to: CGPoint(x: rect.minX + r, y: rect.minY))
-        p.addLine(to: CGPoint(x: rect.maxX - r, y: rect.minY))
-        p.addArc(tangent1End: CGPoint(x: rect.maxX, y: rect.minY),
-                 tangent2End: CGPoint(x: rect.maxX, y: rect.minY + r), radius: r)
-        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - r))
-        p.addArc(tangent1End: CGPoint(x: rect.maxX, y: rect.maxY),
-                 tangent2End: CGPoint(x: rect.maxX - r, y: rect.maxY), radius: r)
-        p.addLine(to: CGPoint(x: rect.minX + notch + r, y: rect.maxY))
-        p.addArc(tangent1End: CGPoint(x: rect.minX + notch, y: rect.maxY),
-                 tangent2End: CGPoint(x: rect.minX + notch, y: rect.maxY - r), radius: r)
-        p.addLine(to: CGPoint(x: rect.minX + notch, y: rect.midY + r))
-        p.addArc(tangent1End: CGPoint(x: rect.minX + notch, y: rect.midY),
-                 tangent2End: CGPoint(x: rect.minX + notch - r, y: rect.midY), radius: r)
-        p.addLine(to: CGPoint(x: rect.minX + r, y: rect.midY))
-        p.addArc(tangent1End: CGPoint(x: rect.minX, y: rect.midY),
-                 tangent2End: CGPoint(x: rect.minX, y: rect.midY - r), radius: r)
-        p.addLine(to: CGPoint(x: rect.minX, y: rect.minY + r))
-        p.addArc(tangent1End: CGPoint(x: rect.minX, y: rect.minY),
-                 tangent2End: CGPoint(x: rect.minX + r, y: rect.minY), radius: r)
-        p.closeSubpath()
-        return p
-    }
-}
-
-/// A cap outline for either key shape, usable as a clip and hit shape.
+/// A cap outline, usable as a clip and hit shape.
 private struct CapShape: InsettableShape {
-    let kind: KeyCap.Shape
     let radius: CGFloat
     var inset: CGFloat = 0
 
     func path(in rect: CGRect) -> Path {
-        let r = rect.insetBy(dx: inset, dy: inset)
-        switch kind {
-        case .rect: return RoundedRectangle(cornerRadius: radius, style: .continuous).path(in: r)
-        case .isoEnter: return IsoEnterShape(radius: radius).path(in: r)
-        }
+        RoundedRectangle(cornerRadius: radius, style: .continuous).path(in: rect.insetBy(dx: inset, dy: inset))
     }
 
     func inset(by amount: CGFloat) -> CapShape {
@@ -72,7 +35,7 @@ struct KeyboardCanvas: View {
         GeometryReader { geo in
             let margin: CGFloat = 10
             let unit = max(8, min((geo.size.width - margin * 2) / layout.size.width,
-                                  (geo.size.height - margin * 2) / layout.size.height, 76))
+                                  (geo.size.height - margin * 2) / layout.size.height, 140))
             let boardW = layout.size.width * unit, boardH = layout.size.height * unit
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: unit * 0.35, style: .continuous)
@@ -109,7 +72,7 @@ struct KeyboardCanvas: View {
             .frame(width: cap.frame.width * unit, height: cap.frame.height * unit)
         if cap.isBindable {
             CursorButton { onTap(cap) } label: {
-                view.contentShape(CapShape(kind: cap.shape, radius: unit * 0.12))
+                view.contentShape(CapShape(radius: unit * 0.12))
             }
             .editorHover { onHover($0 ? cap : nil) }
             .offset(x: cap.frame.minX * unit, y: cap.frame.minY * unit)
@@ -138,7 +101,7 @@ private struct KeyCapView: View {
     private var tint: Color? { action?.tint }
 
     var body: some View {
-        let shape = CapShape(kind: cap.shape, radius: unit * 0.14)
+        let shape = CapShape(radius: unit * 0.14)
         let accent: Color = selected ? novaAmber : (tint ?? novaAmber)
         ZStack {
             // Side wall: the darker rim visible under the top face.
@@ -172,7 +135,6 @@ private struct KeyCapView: View {
             if selected || hot || pulsing {
                 shape.strokeBorder(accent.opacity(pulsing && !selected ? (pulse ? 1 : 0.3) : 0.95),
                                    lineWidth: selected ? 2.5 : 2)
-                    .shadow(color: accent.opacity(0.7), radius: unit * 0.1)
             }
         }
         .padding(unit * 0.05)

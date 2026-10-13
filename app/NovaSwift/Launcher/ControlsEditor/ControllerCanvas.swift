@@ -43,15 +43,18 @@ struct ControllerCanvas: View {
             let art = style.art
             let labelW = min(190, max(96, geo.size.width * 0.18))
             let gutter: CGFloat = 16
-            let s = max(0.2, min((geo.size.width - 2 * (labelW + gutter)) / PadArt.canvas.width,
-                                 (geo.size.height - 8) / PadArt.canvas.height))
+            let b = art.bounds
+            let s = max(0.2, min((geo.size.width - 2 * (labelW + gutter)) / b.width,
+                                 (geo.size.height - 8) / b.height))
             let artW = PadArt.canvas.width * s, artH = PadArt.canvas.height * s
-            let ox = (geo.size.width - artW) / 2, oy = (geo.size.height - artH) / 2
+            // Centre the drawn bounds (not the whole authoring grid) in the canvas.
+            let ox = (geo.size.width - b.width * s) / 2 - b.minX * s
+            let oy = (geo.size.height - b.height * s) / 2 - b.minY * s
             ZStack(alignment: .topLeading) {
                 artLayer(art, s: s)
                     .frame(width: artW, height: artH)
                     .offset(x: ox, y: oy)
-                calloutLayer(art, s: s, origin: CGPoint(x: ox, y: oy), labelW: labelW, gutter: gutter,
+                calloutLayer(art, s: s, origin: CGPoint(x: ox, y: oy), bounds: b, labelW: labelW, gutter: gutter,
                              size: geo.size)
             }
         }
@@ -70,7 +73,10 @@ struct ControllerCanvas: View {
                 .overlay(ArtShape(source: art.body)
                     .stroke(LinearGradient(colors: [.white.opacity(0.5), .black.opacity(0.4)],
                                            startPoint: .top, endPoint: .bottom), lineWidth: max(1, 3 * s)))
+                .overlay(ArtShape(source: art.body).stroke(.black.opacity(0.45), lineWidth: 16 * s).blur(radius: 8 * s)
+                    .clipShape(ArtShape(source: art.body)))
                 .shadow(color: .black.opacity(0.55), radius: 16 * s, y: 12 * s)
+                .allowsHitTesting(false)
             ForEach(art.decor) { decor in decorView(decor, s: s) }
             ForEach(art.controls.filter { !$0.behindBody }) { control in controlView(control, s: s) }
         }
@@ -118,10 +124,10 @@ struct ControllerCanvas: View {
 
     // MARK: Callouts
 
-    private func calloutLayer(_ art: PadArt, s: CGFloat, origin: CGPoint, labelW: CGFloat,
+    private func calloutLayer(_ art: PadArt, s: CGFloat, origin: CGPoint, bounds: CGRect, labelW: CGFloat,
                               gutter: CGFloat, size: CGSize) -> some View {
         let items = callouts(art)
-        let artLeft = origin.x, artRight = origin.x + PadArt.canvas.width * s
+        let artLeft = origin.x + bounds.minX * s, artRight = origin.x + bounds.maxX * s
         let rowH: CGFloat = 40, gap: CGFloat = 5
         func screen(_ p: CGPoint) -> CGPoint { CGPoint(x: origin.x + p.x * s, y: origin.y + p.y * s) }
 
@@ -129,14 +135,13 @@ struct ControllerCanvas: View {
         // pull the pile back up if it would run off the bottom.
         func place(_ side: PadSide) -> [(Callout, CGFloat)] {
             let sorted = items.filter { $0.side == side }.sorted { $0.anchor.y < $1.anchor.y }
-            var ys = sorted.map { screen($0.anchor).y }
-            for i in ys.indices {
-                ys[i] = max(ys[i], (i > 0 ? ys[i - 1] + rowH + gap : rowH / 2 + 2))
-            }
-            for i in ys.indices.reversed() {
-                let limit = i + 1 < ys.count ? ys[i + 1] - rowH - gap : size.height - rowH / 2 - 2
-                ys[i] = min(ys[i], limit)
-            }
+            // Spread evenly over the pad's height (never tighter than a row), so
+            // sorted-by-anchor labels give leaders that fan out without crossing.
+            let top = origin.y + bounds.minY * s, span = max(bounds.height * s, CGFloat(sorted.count) * (rowH + gap))
+            let step = sorted.count > 1 ? (span - rowH) / CGFloat(sorted.count - 1) : 0
+            var ys = sorted.indices.map { sorted.count > 1 ? top + rowH / 2 + CGFloat($0) * step : screen(sorted[$0].anchor).y }
+            let overflow = (ys.last ?? 0) + rowH / 2 + 2 - size.height
+            if overflow > 0 { ys = ys.map { $0 - overflow } }
             return Array(zip(sorted, ys))
         }
         let left = place(.left), right = place(.right)
@@ -223,6 +228,16 @@ struct ControllerCanvas: View {
     }
 }
 
+/// Type erasure that keeps `strokeBorder` (an inset stroke, so highlights never
+/// spill past the control's own outline).
+private struct AnyInsettableShape: InsettableShape {
+    private let build: (CGRect, CGFloat) -> Path
+    private var inset: CGFloat = 0
+    init<S: InsettableShape>(_ shape: S) { build = { rect, amount in shape.inset(by: amount).path(in: rect) } }
+    func path(in rect: CGRect) -> Path { build(rect, inset) }
+    func inset(by amount: CGFloat) -> AnyInsettableShape { var s = self; s.inset += amount; return s }
+}
+
 // MARK: - One control
 
 private struct PadControlView: View {
@@ -237,18 +252,19 @@ private struct PadControlView: View {
 
     @State private var pulse = false
 
+    private var isDpad: Bool { if case .dpadArm = control.kind { return true } else { return false } }
+
     var body: some View {
         ZStack {
             face
-            if let categoryTint {
-                rim.stroke(categoryTint, lineWidth: max(2, 4 * scale)).opacity(0.95)
+            if let categoryTint, !isDpad {
+                rim.strokeBorder(categoryTint, lineWidth: max(2, 3 * scale)).opacity(0.95)
             }
             if pressed { rim.fill(.white.opacity(0.45)) }
             if selected || hot || pulsing {
-                rim.stroke(selected ? novaAmber : (categoryTint ?? novaAmber),
-                           lineWidth: max(2, 4 * scale))
+                rim.strokeBorder(selected ? novaAmber : (categoryTint ?? novaAmber),
+                                 lineWidth: max(2, 3 * scale))
                     .opacity(pulsing && !selected ? (pulse ? 1 : 0.25) : 1)
-                    .shadow(color: (selected ? novaAmber : (categoryTint ?? novaAmber)).opacity(0.8), radius: 8 * scale)
             }
         }
         .scaleEffect(pressed ? 0.95 : 1)
@@ -266,12 +282,12 @@ private struct PadControlView: View {
     }
 
     /// The control's outline, also its hit shape.
-    private var rim: AnyShape {
+    private var rim: AnyInsettableShape {
         switch control.kind {
-        case .round, .stick: return AnyShape(Circle())
-        case .bumper: return AnyShape(RoundedRectangle(cornerRadius: 22 * scale, style: .continuous))
-        case .trigger: return AnyShape(triggerShape)
-        case .dpadArm: return AnyShape(RoundedRectangle(cornerRadius: 9 * scale, style: .continuous))
+        case .round, .stick: return AnyInsettableShape(Circle())
+        case .bumper: return AnyInsettableShape(RoundedRectangle(cornerRadius: 22 * scale, style: .continuous))
+        case .trigger: return AnyInsettableShape(triggerShape)
+        case .dpadArm: return AnyInsettableShape(RoundedRectangle(cornerRadius: 9 * scale, style: .continuous))
         }
     }
 
@@ -293,6 +309,8 @@ private struct PadControlView: View {
             ZStack {
                 Circle().fill(control.fill.map { AnyShapeStyle(LinearGradient(colors: [$0.opacity(1), $0.opacity(0.7)], startPoint: .top, endPoint: .bottom)) }
                               ?? AnyShapeStyle(plastic))
+                Circle().fill(RadialGradient(colors: [.white.opacity(0.35), .clear], center: UnitPoint(x: 0.35, y: 0.28),
+                                             startRadius: 0, endRadius: 28 * scale))
                 Circle().strokeBorder(LinearGradient(colors: [.white.opacity(0.5), .black.opacity(0.4)],
                                                      startPoint: .top, endPoint: .bottom), lineWidth: max(1, 2 * scale))
                 if let symbol = control.symbol {
@@ -331,10 +349,9 @@ private struct PadControlView: View {
             }
         case .dpadArm(let dir):
             ZStack {
+                // The cross itself is one decor shape; an arm only tints when bound.
                 RoundedRectangle(cornerRadius: 9 * scale, style: .continuous)
-                    .fill(LinearGradient(colors: [Color(white: 0.38), Color(white: 0.2)], startPoint: .top, endPoint: .bottom))
-                RoundedRectangle(cornerRadius: 9 * scale, style: .continuous)
-                    .strokeBorder(.black.opacity(0.5), lineWidth: max(1, 1.5 * scale))
+                    .fill((categoryTint ?? .clear).opacity(0.38))
                 Image(systemName: dpadSymbol(dir)).font(.system(size: 13 * scale, weight: .bold))
                     .foregroundStyle(.white.opacity(0.55))
             }

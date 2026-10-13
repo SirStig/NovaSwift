@@ -1207,13 +1207,8 @@ final class GameScene: SKScene {
                                                 player: ship, galaxy: galaxy, combatTuning: tuning,
                                                 seed: currentWorldSeed(systemID: systemID),
                                                 spawnModel: settings.systemAliveness.spawnModel,
-                                                enhancements: settings.enhancements)
-            // System Aliveness setting scales ambient traffic density/pass-through behavior.
-            w.spawner?.model = settings.systemAliveness.spawnModel
-            w.spawner?.populationScale = settings.systemAliveness.populationScale
-            w.enhancements = settings.enhancements
-            w.strictPlay = strictPlay
-            w.playerCombatRating = playerCombatRatingProvider?() ?? 0
+                                                enhancements: settings.enhancements,
+                                                configure: { [unowned self] in self.configureNewWorld($0, settings: settings) })
             applyDefenseState(w, systemID: systemID)
             self.world = w
             self.galaxy = gx
@@ -3062,6 +3057,26 @@ final class GameScene: SKScene {
     /// Push the current pêrs grudge set + spawn-eligibility gate onto the live
     /// world. Called by the host after it sets those (post-`configure`), so the
     /// starting system reflects a pilot's existing grudges immediately.
+    /// Applies every per-world setting and pilot hook to a freshly built world.
+    /// Passed to `GameSession.makeWorld(configure:)` so it runs BEFORE the initial
+    /// population: përs `ActiveOn`/defeated gating, `shïp.AppearOn`, Strict Play,
+    /// the combat rating and the System Aliveness population scale already govern
+    /// the very first fill of every system (initial build, jump, take-off).
+    private func configureNewWorld(_ w: World, settings: GameSettings) {
+        // System Aliveness setting scales ambient traffic density/pass-through behavior.
+        w.spawner?.model = settings.systemAliveness.spawnModel
+        w.spawner?.populationScale = settings.systemAliveness.populationScale
+        w.enhancements = settings.enhancements
+        w.strictPlay = strictPlay
+        w.playerCombatRating = playerCombatRatingProvider?() ?? 0
+        w.playerPersGrudges = persGrudges
+        if let e = persSpawnEligible { w.persSpawnEligible = e }
+        if let e = shipSpawnEligible { w.shipSpawnEligible = e }
+        if let e = missionBoardStandsDown { w.missionBoardStandsDown = e }
+        if let room = playerHoldHasRoom { w.playerHoldHasRoom = room }
+        if let left = stellarStrengthLeft { w.stellarArmor = left() }
+    }
+
     func syncPersStateToWorld() {
         world?.playerPersGrudges = persGrudges
         if let e = persSpawnEligible { world?.persSpawnEligible = e }
@@ -4963,13 +4978,8 @@ final class GameScene: SKScene {
         let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, galaxy: galaxy, combatTuning: tuning,
                                             seed: currentWorldSeed(systemID: systemID),
                                             spawnModel: settings.systemAliveness.spawnModel,
-                                            enhancements: settings.enhancements)
-        // System Aliveness setting scales ambient traffic density/pass-through behavior.
-        w.spawner?.model = settings.systemAliveness.spawnModel
-        w.spawner?.populationScale = settings.systemAliveness.populationScale
-        w.enhancements = settings.enhancements
-        w.strictPlay = strictPlay
-        w.playerCombatRating = playerCombatRatingProvider?() ?? 0
+                                            enhancements: settings.enhancements,
+                                            configure: { [unowned self] in self.configureNewWorld($0, settings: settings) })
         persistOutgoingDefenseState()
         carryEscortsThroughJump()
         applyDefenseState(w, systemID: systemID)
@@ -5102,13 +5112,8 @@ final class GameScene: SKScene {
         let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, galaxy: galaxy, combatTuning: tuning,
                                             seed: currentWorldSeed(systemID: systemID),
                                             spawnModel: settings.systemAliveness.spawnModel,
-                                            enhancements: settings.enhancements)
-        // System Aliveness setting scales ambient traffic density/pass-through behavior.
-        w.spawner?.model = settings.systemAliveness.spawnModel
-        w.spawner?.populationScale = settings.systemAliveness.populationScale
-        w.enhancements = settings.enhancements
-        w.strictPlay = strictPlay
-        w.playerCombatRating = playerCombatRatingProvider?() ?? 0
+                                            enhancements: settings.enhancements,
+                                            configure: { [unowned self] in self.configureNewWorld($0, settings: settings) })
         persistOutgoingDefenseState()
         applyDefenseState(w, systemID: systemID)
         w.previousSystemBearing = lastArrivalBearing

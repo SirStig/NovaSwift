@@ -13,11 +13,10 @@ const Model = preload("res://screens/controls_editor/EditorModel.gd")
 signal key_pressed(code: int)
 signal key_hover(code: int, on: bool)
 
-const MARGIN := 6.0
+const MARGIN := 4.0
 
 var caps: Array = []
 var preset := "full"
-var iso := false
 var board := Vector2(15, 5)
 
 var _info: Dictionary = {}          # code -> {acts: Array, tint: Color, dot: bool}
@@ -27,12 +26,13 @@ var _selected := -999
 var _layout_keys: Array = []
 
 
-class KeyCap extends Button:
+class KeyCap extends Control:
+	signal pressed
 	const AMBER := Color(1.0, 0.7, 0.28)
 	var code := -1
 	var legend := ""
 	var locked := false
-	var rects: Array = []           # local Rect2s (one, or two for the ISO Enter)
+	var rects: Array = []           # local Rect2s (one, or two for an L-shaped key)
 	var unit := 48.0
 	var acts: Array = []
 	var tint := Color(0, 0, 0, 0)
@@ -41,13 +41,30 @@ class KeyCap extends Button:
 	var hl := false
 	var sel := false
 	var hot := false                # the physical key is down right now
+	var hovered := false
 
 	func _init() -> void:
 		focus_mode = Control.FOCUS_ALL
-		flat = true
-		for s in ["normal", "hover", "pressed", "hover_pressed", "focus", "disabled"]:
-			add_theme_stylebox_override(s, StyleBoxEmpty.new())
+		clip_contents = true        # nothing a cap draws can ever leave its own cell
 		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+
+	func _notification(what: int) -> void:
+		if what == NOTIFICATION_MOUSE_ENTER:
+			hovered = true
+			queue_redraw()
+		elif what == NOTIFICATION_MOUSE_EXIT:
+			hovered = false
+			queue_redraw()
+		elif what == NOTIFICATION_FOCUS_ENTER or what == NOTIFICATION_FOCUS_EXIT:
+			queue_redraw()
+
+	func _gui_input(event: InputEvent) -> void:
+		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			pressed.emit()
+			accept_event()
+		elif event.is_action_pressed("ui_accept"):
+			pressed.emit()
+			accept_event()
 
 	func _short_text() -> String:
 		if acts.is_empty():
@@ -60,29 +77,24 @@ class KeyCap extends Button:
 	func _draw() -> void:
 		if rects.is_empty():
 			return
-		var gap := maxf(1.5, unit * 0.045)
+		var gap := maxf(1.0, unit * 0.04)
 		var bound := not acts.is_empty()
 		var face_col := Color(0.165, 0.17, 0.19)
 		if bound:
-			face_col = Color(0.11, 0.115, 0.13).lerp(tint, 0.46)
+			face_col = Color(0.11, 0.115, 0.13).lerp(tint, 0.5)
 		if locked:
 			face_col = Color(0.10, 0.10, 0.11)
-		var base_col := face_col.darkened(0.55)
-		var rad := int(unit * 0.13)
-		for r in rects:
-			var rr: Rect2 = (r as Rect2).grow(-gap)
-			draw_style_box(T.box(base_col, rad), rr)
+		var base_col := face_col.darkened(0.5)
+		var rad := int(unit * 0.12)
 		var faces: Array = []
 		for r in rects:
-			var rr2: Rect2 = (r as Rect2).grow(-gap)
-			var top := unit * 0.05
-			var side := unit * 0.07
-			var face := Rect2(rr2.position + Vector2(side, top), rr2.size - Vector2(side * 2.0, top + unit * 0.14))
+			var cell: Rect2 = (r as Rect2).grow(-gap)
+			draw_style_box(T.box(base_col, rad), cell)
+			var face := Rect2(cell.position + Vector2(unit * 0.03, unit * 0.03), cell.size - Vector2(unit * 0.06, unit * 0.11))
 			faces.append(face)
-			draw_style_box(T.box(face_col, rad, face_col.lightened(0.28), 1), face)
+			draw_style_box(T.box(face_col, rad, face_col.lightened(0.25), 1), face)
 		var f: Rect2 = faces[0]
 		if locked:
-			# hatch the cap: the key exists but nothing can bind it
 			var x := f.position.x - f.size.y
 			while x < f.end.x:
 				var a := Vector2(clampf(x, f.position.x, f.end.x), f.end.y)
@@ -90,15 +102,14 @@ class KeyCap extends Button:
 				draw_line(a, b, Color(1, 1, 1, 0.08), 1.0)
 				x += maxf(5.0, unit * 0.18)
 		var font := T.font("caption", "semibold")
-		var lfs := int(clampf(unit * 0.23, 8.0, 14.0))
-		var lcol := Color(1, 1, 1, 0.78 if bound else 0.5)
+		var lfs := int(clampf(unit * 0.21, 8.0, 13.0))
+		var lcol := Color(1, 1, 1, 0.8 if bound else 0.5)
 		if f.size.y < unit * 0.8:
-			# half-height / F-row caps: just the legend, centred
 			var sz := font.get_string_size(legend, HORIZONTAL_ALIGNMENT_LEFT, -1, lfs)
 			draw_string(font, Vector2(f.position.x + (f.size.x - sz.x) * 0.5, f.position.y + (f.size.y + sz.y * 0.62) * 0.5),
 				legend, HORIZONTAL_ALIGNMENT_LEFT, -1, lfs, Color(1, 1, 1, 0.95) if bound else lcol)
 		else:
-			draw_string(font, f.position + Vector2(unit * 0.09, lfs + unit * 0.04), legend,
+			draw_string(font, f.position + Vector2(unit * 0.08, lfs + unit * 0.02), legend,
 				HORIZONTAL_ALIGNMENT_LEFT, f.size.x - 4.0, lfs, lcol)
 			if bound:
 				var text := _short_text()
@@ -107,46 +118,47 @@ class KeyCap extends Button:
 					var fcr: Rect2 = fc
 					if fcr.size.x * fcr.size.y > big.size.x * big.size.y:
 						big = fcr
-				var avail := Rect2(big.position + Vector2(3.0, lfs * 0.9 + 2.0), big.size - Vector2(6.0, lfs * 0.9 + 4.0))
-				var afont := T.font("caption", "medium")
-				var fs := int(clampf(unit * 0.27, 8.0, 15.0))
+				var top := big.position.y + lfs + unit * 0.06
+				var avail := Rect2(Vector2(big.position.x + 3.0, top), Vector2(big.size.x - 6.0, big.end.y - top - 2.0))
+				var afont := T.font("caption", "semibold")
+				var fs := int(clampf(unit * 0.25, 9.0, 16.0))
 				var sz2 := Vector2.ZERO
 				while true:
 					sz2 = afont.get_multiline_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, avail.size.x, fs, 2)
-					if (sz2.y <= avail.size.y + 1.0 and sz2.x <= avail.size.x + 1.0) or fs <= 7:
+					if (sz2.y <= avail.size.y + 1.0 and sz2.x <= avail.size.x + 1.0) or fs <= 8:
 						break
 					fs -= 1
 				var py := avail.position.y + (avail.size.y - sz2.y) * 0.5 + afont.get_ascent(fs)
 				draw_multiline_string(afont, Vector2(avail.position.x, py), text, HORIZONTAL_ALIGNMENT_CENTER,
-					avail.size.x, fs, 2, Color(1, 1, 1, 0.97))
+					avail.size.x, fs, 2, Color(1, 1, 1, 0.98))
 		if dot:
-			draw_circle(Vector2(f.end.x - unit * 0.14, f.end.y - unit * 0.14), maxf(2.0, unit * 0.07), Color(1, 1, 1, 0.65))
+			draw_circle(Vector2(f.end.x - unit * 0.13, f.end.y - unit * 0.13), maxf(2.0, unit * 0.06), Color(1, 1, 1, 0.7))
+		# live press / row hover / selection / pulse / focus: all strokes and fills INSIDE the cap's face
 		for fc in faces:
 			var fr: Rect2 = fc
 			if hot:
 				draw_style_box(T.box(Color(1, 0.85, 0.4, 0.35), rad), fr)
 			if hl:
-				draw_style_box(T.box(Color(0, 0, 0, 0), rad, AMBER, 2), fr.grow(1))
+				draw_style_box(T.box(Color(0, 0, 0, 0), rad, AMBER, 2), fr)
 			if sel:
-				draw_style_box(T.box(Color(1, 0.7, 0.28, 0.16), rad, AMBER, 3), fr.grow(1.5))
+				draw_style_box(T.box(Color(1, 0.7, 0.28, 0.16), rad, AMBER, 3), fr)
 			if pulse:
 				var pa := 0.5 + 0.5 * sin(float(Time.get_ticks_msec()) / 160.0)
-				draw_style_box(T.box(Color(1, 0.7, 0.28, 0.10 + 0.25 * pa), rad, Color(1, 0.8, 0.4, 0.4 + 0.6 * pa), 3), fr.grow(1.5))
+				draw_style_box(T.box(Color(1, 0.7, 0.28, 0.10 + 0.25 * pa), rad, Color(1, 0.8, 0.4, 0.4 + 0.6 * pa), 3), fr)
 			if has_focus():
-				draw_style_box(T.box(Color(1, 1, 1, 0.06), rad, Color(1, 1, 1, 0.95), 2), fr.grow(2.5))
-			elif is_hovered() and not hl:
+				draw_style_box(T.box(Color(1, 1, 1, 0.06), rad, Color(1, 1, 1, 0.95), 2), fr)
+			elif hovered and not hl:
 				draw_style_box(T.box(Color(1, 1, 1, 0.07), rad, Color(1, 1, 1, 0.5), 1), fr)
 
 
 func _ready() -> void:
 	resized.connect(_layout)
-	set_layout(Model.preset(), Model.iso())
+	set_layout(Model.preset())
 
 
-func set_layout(p: String, with_iso: bool) -> void:
+func set_layout(p: String) -> void:
 	preset = p
-	iso = with_iso
-	var b: Dictionary = Layouts.build(p, with_iso)
+	var b: Dictionary = Layouts.build(p)
 	_layout_keys = b.keys
 	board = b.size
 	for c in caps:
@@ -240,7 +252,7 @@ func set_selected(code: int) -> void:
 	_apply_info()
 
 
-func cap_for(code: int) -> Button:
+func cap_for(code: int) -> Control:
 	for c in caps:
 		if c.code == code:
 			return c

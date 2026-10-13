@@ -21,7 +21,8 @@ public enum PluginSet {
     /// Persisted state wins for order (the only durable record of a reorder);
     /// plug-ins never seen before fall after all known ones, alphabetically.
     public static func arrange(discovered: [PluginBundle], persisted: [PluginEnableState],
-                               inMemoryEnabled: Set<String> = [], manual: Bool) -> [PluginBundle] {
+                               inMemoryEnabled: Set<String> = [], manual: Bool,
+                               tcAddOns: TCAddOns.Lists = [:]) -> [PluginBundle] {
         var discovered = discovered
         let persistedOrder = Dictionary(persisted.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
         let previouslyEnabled = inMemoryEnabled.union(persisted.filter(\.isEnabled).map(\.id))
@@ -44,7 +45,9 @@ public enum PluginSet {
                 seenTC = true
             }
         }
-        return manual ? discovered : GameLibrary.originalPluginOrder(discovered)
+        var result = manual ? discovered : GameLibrary.originalPluginOrder(discovered)
+        TCAddOns.apply(tcAddOns, to: &result)
+        return result
     }
 
     /// The enable switch. Only the manual-order enhancement may toggle ordinary

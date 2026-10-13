@@ -150,6 +150,15 @@ class NovaWorld: Node2D {
     private func resetFrameState() {
         simAccumulator = 0
         interpolationAlpha = 0
+        if let world {
+            // A rebuilt world: the player ship object is reused (jump) or re-placed (launch) AFTER the
+            // build, so its render-interpolation slots still hold the old system's pose, and alpha = 0
+            // draws exactly that - one frame of the whole scene at the wrong place. Re-seed them, and lay
+            // the asteroid field out now (the first `step` would, a frame after the arrival).
+            world.viewportHalfExtent = viewHalf
+            world.prepareAsteroidField()
+            world.snapshotRenderState()
+        }
         pendingEventNames.removeAll(keepingCapacity: true)
         pendingEffects.removeAll(keepingCapacity: true)
         sound.resetForNewWorld()
@@ -207,9 +216,10 @@ class NovaWorld: Node2D {
         // Base data + the enabled plug-ins (Nova Plug-ins folder / user plug-in folder), merged in
         // load order exactly as the Apple app does — see Plugins.swift. Empty/missing base is rejected.
         guard let collection = PluginRuntime.shared.loadMerged(baseDir: URL(fileURLWithPath: baseDir)) else { return false }
-        let g = NovaGame(collection)
+        let g = PerfSupport.makeGame(collection, baseDir: URL(fileURLWithPath: baseDir))   // + the decoded-sprite disk cache
         self.game = g
         self.galaxy = Galaxy(game: g, flightTuning: plumbing.flightTuning)
+        dataGen += 1
         return true
     }
 
@@ -305,6 +315,7 @@ class NovaWorld: Node2D {
     @Callable(autoSnakeCase: true)
     func step(dt: Double) {
         guard let world = self.world else { return }
+        world.viewportHalfExtent = viewHalf           // the asteroid field lives in the window's view (FL-16)
         // The engine flies a hyperjump itself; held keys mustn't fight it.
         var live = settingsPlayerIntent(self.intent)  // Settings: invert turn, mouse aim, auto-landing
         live.selfDestruct = gaps.selfDestructHeld     // Alt-−, held
@@ -1185,6 +1196,45 @@ class NovaWorld: Node2D {
         _ = autosave(.jump)                                        // `frequentAutosave` only (UI-01)
     }
 
+    // MARK: Performance
+    //
+    // Window size for the engine's asteroid field, a counter the frontend's sprite cache keys its
+    // validity on, and the per-system sprite manifest + background decode (see Perf.swift).
+
+    /// Half the visible play area in world px (Apple `GameScene.viewSpan` / 2).
+    private var viewHalf = Vec2(320, 300)
+    /// Bumped whenever a data set is (re)loaded: a cached texture keyed by resource id is stale after it.
+    private var dataGen = 0
+    private let prewarmer = SpritePrewarmer()
+
+    /// How much of space the window shows at the current zoom (turned views pass their diagonal both ways).
+    @Callable(autoSnakeCase: true) func setViewSpan(width: Double, height: Double) {
+        viewHalf = Vec2(max(width, 64) / 2, max(height, 64) / 2)
+        world?.viewportHalfExtent = viewHalf
+    }
+
+    @Callable(autoSnakeCase: true) func dataGeneration() -> Int { dataGen }
+
+    /// Flat `[kind, id, ...]` of every sprite the flight view will ask for in `systemID` (stellars, rocks,
+    /// the hulls its spawn tables can produce with their overlay layers). With `background` the decode
+    /// of that list starts on a worker thread; `prewarmProgress` says how many entries are warm.
+    @Callable(autoSnakeCase: true) func spriteManifest(systemID: Int, background: Bool) -> PackedInt32Array {
+        guard let game else { return PackedInt32Array() }
+        let m = PerfSupport.manifest(game: game, systemID: systemID, playerShip: pilotStarted ? pilot.shipType : nil)
+        if background { prewarmer.start(game: game, manifest: m) }
+        return PackedInt32Array(m)
+    }
+
+    /// The system worth warming right now: the one a launch will rebuild while docked, or the destination
+    /// of a hyperjump in progress. -1 when neither.
+    @Callable(autoSnakeCase: true) func prewarmTarget() -> Int {
+        if dockedSpobID != nil { return currentSystemID ?? -1 }
+        if world?.playerJump != nil, let plan = nav.pending { return plan.destination }
+        return -1
+    }
+
+    @Callable(autoSnakeCase: true) func prewarmProgress() -> Int { prewarmer.progress }
+
     // MARK: Spaceport (outfitter/shipyard)
     //
     // The landed screens (godot/screens/Spaceport.gd). Every rule — which outfits
@@ -1611,8 +1661,11 @@ class NovaWorld: Node2D {
         guard let world = self.world else { return PackedFloat32Array() }
         var flat: [Float] = []
         for rock in world.asteroids where rock.isAlive {
-            flat.append(contentsOf: [Float(rock.position.x), Float(rock.position.y),
-                                     Float(rock.radius), Float(rock.angle)])
+            // Interpolated like the ships (Apple `syncAsteroids` renderLerp): drawn at the 30 Hz tick
+            // pose they judder against the interpolated camera on a 60+ Hz display.
+            let r = Vec2(lerp(rock.renderPrevPosition.x, rock.position.x, interpolationAlpha),
+                         lerp(rock.renderPrevPosition.y, rock.position.y, interpolationAlpha))
+            flat.append(contentsOf: [Float(r.x), Float(r.y), Float(rock.radius), Float(rock.angle)])
         }
         return PackedFloat32Array(flat)
     }
@@ -2220,7 +2273,7 @@ class NovaWorld: Node2D {
             // Same merge as `load_game`: base data + enabled plug-ins (Plugins.swift).
             guard let collection = PluginRuntime.shared.loadMerged(baseDir: URL(fileURLWithPath: baseDir)) else { state.finish(nil); return }
             state.report("Indexing the galaxy", 0.85)
-            let g = NovaGame(collection)
+            let g = PerfSupport.makeGame(collection, baseDir: URL(fileURLWithPath: baseDir))
             let galaxy = Galaxy(game: g, flightTuning: flightTuning)
             state.finish((g, galaxy))
         }
@@ -2234,6 +2287,7 @@ class NovaWorld: Node2D {
         if snap["done"] as? Bool == true, snap["ok"] as? Bool == true, let (g, galaxy) = asyncLoad.take() {
             self.game = g
             self.galaxy = galaxy
+            dataGen += 1
         }
         snap["installed"] = game != nil
         return Self.json(snap)
@@ -5391,18 +5445,38 @@ class NovaWorld: Node2D {
     private func tickHailQuotes(dt: Double) {
         guard let world, let game, dockedSpobID == nil, world.player.isAlive, dt > 0 else { return }
         let engine = storyEngine()
+        let force = statusLine.forceRoll
         let quotes = statusLine.quotes.step(
             world: world, game: game, elapsed: dt, barBusy: statusLine.busy,
             grudge: { [pilot] in pilot.persHoldsGrudge($0) },
-            hostile: { [weak self] in self?.isEffectivelyHostileToPlayer($0) ?? false },
+            hostile: { world.isEffectivelyHostileToPlayer($0) },
             missionAvailable: { [pilot] pers in
                 guard let engine else { return true }
                 return PersEncounter.offeredMission(pers, player: pilot, game: game, engine: engine,
                                                     boarding: pers.offerMissionOnBoard) != nil
             },
-            roll: { Double.random(in: 0..<1) })
+            roll: { force ? 0 : Double.random(in: 0..<1) })
         // (the world's own .overlayMessage event is cleared by the next step uncollected: post once, here)
         for q in quotes { post(q, rawCalls: PersQuoteBroadcaster.overlayFrames) }
+    }
+
+    /// Test seam (status_line_selfcheck): make the nearest NPC a gate-free pêrs that has a HailQuote,
+    /// force the 1-in-140 roll, and return the text its broadcast will show ("" = no such pêrs).
+    @Callable(autoSnakeCase: true) func debugArmHailQuote() -> String {
+        guard let world, let game, let npc = world.npcs.first(where: { $0.isAlive }) else { return "" }
+        let gates = 0x0020 | 0x0010 | 0x0004 | 0x0008 | 0x0400 | 0x0800 | 0x0080
+        for id in 128..<1000 {
+            guard let pers = game.pers(id), pers.hailQuote >= 1, pers.flags & gates == 0, !pers.hailQuoteWhenDisabled,
+                  let quote = game.singleString(pers.hailQuote + 4999) ?? game.stringList(7101)?.string(at: pers.hailQuote),
+                  !quote.isEmpty else { continue }
+            npc.personID = id
+            npc.disabled = false
+            npc.position = world.player.position + Vec2(150, 0)
+            statusLine.forceRoll = true
+            statusLine.quotes.reset()
+            return quote.replacingOccurrences(of: "<OSN>", with: pers.name)
+        }
+        return ""
     }
 
     /// The raw-call display length of a line the bridge posted with a non-default duration, popped

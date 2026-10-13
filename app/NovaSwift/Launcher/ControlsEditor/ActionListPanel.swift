@@ -10,6 +10,8 @@ struct ActionListPanel<Header: View>: View {
     let bindingText: (GameAction) -> String?
     /// Optional SF Symbol drawn before the chip (the connected pad's glyph).
     var symbol: (GameAction) -> String? = { _ in nil }
+    /// Greyed text for an action whose input is fixed hardware (the sticks) when it has no binding.
+    var fixedText: (GameAction) -> String? = { _ in nil }
     let selected: GameAction?
     @Binding var hovered: GameAction?
     let conflicts: Set<GameAction>
@@ -86,7 +88,7 @@ struct ActionListPanel<Header: View>: View {
                     if !isSelected, let name = symbol(action) {
                         Image(systemName: name).foregroundStyle(.secondary)
                     }
-                    chip(isSelected ? prompt : (text ?? "—"), selected: isSelected, conflict: isConflict,
+                    chip(isSelected ? prompt : (text ?? fixedText(action) ?? "—"), selected: isSelected, conflict: isConflict,
                          dimmed: text == nil && !isSelected)
                 }
                 .padding(.vertical, 3).padding(.horizontal, 6)
