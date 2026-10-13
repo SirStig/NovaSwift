@@ -29,6 +29,9 @@ const StoryGuide = preload("res://screens/StoryGuide.gd")
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
 const CD = preload("res://ui/classic/ClassicDialog.gd")
 const CS = preload("res://ui/classic/ClassicScreen.gd")
+const Prefs = preload("res://Prefs.gd")
+const Movies = preload("res://Movies.gd")
+const MoviePlayer = preload("res://ui/MoviePlayer.gd")
 
 const COL_AMBER := Color(1.0, 0.82, 0.4)
 const COL_DIM := Color(0.62, 0.66, 0.74)
@@ -47,6 +50,8 @@ var _info_sel := -1               # Missions tab: selected mission id
 var _info_msg := ""
 var _tex := {}                    # PICT id -> Texture2D (or null)
 var _labels := {}
+var _movie_shown_id: int = -1     # mission whose dësc movie already played for the pending offer
+var _movie_playing: bool = false
 
 
 func setup(world) -> void:
@@ -269,6 +274,15 @@ func _open_offer() -> void:
 	var o = _json(nova.offer_state())
 	if not (o is Dictionary) or o.is_empty():
 		return
+	if _movie_playing:
+		return
+	# The offer's dësc movie (mission board / Frozen Heart / ARPIA2 briefings) plays before the text
+	# unless its Flags put it after (0x00442510); same rules as the Apple MissionBoardView.
+	var mv: Dictionary = _offer_movie(int(o.get("id", -1)))
+	if not mv.is_empty() and not bool(mv.after) and _movie_shown_id != int(o.get("id", -1)):
+		_movie_shown_id = int(o.get("id", -1))
+		_play_movie(mv.info, _open_offer)
+		return
 	if ClassicTheme.classic("dialogs"):
 		_open_offer_classic(o)
 		return
@@ -303,13 +317,62 @@ func _open_offer() -> void:
 
 
 func _offer_accept() -> void:
-	_close_modal()
-	nova.offer_accept()
+	_finish_offer(func(): nova.offer_accept())
 
 
 func _offer_decline() -> void:
+	_finish_offer(func(): nova.offer_decline())
+
+
+## Close the offer dialog and run `action`, after the movie when the dësc says so (Flags 0x0001).
+func _finish_offer(action: Callable) -> void:
+	var o = _json(nova.offer_state())
+	var id: int = int(o.get("id", -1)) if o is Dictionary else -1
 	_close_modal()
-	nova.offer_decline()
+	var mv: Dictionary = _offer_movie(id) if id >= 0 else {}
+	_movie_shown_id = -1
+	if not mv.is_empty() and bool(mv.after):
+		_play_movie(mv.info, action)
+	else:
+		action.call()
+
+
+## {info, after} for the pending offer's dësc movie when it can play right now, else {}. A clip that is
+## found but not converted yet starts converting in the background (it plays next time), as the race clips do.
+func _offer_movie(mission_id: int) -> Dictionary:
+	if mission_id < 0 or not bool(Prefs.get_value("classic", "play_movies")) or not ClassDB.class_exists("NovaPlugins"):
+		return {}
+	var pl: Object = ClassDB.instantiate("NovaPlugins")
+	if pl == null or not pl.has_method("desc_movie"):
+		return {}
+	var dm = _json(pl.desc_movie(3872 + mission_id))   # MissionRes.offerTextID
+	if not (dm is Dictionary) or str(dm.get("movie", "")).strip_edges() == "":
+		return {}
+	var path: String = Movies.find_movie(str(dm.movie).strip_edges(), Movies.search_roots(""))
+	if path == "":
+		return {}
+	var info: Dictionary = Movies.ready(path)
+	if info.is_empty():
+		Movies.convert_async(path)
+		return {}
+	return {"info": info, "after": bool(dm.get("after", false))}
+
+
+## A skippable full-dialog movie; `then` runs when it ends, is skipped or fails.
+func _play_movie(info: Dictionary, then: Callable) -> void:
+	_movie_playing = true
+	var box := _dialog_root(520)
+	var player: Control = MoviePlayer.new()
+	player.name = "offer_movie"
+	player.setup(info, Vector2(480, 300))
+	box.add_child(player)
+	var skip := _btn("Skip", func(): player.skip(), box)
+	_open_modal(box, "movie", [skip], func(): player.skip())
+	_focus(skip)
+	player.finished.connect(func():
+		_movie_playing = false
+		_close_modal()
+		then.call())
 
 
 # MARK: Player Info / Mission Info -------------------------------------------

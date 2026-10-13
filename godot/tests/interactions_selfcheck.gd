@@ -28,34 +28,53 @@ func _run() -> void:
 	var ids: PackedInt32Array = nova.ship_ids()
 	print("ships: ", ids.size())
 
-	# --- hail a ship (try each NPC until one opens a window)
+	# --- hail a ship (try each NPC until one opens a window; the cast is seeded per in-game day, so
+	# --- if none can answer yet - disabled, jumping out - let the traffic move and look again)
 	var opened := false
-	for id in ids:
-		if id == 0 or not nova.select_target(id):
-			continue
-		var r := _json(nova.hail_open(false))
-		print("  hail ship ", id, ": ", r.get("result"), " ", r.get("message"))
-		if r.get("result") == "window":
-			var st := _json(nova.hail_state())
-			print("  ship hail: name='", st["name"], "' class='", st["classLine"], "' status='", st["status"], "'")
-			print("  text: ", st["text"])
-			print("  buttons: ", st["top"], " | ", st["middle"], " | ", st["close"])
-			ok = _check("ship hail has text", str(st["text"]) != "" and str(st["name"]) != "") and ok
-			nova.hail_press_top()
-			print("  after greetings: ", _json(nova.hail_state())["text"])
-			nova.hail_close()
-			opened = true
+	for attempt in 6:
+		if attempt > 0:
+			for i in 90:
+				nova.step(1.0 / 30.0)
+			ids = nova.ship_ids()
+		for id in ids:
+			if id == 0 or not nova.select_target(id):
+				continue
+			var r := _json(nova.hail_open(false))
+			print("  hail ship ", id, ": ", r.get("result"), " ", r.get("message"))
+			if r.get("result") == "window":
+				var st := _json(nova.hail_state())
+				print("  ship hail: name='", st["name"], "' class='", st["classLine"], "' status='", st["status"], "'")
+				print("  text: ", st["text"])
+				print("  buttons: ", st["top"], " | ", st["middle"], " | ", st["close"])
+				ok = _check("ship hail has text", str(st["text"]) != "" and str(st["name"]) != "") and ok
+				nova.hail_press_top()
+				print("  after greetings: ", _json(nova.hail_state())["text"])
+				nova.hail_close()
+				opened = true
+				break
+			elif r.get("result") == "escorts":
+				nova.hail_close()
+		if opened:
 			break
-		elif r.get("result") == "escorts":
-			nova.hail_close()
 	ok = _check("a ship hail opened", opened) and ok
 
 	# --- hail a stellar: the selected one (nothing selected, nothing happens)
 	nova.clear_player_target()
 	ok = _check("hail with no stellar selected does nothing", _json(nova.hail_open(true)).get("result") == "nothing") and ok
-	ok = _check("select nav stellar 1", nova.select_nav_stellar(0)) and ok
-	var pr := _json(nova.hail_open(true))
-	print("  hail stellar: ", pr.get("result"), " ", pr.get("message"))
+	# The start system is random: take the first of its nav stellars that answers (an uninhabited
+	# rock says "No response.").
+	var pr := {}
+	var picked := false
+	for idx in 4:
+		if not nova.select_nav_stellar(idx):
+			continue
+		picked = true
+		pr = _json(nova.hail_open(true))
+		print("  hail stellar ", idx, ": ", pr.get("result"), " ", pr.get("message"))
+		if pr.get("result") == "window":
+			break
+		nova.hail_close()
+	ok = _check("select nav stellar 1", picked) and ok
 	ok = _check("stellar hail opens", pr.get("result") == "window") and ok
 	if pr.get("result") == "window":
 		var ps := _json(nova.hail_state())

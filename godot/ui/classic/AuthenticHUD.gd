@@ -108,6 +108,31 @@ func bar_width(vp: Vector2) -> float:
 	return minf(float(_intf["bgW"]) * vp.y / float(_intf["bgH"]), vp.x * 0.35)
 
 
+## The design-to-screen factor of a `vp` window (the ïntf backdrop scaled to the viewport height);
+## 1.0 when no interface is loaded. The original's ui_scale.
+func ui_scale(vp: Vector2) -> float:
+	if _intf.is_empty() or float(_intf.get("bgH", 0)) <= 0.0:
+		return 1.0
+	return vp.y / float(_intf["bgH"])
+
+
+## The in-flight message line's rect (FUN_0087550b 0x0087550b, called from the flight-view setup
+## 0x004af020): left = window left + 25, right = window right - sidebar - 50, bottom = window
+## bottom - 5, top = bottom - 4 - 26 (all x ui_scale). `NovaHud_ShowOverlayMessage` 0x0047e2d0
+## fills it, then `DrawContext_DrawPascalStringInFilledRect` 0x004bcd30 puts the pen at
+## (rect.left, rect.top + font ascent): the line hangs from the TOP of the 30 px rect, 12 pt white
+## (DAT_00733b44 = 0xffff) with no drop shadow.
+static func message_rect(vp: Vector2, sidebar: float, s: float) -> Rect2:
+	var left := 25.0 * s
+	var top := vp.y - (9.0 + 26.0) * s
+	var right := vp.x - sidebar - 50.0 * s
+	return Rect2(left, top, maxf(0.0, right - left), (vp.y - 5.0 * s) - top)
+
+
+## The overlay message's design font size (NovaHud_ShowCachedOverlayMessage passes 0xc).
+const MESSAGE_FONT_DESIGN := 12
+
+
 ## The ïntf text face for the message log / prompts the host draws in the play area.
 func text_font() -> Font:
 	return _font

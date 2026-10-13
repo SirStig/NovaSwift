@@ -25,7 +25,7 @@
 # system, a click / A picks one and the bridge flies the transport (no fuel, no days).
 #   Gamepad: left stick drives a cursor that snaps to nearby systems, D-pad hops
 #   to the next system in that direction, right stick pans, LB/RB zoom, R3 recentre.
-#   Mouse: wheel zooms, right/middle-drag pans.
+#   Mouse: wheel or pinch zooms; drag (any button) or two-finger scroll pans; a click without a drag plots.
 #
 # Opened by Main.gd; emits `closed` and `jump_requested`, and `message` for the log.
 
@@ -116,6 +116,12 @@ var _hover := -1
 var _pad_mode := false           # the pad last moved the cursor (drives hint text)
 var _auto_route := bool(Prefs.get_value("gameplay", "auto_route_plotting"))   # Settings > Automatic route plotting; the map key still toggles it
 var _dragging := false
+# Left button: a press that moves past DRAG_SLOP pans (Apple's DragGesture); one
+# that doesn't is a click that plots, decided on release.
+var _left_down := false
+var _left_dragged := false
+var _left_press := Vector2.ZERO
+const DRAG_SLOP := 4.0
 var _jumps := 0
 var _max_hops := 1
 
@@ -344,10 +350,18 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
 		_pad_mode = false
 		_cursor = _local(event.position)
-		if _dragging:
+		if _left_down and not _left_dragged and _cursor.distance_to(_left_press) > DRAG_SLOP:
+			_left_dragged = true
+		if _dragging or _left_dragged:
 			_center -= event.relative / (_zoom * _canvas_scale())
 		_hover = _nearest(_cursor, MOUSE_RADIUS)
 		_canvas.queue_redraw()
+	elif event is InputEventPanGesture:
+		# Two-finger trackpad scroll pans (macOS / Linux touchpads).
+		_center += event.delta * 8.0 / _zoom
+		_canvas.queue_redraw()
+	elif event is InputEventMagnifyGesture:
+		_zoom_at(event.factor, _local(event.position))
 	elif event is InputEventMouseButton:
 		_pad_mode = false
 		var lp := _local(event.position)
@@ -359,9 +373,16 @@ func _input(event: InputEvent) -> void:
 		elif event.button_index == MOUSE_BUTTON_RIGHT or event.button_index == MOUSE_BUTTON_MIDDLE:
 			_dragging = event.pressed
 		elif event.button_index == MOUSE_BUTTON_LEFT and event.pressed and inside:
-			var id := _nearest(lp, MOUSE_RADIUS)
-			if id != -1:
-				_plot(id, event.shift_pressed)
+			_left_down = true
+			_left_dragged = false
+			_left_press = lp
+		elif event.button_index == MOUSE_BUTTON_LEFT and not event.pressed and _left_down:
+			_left_down = false
+			if not _left_dragged:
+				var id := _nearest(_left_press, MOUSE_RADIUS)
+				if id != -1:
+					_plot(id, event.shift_pressed)
+			_left_dragged = false
 	elif event is InputEventJoypadButton and event.pressed:
 		match event.button_index:
 			JOY_BUTTON_DPAD_LEFT: _step_direction(Vector2.LEFT)
@@ -769,7 +790,7 @@ func _draw_panel(c: Control, font: Font, fs: int, size: Vector2) -> void:
 
 	var hint := ("L-stick cursor · D-pad next system · A plot · Y add hop · X auto-route · L3 find · D-pad ↑ jump · "
 		+ "LB/RB zoom · R-stick pan · B close") if _pad_mode else (
-		"Click plot · Shift+click add hop · J jump · T auto-route · F find · wheel zoom · right-drag pan · C center · M/Esc close")
+		"Click plot · Shift+click add hop · J jump · T auto-route · F find · wheel zoom · drag pan · C center · M/Esc close")
 	c.draw_string(font, Vector2(20, size.y - 16), hint, HORIZONTAL_ALIGNMENT_LEFT, -1, fs - 2, COLOR_DIM)
 
 
@@ -787,7 +808,7 @@ func _draw_gate_panel(c: Control, font: Font, fs: int, size: Vector2) -> void:
 	for n in lines.size():
 		c.draw_string(font, rect.position + Vector2(10, 8 + (n + 1) * (fs + 6) - 4), lines[n],
 			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, COLOR_TEXT if n != 1 else COLOR_ROUTE)
-	var hint := "Click / A pick a destination · wheel zoom · right-drag pan · Esc / B leave"
+	var hint := "Click / A pick a destination · wheel zoom · drag pan · Esc / B leave"
 	c.draw_string(font, Vector2(20, size.y - 16), hint, HORIZONTAL_ALIGNMENT_LEFT, -1, fs - 2, COLOR_DIM)
 
 

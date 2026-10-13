@@ -19,10 +19,49 @@ const EXTENSIONS := ["", ".mov", ".mp3"]
 var track_path := ""    # what was found (may be undecodable), for tests
 
 
+## The folders the active plug-in set puts in front of the base data (selected total conversion's own
+## folders, enabled plug-in folders, then the base data) -- see NovaPlugins.media_dirs. Empty when the
+## bridge has no plug-in runtime (old binary).
+static func plugin_roots() -> PackedStringArray:
+	var out := PackedStringArray()
+	if not ClassDB.class_exists("NovaPlugins"):
+		return out
+	var pl: Object = ClassDB.instantiate("NovaPlugins")
+	if pl == null or not pl.has_method("media_dirs"):
+		return out
+	var arr = JSON.parse_string(str(pl.media_dirs()))
+	if arr is Array:
+		for d in arr:
+			out.append(str(d))
+	return out
+
+
+## Find the track named by `name` in an ordered list of search roots (plug-in folders first, base data
+## last): per root the bare name, ".mov", then ".mp3", a direct hit before a nested one. "" if none.
+static func locate_in(roots: PackedStringArray, name: String) -> String:
+	if name == "":
+		return ""
+	for r in roots:
+		for ext in EXTENSIONS:
+			var file: String = name + ext
+			var p: String = String(r).path_join(file)
+			if FileAccess.file_exists(p):
+				return p
+			var hit: String = _find_nested(String(r), file, 3)
+			if hit != "":
+				return hit
+	return ""
+
+
 ## Find the track named by `name` under `data_dir`, or "". Exposed for tests.
 static func locate(data_dir: String, name: String) -> String:
 	if name == "" or data_dir == "":
 		return ""
+	var plug: PackedStringArray = plugin_roots()
+	if not plug.is_empty():
+		var first: String = locate_in(plug, name)
+		if first != "":
+			return first
 	for folder in FOLDERS:
 		for ext in EXTENSIONS:
 			var file: String = name + ext

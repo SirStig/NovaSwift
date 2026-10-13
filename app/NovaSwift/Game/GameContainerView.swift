@@ -118,21 +118,7 @@ final class GameHost {
             // survives across jumps. `currentSystemID`/`game` are what the
             // hostility ladder reads and where a crime's flood starts.
             let dip = galaxy.makeDiplomacy()
-            dip.currentSystemID = target
-            dip.game = game
-            dip.seed(reputation: pilot.systemReputation ?? [:])
-            // Ranks with "govt won't attack" (Flags 0x0100) shield the player
-            // from that government's ships for as long as the rank is held.
-            dip.rankProtectedGovts = Set(pilot.activeRanks
-                .compactMap { game.rank($0) }
-                .filter { $0.govtWontAttack && $0.govt >= 128 }
-                .map { $0.govt })
-            // Every active rank's flags: the ship comm window reads 0x0400 / 0x0800
-            // from ranks allied with the hailed ship (AI-42).
-            dip.activeRankFlags = pilot.activeRanks.sorted()
-                .compactMap { game.rank($0) }
-                .filter { $0.govt >= 128 }
-                .map { (govt: $0.govt, flags: $0.flags) }
+            WorldPilotLink.seedDiplomacy(dip, pilot: pilot, game: game, systemID: target)
             // Player ship + sprite textures from the current pilot loadout (see
             // `buildPlayerShip`) — the exact same construction the in-place
             // takeoff reload (`GameScene.reloadForDeparture`) uses, so a newly
@@ -346,16 +332,13 @@ final class GameHost {
             scene.stellarStrengthLeft = { [weak pilotStore] in pilotStore?.state.stellarStrengthLeft ?? [:] }
             scene.persSpawnEligible = { [weak pilotStore] id in
                 guard let store = pilotStore else { return true }
-                if store.state.isPersDefeated(id) { return false }
-                guard let pers = scanGame.pers(id), !pers.activeOn.isEmpty else { return true }
-                return StoryEngine(game: scanGame, player: store.state).evaluate(test: pers.activeOn)
+                return WorldPilotLink.persSpawnEligible(id, pilot: store.state, game: scanGame)
             }
             // shïp.AppearOn: a hull with a non-blank AppearOn test only appears in
             // düde spawns while its control-bit expression passes against live bits.
             scene.shipSpawnEligible = { [weak pilotStore] id in
                 guard let store = pilotStore else { return true }
-                guard let ship = scanGame.ship(id), !ship.appearOn.isEmpty else { return true }
-                return StoryEngine(game: scanGame, player: store.state).evaluate(test: ship.appearOn)
+                return WorldPilotLink.shipSpawnEligible(id, pilot: store.state, game: scanGame)
             }
             // The status bar's cargo panel (0x004612c0): the commodity bins,
             // the Special line, and the fleet's capacity for Free.
@@ -370,10 +353,12 @@ final class GameHost {
             // Mining: the player's scoop collected a destroyed asteroid's yield —
             // add it to cargo (clamped to free hold) and report what was stowed.
             scene.onAsteroidMined = { [weak pilotStore] cargoType, quantity in
-                guard let store = pilotStore, let commodity = Commodity.standard(cargoID: cargoType) else { return nil }
-                let stowed = store.collectCargo(id: cargoType, tons: quantity, galaxy: Galaxy(game: scanGame))
-                guard stowed > 0 else { return nil }
-                return (stowed, scanGame.commodityName(commodity))
+                guard let store = pilotStore,
+                      let mined = WorldPilotLink.collectMined(cargoType: cargoType, quantity: quantity,
+                                                              pilot: &store.state, galaxy: Galaxy(game: scanGame))
+                else { return nil }
+                store.save()
+                return mined
             }
             // Tribbles breed and perishables rot in flight (EC-24).
             scene.onJunkCargoEvent = { [weak pilotStore] in
@@ -1995,7 +1980,7 @@ struct GameContainerView: View {
             }
             model.pilot.state.credits = max(0, model.pilot.state.credits - loss.credits)
             scene.debugSyncCredits(model.pilot.state.credits)
-            if let line = playerBoardedLine(tons: loss.cargo.values.reduce(0, +), credits: loss.credits) {
+            if let game = host?.game, let line = OriginalText(game: game).playerBoardedLine(tons: loss.cargo.values.reduce(0, +), credits: loss.credits) {
                 host?.hud.post(line)
                 model.audio.play(.beep2)   // Boarding_BoardShipAndTransferCargo 0x00412550, snd 151
             }
@@ -2441,22 +2426,6 @@ struct GameContainerView: View {
         setScenePaused(false, reason: reason)
         syncNav(host)
         grabSceneFocus(reason: reason)
-    }
-
-    /// The boarded-player line (0x00412550): "<n> ton(s)" STR# 2002 #391 #373
-    /// [#392] "<c> credit(s)" #374, nil when nothing was taken.
-    private func playerBoardedLine(tons: Int, credits: Int) -> String? {
-        guard tons > 0 || credits > 0 else { return nil }
-        let list = host?.game?.stringList(2002)
-        func s(_ i: Int) -> String { list?.string(at: i) ?? "" }
-        var parts: [String] = []
-        if tons > 0 {
-            parts += ["\(tons)", tons == 1 ? "ton" : "tons", s(391), s(373)]
-            if credits > 0 { parts.append(s(392)) }
-        }
-        if credits > 0 { parts += ["\(credits)", credits < 2 ? "credit" : "credits"] }
-        parts.append(s(374))
-        return parts.filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     /// The landing fee (EC-05): the full `spöb` fee, waived at a dominated
@@ -2953,34 +2922,15 @@ struct GameContainerView: View {
     /// `armor + rand(armor × 0.5 + 1)` of the hull's base armor.
     private func checkHazardOutfits(_ host: GameHost) {
         guard let game = host.game else { return }
-        let bombs = model.pilot.state.outfits.filter { $0.value > 0 }.keys.sorted().compactMap { oid -> (OutfRes, Int, Bool)? in
-            guard let o = game.outfit(oid) else { return nil }
-            for (type, value) in o.modifiers {
-                if type == .bomb { return (o, value, true) }
-                if type == .nonlethalBomb { return (o, value, false) }
-            }
-            return nil
-        }
-        guard let (outfit, value, lethal) = bombs.first else { bombFuse = nil; return }
-        guard let fuse = bombFuse else { bombFuse = Int.random(in: 0..<100); return }
-        guard fuse >= 300 else { bombFuse = fuse + 1; return }
-        bombFuse = nil
-        guard let ship = host.scene.playerShip, ship.isAlive else { return }
-        if lethal {
-            let line = value >= 0 ? game.descText(value)
-                : (game.stringList(2002)?.string(at: 38) ?? "A bomb has exploded onboard your ship!")
+        switch HazardOutfits.tick(fuse: &bombFuse, pilot: &model.pilot.state, ship: host.scene.playerShip, game: game) {
+        case .none:
+            break
+        case let .detonated(line, outfitID):
             host.hud.post(line)
-            ship.hasEscapePod = false
-            ship.hasAutoEject = false
-            _ = ship.applyDamage(shield: 1_000_000, armor: 1_000_000, piercing: true)
-            Log.scene.notice("Bomb outfit \(outfit.id, privacy: .public) detonated")
-        } else {
-            model.pilot.state.outfits[outfit.id] = nil
-            let base = Double(game.ship(model.pilot.state.shipType)?.armor ?? 0)
-            let damage = base + Double(Int.random(in: 0..<max(1, Int(base * 0.5 + 1))))
-            _ = ship.applyDamage(shield: 0, armor: damage, piercing: true)
-            host.scene.triggerPlayerOutfitExplosion(radius: 24, boomID: value >= 128 ? value - 128 : nil)
-            Log.scene.notice("Nonlethal bomb outfit \(outfit.id, privacy: .public) went off")
+            Log.scene.notice("Bomb outfit \(outfitID, privacy: .public) detonated")
+        case let .nonlethal(outfitID, boomID):
+            host.scene.triggerPlayerOutfitExplosion(radius: 24, boomID: boomID)
+            Log.scene.notice("Nonlethal bomb outfit \(outfitID, privacy: .public) went off")
         }
     }
 

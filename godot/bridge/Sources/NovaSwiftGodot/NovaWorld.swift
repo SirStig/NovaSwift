@@ -135,6 +135,8 @@ class NovaWorld: Node2D {
     private var pendingEffects: [Float] = []
     /// Sound cues + the voice board (see "Audio" at the end of this class).
     private var sound = SoundState()
+    /// The status line's per-line durations, the frontend's busy flag, the HailQuote broadcaster.
+    private var statusLine = StatusLineState()
     /// Per-ship overlay clocks, animated stellars, weapon visuals (see `// MARK: Flight visuals`).
     private let flightVisuals = FlightVisuals()
 
@@ -151,6 +153,7 @@ class NovaWorld: Node2D {
         pendingEventNames.removeAll(keepingCapacity: true)
         pendingEffects.removeAll(keepingCapacity: true)
         sound.resetForNewWorld()
+        statusLine.resetForNewWorld()   // HailQuote latches are per world
         travel.resetForNewWorld()    // selected stellar, landing clearance, gate state
         interactionsWorldRebuilt()   // close hail/plunder windows, bring the escort wing back
         storyWorldRebuilt()          // attach the mission-ship host, drop active missions' ships in
@@ -327,6 +330,7 @@ class NovaWorld: Node2D {
         }
         tickSoundAlarms(dt: dt)       // red alert / klaxxon / warp-up cue
         tickInteractions(dt: dt)      // Escort Commands panel clock
+        tickHailQuotes(dt: dt)        // pêrs HailQuote broadcasts (0x00433050)
         tickTravel()                  // the 250 px landing-clearance arm
         tickStory(dt: dt)             // sightings, queued world edits
         gapsTick()                    // the escape pod's respawn
@@ -705,6 +709,10 @@ class NovaWorld: Node2D {
         // Fuel goes the same way: the pilot owns the tank level while docked
         // (refuelling is paid), and `launch()` carries it back out.
         if let ship = world?.player { pilot.cargo = ship.cargo; pilot.fuel = ship.fuel }
+        // What was fired or lost in flight stays spent (UI-02), and the crimes / kills / garrison
+        // changes the visit made are folded into the pilot (Apple `syncCombatStanding` + `recordMunitions`).
+        if let ship = world?.player, let game { Munitions.record(ship, into: &pilot, game: game) }
+        syncLiveStanding()
         // The landing fee (EC-05): the full `spöb` fee, waived at a dominated
         // stellar. Clearance already refused a landing the player couldn't pay for.
         if chargeFee, let spob = game?.spob(spobID) {
@@ -794,7 +802,16 @@ class NovaWorld: Node2D {
         dockedSpobID = nil
         pilot.landedSpob = nil
         resetFrameState()
-        if let launchMessage, !launchMessage.isEmpty { storyState.services.messages.append(launchMessage) }
+        // The launch line (0x00456134; UI-11): a staged mission `Q` message replaces it
+        // (snd 154, 0x1f4 raw calls), else "Launching from X on <date>." (#55-60).
+        if let launchMessage {
+            if !launchMessage.isEmpty {
+                beep(5)
+                post(launchMessage, rawCalls: OriginalText.Duration.missionQuote)
+            }
+        } else {
+            post(StatusLineBackend.launch(game: game, pilot: pilot, spobID: spobID))
+        }
         return true
     }
 
@@ -1063,6 +1080,7 @@ class NovaWorld: Node2D {
             soundTicks60: galaxy.hyperspaceWarpUpSoundTicks60,
             soundTicks60X2: galaxy.hyperspaceWarpUp2xSoundTicks60,
             multiplier: galaxy.jumpDurationMultiplier(hull: p.shipTypeID))
+        if let line = world.strandedFighterWarning(game: game) { nav.messages.append(line) }   // "Wait for me!" (FL-23)
         nav.pending = PendingHyperjump(destination: route[hops - 1], hops: hops,
                                        passedThrough: Array(route.prefix(max(0, hops - 1))), bearing: bearing)
         return ""
@@ -1124,8 +1142,9 @@ class NovaWorld: Node2D {
     private func completeHyperjump(_ plan: PendingHyperjump) {
         guard let world, let game, let galaxy, let nv = navigator() else { return }
         let ship = world.player
+        syncLiveStanding()                           // the about-to-be-discarded world holds the legal record
         storyLeavingSystem()                         // surviving aux ships go back to their budgets
-        _ = world.returnJumpingFighters()
+        let abandonedFighters = world.returnJumpingFighters()   // rides on the arrival line (UI-11)
         // AI-38: disabled escorts are lost, the rest keep shields/armor/fuel/ammo
         // into the next system (`respawn` consumes this on the rebuild below).
         interact.messages += interact.escorts.carryThroughJump(world: world, pilot: &pilot, game: game, via: .jump)
@@ -1159,6 +1178,7 @@ class NovaWorld: Node2D {
         if let nv = navigator() { nav.route.sync(current: plan.destination, linked: nv.isLinked) }
         nav.arrivedIn = game.system(plan.destination)?.displayName ?? ""
         resetFrameState()
+        postArrivalLine(systemID: plan.destination, gateID: nil, abandonedFighters: abandonedFighters)
         sound.board.stop(soundID: SoundCues.hyperspaceChargeID)   // the jump cut its Warp up
         sound.board.stop(soundID: SoundCues.warpUp2xID)
         sound.pending.append(SoundCues.hyperspaceArrive)           // arriving: Warp out
@@ -2018,6 +2038,7 @@ class NovaWorld: Node2D {
     /// follows with `make_world(-1)`. False with no game loaded or a session already running.
     @Callable(autoSnakeCase: true) func tutorialBegin() -> Bool {
         guard let game, training == nil else { return false }
+        syncLiveStanding()   // the real pilot keeps what it earned; the trainee starts clean
         training = TrainingSession(pilot: pilot, started: pilotStarted, saveID: pilotSaveID)
         var p = PilotFactory.makeDefault(name: "Trainee", isMale: true, game: game)
         p.landedSpob = nil
@@ -2031,6 +2052,7 @@ class NovaWorld: Node2D {
     /// End the training flight: the real pilot (if any) is back, untouched.
     @Callable(autoSnakeCase: true) func tutorialEnd() {
         guard let t = training else { return }
+        syncLiveStanding()   // the trainee's accrued standing is thrown away with it
         pilot = t.pilot
         pilotStarted = t.started
         pilotSaveID = t.saveID
@@ -2234,6 +2256,7 @@ class NovaWorld: Node2D {
     }
 
     private func adoptPilot(_ state: PlayerState, saveID: UUID) {
+        syncLiveStanding()   // the outgoing pilot takes its own accrued standing, not the next one's
         pilot = state
         pilot.rosterID = saveID
         pilotSaveID = saveID
@@ -2272,6 +2295,7 @@ class NovaWorld: Node2D {
             pilot.shipHeading = nil
         }
         if let ship = world?.player, let game { Munitions.record(ship, into: &pilot, game: game) }
+        syncLiveStanding()   // legal record, rating, garrisons, stellar armor
         return PilotSaves.persist(archive: a, id: id, state: pilot, game: game, backup: backup)
     }
 
@@ -2634,8 +2658,10 @@ class NovaWorld: Node2D {
         if let cue = SoundCues.beep(n) { sound.pending.append(cue) }
     }
 
-    private func post(_ line: String) {
-        if !line.isEmpty { travel.messages.append(line) }
+    private func post(_ line: String, rawCalls: Int = 0) {
+        if line.isEmpty { return }
+        travel.messages.append(line)
+        statusLine.note(line, rawCalls: rawCalls)   // a non-default display length (the buoy, a quote)
     }
 
     /// Bodies the player can approach to land on / use (`GameScene.isPlayerLandTarget`).
@@ -2676,6 +2702,18 @@ class NovaWorld: Node2D {
             return world?.cycleNearestFirst(reverse: reverse)?.entityID ?? -1
         }
         return world?.cyclePlayerTarget(forward: !reverse, squad: squad)?.entityID ?? -1
+    }
+
+    /// Test seam: why each live NPC is or isn't on the plain `cycleTarget` list, as
+    /// `[{id, name, onCycle, squad, cloaked, hullFlags2}]`.
+    @Callable(autoSnakeCase: true) func debugCycleCandidates() -> String {
+        guard let world else { return "[]" }
+        let on = Set(world.playerCycleCandidates(squad: false).map { $0.entityID })
+        return Self.json(world.npcs.filter { $0.isAlive }.map {
+            ["id": $0.entityID, "name": $0.name, "onCycle": on.contains($0.entityID),
+             "squad": world.isInPlayerSquad($0), "cloaked": $0.isEffectivelyCloaked,
+             "hullFlags2": $0.hullFlags2] as [String: Any]
+        })
     }
 
     /// Alt-R: the nearest ship outside the player's squad, no range limit (0x00462850).
@@ -2874,7 +2912,8 @@ class NovaWorld: Node2D {
         let fee = pilot.hasDominated(id) ? 0 : spob.landingFee
         beep(2)   // NovaUi_UpdateTravelEngagementProgress 0x00459950
         post(OriginalText(game: game).landingClearance(
-            body: OriginalText.Body(spob), stellar: spob.displayName, pilot: pilot.pilotName, fee: fee) { Int.random(in: 0..<$0) })
+            body: OriginalText.Body(spob), stellar: spob.displayName, pilot: pilot.pilotName, fee: fee) { Int.random(in: 0..<$0) },
+             rawCalls: OriginalText.Duration.landing)
     }
 
     /// The land hint for the nearest approachable stellar in reach, as `[kind, name]`
@@ -2920,31 +2959,31 @@ class NovaWorld: Node2D {
         let kind = OriginalText.Body(spob)
         if pilot.destroyedStellars?.contains(id) == true, !spob.landableOnlyWhenDestroyed {
             beep(4)
-            post(text.unableToLand(body: kind, stellar: spob.displayName))
+            post(text.unableToLand(body: kind, stellar: spob.displayName), rawCalls: OriginalText.Duration.landing)
             return landJSON("messages")
         }
         if landingProblem(id) == .cloaked {
             beep(4)
-            post(text.misc(73))
+            post(text.misc(73), rawCalls: OriginalText.Duration.landing)
             return landJSON("messages")
         }
         guard travel.landingRequest == id else {
             // First press: the request.
             if spob.isUninhabited && !spob.isGate {
                 beep(1)   // 0x00459950: the "No response." line sounds snd 150
-                post(text.misc(53))
+                post(text.misc(53), rawCalls: OriginalText.Duration.landing)
                 travel.landingRequest = id
                 travel.cleared.insert(id)
                 if let land = attemptLandSelected() { return requestLanding(land) }
                 return landJSON("messages")
             }
             // Clearance reads the per-system reputation: fold in this session's crimes first (EC-02).
-            pilot.applyReputationDelta(world.diplomacy?.consumeReputationDelta() ?? [:])
+            syncLiveStanding()
             let refusal = spob.isGate ? nil : landingRefusalReason(spob)
             let denied = spob.isGate ? !(spob.isWormhole || playerMayUseGate(id)) : refusal != nil
             if denied {
                 beep(2)
-                post(refusal ?? text.landingDenied(body: kind))
+                post(refusal ?? text.landingDenied(body: kind), rawCalls: OriginalText.Duration.landing)
                 travel.selectedSpob = nil
                 return landJSON("messages")
             }
@@ -2953,16 +2992,16 @@ class NovaWorld: Node2D {
                 return landJSON("messages")   // the clearance line follows on the next tick
             }
             beep(2)
-            post(text.landingRequest(body: kind, stellar: spob.displayName, pilot: pilot.pilotName) { Int.random(in: 0..<$0) })
+            post(text.landingRequest(body: kind, stellar: spob.displayName, pilot: pilot.pilotName) { Int.random(in: 0..<$0) }, rawCalls: OriginalText.Duration.landing)
             return landJSON("messages")
         }
         // Second press: land, or say why not.
         if let land = attemptLandSelected() { return requestLanding(land) }
         beep(4)
         switch landingProblem(id) {
-        case .tooFast?: post(text.tooFast(body: kind))
-        case .cloaked?: post(text.misc(73))
-        default: post(text.tooFar(body: kind))
+        case .tooFast?: post(text.tooFast(body: kind), rawCalls: OriginalText.Duration.approach)
+        case .cloaked?: post(text.misc(73), rawCalls: OriginalText.Duration.landing)
+        default: post(text.tooFar(body: kind), rawCalls: OriginalText.Duration.approach)
         }
         return landJSON("messages")
     }
@@ -3142,7 +3181,7 @@ class NovaWorld: Node2D {
         guard let world, let game, let galaxy, dockedSpobID == nil, world.playerJump == nil else { return false }
         let ship = world.player
         storyLeavingSystem()
-        _ = world.returnJumpingFighters()
+        let abandonedFighters = world.returnJumpingFighters()
         interact.messages += interact.escorts.carryThroughJump(world: world, pilot: &pilot, game: game, via: .gate(destGate))
         pilot.cargo = ship.cargo
         pilot.fuel = ship.fuel
@@ -3170,6 +3209,7 @@ class NovaWorld: Node2D {
         if let nv = navigator() { nav.route.arriveViaGate(at: destSystem, linked: nv.isLinked) }
         nav.arrivedIn = game.system(destSystem)?.displayName ?? ""
         resetFrameState()
+        postArrivalLine(systemID: destSystem, gateID: destGate, abandonedFighters: abandonedFighters)
         travel.openGates.insert(destGate)          // the arrival gate glows as you pop out
         sound.pending.append(SoundCues.hyperspaceArrive)   // gate travel plays only Warp out
         return true
@@ -3661,6 +3701,7 @@ class NovaWorld: Node2D {
     /// grid reads the live ship when flying.
     @Callable(autoSnakeCase: true) func playerInfo() -> String {
         guard let game, let galaxy else { return "{}" }
+        syncLiveStanding()   // a kill a moment ago must show in the rating
         let pages = PlayerInfoPages(game: game, player: pilot)
         var figures: PlayerInfoPages.ShipFigures?
         if dockedSpobID == nil, let world, world.player.isAlive {
@@ -4115,6 +4156,50 @@ class NovaWorld: Node2D {
                 pilot.cargo = held.cargo
             }
         }
+        gapsHazardTick(world)
+    }
+
+    /// Bomb outfits (OS-08): the fuse counts the player's 30 Hz flight ticks; the rules are
+    /// `HazardOutfits.tick` (Apple `checkHazardOutfits`).
+    private func gapsHazardTick(_ world: World) {
+        guard dockedSpobID == nil, let game, !pilot.outfits.isEmpty else { gaps.bombFuse = nil; return }
+        switch HazardOutfits.tick(fuse: &gaps.bombFuse, pilot: &pilot, ship: world.player, game: game) {
+        case .none:
+            break
+        case let .detonated(line, _):
+            post(line)
+        case let .nonlethal(_, boomID):
+            world.emitExplosion(at: world.player.position, radius: 24, boomID: boomID)
+        }
+    }
+
+    /// The player's mining scoop collected a box (a destroyed rock's yield, a spilled load): it
+    /// goes into the hold, clamped to free space (Apple `onAsteroidMined`).
+    private func gapsMined(cargoType: Int, quantity: Int) {
+        guard let world, let galaxy else { return }
+        var held = pilot
+        held.cargo = world.player.cargo
+        guard WorldPilotLink.collectMined(cargoType: cargoType, quantity: quantity, pilot: &held, galaxy: galaxy) != nil
+        else { return }
+        world.player.cargo = held.cargo
+        pilot.cargo = held.cargo
+    }
+
+    /// An NPC boarded the player (AI-29): the boarders take cargo and credits, snd 151 and
+    /// the original's status line (Apple `onPlayerBoardedBy`).
+    private func gapsPlayerBoarded(by boarderID: Int, ratio: Int) {
+        guard let world, let game else { return }
+        var cargo = world.player.cargo
+        var credits = pilot.credits
+        let line = WorldPilotLink.resolveBoarding(world: world, game: game, boarderID: boarderID, ratio: ratio,
+                                                  cargo: &cargo, credits: &credits)
+        world.player.cargo = cargo
+        pilot.cargo = cargo
+        pilot.credits = credits
+        if let line, !line.isEmpty {
+            post(line)
+            beep(2)   // Boarding_BoardShipAndTransferCargo 0x00412550, snd 151
+        }
     }
 
     // --- World events the section reacts to (called from collectEvents) ---
@@ -4135,6 +4220,14 @@ class NovaWorld: Node2D {
             if intoPod { post(strs?.string(at: 38) ?? "") }
             else { post("\(strs?.string(at: 52) ?? "") \(game.ship(newClass)?.displayName ?? "").") }
             _ = autosave(.event)
+        case let .asteroidMined(cargoType, quantity, _):
+            gapsMined(cargoType: cargoType, quantity: quantity)
+        case let .playerBoarded(boarderID, ratio):
+            gapsPlayerBoarded(by: boarderID, ratio: ratio)
+        case .personGrudge, .personDefeated, .reinforcementsCalled:
+            // The pilot remembers who it wronged / defeated (never respawns) and which
+            // systems' reinforcements are on their retrigger delay (Apple `onPersGrudge` etc.).
+            if WorldPilotLink.note(event: event, pilot: &pilot) { _ = autosave(.event) }
         case .escapePodRespawn:
             gaps.podRespawnPending = true
         case .playerDestroyed:
@@ -4466,6 +4559,178 @@ class NovaWorld: Node2D {
         return storyState.services.pendingOffer != nil
     }
 
+    // --- Live-wiring test seams (godot/tests/live_wiring_selfcheck.gd). Not used by the game. ---
+
+    /// `{rating, legal, strict, seed}` of the pilot AFTER folding the live world into it.
+    @Callable(autoSnakeCase: true) func debugStanding() -> String {
+        syncLiveStanding()
+        let here = world?.diplomacy?.reputationHere ?? 0
+        return Self.json(["rating": pilot.combatRating, "worldRating": world?.playerCombatRating ?? -1,
+                          "legalHere": here, "pilotLegal": pilot.systemReputation?[currentSystemID ?? -1] ?? 0,
+                          "strictWorld": world?.strictPlay ?? false, "strictPilot": pilot.isStrictPlay,
+                          "system": currentSystemID ?? -1, "sysGovt": world?.diplomacy?.currentSystemGovernment ?? -1,
+                          "credits": pilot.credits, "ranks": Array(pilot.activeRanks).sorted()] as [String: Any])
+    }
+
+    /// Ids of the first `limit` systems in the data (test aid for hopping between worlds).
+    @Callable(autoSnakeCase: true) func debugSystemIds() -> PackedInt32Array {
+        PackedInt32Array((game?.systems().prefix(8) ?? []).map { Int32($0.id) })
+    }
+
+    /// Commit a crime against `govt` in the current system as the engine would (a kill, a
+    /// disable, a boarding), without needing a victim in range.
+    @Callable(autoSnakeCase: true) func debugCommitCrime(kind: String, govt: Int, strength: Int) {
+        guard let dip = world?.diplomacy else { return }
+        switch kind {
+        case "kill": dip.recordKill(of: govt, shipStrength: strength)
+        case "disable": dip.recordDisable(of: govt)
+        case "board": dip.recordBoard(of: govt)
+        default: dip.recordSmuggling(against: govt)
+        }
+    }
+
+    /// Destroy the first live NPC as the player's kill (credited to the legal record and the combat
+    /// rating by the engine itself). Returns the victim's `{govt, strength, person}`.
+    @Callable(autoSnakeCase: true) func debugKillNpc() -> String {
+        guard let world, let npc = world.npcs.first(where: { $0.isAlive && $0.missionID == nil }) else { return "{}" }
+        npc.killedByPlayer = true
+        npc.killCredited = true
+        npc.armor = 0
+        let out: [String: Any] = ["govt": npc.government, "strength": Int(npc.combatStrength), "person": npc.personID ?? -1]
+        step(dt: Self.fixedStep * 2)
+        return Self.json(out)
+    }
+
+    /// Hand the player ship a mining scoop outfit and rebuild the world, then drop `tons` of
+    /// cargo `cargoType` boxes on top of it. True once the scoop is fitted.
+    @Callable(autoSnakeCase: true) func debugEquipScoop() -> Bool {
+        guard let game, let o = game.outfits().first(where: { $0.has(.miningScoop) }) else { return false }
+        pilot.grantOutfit(o.id)
+        return makeWorld(systemID: currentSystemID ?? -1)
+    }
+
+    /// Spawn `count` resource boxes of `cargoType` on the player; returns how many tons the
+    /// hold gained after `ticks` of flight (the scoop collects what fits).
+    @Callable(autoSnakeCase: true) func debugMineBoxes(cargoType: Int, count: Int, ticks: Int) -> Int {
+        guard let world else { return 0 }
+        let before = world.player.cargo[cargoType] ?? 0
+        for _ in 0..<count { world.spawnFreeflightObject(at: world.player.position, cargoType: cargoType, spriteSet: 0) }
+        for _ in 0..<ticks { step(dt: Self.fixedStep) }
+        return (world.player.cargo[cargoType] ?? 0) - before
+    }
+
+    /// Tons of the hold still free (the mining scoop's gate).
+    @Callable(autoSnakeCase: true) func debugHoldHasRoom() -> Bool { world?.playerHoldHasRoom() ?? false }
+
+    /// The world's view of përs `id`: `[eligible, grudge]` as 0/1.
+    @Callable(autoSnakeCase: true) func debugPersGate(id: Int) -> PackedInt32Array {
+        guard let world else { return PackedInt32Array() }
+        return PackedInt32Array([world.persSpawnEligible(id) ? 1 : 0, world.playerPersGrudges.contains(id) ? 1 : 0])
+    }
+
+    /// Let përs `id` be defeated / wronged as the engine reports it.
+    @Callable(autoSnakeCase: true) func debugPersEvent(id: Int, defeated: Bool) {
+        let e: WorldEvent = defeated ? .personDefeated(personID: id) : .personGrudge(personID: id)
+        gapsNote(e)
+    }
+
+    /// A pêrs with an `ActiveOn` expression, else a plain one: `[id, hasActiveOn]`.
+    @Callable(autoSnakeCase: true) func debugGatedPers() -> PackedInt32Array {
+        guard let game else { return PackedInt32Array() }
+        if let p = game.perses().first(where: { !$0.activeOn.isEmpty }) { return PackedInt32Array([Int32(p.id), 1]) }
+        if let p = game.perses().first { return PackedInt32Array([Int32(p.id), 0]) }
+        return PackedInt32Array()
+    }
+
+    /// An NPC boards the player: `{cargo, credits, line}` lost. Uses the first live NPC as the boarder.
+    @Callable(autoSnakeCase: true) func debugBoardPlayer(ratio: Int) -> String {
+        guard let world, let boarder = world.npcs.first(where: { $0.isAlive }) else { return "{}" }
+        let c0 = world.player.cargo.values.reduce(0, +), cr0 = pilot.credits
+        gapsNote(.playerBoarded(byShipID: boarder.entityID, ratio: ratio))
+        return Self.json(["cargoLost": c0 - world.player.cargo.values.reduce(0, +),
+                          "creditsLost": cr0 - pilot.credits] as [String: Any])
+    }
+
+    /// Stellar defense state the pilot holds: `{garrisons: {spob: n}, reinforce: {sys: days}, armor: {spob: v}}`.
+    @Callable(autoSnakeCase: true) func debugDefenseState() -> String {
+        syncLiveStanding()
+        func keyed<V>(_ m: [Int: V]?) -> [String: Any] { Dictionary(uniqueKeysWithValues: (m ?? [:]).map { (String($0.key), $0.value as Any) }) }
+        return Self.json(["garrisons": keyed(pilot.stellarGarrisons), "reinforce": keyed(pilot.reinforcementRetriggerDays),
+                          "armor": keyed(pilot.stellarStrengthLeft),
+                          "worldGarrisons": keyed(world?.stellarGarrisons),
+                          "worldArmor": keyed(world?.stellarArmor)] as [String: Any])
+    }
+
+    /// Take a garrison ship from stellar `spobID`'s pool, as a defense launch does (marks it touched).
+    @Callable(autoSnakeCase: true) func debugSetGarrison(spobID: Int, count: Int) {
+        world?.debugSetGarrison(spobID: spobID, count: count)
+    }
+
+    /// A stellar of the current system that has a defense fleet (`DefCount` > 0), else -1.
+    @Callable(autoSnakeCase: true) func debugDefendedStellar() -> Int {
+        guard let world, let game else { return -1 }
+        return world.systemContext.bodies.first { game.spob($0.id)?.hasDefenseFleet == true }?.id ?? -1
+    }
+
+    /// Demand tribute from `spobID` with a combat rating high enough to open the contest.
+    @Callable(autoSnakeCase: true) func debugDemandTribute(spobID: Int) -> String {
+        guard let world else { return "" }
+        world.playerCombatRating = 20_000
+        return "\(world.demandTribute(spobID: spobID))"
+    }
+
+    /// Fire a `reinforcementsCalled` report for the current system as the spawner does.
+    @Callable(autoSnakeCase: true) func debugReinforcementsCalled(days: Int) {
+        gapsNote(.reinforcementsCalled(systemID: currentSystemID ?? -1, retriggerDays: days))
+    }
+
+    /// `{seed, day}` the current system's world is seeded with today (Apple `currentWorldSeed`).
+    @Callable(autoSnakeCase: true) func debugSpawnSeed() -> String {
+        Self.json(["seed": String(GameSession.worldSeed(systemID: currentSystemID ?? 0, day: pilot.date.julianDay)),
+                   "day": pilot.date.julianDay] as [String: Any])
+    }
+
+    /// Let `days` game days pass (the travel/landing clock) so the next world builds on a new seed.
+    @Callable(autoSnakeCase: true) func debugAdvanceDays(days: Int) {
+        guard let engine = storyEngine() else { return }
+        engine.advanceDays(days)
+        pilot = engine.player
+    }
+
+    /// A hull whose `AppearOn` test is non-blank, else -1.
+    @Callable(autoSnakeCase: true) func debugGatedShip() -> Int {
+        game?.ships().first { !$0.appearOn.isEmpty }?.id ?? -1
+    }
+
+    /// The `AppearOn` expression of hull `id`.
+    @Callable(autoSnakeCase: true) func debugShipAppearOn(id: Int) -> String { game?.ship(id)?.appearOn ?? "" }
+
+    /// Whether the live world lets hull `id` appear.
+    @Callable(autoSnakeCase: true) func debugShipGate(id: Int) -> Bool { world?.shipSpawnEligible(id) ?? true }
+
+    /// `[system, stellar]` of a stellar with a defense fleet, else empty.
+    @Callable(autoSnakeCase: true) func debugSystemWithDefendedStellar() -> PackedInt32Array {
+        guard let game else { return PackedInt32Array() }
+        for spob in game.spobs() where spob.hasDefenseFleet {
+            if let sys = game.systemContaining(spob: spob.id) { return PackedInt32Array([Int32(sys), Int32(spob.id)]) }
+        }
+        return PackedInt32Array()
+    }
+
+    /// Damage a destroyable stellar as combat would leave it: `value` strength remaining.
+    @Callable(autoSnakeCase: true) func debugSetStellarArmor(spobID: Int, value: Double) {
+        world?.stellarArmor[spobID] = value
+    }
+
+    /// Run the bomb fuse `ticks` ticks of flight; the outfit counts as detonated if the hull took damage / died.
+    @Callable(autoSnakeCase: true) func debugGiveBomb(lethal: Bool) -> Bool {
+        guard let game, let o = game.outfits().first(where: { $0.modifiers.contains { $0.0 == (lethal ? .bomb : .nonlethalBomb) } })
+        else { return false }
+        pilot.grantOutfit(o.id)
+        gaps.bombFuse = 300
+        return true
+    }
+
     /// Whether përs `id` is recorded as never to appear again.
     @Callable(autoSnakeCase: true) func debugPersDefeated(id: Int) -> Bool { pilot.isPersDefeated(id) }
 
@@ -4483,12 +4748,41 @@ class NovaWorld: Node2D {
     /// population scale lands right after, as in Apple's `GameScene.init`.
     private func makeConfiguredWorld(game: NovaGame, systemID: Int, player: Ship,
                                      galaxy: Galaxy) -> (world: World, galaxy: Galaxy) {
+        // Carry the pilot into the new world exactly as the Apple `GameHost` does (A1/A3/A5/A7):
+        // what the outgoing world accrued is folded in first (the diplomacy table is cached per
+        // galaxy and the seed below overwrites it), then the legal record + ranks are seeded,
+        // the per-day seed varies the cast between visits, and the pilot's gating / Strict Play /
+        // defense state land before the initial fill.
+        syncLiveStanding()
+        WorldPilotLink.seedDiplomacy(galaxy.makeDiplomacy(), pilot: pilot, game: game, systemID: systemID)
         let built = GameSession.makeWorld(game: game, systemID: systemID, player: player, galaxy: galaxy,
-                                          combatTuning: plumbing.combatTuning, spawnModel: plumbing.traffic.spawnModel,
-                                          enhancements: plumbing.enhancements)
+                                          combatTuning: plumbing.combatTuning,
+                                          seed: GameSession.worldSeed(systemID: systemID, day: pilot.date.julianDay),
+                                          spawnModel: plumbing.traffic.spawnModel,
+                                          enhancements: plumbing.enhancements,
+                                          configure: { [weak self] w in
+            guard let self else { return }
+            WorldPilotLink.configure(world: w, game: game, pilot: { [weak self] in self?.pilot ?? PlayerState() })
+            WorldPilotLink.applyDefenseState(world: w, game: game, pilot: self.pilot, systemID: systemID,
+                                             escortOrdersChanged: { [weak self] in self?.pilot.escortCategoryOrders = $0 })
+        })
         plumbing.configure(built.world)
         plumbing.resetForNewWorld()
         return built
+    }
+
+    /// Fold what the live world accrued into the pilot (A1/A5): crimes into the per-system legal
+    /// record, crime-sensitive rank revocation, kills into the combat rating, damaged stellars'
+    /// armor and touched garrisons. Apple `GameContainerView.syncCombatStanding`; the rules are
+    /// `WorldPilotLink.syncLive`. Called at every point the world might be discarded or read
+    /// (landing, jump, launch, save, Player Info, comm windows).
+    private func syncLiveStanding() {
+        guard let game else { return }
+        if let world {
+            WorldPilotLink.syncLive(world: world, game: game, pilot: &pilot)
+        } else if let galaxy {
+            WorldPilotLink.foldStanding(galaxy.makeDiplomacy(), game: game, pilot: &pilot)
+        }
     }
 
     /// Replace the gameplay settings from JSON (see Settings.swift for the keys). False if the
@@ -4748,7 +5042,7 @@ class NovaWorld: Node2D {
         sound.rawCallAccumulator += max(0, dt) * OriginalClock.rawCallsPerSecond
         let calls = Int(sound.rawCallAccumulator)
         sound.rawCallAccumulator -= Double(calls)
-        if sound.redAlert.advance(rawCalls: calls, lowVolume: false, inEscapePod: world.playerInEscapePod,
+        if sound.redAlert.advance(rawCalls: calls, lowVolume: statusLine.lowVolume, inEscapePod: world.playerInEscapePod,
                                   threat: { world.isAnyShipThreatToPlayerSquad }) {
             sound.pending.append(SoundCues.redAlert)
         }
@@ -5076,11 +5370,68 @@ class NovaWorld: Node2D {
             if let stolenLine, let what = strs?.string(at: stolenLine), let tail = strs?.string(at: 374) {
                 post(what + " " + tail)
             }
-        case let .overlayMessage(text, _):
-            post(text)
+        case let .overlayMessage(text, frames):
+            post(text, rawCalls: frames)   // a HailQuote runs 0x1a4 raw calls
         default:
             break
         }
+    }
+
+    /// The arrival line after a jump or gate (B1): the buoy, else "Arriving in the X system on
+    /// <date>." Queued on the status-line channel like every other message.
+    private func postArrivalLine(systemID: Int, gateID: Int?, abandonedFighters: Int) {
+        guard let game, let line = StatusLineBackend.arrival(game: game, pilot: pilot, systemID: systemID,
+                                                             gateID: gateID, abandonedFighters: abandonedFighters) else { return }
+        post(line.text, rawCalls: line.rawCalls)
+    }
+
+    /// The pêrs HailQuote broadcast (B3; `GameScene.broadcastHailQuotes`, 0x00433050): ships and
+    /// named pilots speak on the status line, 1 in 140 raw calls after a 45 s rest, gated by the
+    /// pêrs flags. The shared broadcaster posts the world's overlay message; `polishNote` shows it.
+    private func tickHailQuotes(dt: Double) {
+        guard let world, let game, dockedSpobID == nil, world.player.isAlive, dt > 0 else { return }
+        let engine = storyEngine()
+        let quotes = statusLine.quotes.step(
+            world: world, game: game, elapsed: dt, barBusy: statusLine.busy,
+            grudge: { [pilot] in pilot.persHoldsGrudge($0) },
+            hostile: { [weak self] in self?.isEffectivelyHostileToPlayer($0) ?? false },
+            missionAvailable: { [pilot] pers in
+                guard let engine else { return true }
+                return PersEncounter.offeredMission(pers, player: pilot, game: game, engine: engine,
+                                                    boarding: pers.offerMissionOnBoard) != nil
+            },
+            roll: { Double.random(in: 0..<1) })
+        // (the world's own .overlayMessage event is cleared by the next step uncollected: post once, here)
+        for q in quotes { post(q, rawCalls: PersQuoteBroadcaster.overlayFrames) }
+    }
+
+    /// The raw-call display length of a line the bridge posted with a non-default duration, popped
+    /// (0 = the default 0xf0, ie `hud_message_seconds(0)`).
+    @Callable(autoSnakeCase: true) func statusLineRawCalls(text: String) -> Int {
+        statusLine.pop(text)
+    }
+
+    /// The frontend's message line is showing something: the HailQuote broadcast waits for it.
+    @Callable(autoSnakeCase: true) func setStatusLineBusy(busy: Bool) { statusLine.busy = busy }
+
+    /// Sound volume below 2 of 7: Red Alert then shows its cicn blink (`RedAlertCue`).
+    @Callable(autoSnakeCase: true) func setAlertLowVolume(low: Bool) { statusLine.lowVolume = low }
+
+    /// The Red Alert blink frame (cicn 18000 + this) while the indicator runs, else -1 (B6).
+    @Callable(autoSnakeCase: true) func redAlertBlinkFrame() -> Int { sound.redAlert.blinkFrame ?? -1 }
+
+    /// Per stellar body, SAME order as `body_transforms()`: `[r, g, b]` (0...1) of the radar ring
+    /// when an IFF is fitted (`RadarIFF.stellarColor`, 0x00466030); empty without one (B7).
+    @Callable(autoSnakeCase: true) func radarStellarColors() -> PackedFloat32Array {
+        guard let world, let game, hudHasIff() else { return PackedFloat32Array() }
+        var flat: [Float] = []
+        let system = currentSystemID ?? -1
+        for b in world.systemContext.bodies {
+            guard let spob = game.spob(b.id) else { flat += [0.5, 0.5, 0.5]; continue }
+            let c = RadarIFF.stellarColor(spob, state: pilot, game: game, system: system)
+            flat += [Float(c.r) / 65535, Float(c.g) / 65535, Float(c.b) / 65535]
+        }
+        return PackedFloat32Array(flat)
     }
 
     /// How long a status-line message stays up, seconds: `rawCalls` of the

@@ -102,13 +102,24 @@ static func _find_in(dir: String, name: String, depth: int) -> String:
 ## Plug-in folders (a `plugins/` sibling of the base data dir) then the base dir itself.
 static func search_roots(data_dir: String) -> PackedStringArray:
 	var out := PackedStringArray()
+	# The active plug-in set first (a total conversion's own Nova Files, enabled plug-in folders), then the
+	# base data -- Ui_PlayMovieFileModal looks in "Nova Plug-ins" before "Nova Files".
+	if ClassDB.class_exists("NovaPlugins"):
+		var pl: Object = ClassDB.instantiate("NovaPlugins")
+		if pl != null and pl.has_method("media_dirs"):
+			var arr = JSON.parse_string(str(pl.media_dirs()))
+			if arr is Array:
+				for d in arr:
+					if not out.has(str(d)):
+						out.append(str(d))
 	if data_dir == "":
 		return out
 	var parent: String = data_dir.simplify_path().get_base_dir()
 	for p in [parent.path_join("plugins"), data_dir.path_join("Nova Plug-ins"), data_dir.path_join("plugins")]:
-		if DirAccess.dir_exists_absolute(p):
+		if DirAccess.dir_exists_absolute(p) and not out.has(p):
 			out.append(p)
-	out.append(data_dir)
+	if not out.has(data_dir):
+		out.append(data_dir)
 	return out
 
 

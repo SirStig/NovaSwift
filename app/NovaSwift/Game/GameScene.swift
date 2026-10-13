@@ -164,10 +164,7 @@ final class GameScene: SKScene {
     /// Mixes the system id with the in-game day into a world RNG seed. Wrapping
     /// arithmetic (SplitMix64-style constants) so it can never trap on overflow.
     static func worldSeed(systemID: Int, day: Int) -> UInt64 {
-        var h = UInt64(bitPattern: Int64(systemID)) &* 0x9E37_79B9_7F4A_7C15
-        h = (h ^ UInt64(bitPattern: Int64(day))) &* 0xD1B5_4A32_D192_ED03
-        h ^= h >> 29
-        return h &+ 0x5EED_1234
+        GameSession.worldSeed(systemID: systemID, day: day)
     }
 
     /// The seed for the world currently being (re)built: `systemID` + live day.
@@ -4769,17 +4766,8 @@ final class GameScene: SKScene {
     /// class lacks Flags2 0x0010) call out — "Wait for me!" / "Wait for us!"
     /// (STR# 2002 #160–163, the class name first; FL-23).
     private func warnStrandedFighters() {
-        guard let game = galaxy?.game else { return }
-        let stranded = world.npcs.filter { f in
-            guard f.carrierID == World.playerEntityID, f.isAlive, !f.disabled,
-                  f.fuel < ShipFuel.perJump else { return false }
-            return (game.ship(f.shipTypeID)?.flags2 ?? 0) & 0x0010 == 0
-        }
-        guard let last = stranded.last else { return }
-        let entry = (stranded.count == 1 ? 160 : 162) + world.rng.range(2)
-        guard let line = game.stringList(2002)?.string(at: entry) else { return }
-        let name = game.ship(last.shipTypeID)?.displayName ?? last.name
-        hud?.post("\(name): \(line)")
+        guard let game = galaxy?.game, let line = world.strandedFighterWarning(game: game) else { return }
+        hud?.post(line)
     }
 
     /// Travel through a gate to `systemID`, emerging from gate `destGateID` on the

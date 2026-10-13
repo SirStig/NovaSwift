@@ -22,6 +22,9 @@ public enum GameSession {
     ///     (System Aliveness); the initial fill already uses them.
     ///   - enhancements: the player's Enhancement toggles, in force from the
     ///     initial fill on.
+    ///   - configure: runs once the world and its spawner exist but BEFORE the initial
+    ///     population, so pilot-dependent gating (përs `ActiveOn`, hull `AppearOn`,
+    ///     Strict Play, combat rating) already applies to the first fill.
     /// - Returns: the wired world and the galaxy catalog (for sprite lookups).
     @discardableResult
     public static func makeWorld(game: NovaGame, systemID: Int, player: Ship,
@@ -30,7 +33,8 @@ public enum GameSession {
                                  combatTuning: CombatTuning = .default,
                                  seed: UInt64 = 0x5EED_1234,
                                  spawnModel: Spawner.SpawnModel = .original,
-                                 enhancements: GameplayEnhancements = GameplayEnhancements()) -> (world: World, galaxy: Galaxy) {
+                                 enhancements: GameplayEnhancements = GameplayEnhancements(),
+                                 configure: ((World) -> Void)? = nil) -> (world: World, galaxy: Galaxy) {
         let galaxy = existing ?? Galaxy(game: game, flightTuning: flightTuning, combatTuning: combatTuning)
 
         // Give the player real combat stats/loadout from its hull if not already set.
@@ -59,9 +63,22 @@ public enum GameSession {
             let spawner = Spawner(galaxy: galaxy, table: SpawnTable(system: sys))
             spawner.model = spawnModel
             world.spawner = spawner
+            configure?(world)
             spawner.populate(world)
             world.populateAsteroids(typeIDs: sys.asteroidTypeIDs, count: sys.asteroidCount)
+        } else {
+            configure?(world)
         }
         return (world, galaxy)
+    }
+
+    /// Mixes the system id with the in-game day into a world RNG seed, so re-entering a system
+    /// on another day gives a fresh cast while one visit stays deterministic. Wrapping
+    /// arithmetic (SplitMix64-style constants) so it can never trap on overflow.
+    public static func worldSeed(systemID: Int, day: Int) -> UInt64 {
+        var h = UInt64(bitPattern: Int64(systemID)) &* 0x9E37_79B9_7F4A_7C15
+        h = (h ^ UInt64(bitPattern: Int64(day))) &* 0xD1B5_4A32_D192_ED03
+        h ^= h >> 29
+        return h &+ 0x5EED_1234
     }
 }

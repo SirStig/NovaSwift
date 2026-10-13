@@ -10,9 +10,10 @@
 # The keyboard defaults are the original's table, exactly as the Apple app ships it
 # (KeyBindings.defaults, itself `NovaPrefs_ResetKeyBindings` 0x004b4400): arrows fly,
 # Space fires the primary, Control the secondary, Z the afterburner; W / Alt-W step the
-# secondary, S clears it; ` / Shift-` / Alt-` cycle ship targets, R takes the nearest
+# secondary, S clears it; ` or Tab / Shift-` or Shift-Tab / Alt-` cycle ship targets, R takes the nearest
 # hostile, Alt-R the nearest ship; N clears the travel selection (Alt-N the ship target),
-# 1-4 pick the system's nav stellars; Y hails (Alt-Y the stellar), L lands, M is the map,
+# 1-4 pick the system's nav stellars; \ / Shift-\ step the armed hyperspace link (raising the
+# route mini map, - / = zoom it); Return dismisses the status message; Y hails (Alt-Y the stellar), L lands, M is the map,
 # H re-arms the route, J jumps, B boards; P Player Info, I Mission Info; E shows the
 # Escort Commands panel (then 1-5 pick a group) and F attack · D defend · V hold ·
 # C formation · Alt-C return to hangar order them.

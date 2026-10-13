@@ -33,6 +33,8 @@ var muted := false
 
 # What the last drain asked each voice to do, for tests and debugging.
 var cues_started := 0
+## snd ids a cue asked for that the data cannot decode (tests/plugins_load_selfcheck.gd).
+var missing_sounds: Dictionary = {}
 
 
 func setup(nova: Object) -> void:
@@ -101,6 +103,8 @@ func stream_for(sound_id: int) -> AudioStreamWAV:
 		stream.mix_rate = info[0]
 		stream.data = _nova.sound_pcm(sound_id)
 	_streams[sound_id] = stream
+	if stream == null:
+		missing_sounds[sound_id] = true
 	return stream
 
 

@@ -24,6 +24,8 @@ struct GapsState {
     var podRespawnPending = false
     /// The death sequence ran out with no eject: a real game over.
     var playerDestroyed = false
+    /// The bomb outfit's fuse (OS-08): nil with no bomb aboard, else the 30 Hz tick count.
+    var bombFuse: Int?
     /// Status-line lines raised here, drained with the travel messages.
     var messages: [String] = []
 

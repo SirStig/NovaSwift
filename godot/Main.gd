@@ -291,7 +291,7 @@ func _process(delta: float) -> void:
 		_flight.set_active(false)
 		if not _spaceport.is_open():
 			_spaceport.open()   # screens/Spaceport.gd owns input while docked
-		_drain_events_to_log(delta)
+		_drain_events_to_log(0.0)   # docked: the sim (and the status line's clock) is stopped
 		queue_redraw()
 		return
 
@@ -303,7 +303,7 @@ func _process(delta: float) -> void:
 
 	if _nav.blocks_flight() or _interact.blocks_flight() or _story.blocks_flight():   # map / hail / plunder dialog up: sim paused
 		_flight_frame(0.0, false)
-		_drain_events_to_log(delta)
+		_drain_events_to_log(0.0)   # map / dialog up: the sim is paused, so is the message clock
 		queue_redraw()
 		return
 
@@ -469,13 +469,23 @@ func _push_log(text: String) -> void:
 	if line.strip_edges() == "":
 		_log.clear()    # an empty post clears the line, as in the original
 		return
-	_log = [{"text": line, "age": 0.0}]
+	# Each post carries its own length in raw sim calls: the buoy 0x1e0, a mission Q 0x1f4, a
+	# HailQuote 0x1a4, landing 0xfa / 0x168, everything else 0xf0 (OriginalText.Duration).
+	var life := LOG_LIFETIME
+	if nova != null:
+		life = float(nova.hud_message_seconds(int(nova.status_line_raw_calls(text))))
+	_log = [{"text": line, "age": 0.0, "life": life}]
 
 
 func _drain_events_to_log(delta: float) -> void:
+	# Message timers run on SIM time: the callers pass 0 while the map / a dialog / the spaceport
+	# holds the sim, and the Settings game speed (and Caps Lock 2x) shortens them as it does the
+	# original's raw-call counters (B4).
+	var sim_dt: float = delta * float(nova.speed_multiplier()) if delta > 0.0 else 0.0
 	for entry in _log:
-		entry["age"] += delta
-	_log = _log.filter(func(e): return e["age"] < LOG_LIFETIME)
+		entry["age"] += sim_dt
+	_log = _log.filter(func(e): return e["age"] < float(e.get("life", LOG_LIFETIME)))
+	nova.set_status_line_busy(not _log.is_empty())   # the HailQuote broadcast waits for a free line
 
 	# drain_events() genuinely drains on the bridge side, so this is safe to call
 	# on a frame where the sim didn't tick (docked) — it just comes back empty.
@@ -510,6 +520,7 @@ func _draw() -> void:
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	_draw_land_prompt(vp)
 	_draw_message_log(vp)
+	_draw_alert_icons(vp)
 
 
 # Classic presentation (Settings > Presentation, default): the original `ïntf` status
@@ -692,6 +703,14 @@ func _shadow_string(font: Font, pos: Vector2, text: String, size: int, col: Colo
 	draw_string(font, pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
 
 
+## The Classic message rect for a `vp` window (AuthenticHUD.message_rect); Rect2() outside Classic.
+func message_rect(vp: Vector2) -> Rect2:
+	if not _classic_hud_on or _classic_hud == null:
+		return Rect2()
+	var h = _classic_hud.get_child(0)
+	return AuthenticHUD.message_rect(vp, h.bar_width(vp), h.ui_scale(vp))
+
+
 ## The one-line status message (MessageLogView): bottom-left, 16 px in, 8 px up, clipped
 ## (no ellipsis) at the sidebar + 50 px; fades over its last 0.6 s.
 func _draw_message_log(vp: Vector2) -> void:
@@ -701,7 +720,20 @@ func _draw_message_log(vp: Vector2) -> void:
 	var entry: Dictionary = _log[0]
 	var t: float = entry["age"]
 	var col: Color = ht["color"]
-	col.a = clampf((LOG_LIFETIME - t) / LOG_FADE, 0.0, 1.0)
+	if bool(ht["classic"]):
+		# Classic: the original's message rect (FUN_0087550b), 12 pt white, hanging from its top,
+		# no shadow and no fade (the rect is simply refilled when the timer ends).
+		var h = _classic_hud.get_child(0)
+		var r: Rect2 = message_rect(vp)
+		var cfont: Font = h.text_font()
+		var cfs: int = maxi(6, int(round(float(AuthenticHUD.MESSAGE_FONT_DESIGN) * h.ui_scale(vp))))
+		var ctext := str(entry["text"])
+		while ctext.length() > 0 and cfont.get_string_size(ctext, HORIZONTAL_ALIGNMENT_LEFT, -1, cfs).x > r.size.x:
+			ctext = ctext.substr(0, ctext.length() - 1)   # clipped to the rect, no ellipsis
+		draw_string(cfont, Vector2(r.position.x, r.position.y + cfont.get_ascent(cfs)), ctext,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, cfs, Color.WHITE)
+		return
+	col.a = clampf((float(entry.get("life", LOG_LIFETIME)) - t) / LOG_FADE, 0.0, 1.0)
 	var font: Font = ht["font"]
 	var fs := int(ht["size"])
 	var text := str(entry["text"])
@@ -710,6 +742,57 @@ func _draw_message_log(vp: Vector2) -> void:
 		text = text.substr(0, text.length() - 1)
 	var base := vp.y - MESSAGE_PAD_BOTTOM - font.get_descent(fs)
 	_shadow_string(font, Vector2(MESSAGE_PAD_LEFT, base), text, fs, col)
+
+
+# The two playfield icons (B6): the "x2" cicn 20000 at the top-left while the effective speed is
+# exactly 2x (Frame_AnchorX2IndicatorSprite 0x0042cbb0), and the low-volume Red Alert blink, cicn
+# 18000 + parity at the playfield's top-right (FUN_0042cc30), driven by the shared RedAlertCue.
+var _cicn_cache := {}
+
+func _cicn_tex(id: int) -> Texture2D:
+	if _cicn_cache.has(id):
+		return _cicn_cache[id]
+	var tex: Texture2D = null
+	var info: PackedInt32Array = nova.cicn_info(id)
+	if info.size() >= 2 and info[0] > 0 and info[1] > 0:
+		var bytes: PackedByteArray = nova.cicn_rgba(id)
+		if bytes.size() >= info[0] * info[1] * 4:
+			tex = ImageTexture.create_from_image(Image.create_from_data(info[0], info[1], false, Image.FORMAT_RGBA8, bytes))
+	_cicn_cache[id] = tex
+	return tex
+
+
+## [x2 icon rect or Rect2(), red-alert icon rect or Rect2(), red-alert cicn id or -1] for a `vp` window.
+func alert_icon_layout(vp: Vector2) -> Array:
+	var x2_rect := Rect2()
+	if nova.x2_active():
+		var t: Texture2D = _cicn_tex(20000)
+		if t != null:
+			x2_rect = Rect2(Vector2.ZERO, t.get_size())
+	var frame: int = nova.red_alert_blink_frame()
+	var rid := -1
+	var ra_rect := Rect2()
+	if frame >= 0:
+		var t2: Texture2D = _cicn_tex(18000 + frame)
+		if t2 != null:
+			rid = 18000 + frame
+			var right := vp.x
+			if _classic_hud_on and _classic_hud != null:
+				right -= float(_classic_hud.get_child(0).bar_width(vp))   # the playfield ends where the sidebar begins
+			ra_rect = Rect2(Vector2(right - t2.get_size().x, 0.0), t2.get_size())
+	return [x2_rect, ra_rect, rid]
+
+
+func _draw_alert_icons(vp: Vector2) -> void:
+	var vol: float = 0.0 if bool(Prefs.get_value("audio", "muted")) else float(Prefs.get_value("audio", "master")) * float(Prefs.get_value("audio", "sfx"))
+	nova.set_alert_low_volume(vol * 7.0 < 2.0)   # the blink only shows below 2 of 7 (RedAlertCue)
+	var lay: Array = alert_icon_layout(vp)
+	var x2_rect: Rect2 = lay[0]
+	if x2_rect.size.x > 0.0:
+		draw_texture_rect(_cicn_tex(20000), x2_rect, false)
+	var ra_rect: Rect2 = lay[1]
+	if ra_rect.size.x > 0.0:
+		draw_texture_rect(_cicn_tex(int(lay[2])), ra_rect, false)
 
 
 # The Land control's name for prompts: the pad's button when a controller is connected,

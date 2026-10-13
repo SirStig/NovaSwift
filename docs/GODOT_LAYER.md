@@ -243,6 +243,21 @@ app's `KeyBindings.defaults`); pad D-pad ← hail, → board. Known gaps: `pêrs
 LinkMission offers from a hail/board are not presented; the Escorts window has no
 Upgrade/Sell (shipyard marks).
 
+### Flight controls checklist (keyboard + pad)
+
+Every flight action of the Apple app's `GameAction` set has an InputMap action in
+`Controls.gd` and a hotkey pass in `Main._process_hotkeys` (or `NavScreens` / `Interactions`
+/ `StoryScreens`), asserted end to end by `tests/controls_selfcheck.gd` (key/pad tables,
+then each action through Main.gd -> bridge -> engine). Tab and ` both step the ship target
+(Shift back, Alt-` escorts only); the cycle is the original's (`Ship_FindNextPlayerCycleTarget`:
+slot order, every ship outside the squad, no range limit, past the last it clears to "No
+Target" and the next press starts over). `\` / Shift-`\` step the armed hyperspace link
+(`StarMapRoute.cycleLink`, shared) and raise the route mini map (`screens/RouteMiniMap.gd`;
+`-` / `=` zoom it for ~8 s, as `routeMapShownAt`/`routeMapUnitsPerPixel`); Return dismisses
+the status message. Pad: X cycles targets (the Apple `PadBindings`: X=targetNext,
+Y=nearestHostile). Port-only Apple extras with no original key (camera view/zoom, ship-info
+card, Evasive) are not bound in Godot. `docs/GODOT_SETTINGS_KEYS.md` lists the rebind keys.
+
 ### Flight travel (selected stellar · landing clearance · gates · escorts across jumps)
 
 NovaWorld's `// MARK: Flight travel` (state in `Flight.swift`) mirrors what the Apple
@@ -969,3 +984,32 @@ Where clips play:
 Self-check: `NOVA_DATA_DIR=$PWD/data/base godot --headless --path godot -s res://tests/movies_selfcheck.gd`
 (conversion, cache hit, async, forced-missing ffmpeg, player skip). The libtheora branch is only
 exercised on machines whose ffmpeg has the encoder.
+
+## Live-world wiring (package A of `GODOT_FIDELITY_GAPS.md`, 2026-10-13)
+
+The Apple container wires the persisted pilot into every world it builds and folds what happened in flight back into the
+pilot through ~25 scene closures. That logic now lives in `Sources/NovaSwiftStory/WorldPilotLink.swift` (and
+`GameSession.worldSeed` / the `configure:` hook of `GameSession.makeWorld`), and BOTH frontends call it; the bridge only
+marshals (`makeConfiguredWorld`, `syncLiveStanding`, `gapsNote` in `NovaWorld.swift`).
+
+| Item | Shared rule | Bridge call site |
+|---|---|---|
+| A1 legal record, crime rank revocation, combat rating | `WorldPilotLink.seedDiplomacy` (per-system record, rank shields), `.syncLive` -> `FlightComm.syncStanding` | `makeConfiguredWorld` (seed + drain the outgoing world first), `touchDown`, `completeHyperjump`, `writePilot` (every save), landing request, Player Info; pilot swaps drain into the outgoing pilot |
+| A2 mining / scooping | `World.playerHoldHasRoom` set by `WorldPilotLink.configure`; `.collectMined` | `.asteroidMined` in `gapsNote` -> `gapsMined` (live hold + pilot cargo together) |
+| A3 përs / hull gating, grudges, defeats | `.persSpawnEligible`, `.shipSpawnEligible`, `.note(event:)` | set BEFORE the initial population via the new `GameSession.makeWorld(configure:)` hook (Apple's own initial fill predates its wiring); `.personGrudge/.personDefeated` autosave as `.event` |
+| A4 NPCs boarding the player | `.resolveBoarding`, `OriginalText.playerBoardedLine` | `.playerBoarded` -> `gapsPlayerBoarded` (status line STR# 2002 #391/#373/#392/#374 + snd 151) |
+| A5 garrisons, reinforcements, stellar armor, escort orders | `.applyDefenseState`, `.syncLive` (garrison snapshot, `stellarArmor`), `.note` (`reinforcementRetriggerDays`) | same sync points as A1; `applyDefenseState` runs in the `configure:` hook |
+| A6 bombs | `HazardOutfits.tick` (ModType 47/50) | `gapsHazardTick`, one call per 30 Hz flight tick |
+| A7 Strict Play, per-day seed | `PlayerState.isStrictPlay` -> `World.strictPlay`; `GameSession.worldSeed(systemID:day:)` | `makeConfiguredWorld` |
+| A8 launch/jump bookkeeping | `Munitions.record` on landing; `World.strandedFighterWarning` ("Wait for me!") at jump engage; mission aux-ship budget decrement was already in `storyNote` | `touchDown`, `beginHyperjump` |
+
+Pilot save keys are the Apple ones (`systemReputation`, `combatRating`, `persGrudges`, `defeatedPers`, `stellarGarrisons`,
+`reinforcementRetriggerDays`, `stellarStrengthLeft`, `escortCategoryOrders`, `strictPlay`), so pilots stay interchangeable.
+Not yet ported (package B/other): HailQuote broadcasts, the arrival/launch status lines. Note: the per-day seed makes the
+ambient cast differ per visit (as on Apple); `interactions_selfcheck.gd` now retries its ship/stellar hail instead of
+assuming the first NPC / nav stellar answers.
+
+Test: `godot/tests/live_wiring_selfcheck.gd` (kill -> rating, crime -> legal record kept across rebuilds, mining incl.
+full hold, përs defeat/grudge across save+reload, `AppearOn` gate, boarded credit loss, garrison/reinforcement/armor across
+a jump and a reload, Strict Play, per-day seed, nonlethal + lethal bombs). The `debug_*` bridge methods it uses are test
+seams only.

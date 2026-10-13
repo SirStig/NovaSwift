@@ -183,10 +183,19 @@ public enum GameLibrary {
     /// subfolder is an archive's wrapper directory and is looked through.
     private static func bundles(forFolder folder: URL, id: String, name: String) -> [PluginBundle] {
         if let tc = totalConversion(at: folder, id: id) { return [tc] }
-        let files = topLevelResourceFiles(in: folder)
+        var files = topLevelResourceFiles(in: folder)
         let isPack = { (u: URL) in u.pathExtension.lowercased() == GraphicsPackManifest.folderExtension }
         let packs = subdirectories(of: folder).filter(isPack)
-        let subs = subdirectories(of: folder).filter { !isPack($0) }
+        // A game-folder style pack (`Play X.nplay` + `Plug-Ins/` + docs, no `Nova Files/`, e.g. ARPIA2.zip):
+        // with no files of its own, its `Plug-Ins` folder IS the plug-in, as if dropped into the game's
+        // `Nova Plug-Ins`; the other subfolders stay opt-in sub-items.
+        var consumed: URL?
+        if files.isEmpty, let plug = subdirectories(of: folder).first(where: {
+            ["NOVA PLUG-INS", "PLUG-INS"].contains($0.lastPathComponent.uppercased()) }) {
+            let inner = topLevelResourceFiles(in: plug)
+            if !inner.isEmpty { files = inner; consumed = plug }
+        }
+        let subs = subdirectories(of: folder).filter { !isPack($0) && $0 != consumed }
         if files.isEmpty, packs.isEmpty, subs.count == 1 {
             return bundles(forFolder: subs[0], id: id, name: name)
         }

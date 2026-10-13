@@ -2408,7 +2408,7 @@ public final class World {
 
     /// A box at `position` drifting off at `(range(81) + 60) × 0.002` px/tick on a
     /// `range(360)` heading, alive 300–499 ticks, spinning −1/0/0/+1 frames a tick.
-    func spawnFreeflightObject(at position: Vec2, cargoType: Int, spriteSet: Int) {
+    public func spawnFreeflightObject(at position: Vec2, cargoType: Int, spriteSet: Int) {
         guard freeflightObjects.count < 64 else { return }
         let life = Double(rng.range(200) + 300) / OriginalClock.ticksPerSecond
         let frame = Double(rng.range(36))

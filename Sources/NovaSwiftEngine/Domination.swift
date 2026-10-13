@@ -158,6 +158,13 @@ extension World {
         emit(.stellarDominated(spobID: spobID))
     }
 
+    /// Dev-tools / test shortcut: set a stellar's remaining garrison as a defense fight
+    /// would leave it, and mark it touched so `garrisonSnapshot()` reports it.
+    public func debugSetGarrison(spobID: Int, count: Int) {
+        stellarGarrisons[spobID] = max(0, count)
+        touchedGarrisons.insert(spobID)
+    }
+
     /// AI-15: every garrison this visit changed, for the host to merge into
     /// the save — the ships still in each pool plus the defenders still alive
     /// in the field (survivors return to the garrison; the dead are lost).

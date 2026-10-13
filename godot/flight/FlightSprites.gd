@@ -24,6 +24,8 @@ const CICN := 100        # not a bridge kind: bridge cicn_info / cicn_rgba
 
 var nova
 var _cache := {}
+## Keys (Vector2i(kind, id)) whose lookup found no graphic -- read by tests/plugins_load_selfcheck.gd.
+var misses: Dictionary = {}
 
 
 func setup(world: Object) -> void:
@@ -40,6 +42,8 @@ func entry(kind: int, id: int):
 		return _cache[key]
 	var e = _build(kind, id)
 	_cache[key] = e
+	if e == null:
+		misses[key] = true
 	return e
 
 

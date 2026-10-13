@@ -13,7 +13,6 @@ extends RefCounted
 
 const Sprites = preload("res://flight/FlightSprites.gd")
 
-const COLOR_JUMP_RING := Color(0.3, 0.5, 0.7, 0.25)
 const COLOR_ROCK := Color(0.45, 0.4, 0.36)
 const BODY_COLORS := [
 	Color(0.45, 0.7, 0.5), Color(0.6, 0.6, 0.65), Color(0.5, 0.75, 1.0),
@@ -30,9 +29,7 @@ func setup(renderer) -> void:
 
 
 func draw_bodies(ci: CanvasItem) -> void:
-	var jr: float = r.nova.jump_radius()
-	if jr > 0.0:
-		ci.draw_arc(r.w2l(Vector2.ZERO), jr, 0.0, TAU, 96, COLOR_JUMP_RING, 2.0, true)
+	# No jump-distance ring: neither the original nor the Apple app draws one.
 	var xf: PackedFloat32Array = r.body_xf
 	var ids: PackedInt32Array = r.body_ids
 	var states: PackedFloat32Array = r.stellar_states

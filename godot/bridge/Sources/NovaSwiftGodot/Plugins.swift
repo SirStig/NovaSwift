@@ -58,7 +58,7 @@ final class PluginRuntime: @unchecked Sendable {
     /// `…/NovaSwift` — the per-user data root (state file, catalog cache, Plug-ins folder).
     var root: URL {
         let env = ProcessInfo.processInfo.environment
-        if let h = env["NOVA_PLUGIN_HOME"], !h.isEmpty { return URL(fileURLWithPath: h, isDirectory: true) }
+        if let h = env["NOVA_PLUGIN_HOME"], !h.isEmpty { return URL(fileURLWithPath: h, isDirectory: true).standardizedFileURL }
         let home = FileManager.default.homeDirectoryForCurrentUser
         #if os(macOS)
         return home.appendingPathComponent("Library/Application Support/NovaSwift", isDirectory: true)
@@ -74,7 +74,9 @@ final class PluginRuntime: @unchecked Sendable {
     /// Where downloaded / imported plug-ins live (the Apple `importedPluginsDir`).
     var installDir: URL {
         lock.lock(); defer { lock.unlock() }
-        return installDirOverride ?? root.appendingPathComponent("Plug-ins", isDirectory: true)
+        // Standardised: ZIPFoundation rejects entries whose path does not start with the destination's
+        // normalised path, so a `//` or `..` in a user-typed folder would fail every zip install.
+        return (installDirOverride ?? root.appendingPathComponent("Plug-ins", isDirectory: true)).standardizedFileURL
     }
 
     private var stateFile: URL {
@@ -517,6 +519,41 @@ class NovaPlugins: RefCounted {
     @Callable(autoSnakeCase: true) func resourceSource(type: String, id: Int) -> String {
         guard let t = FourCharCode(type), let r = host?.dbgGame?.resources.resource(t, id) else { return "?" }
         return r.pluginID
+    }
+
+    // MARK: Plug-in media (music, movies)
+
+    /// Folders to search for loose media (title music, `dësc` movies) in priority order, as JSON
+    /// `[path]`: the selected total conversion's own `Plug-Ins` + `Nova Files` (global plug-ins do
+    /// not apply under a TC, as in `GameLibrary.resolveLayers`), else the enabled plug-ins' folders
+    /// (later load order first), then the base data folder. Original rule (`FUN_004ab5d0`,
+    /// `Ui_PlayMovieFileModal`): "Nova Plug-ins" before "Nova Files".
+    @Callable(autoSnakeCase: true) func mediaDirs() -> String {
+        let rt = PluginRuntime.shared
+        var out: [String] = []
+        func add(_ u: URL?) {
+            guard let p = u?.path, !p.isEmpty, !out.contains(p) else { return }
+            out.append(p)
+        }
+        let active = rt.plugins.filter(\.isEnabled)
+        if let tc = active.last(where: \.isTotalConversion) {
+            for u in tc.fileURLs { add(u.deletingLastPathComponent()) }
+            for u in tc.novaFilesURLs { add(u.deletingLastPathComponent()) }
+        } else {
+            for p in active.reversed() {
+                for u in p.allFileURLs { add(u.deletingLastPathComponent()) }
+                add(p.folderURL)
+            }
+        }
+        add(rt.baseDir)
+        return Self.json(out)
+    }
+
+    /// The movie file a `dësc` record names ("" = none), plus whether it plays after the text:
+    /// `{movie, after}`. The Apple app plays it with the mission offer (`MissionBoardView`).
+    @Callable(autoSnakeCase: true) func descMovie(id: Int) -> String {
+        guard let d = host?.dbgGame?.desc(id), let m = d.movieFilename else { return Self.json(["movie": "", "after": false] as [String: Any]) }
+        return Self.json(["movie": m, "after": d.moviePlaysAfterText] as [String: Any])
     }
 
     // MARK: Folders (tests, "add folder")

@@ -20,6 +20,7 @@ func usage() -> Never {
       \(name) list    <file> <TYPE>
       \(name) sprites <file> [outDir]     Decode rlëD sprites → PNG sheets
       \(name) library <baseDir> [plugDir] Discover base + plug-ins; show override effect
+      \(name) merged-counts <baseDir> <plugDir> [enableIds]  JSON per-type counts of base + plug-ins (Godot parity reference)
       \(name) ship    <baseDir> [id]      Decode ship stats + full loadout + sprite → PNG
       \(name) outfit  <baseDir> [id]      List outfits, or one outfit's modifiers
       \(name) govt    <baseDir> [id]      List governments, or one govt's decoded fields
@@ -295,6 +296,37 @@ case "library":
     } catch {
         FileHandle.standardError.write(Data("error: \(error)\n".utf8))
         exit(1)
+    }
+
+case "merged-counts":
+    // Reference for the Godot plug-in self-check: the exact discover -> arrange -> merge path both
+    // frontends use (original load rule; `enableId` selects a total conversion / optional sub-item
+    // under manual order). Prints {"total":N,"types":{"shïp":N,...},"plugins":[ids enabled]}.
+    guard args.count == 3 || args.count == 4 else { usage() }
+    let mcBase = URL(fileURLWithPath: args[1])
+    let mcBaseFiles = GameLibrary.discoverResourceFiles(in: mcBase)
+    var mcPlugins = GameLibrary.discoverPlugins(in: URL(fileURLWithPath: args[2]))
+    // `enableIds` (comma list) = manual order with exactly those bundles on; none = the original rule
+    // (everything loads) with the first total conversion selected, as the Godot self-check does.
+    let mcIDs = args.count == 4 ? args[3].split(separator: ",").map(String.init) : []
+    let mcManual = !mcIDs.isEmpty
+    mcPlugins = PluginSet.arrange(discovered: mcPlugins, persisted: [], manual: mcManual)
+    for id in mcIDs { PluginSet.setEnabled(&mcPlugins, id: id, enabled: true, manual: true) }
+    if !mcManual, let tc = mcPlugins.first(where: \.isTotalConversion) {
+        PluginSet.setEnabled(&mcPlugins, id: tc.id, enabled: true, manual: false)
+    }
+    do {
+        let sink = PluginLoadFailureSink()
+        let merged = try GameLibrary.merge(baseFiles: mcBaseFiles, plugins: mcPlugins, flatPluginOrder: !mcManual, failures: sink)
+        var types: [String: Int] = [:]
+        for (t, c) in merged.typeCounts { types[t.stringValue] = c }
+        let obj: [String: Any] = ["total": merged.totalCount, "types": types,
+                                  "plugins": mcPlugins.filter(\.isEnabled).map(\.id),
+                                  "failures": sink.failures.map { "\($0.pluginID)/\($0.fileName): \($0.message)" }]
+        let d = try JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys])
+        print(String(data: d, encoding: .utf8) ?? "{}")
+    } catch {
+        FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1)
     }
 
 case "ship":

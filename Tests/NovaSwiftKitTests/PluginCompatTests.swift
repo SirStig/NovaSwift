@@ -66,4 +66,18 @@ final class PluginCompatTests: XCTestCase {
         XCTAssertNotNil(merged.resource(NovaType.ship, 200), "the TC's own Plug-Ins load")
         XCTAssertNil(merged.resource(NovaType.ship, 300), "global plug-ins do not apply")
     }
+
+    /// ARPIA2.zip's layout: `Plug-Ins/` (the real plug-in) beside docs, extras and Pilots, no `Nova Files/`.
+    /// The Plug-Ins folder loads by default; the extras remain opt-in.
+    func testGameFolderStylePackLoadsItsPlugInsFolder() throws {
+        try put("shïp", [(128, "Core")], at: "plugins/Pack/Plug-Ins/Pack - Data.rez")
+        try put("shïp", [(129, "Extra")], at: "plugins/Pack/Extra add-ons/Extra.rez")
+        try Data("{}".utf8).write(to: root.appendingPathComponent("plugins/Pack/Play Pack.nplay"))
+        let found = GameLibrary.discoverPlugins(in: root.appendingPathComponent("plugins"))
+        XCTAssertEqual(found.map(\.id), ["Pack", "Pack/Extra add-ons"])
+        let auto = GameLibrary.originalPluginOrder(found)
+        XCTAssertEqual(auto.filter(\.isEnabled).map(\.id), ["Pack"], "Plug-Ins loads, the extras are opt-in")
+        XCTAssertEqual(found[0].fileURLs.map(\.lastPathComponent), ["Pack - Data.rez"])
+        XCTAssertFalse(found[0].isTotalConversion)
+    }
 }

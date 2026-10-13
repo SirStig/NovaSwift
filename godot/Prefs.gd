@@ -48,7 +48,9 @@ const DEFAULTS := {
 	"video": {"fullscreen": false, "vsync": true, "scale": 1.0},
 	# invert_turn / mouse_aiming: Apple invertTurn / mouseAiming (both off = the original's feel).
 	"input": {"deadzone": Controls.STICK_DEADZONE, "modern_keys": false, "invert_turn": false,
-		"mouse_aiming": false},
+		"mouse_aiming": false,
+		# Controls Editor pickers (screens/controls_editor): keyboard size preset, ISO keys, pad art style.
+		"ctl_preset": "auto", "ctl_iso": false, "ctl_pad_style": "auto"},
 	"data": {"dir": ""},
 	"pilots": {"dir": "", "recent": [], "migrated": false},
 	# The original's Preferences window (NovaPrefs_ResetToDefaults: volume 5, brightness 3, all on
