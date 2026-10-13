@@ -36,7 +36,7 @@ func _init() -> void:
 	var has_system := false
 	var form := ""
 	for row in types:
-		if str(row.get("name", "")) == "System":
+		if str(row.get("type", "")) == "sÿst":
 			has_system = true
 		if form == "" and str(row.get("kind", "")) == "form":
 			form = str(row.get("type", ""))
@@ -99,7 +99,8 @@ func _init() -> void:
 		var texts := []
 		for b in shell.plugin_editor.find_children("*", "Button", true, false):
 			texts.append(b.text)
-		for name in ["Close", "File", "Save", "Undo", "Redo", "Test Run", "Changes", "Resources", "Galaxy Map", "Star System", "Story & Bits", "Validation", "Project & Export", "Bundle Files"]:
+			texts.append(str(b.tooltip_text).get_slice("  (", 0))
+		for name in ["Close", "File", "Save", "Nothing to undo", "Nothing to redo", "Test Run", "Overview", "Resources", "Galaxy Map", "Star System", "Story & Bits", "Validation", "Project & Export", "Bundle Files"]:
 			_ok(texts.has(name), "editor has %s" % name)
 		shell.plugin_editor._request_close()
 		await process_frame
@@ -113,11 +114,58 @@ func _init() -> void:
 	root.add_child(screen)
 	screen.setup(nova, data)
 	await process_frame
-	_ok(screen.ed != null and screen.tool == "changes", "editor screen builds on a new document")
+	_ok(screen.ed != null and screen.tool == "overview", "editor screen builds on a new document")
+	await _drive(screen)
 	screen.queue_free()
 
 	print("PLUGIN EDITOR " + ("OK" if ok else "FAILED"))
 	quit(0 if ok else 1)
+
+
+## Visit every tool and inspector kind, and run the edit commands, so runtime errors surface here.
+func _drive(screen) -> void:
+	for t in screen.TOOLS:
+		screen._show_tool(str(t[0]))
+		await process_frame
+		_ok(screen.tool == str(t[0]) and screen._tool_host.get_child_count() > 0, "tool %s builds" % str(t[0]))
+	for ty in ["shïp", "wëap", "oütf", "sÿst", "spöb", "mïsn", "dësc", "STR#", "PICT", "rlëD", "snd ", "DITL", "gövt", "crön"]:
+		screen._pick_type(ty)
+		await process_frame
+		var insp = screen._inspector
+		_ok(insp != null and insp.get_child_count() > 0, "inspector for '%s' #%d (%d cards)" % [ty, screen.selected_id, insp.get_child_count() if insp else 0])
+	screen._pick_type("shïp")
+	screen.selected_id = 128
+	screen._show_tool("resources")
+	await process_frame
+	screen._inspector._commit({"t": "int", "v": 999}, "speed")
+	await process_frame
+	_ok(bool(screen._st.get("dirty", false)), "inspector edit marks the document dirty")
+	screen._show_tool("overview")
+	await process_frame
+	screen._create_current()
+	await process_frame
+	_ok(screen.tool == "resources" and screen.selected_id >= 128, "New creates and selects (#%d)" % screen.selected_id)
+	screen._duplicate_current()
+	await process_frame
+	screen._inspector.open_picker("wëap", 128, screen._inspector, func(_id: int) -> void: pass)
+	await process_frame
+	_ok(screen._inspector._picker_list.item_count > 0, "resource picker lists weapons (%d)" % screen._inspector._picker_list.item_count)
+	screen._inspector._picker.hide()
+	screen._do_undo()
+	screen._do_undo()
+	screen._do_undo()
+	await process_frame
+	_ok(not bool(screen._st.get("canUndo", true)), "undo unwinds every editor edit")
+	screen._system_id = 128
+	screen._show_tool("system")
+	await process_frame
+	screen._show_tool("galaxy")
+	await process_frame
+	screen._show_tool("story")
+	await process_frame
+	for t in screen.TOOLS:
+		screen._show_tool(str(t[0]))
+		await process_frame
 
 
 func _ok(cond: bool, label: String) -> void:

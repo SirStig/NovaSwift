@@ -304,6 +304,7 @@ final class GameAudioEngine {
             Log.audio.error("startMusic: engine not started, cannot play \(url.lastPathComponent, privacy: .public)")
             return
         }
+        HangWatchdog.note("startMusic \(url.lastPathComponent)")
         let file: AVAudioFile
         do {
             file = try AVAudioFile(forReading: url)

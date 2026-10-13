@@ -81,6 +81,7 @@ func setup(tools: Node) -> void:
 	var right := DevUI.vbox(grid, 12)
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_result = DevUI.vbox(right, 12)
+	_result.visible = false
 	var prev := DevUI.section_card(right, "Previous reports", "clock", DevUI.AMBER)
 	_recent = DevUI.vbox(prev, 8)
 
@@ -148,12 +149,14 @@ func _create() -> void:
 	_create_btn.disabled = true
 	_create_btn.text = "Collecting…"
 	DevUI.clear_children(_result)
+	_result.visible = false
 	await get_tree().process_frame
 	var r := make_report(_tools.dbg, _note.text)
 	_busy = false
 	_create_btn.disabled = false
 	_create_btn.text = "Create Report"
 	DevUI.clear_children(_result)
+	_result.visible = true
 	if not r.ok:
 		var err := DevUI.section_card(_result, "Couldn't build the report", "exclamationmark.triangle.fill", DevUI.RED)
 		DevUI.wrap_label(err, str(r.error), 12, DevUI.RED)

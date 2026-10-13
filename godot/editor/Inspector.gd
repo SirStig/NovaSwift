@@ -13,7 +13,7 @@ signal navigate(type_code: String, id: int)
 signal command(what: String)
 signal message(text: String, bad: bool)
 
-const LABEL_W := 200.0
+const LABEL_W := 180.0
 
 var ed: Object
 var type_code := ""
@@ -280,7 +280,7 @@ func _group_card(group: String, fields: Array) -> void:
 		if count > 1 and value is Dictionary and str((value as Dictionary).get("t", "")) == "array":
 			var table: Array = [f]
 			var j := i + 1
-			while j < fields.size() and int(fields[j].get("count", 1)) == count:
+			while j < fields.size() and int(fields[j].get("count", 1)) == count and not (str(fields[j].get("kind", "")) == "ref" and str(f.get("kind", "")) == "ref"):
 				var vj: Variant = _values.get(str(fields[j].get("key", "")), {})
 				if not (vj is Dictionary and str((vj as Dictionary).get("t", "")) == "array"):
 					break
@@ -397,7 +397,13 @@ func _int_editor(f: Dictionary, v: Dictionary, commit: Callable) -> Control:
 	var s := EdTheme.spin(n, int(f.get("min", -2147483648)), int(f.get("max", 2147483647)))
 	h.add_child(s)
 	var options: Array = f.get("options", [])
+	if int(f.get("count", 1)) > 1:
+		s.custom_minimum_size.x = 88
+		s.value_changed.connect(func(x: float) -> void: commit.call({"t": "int", "v": int(x)}))
+		return h
 	var hint := EdTheme.label("", 12, EdTheme.TERTIARY)
+	hint.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var update_hint := func(x: int) -> void:
 		hint.text = ""
 		for opt in options:
@@ -463,7 +469,8 @@ func _enum_editor(f: Dictionary, v: Dictionary, commit: Callable) -> Control:
 	var options: Array = f.get("options", [])
 	var menu := OptionButton.new()
 	menu.fit_to_longest_item = false
-	menu.custom_minimum_size.x = 200
+	menu.custom_minimum_size.x = 150
+	menu.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	var chosen := -1
 	for i in options.size():
 		var opt: Dictionary = options[i]
@@ -522,8 +529,9 @@ func _ref_picker(ref_type: String, base: int, value: int, commit: Callable, opti
 	var b := EdTheme.button("", Callable(), "plain")
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	b.custom_minimum_size.x = 240
+	b.custom_minimum_size.x = 150
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	b.add_theme_stylebox_override("normal", T.box(T.MENU_CHIP_BG, 6, T.MENU_CHIP_BORDER, 1, Vector2(9, 4)))
 	b.add_theme_stylebox_override("hover", T.box(Color(0.15, 0.15, 0.15), 6, T.MENU_CHIP_BORDER, 1, Vector2(9, 4)))
 	h.add_child(b)
@@ -807,10 +815,9 @@ func _text_editor() -> void:
 	row2.add_child(_text_field(str(meta["movie"]), func(t: String) -> void:
 		meta["movie"] = t
 		push.call(), "QuickTime movie name"))
-	var grid := GridContainer.new()
-	grid.columns = 3
+	var grid := HFlowContainer.new()
 	grid.add_theme_constant_override("h_separation", 18)
-	ob.add_child(EdTheme.margin(grid, LABEL_W + 12, 2, 0, 0))
+	ob.add_child(EdTheme.margin(grid, 0, 2, 0, 0))
 	for pair in [[1, "Show movie after text"], [2, "Double-size movie"], [4, "Cinematic letterbox"]]:
 		var c := CheckBox.new()
 		var mask := int(pair[0])

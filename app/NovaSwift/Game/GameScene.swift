@@ -545,6 +545,12 @@ final class GameScene: SKScene {
     private var appliedBackdrop: NovaColor?
 
     private var lastUpdate: TimeInterval = 0
+    /// A paused scene gets no `update`, so the first frame after a resume would
+    /// measure the whole pause (menus, map, a spaceport visit) as one frame and
+    /// report it as a multi-second hitch. Restart the frame clock instead.
+    override var isPaused: Bool {
+        didSet { if oldValue && !isPaused { lastUpdate = 0 } }
+    }
     /// Banked simulation time (seconds) not yet consumed by a fixed sim tick. The
     /// world advances only in whole `Self.simFixedStep` slices; whatever real time
     /// is left over each frame is carried here into the next. See `update(_:)`.

@@ -326,6 +326,7 @@ final class GameDataController: ObservableObject {
     }
 
     func reload() {
+        HangWatchdog.note("data reload")
         guard let (baseDir, baseFiles) = prepareReload() else { return }
         do {
             let sink = PluginLoadFailureSink()

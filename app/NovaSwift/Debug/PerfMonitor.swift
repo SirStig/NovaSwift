@@ -34,7 +34,18 @@ final class PerfMonitor: @unchecked Sendable {
 
     /// Once per rendered frame, from the scene's update.
     func frame(seconds raw: TimeInterval, at now: TimeInterval) {
-        guard raw > 0, raw < 2 else { return }   // first frame / returning from the background
+        guard raw > 0 else { return }   // first frame after a (re)start or resume
+        guard raw < 2 else {
+            // Too long to fold into the window's averages, but not dropped: a
+            // multi-second freeze is exactly what this log is for. (Scene pauses
+            // reset the frame clock, so this is a real stall — or a return from
+            // the background, which a long value usually means.)
+            if raw < 30 {
+                Log.perf.notice("LONG STALL \(Int(raw * 1000), privacy: .public) ms between frames")
+                Self.signposter.emitEvent("Long stall", "\(Int(raw * 1000)) ms")
+            }
+            return
+        }
         let ms = raw * 1000
         lock.lock()
         if windowStart == 0 { windowStart = now }

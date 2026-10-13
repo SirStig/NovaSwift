@@ -133,6 +133,7 @@ struct SpaceportView: View {
             if spob.isUninhabited { appModel.audio.play(.beep2) } else { autoRecharge() }
         }
         .onChange(of: screen) { oldValue, newValue in
+            HangWatchdog.note("spaceport -> \(newValue)")
             Log.spaceport.debug("Spaceport screen -> \(String(describing: newValue), privacy: .public) at spöb \(spob.id, privacy: .public)")
             // Closing the trade centre, outfitter or shipyard resets the
             // lane-offer context (0x00448660).

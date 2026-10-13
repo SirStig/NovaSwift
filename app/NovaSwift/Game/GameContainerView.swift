@@ -1512,6 +1512,7 @@ struct GameContainerView: View {
     /// Console for an unexpected `true` here that never flips back.
     private func setScenePaused(_ paused: Bool, reason: String) {
         host?.scene.isPaused = paused
+        HangWatchdog.note("scene \(paused ? "paused" : "resumed") (\(reason))")
         Log.scene.debug("isPaused -> \(paused, privacy: .public) (\(reason, privacy: .public))")
     }
 

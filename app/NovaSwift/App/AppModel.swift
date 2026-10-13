@@ -16,7 +16,10 @@ final class AppModel: ObservableObject {
     enum Screen: Equatable { case launcher, mainMenu, loading, game, editor }
 
     @Published var screen: Screen = .launcher {
-        didSet { audio.setMusicAllowed(screen == .mainMenu) }
+        didSet {
+            HangWatchdog.note("screen -> \(screen)")
+            audio.setMusicAllowed(screen == .mainMenu)
+        }
     }
 
     /// A newly-created pilot whose scenario intro is playing. Presented
@@ -638,6 +641,7 @@ final class AppModel: ObservableObject {
             Log.pilot.debug("autosave(\(String(describing: reason), privacy: .public)): skipped — not an original save point")
             return
         }
+        HangWatchdog.note("autosave(\(reason))")
         let id = pilot.rosterID ?? roster.adopt(state: pilot.state, game: data.game).id
         if pilot.rosterID == nil { pilot.bind(rosterID: id) }
         roster.persist(id: id, state: pilot.state, game: data.game, backup: reason.wantsBackup)

@@ -558,6 +558,7 @@ func _fit_panel() -> void:
 	_panel.position = Vector2((vp.x - w) * 0.5, 14.0)
 	_wide = w >= WIDE_BREAKPOINT
 	_title.visible = w >= 760.0
+	_metrics_label.get_parent().get_parent().visible = w >= 900.0
 	# Tab labels: selected always shows its name; others collapse to icons when tight.
 	var roomy := w >= 1400.0
 	for t in TABS:

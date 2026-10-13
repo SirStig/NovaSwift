@@ -6,6 +6,10 @@ import SwiftUI
 struct NovaSwiftApp: App {
     @StateObject private var model = AppModel()
 
+    init() {
+        HangWatchdog.shared.start()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
