@@ -16,7 +16,7 @@ private struct ArtPath: Shape {
 /// Type erasure that keeps `strokeBorder` (an inset stroke, so highlights never
 /// spill past the control's own outline).
 private struct AnyInsettableShape: InsettableShape {
-    private let build: (CGRect, CGFloat) -> Path
+    private let build: @Sendable (CGRect, CGFloat) -> Path
     private var inset: CGFloat = 0
     init<S: InsettableShape>(_ shape: S) { build = { rect, amount in shape.inset(by: amount).path(in: rect) } }
     func path(in rect: CGRect) -> Path { build(rect, inset) }

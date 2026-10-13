@@ -27,14 +27,7 @@ public enum Log {
 #endif
 }
 
-/// Embeds a reference to a live ship/stellar in a log message so the dev
-/// console can render it as a clickable chip (`DevLogLinking` in the app
-/// target parses this exact marker back out). Purely additive text — a call
-/// site that never uses this looks and behaves exactly as before.
-public enum LogTag {
-    public static func ship(id: Int, name: String) -> String { "«ship:\(id):\(name)»" }
-    public static func spob(id: Int, name: String) -> String { "«spob:\(id):\(name)»" }
-}
+// `LogTag` lives in NovaSwiftEngine (a dependency of this module).
 
 #if !canImport(os)
 /// A string-interpolation type shaped like `os.Logger`'s `OSLogMessage` just

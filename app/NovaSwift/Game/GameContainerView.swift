@@ -352,9 +352,10 @@ final class GameHost {
                 guard let inputs = scene.travelHintInputs() else { return }
                 let nearest = inputs.nearestSpobID.flatMap { game.spob($0) }
                     .map { TravelHintTracker.Stellar(name: $0.displayName, isStation: $0.isStation) }
+                let bindings = model.bindings
                 func key(_ action: GameAction) -> String {
-                    let token = model.bindings.token(for: action)
-                    return token.isEmpty ? "" : KeyBindings.label(token)
+                    let token = bindings.token(for: action)
+                    return token.isEmpty ? "" : KeyToken.label(token)
                 }
                 let keys = TravelHintTracker.Keys(land: key(.land), map: key(.galaxyMap), jump: key(.hyperjump))
                 if let hint = tracker.tick(rawCalls: elapsed / OriginalClock.rawCallSeconds,
