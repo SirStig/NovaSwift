@@ -47,6 +47,10 @@ final class HDGraphics: @unchecked Sendable {
     private var liveLoading: Set<Int> = []
     private var liveFailed: Set<Int> = []
     private var generation = 0
+    /// Bumped whenever new HD art becomes ready, so a scene that drew a
+    /// sprite classic while it was still being prepared can swap it in.
+    private var readyRevision = 0
+    var revision: Int { lock.lock(); defer { lock.unlock() }; return readyRevision }
     private var atlases: [Int: HDAtlas] = [:]
     private var textures: [Int: [SKTexture]] = [:]
     /// Shield bubbles for hulls whose pack asks for one (`shield`), by base sprite id.
@@ -378,6 +382,7 @@ final class HDGraphics: @unchecked Sendable {
             lock.lock()
             if gen == generation {
                 for (id, atlas) in made { atlases[id] = atlas }
+                readyRevision += 1
                 modelHulls[e.spriteID] = e.descriptor.kind == .model ? e.descriptor.hidesClassicOverlays : nil
             }
             lock.unlock()

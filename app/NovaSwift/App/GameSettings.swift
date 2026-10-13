@@ -435,6 +435,11 @@ struct GameSettings: Codable, Equatable {
     /// all. Higher values zoom out (show more world, everything reads smaller
     /// and slower-moving); lower values zoom in.
     var cameraZoom: Double = Self.defaultCameraZoom
+    /// How the flight camera frames the ship (`CameraView`). Presentation
+    /// only; `classic` (the default) is the original's fixed north-up camera.
+    var cameraView: CameraView = .classic
+    /// The chase view's tilt, degrees (`CameraTilt.range`).
+    var chaseTilt: Double = 30
 
     /// 1.0 (the original's native scale) everywhere except iPhone. Zoom is a
     /// fixed world-units-per-*point* multiplier, and an iPhone's screen is far
@@ -668,6 +673,8 @@ struct GameSettings: Codable, Equatable {
         shipBarPosition       = v(.shipBarPosition, d.shipBarPosition)
         showPlanetLabels      = v(.showPlanetLabels, d.showPlanetLabels)
         cameraZoom            = v(.cameraZoom, d.cameraZoom)
+        cameraView            = v(.cameraView, d.cameraView)
+        chaseTilt             = v(.chaseTilt, d.chaseTilt)
         masterVolume          = v(.masterVolume, d.masterVolume)
         musicVolume           = v(.musicVolume, d.musicVolume)
         sfxVolume             = v(.sfxVolume, d.sfxVolume)

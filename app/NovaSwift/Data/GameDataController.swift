@@ -230,7 +230,14 @@ final class GameDataController: ObservableObject {
                 continuation.finish()
             }
         }
+        // Reports arrive per sprite, far faster than a screen refreshes, and each
+        // one redraws everything watching the app model: publish ~20 a second.
+        var lastPublished = Date.distantPast
         for await report in reports {
+            let now = Date()
+            guard report.completed >= report.total || report.phase != prewarmProgress?.phase
+                    || now.timeIntervalSince(lastPublished) >= 0.05 else { continue }
+            lastPublished = now
             prewarmProgress = report
             prewarmFraction = max(prewarmFraction, report.fraction)
         }
@@ -293,7 +300,14 @@ final class GameDataController: ObservableObject {
                 continuation.finish()
             }
         }
-        for await report in reports { prewarmProgress = report }
+        var lastPublished = Date.distantPast
+        for await report in reports {
+            let now = Date()
+            guard report.completed >= report.total || report.phase != prewarmProgress?.phase
+                    || now.timeIntervalSince(lastPublished) >= 0.05 else { continue }
+            lastPublished = now
+            prewarmProgress = report
+        }
     }
 
     /// Loads the mission→storyline table from disk cache, or (on a miss)

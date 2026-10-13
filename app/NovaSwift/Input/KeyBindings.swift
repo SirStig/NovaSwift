@@ -49,6 +49,7 @@ struct KeyBindings: Codable, Equatable {
             .commandEscortEvasive: "", .shipInfo: "", .pauseGame: "",
             .openMenu: "escape", .cycleHyperspaceLink: "\\",
             .routeMapZoomOut: "-", .routeMapZoomIn: "=",
+            .cycleCameraView: "o", .cameraZoomOut: "[", .cameraZoomIn: "]",
         ]
         #if !os(macOS)
         m[.fireSecondary] = "return"
@@ -90,6 +91,7 @@ struct KeyBindings: Codable, Equatable {
         .hyperspaceArm: "h", .dismissMessage: "", .playerInfo: "", .missionInfo: "",
         .clearSecondary: "s", .hailStellar: "opt+y", .selfDestruct: "opt+-",
         .commandEscortFormation: "", .commandEscortReturnHangar: "",
+        .cycleCameraView: "o", .cameraZoomOut: "[", .cameraZoomIn: "]",
     ]
 
     func token(for action: GameAction) -> String { map[action] ?? "" }

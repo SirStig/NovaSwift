@@ -179,23 +179,36 @@ public final class LiveHullLayer {
 
     public init(simpleLighting: Bool) {
         stage = ModelStage(model: SCNNode(), settings: .init())
-        // Far enough back that the nearest hull is in front of the camera.
-        let back = Self.depthSpacing * Double(Self.maxDepthSlots + 2)
-        let p = stage.pitchDegrees * .pi / 180
-        stage.camera.position = SCNVector3(0, Float(sin(p) * back), Float(cos(p) * back))
-        stage.camera.look(at: SCNVector3Zero)
+        viewPitch = stage.pitchDegrees
         stage.camera.camera?.zNear = 1
-        stage.camera.camera?.zFar = back * 2
+        stage.camera.camera?.zFar = Self.cameraDistance * 2
         if simpleLighting { stage.scene.lightingEnvironment.intensity = 0 }
         node = SK3DNode(viewportSize: CGSize(width: 2, height: 2))
         node.scnScene = stage.scene
         node.pointOfView = stage.camera
         node.name = "live3DLayer"
         node.autoenablesDefaultLighting = false
+        aimCamera()
     }
 
     public var isEmpty: Bool { hulls.isEmpty }
     public var count: Int { hulls.count }
+
+    /// Far enough back that the nearest hull is in front of the camera.
+    static let cameraDistance = depthSpacing * Double(maxDepthSlots + 2)
+
+    /// The camera's elevation, degrees: the stage's own (38, as the classic
+    /// frames were shot) unless a lower camera view asks for a flatter look.
+    /// The lights stay where the stage put them.
+    public var viewPitch: Double {
+        didSet { if viewPitch != oldValue { aimCamera() } }
+    }
+
+    private func aimCamera() {
+        let p = viewPitch * .pi / 180, back = Self.cameraDistance
+        stage.camera.position = SCNVector3(0, Float(sin(p) * back), Float(cos(p) * back))
+        stage.camera.look(at: SCNVector3Zero)
+    }
 
     public func add(_ hull: LiveHull) {
         guard hull.isShared, hull.layer !== self else { return }

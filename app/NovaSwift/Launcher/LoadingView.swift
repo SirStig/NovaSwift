@@ -204,6 +204,10 @@ private struct LoadingScene: View {
                     LinearGradient(colors: [.clear, .clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
                 }
             }
+            // Driven by the clock alone. Without this, an animated change
+            // elsewhere on the screen (the tip swapping every 7 s) re-tweened
+            // the drift from a stale value: the backdrop jumped back, then on.
+            .transaction { $0.animation = nil }
         }
         .ignoresSafeArea()
     }
@@ -258,6 +262,7 @@ private struct BurningWordmark: View {
                     .aspectRatio(contentMode: .fit)
             }
             .shadow(color: Color(red: 1, green: 0.45, blue: 0.1).opacity(0.25 * glow), radius: 30)
+            .transaction { $0.animation = nil }   // the flicker follows the clock only (see LoadingScene)
         }
         .accessibilityElement()
         .accessibilityLabel("NovaSwift")

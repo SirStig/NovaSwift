@@ -201,6 +201,17 @@ struct SettingsView: View {
         )
     }
 
+    private var live3DOn: Bool { model.settings.hdGraphics && model.settings.hullPresentation == .live }
+
+    /// The camera view, shown as the one that draws (chase reads as ship-up
+    /// while live 3D is off).
+    private var cameraViewBinding: Binding<CameraView> {
+        Binding(
+            get: { model.settings.cameraView.effective(live3D: live3DOn) },
+            set: { model.settings.cameraView = $0; model.commitSettings() }
+        )
+    }
+
     private var livePresentationBinding: Binding<GameSettings.HullPresentation> {
         Binding(
             get: { model.settings.hullPresentation },
@@ -385,6 +396,20 @@ struct SettingsView: View {
                                 }) { $0.label }
             sliderRow("Starfield density", binding(\.starfieldDensity), 0.2...2.0)
             sliderRow("Camera zoom", binding(\.cameraZoom), 0.5...2.5)
+            NovaMenuPicker(title: "Camera view", selection: cameraViewBinding,
+                           options: CameraView.available(live3D: live3DOn)) { $0.label }
+            if model.settings.cameraView == .chase, live3DOn {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Chase camera tilt").novaFont(.body)
+                        Spacer()
+                        Text("\(Int(model.settings.chaseTilt.rounded()))°")
+                            .novaFont(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    NovaSlider(value: binding(\.chaseTilt), range: CameraTilt.range)
+                }
+                .padding(.vertical, 2)
+            }
             NovaMenuPicker(title: "Frame rate limit", selection: binding(\.frameRateCap),
                            options: GameSettings.FrameRateCap.allCases) { $0.label }
             Toggle("Smooth sprite scaling", isOn: binding(\.smoothSprites))
@@ -420,7 +445,7 @@ struct SettingsView: View {
         } header: {
             sectionHeader("Graphics", icon: "sparkles")
         } footer: {
-            Text("EV Nova's art is pixel art — leave smooth scaling off for the crisp, faithful look. HD graphics draws the high-resolution art and 3D models that graphics plug-ins such as Nova Reimagined provide, in place of the originals; ships still handle and collide exactly as in the original. Graphics quality sets HD detail, 3D model detail and lighting, particles and starfield density together; change any of them afterwards to fine-tune. Full live 3D turns ships that have 3D models in real time instead of drawing their pre-rendered frames, for as many ships as the device keeps its frame rate with; the rest draw as sprites. Lower model detail and simple lighting help phones and older Macs. Hyperspace jumps fade to white as on the Mac; the Windows look skips the fade and only flashes. Jump timing is the same either way. Camera zoom is world pixels shown per screen point; 1.0 is the original's own native scale (higher shows more of the system at once, everything reading smaller). iPhone starts a bit further out than that by default, since its screen is far fewer points across than a Mac window or iPad. A lower frame-rate limit saves battery on mobile.")
+            Text("EV Nova's art is pixel art — leave smooth scaling off for the crisp, faithful look. HD graphics draws the high-resolution art and 3D models that graphics plug-ins such as Nova Reimagined provide, in place of the originals; ships still handle and collide exactly as in the original. Graphics quality sets HD detail, 3D model detail and lighting, particles and starfield density together; change any of them afterwards to fine-tune. Full live 3D turns ships that have 3D models in real time instead of drawing their pre-rendered frames, for as many ships as the device keeps its frame rate with; the rest draw as sprites. Lower model detail and simple lighting help phones and older Macs. Hyperspace jumps fade to white as on the Mac; the Windows look skips the fade and only flashes. Jump timing is the same either way. Camera zoom is world pixels shown per screen point; 1.0 is the original's own native scale (higher shows more of the system at once, everything reading smaller). iPhone starts a bit further out than that by default, since its screen is far fewer points across than a Mac window or iPad. Camera view changes only how flight is framed: Classic is the original's fixed, north-up view; Look ahead drifts the view toward where you're heading; Ship up turns the view with your ship; Chase, with live 3D ships, lays the view back behind your ship. Ships fly and fight the same in every view. In flight, O changes the view and [ and ] zoom. A lower frame-rate limit saves battery on mobile.")
         }
     }
 

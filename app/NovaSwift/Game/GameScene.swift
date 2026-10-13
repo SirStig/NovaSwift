@@ -307,6 +307,10 @@ final class GameScene: SKScene {
     /// by the band's z × 100, and the hulls to place in them this frame.
     private var liveLayers: [Int: LiveHullLayer] = [:]
     private var livePlacements: [(hull: LiveHull, sprite: SKSpriteNode, opacity: CGFloat)] = []
+    /// The HD revision this scene's art was last checked against, and the
+    /// wait before checking again (see `adoptLateHDArt`).
+    private var seenHDRevision = -1
+    private var hdRevisionWait: Double = 0
     private var debrisPodFrames: [SKTexture]?
     private var rotationTextures: [SKTexture] = []
     private var placeholder: SKShapeNode?
@@ -567,6 +571,120 @@ final class GameScene: SKScene {
     // its point-space is much smaller than a Mac window or iPad. User-
     // adjustable in Settings for anyone who wants more of the system visible.
     private var cameraZoom: CGFloat { CGFloat(settings.cameraZoom) }
+
+    // MARK: Camera views (presentation only; `CameraRig.swift`)
+
+    /// Eased rotation, lead and tilt of the flight camera.
+    private var cameraRig = CameraRig()
+    /// The view drawn: the setting, with chase falling back without live 3D.
+    private var cameraView: CameraView { settings.cameraView.effective(live3D: livePresentationOn) }
+    /// The camera's rotation (its `zRotation`): a world heading `h` (radians
+    /// clockwise from north) points `h + viewRotation` clockwise from screen-up.
+    private var viewRotation: Double { cameraRig.rotation }
+    /// The chase tilt currently drawn (eases in and out).
+    private var viewTilt: CameraTilt { CameraTilt(angle: cameraRig.tilt) }
+    /// Live hulls drawn upright against the chase tilt: their camera's pitch
+    /// and the vertical stretch that undoes the tilt's foreshortening.
+    private var liveViewPitch: Double { 38 - cameraRig.tilt * 180 / .pi * 0.5 }
+    private var liveViewStretch: CGFloat { CGFloat(1 / cos(cameraRig.tilt)) }
+
+    /// The world-space box covering everything on screen: the viewport at the
+    /// current zoom, or, while the view is turned, the box around the turned
+    /// viewport (its diagonal both ways, so it doesn't change as it turns).
+    private var viewSpan: CGSize {
+        let w = size.width * cameraZoom, h = size.height * cameraZoom
+        guard viewRotation != 0 else { return CGSize(width: w, height: h) }
+        let d = hypot(w, h)
+        return CGSize(width: d, height: d)
+    }
+
+    /// The visible play area in world units: the view less the chase tilt's
+    /// overscan (`GameContainerView` draws the scene that much bigger).
+    private var visiblePlaySize: CGSize {
+        let o = CameraTilt(angle: settings.cameraView.effective(live3D: livePresentationOn) == .chase
+                           ? settings.chaseTilt * .pi / 180 : 0).overscan
+        return CGSize(width: size.width * cameraZoom / o.width, height: size.height * cameraZoom / o.height)
+    }
+
+    /// Frame the camera for this frame: ease the rig toward the chosen view,
+    /// then place and turn the camera and tilt the view. Returns where the
+    /// camera is framed before any shake.
+    @discardableResult
+    private func updateCamera(shipAt scenePos: CGPoint, ship p: Ship, dt: Double) -> CGPoint {
+        cameraRig.update(view: cameraView, heading: renderHeading(p),
+                         velocity: CGVector(dx: p.velocity.x, dy: p.velocity.y), maxSpeed: p.stats.maxSpeed,
+                         viewSize: visiblePlaySize, tiltAngle: settings.chaseTilt * .pi / 180, dt: dt)
+        let base = CGPoint(x: scenePos.x + cameraRig.offset.dx, y: scenePos.y + cameraRig.offset.dy)
+        cameraNode.position = shakenCameraPosition(base, dt: dt)
+        cameraNode.zRotation = CGFloat(viewRotation)
+        applyViewTilt()
+        keepPlanetLabelsUpright()
+        return base
+    }
+
+    /// The rotation planet labels were last turned for.
+    private var planetLabelRotation: Double = 0
+
+    /// Planet names stay upright and under their planet on screen while the
+    /// view turns (they ride the planet nodes, which turn with the world).
+    private func keepPlanetLabelsUpright() {
+        guard viewRotation != planetLabelRotation else { return }
+        planetLabelRotation = viewRotation
+        let a = CGFloat(viewRotation)
+        for node in planetNodes {
+            guard let label = node.childNode(withName: "planetLabel") else { continue }
+            let d = hypot(label.position.x, label.position.y)
+            label.position = CGPoint(x: d * sin(a), y: -d * cos(a))
+            label.zRotation = a
+        }
+    }
+
+    /// Put the camera straight onto its framing (arrival, launch).
+    private func snapCamera(shipAt scenePos: CGPoint) {
+        guard let p = playerShip else { cameraNode.position = scenePos; return }
+        cameraRig.snap(view: cameraView, heading: p.angle, viewSize: visiblePlaySize,
+                       tiltAngle: settings.chaseTilt * .pi / 180)
+        cameraNode.position = CGPoint(x: scenePos.x + cameraRig.offset.dx, y: scenePos.y + cameraRig.offset.dy)
+        cameraNode.zRotation = CGFloat(viewRotation)
+        applyViewTilt()
+    }
+
+    /// The chase tilt as a 3D transform on the view's layer (identity when
+    /// flat). Re-applied whenever it differs, since AppKit may reset a
+    /// layer-backed view's transform when it lays the view out.
+    private func applyViewTilt() {
+        guard let v = view else { return }
+        #if os(macOS)
+        guard let layer = v.layer else { return }
+        let yUp = !layer.contentsAreFlipped()
+        #else
+        let layer = v.layer
+        let yUp = false
+        #endif
+        let b = layer.bounds.size
+        let anchor = layer.anchorPoint
+        let t = viewTilt.layerTransform(bounds: b,
+                                        anchorOffset: CGPoint(x: b.width * (0.5 - anchor.x), y: b.height * (0.5 - anchor.y)),
+                                        yUp: yUp)
+        if !CATransform3DEqualToTransform(layer.transform, t) { layer.transform = t }
+    }
+
+    /// The scene point under a point of the view as the player sees it — the
+    /// view's untilted coordinates (its frame, ignoring the layer transform),
+    /// mapped back through the chase tilt.
+    private func scenePoint(fromSeenViewPoint q: CGPoint) -> CGPoint {
+        guard let v = view else { return q }
+        let b = v.bounds
+        #if os(macOS)
+        let yUp = !v.isFlipped
+        #else
+        let yUp = false
+        #endif
+        let rel = CGPoint(x: q.x - b.midX, y: yUp ? q.y - b.midY : b.midY - q.y)
+        let src = viewTilt.unproject(rel, viewHeight: b.height)
+        let vp = CGPoint(x: b.midX + src.x, y: yUp ? b.midY + src.y : b.midY - src.y)
+        return convertPoint(fromView: vp)
+    }
 
     // Landing: the nearest landable stellar object, and whether the player is
     // close/slow enough to set down on it right now. `attemptLand()` (called by
@@ -1204,7 +1322,7 @@ final class GameScene: SKScene {
             let p = world.player
             let scenePos = CGPoint(x: p.position.x, y: p.position.y)
             shipNode.position = scenePos
-            cameraNode.position = scenePos
+            snapCamera(shipAt: scenePos)
             applyEntrance(.warpIn, to: shipNode, at: scenePos, heading: p.angle)
         }
         // Arriving in the system.
@@ -1220,8 +1338,14 @@ final class GameScene: SKScene {
     // for the same event. `location(in:)` is camera-aware, so this needs no
     // manual camera-transform math.
     #if os(macOS)
+    /// The scene point under the pointer, through any camera tilt.
+    private func scenePoint(_ event: NSEvent) -> CGPoint {
+        guard let v = view else { return event.location(in: self) }
+        return scenePoint(fromSeenViewPoint: v.convert(event.locationInWindow, from: nil))
+    }
+
     override func mouseDown(with event: NSEvent) {
-        let p = event.location(in: self)
+        let p = scenePoint(event)
         Log.input.debug("mouseDown -> scenePoint=(\(p.x, privacy: .public),\(p.y, privacy: .public))")
         selectAt(scenePoint: p)
     }
@@ -1231,7 +1355,7 @@ final class GameScene: SKScene {
     /// show the Destroy/Disable/Capture/Conquer context menu at the click.
     override func rightMouseDown(with event: NSEvent) {
         guard debug != nil else { return }
-        let p = event.location(in: self)
+        let p = scenePoint(event)
         guard let ref = entity(at: p) else { return }
         debug?.contextMenuRequest = (ref, convertPoint(toView: p))
     }
@@ -1240,16 +1364,16 @@ final class GameScene: SKScene {
     override func mouseDragged(with event: NSEvent) { updateMouseAim(event) }
 
     /// "Aim toward mouse cursor": steer the ship toward the pointer while the
-    /// setting is on. The player sits at the camera centre, so the cursor's
-    /// offset from there is the desired heading (0 = up, clockwise — the engine's
-    /// convention). Cleared when the setting is off so it never lingers.
+    /// setting is on. The cursor's offset from the ship, in the world, is the
+    /// desired heading (0 = up, clockwise — the engine's convention), whatever
+    /// way the camera is turned. Cleared when the setting is off so it never lingers.
     private func updateMouseAim(_ event: NSEvent) {
         guard settings.mouseAiming, jumpPhase == .none, autoLandTargetID == nil else {
             input?.mouse.desiredHeading = nil; return
         }
-        let p = event.location(in: self)
-        let dx = p.x - cameraNode.position.x
-        let dy = p.y - cameraNode.position.y
+        let p = scenePoint(event)
+        let dx = p.x - shipNode.position.x
+        let dy = p.y - shipNode.position.y
         guard hypot(dx, dy) > 10 else { return }        // ignore tiny jitter at centre
         input?.mouse.desiredHeading = atan2(Double(dx), Double(dy))
     }
@@ -1259,7 +1383,7 @@ final class GameScene: SKScene {
         if tapToFlyEnabled {
             steerViewOffset = viewOffset(of: t)
         } else {
-            let p = t.location(in: self)
+            let p = scenePoint(t)
             Log.input.debug("touchesBegan -> scenePoint=(\(p.x, privacy: .public),\(p.y, privacy: .public))")
             // Selection itself waits for release (see `pendingSelectPoint`
             // doc comment) so a hold long enough opens the dev context menu
@@ -1277,7 +1401,7 @@ final class GameScene: SKScene {
         if tapToFlyEnabled {
             steerViewOffset = viewOffset(of: t)
         } else if let start = pendingSelectPoint {
-            let p = t.location(in: self)
+            let p = scenePoint(t)
             if hypot(p.x - start.x, p.y - start.y) > Self.longPressMoveTolerance {
                 cancelPendingLongPress()
             }
@@ -1314,12 +1438,24 @@ final class GameScene: SKScene {
         pendingSelectPoint = nil
     }
 
-    /// A touch's offset from the presenting view's centre (which the follow
-    /// camera keeps pinned to the ship), in view points.
+    /// A touch's offset from the presenting view's centre, in view points as
+    /// seen (measured in the untransformed superview, so the chase tilt's
+    /// layer transform doesn't enter into it).
     private func viewOffset(of t: UITouch) -> CGVector {
         guard let v = view else { return .zero }
-        let loc = t.location(in: v)
-        return CGVector(dx: loc.x - v.bounds.midX, dy: loc.y - v.bounds.midY)
+        guard let sv = v.superview else {
+            let loc = t.location(in: v)
+            return CGVector(dx: loc.x - v.bounds.midX, dy: loc.y - v.bounds.midY)
+        }
+        let loc = t.location(in: sv)
+        return CGVector(dx: loc.x - v.center.x, dy: loc.y - v.center.y)
+    }
+
+    /// The scene point under a touch, through any camera tilt.
+    private func scenePoint(_ t: UITouch) -> CGPoint {
+        guard let v = view else { return t.location(in: self) }
+        let o = viewOffset(of: t)
+        return scenePoint(fromSeenViewPoint: CGPoint(x: v.bounds.midX + o.dx, y: v.bounds.midY + o.dy))
     }
     #endif
 
@@ -1350,6 +1486,7 @@ final class GameScene: SKScene {
             label.verticalAlignmentMode = .top
             label.position = CGPoint(x: 0, y: -p.radius - 6)
             label.isHidden = !settings.showPlanetLabels
+            planetLabelRotation = .nan   // turn it to the view on the next frame
             node.addChild(label)
             addChild(node)
             planetNodes.append(node)
@@ -1371,7 +1508,7 @@ final class GameScene: SKScene {
     /// fixed 1600×1600 tile could be smaller than the actual viewport on a
     /// large window, which is why the starfield didn't "fit" the visible space.
     private var requiredStarTile: CGFloat {
-        max(1600, max(size.width, size.height) * cameraZoom * 1.3)
+        max(1600, max(viewSpan.width, viewSpan.height) * 1.3)
     }
 
     /// Classic/Enhanced draw the original's ambient field (0x0046ebf0): at most
@@ -1645,6 +1782,7 @@ final class GameScene: SKScene {
         let simDT = dt * gameSpeedMultiplier
         frameDT = simDT
 
+        controllerInput?.headingOffset = viewRotation   // the right stick aims on screen
         controllerInput?.poll()
         #if os(iOS)
         if settings.controlScheme == .tilt { tiltInput?.poll(sensitivity: settings.tiltSensitivity) }
@@ -1657,8 +1795,12 @@ final class GameScene: SKScene {
         // (coast on bearing); when the mode is off we clear it so no stale
         // heading fights the arc buttons.
         if tapToFlyEnabled {
-            if let off = steerViewOffset, jumpPhase == .none {
-                input?.touch.desiredHeading = atan2(off.dx, -off.dy)
+            if let off = steerViewOffset, jumpPhase == .none, let v = view {
+                // Toward the point under the finger, from the ship, in the world
+                // (the camera may be turned, tilted or leading the ship).
+                let at = scenePoint(fromSeenViewPoint: CGPoint(x: v.bounds.midX + off.dx, y: v.bounds.midY + off.dy))
+                let ship = shipNode?.position ?? cameraNode.position
+                input?.touch.desiredHeading = atan2(Double(at.x - ship.x), Double(at.y - ship.y))
             }
         } else {
             input?.touch.desiredHeading = nil
@@ -1722,7 +1864,7 @@ final class GameScene: SKScene {
         if simAccumulator > catchupCap { simAccumulator = catchupCap }
         // The asteroid field lives in the player's view (FL-16): tell the world
         // how much of space the window shows at the current zoom.
-        world.viewportHalfExtent = Vec2(Double(size.width * cameraZoom) / 2, Double(size.height * cameraZoom) / 2)
+        world.viewportHalfExtent = Vec2(Double(viewSpan.width) / 2, Double(viewSpan.height) / 2)
         while simAccumulator >= fixedStep {
             world.intent = intent
             world.snapshotRenderState()   // capture each ship's pre-tick pose for render interpolation
@@ -1816,11 +1958,13 @@ final class GameScene: SKScene {
             syncLiveHull(&shipLive, retry: &shipLiveRetry, base: shipLiveBase, sprite: shipSprite,
                          in: node, opacity: hullAnim.baseOpacity)
         }
-        syncNPCs(visible: npcCullRect(around: scenePos))
+        syncNPCs(visible: npcCullRect(around: CGPoint(x: scenePos.x + cameraRig.offset.dx,
+                                                      y: scenePos.y + cameraRig.offset.dy)))
         lap("sync.npcs")
         syncAsteroids()
         lap("sync.asteroids")
         updateAnimatedStellars(dt)
+        adoptLateHDArt()
         updateSelectionBrackets()
         updateAIDebug()
         shipNode.position = scenePos
@@ -1847,7 +1991,7 @@ final class GameScene: SKScene {
         } else if let tri = placeholder {
             tri.zRotation = -CGFloat(renderHeading(p))
         }
-        shipLive?.update(heading: renderHeading(p), bank: liveBank(turn, hullAnim, disabled: false), dt: dt)
+        shipLive?.update(heading: renderHeading(p) + viewRotation, bank: liveBank(turn, hullAnim, disabled: false), dt: dt)
         if let hull = shipSprite { releaseIonize(hull); applyIonize(to: hull, ship: p) }
         if let glow = engineGlowSprite, !engineGlowTextures.isEmpty {
             glow.texture = engineGlowTextures[hullAnim.frameIndex(set: baseSet, heading: heading, count: engineGlowTextures.count)]
@@ -1886,9 +2030,9 @@ final class GameScene: SKScene {
                        boosted: p.afterburnerActive)
         lap("player.sprite")
 
-        cameraNode.position = shakenCameraPosition(scenePos, dt: dt)
+        let framed = updateCamera(shipAt: scenePos, ship: p, dt: dt)
         layoutLiveLayers()
-        updateStarfield(cameraAt: scenePos)
+        updateStarfield(cameraAt: framed)
         updateMurkFog()
         lap("camera+bg")
         updateLanding(player: p)
@@ -4055,6 +4199,7 @@ final class GameScene: SKScene {
             guard room else { dropLiveHull(&live, sprite: sprite); return nil }
             liveInUse += 1
             if current.isShared, let sprite { livePlacements.append((current, sprite, opacity)) }
+            else if !current.isShared { faceCamera(current.node) }
             return current
         }
         guard room, let base, let sprite, liveBuiltThisFrame < Self.liveBuildsPerFrame else { return nil }
@@ -4067,6 +4212,7 @@ final class GameScene: SKScene {
         } else {
             made.node.zPosition = sprite.zPosition
             made.node.alpha = opacity
+            faceCamera(made.node)
             container.addChild(made.node)
         }
         sprite.isHidden = true
@@ -4074,6 +4220,14 @@ final class GameScene: SKScene {
         liveInUse += 1
         liveBuiltThisFrame += 1
         return made
+    }
+
+    /// A standalone hull's node, turned square to the screen (its model is
+    /// posed in screen terms, `heading + viewRotation`) and stretched against
+    /// the chase tilt. Its container is never turned, so this is in the world.
+    private func faceCamera(_ node: SKNode) {
+        node.zRotation = CGFloat(viewRotation)
+        node.yScale = liveViewStretch
     }
 
     private func dropLiveHull(_ live: inout LiveHull?, sprite: SKSpriteNode?) {
@@ -4096,10 +4250,24 @@ final class GameScene: SKScene {
     /// layer is one render however many hulls it holds, and covers only the
     /// box around its hulls (clipped to the screen), so it never draws more
     /// pixels than separate hulls would. Hulls not placed this frame leave it.
+    ///
+    /// The layers are laid out square to the screen — turned with the camera
+    /// and stretched against the chase tilt — so their one 3D camera sees each
+    /// hull as the player does; boxes and offsets are in that screen frame.
     private func layoutLiveLayers() {
         guard !liveLayers.isEmpty || !livePlacements.isEmpty else { return }
-        let visible = CGRect(x: cameraNode.position.x - size.width * cameraZoom / 2,
-                             y: cameraNode.position.y - size.height * cameraZoom / 2,
+        let cam = cameraNode.position
+        let rot = CGFloat(viewRotation), c = cos(rot), sn = sin(rot)
+        // World → screen frame (camera-centred, unturned) and back.
+        func toView(_ p: CGPoint) -> CGPoint {
+            let d = CGPoint(x: p.x - cam.x, y: p.y - cam.y)
+            return CGPoint(x: d.x * c + d.y * sn, y: -d.x * sn + d.y * c)
+        }
+        func toWorld(_ v: CGPoint) -> CGPoint {
+            CGPoint(x: cam.x + v.x * c - v.y * sn, y: cam.y + v.x * sn + v.y * c)
+        }
+        let stretch = liveViewStretch
+        let visible = CGRect(x: -size.width * cameraZoom / 2, y: -size.height * cameraZoom / 2,
                              width: size.width * cameraZoom, height: size.height * cameraZoom)
         struct Entry { let hull: LiveHull; let at: CGPoint; let alpha: CGFloat; let slot: Int }
         var bands: [Int: [Entry]] = [:]
@@ -4114,10 +4282,10 @@ final class GameScene: SKScene {
             }
             guard n === self, !hidden, alpha > 0.001 else { continue }   // gone, or not drawn
             let band = Int((z * 100).rounded())
-            let at = p.sprite.convert(CGPoint.zero, to: self)
+            let at = toView(p.sprite.convert(CGPoint.zero, to: self))
             // Banking sweeps the model a little past its frame: pad by a quarter.
             let half = max(p.hull.size.width, p.hull.size.height) * 0.625
-            let rect = CGRect(x: at.x - half, y: at.y - half, width: half * 2, height: half * 2)
+            let rect = CGRect(x: at.x - half, y: at.y - half * stretch, width: half * 2, height: half * 2 * stretch)
             guard rect.intersects(visible) else { continue }
             boxes[band] = boxes[band].map { $0.union(rect) } ?? rect
             // The first placed (the player's hull, then NPCs in turn) is in front.
@@ -4133,11 +4301,14 @@ final class GameScene: SKScene {
                 liveLayers[band] = made
                 return made
             }()
-            layer.node.position = CGPoint(x: box.midX, y: box.midY)
-            layer.setViewport(box.size)
+            layer.node.position = toWorld(CGPoint(x: box.midX, y: box.midY))
+            layer.node.zRotation = rot
+            layer.node.yScale = stretch
+            layer.viewPitch = liveViewPitch
+            layer.setViewport(CGSize(width: box.width, height: box.height / stretch))
             for e in entries {
                 layer.add(e.hull)
-                layer.place(e.hull, at: CGPoint(x: e.at.x - box.midX, y: e.at.y - box.midY),
+                layer.place(e.hull, at: CGPoint(x: e.at.x - box.midX, y: (e.at.y - box.midY) / stretch),
                             opacity: e.alpha, depth: LiveHullLayer.maxDepthSlots - e.slot)
             }
         }
@@ -4184,8 +4355,8 @@ final class GameScene: SKScene {
     /// the viewport at the current zoom, padded by `npcCullMargin` so a ship's
     /// textures are current a few frames before any of it can scroll on screen.
     private func npcCullRect(around center: CGPoint) -> CGRect {
-        let halfW = size.width * cameraZoom / 2 + Self.npcCullMargin
-        let halfH = size.height * cameraZoom / 2 + Self.npcCullMargin
+        let halfW = viewSpan.width / 2 + Self.npcCullMargin
+        let halfH = viewSpan.height / 2 + Self.npcCullMargin
         return CGRect(x: center.x - halfW, y: center.y - halfH, width: halfW * 2, height: halfH * 2)
     }
 
@@ -4243,7 +4414,7 @@ final class GameScene: SKScene {
             }
             if let live = syncLiveHull(&node.live, retry: &node.liveRetry, base: node.liveBase, sprite: node.sprite,
                                        in: node.container, opacity: node.hullAnim.baseOpacity) {
-                live.update(heading: renderHeading(npc), bank: liveBank(turn, node.hullAnim, disabled: npc.disabled),
+                live.update(heading: renderHeading(npc) + viewRotation, bank: liveBank(turn, node.hullAnim, disabled: npc.disabled),
                             dt: frameDT)
             }
             // One fog slot per sprite (0x00428340): murk writes it, then ionization
@@ -4615,7 +4786,7 @@ final class GameScene: SKScene {
         jumpCommitted = false
         jumpClock = 0
         // Orient the streak fan along the direction of travel.
-        jumpStreaks?.zRotation = -CGFloat(outboundHeading)
+        jumpStreaks?.zRotation = -CGFloat(outboundHeading + viewRotation)   // camera space
         if settings.enhancements.quickHyperjump {
             jumpPhase = fastJump ? .accelerate : .align
             jumpArriveFade = 0.35
@@ -4909,7 +5080,7 @@ final class GameScene: SKScene {
         // wait a frame — the flash is covering this) and refresh the HUD name.
         let scenePos = CGPoint(x: player.position.x, y: player.position.y)
         shipNode.position = scenePos
-        cameraNode.position = scenePos
+        snapCamera(shipAt: scenePos)
         systemName = game.system(systemID)?.displayName ?? ""
         hud?.systemName = systemName
         audio?.play(.hyperspaceArrive)
@@ -5050,7 +5221,7 @@ final class GameScene: SKScene {
         // cue here was the odd "escape hatch" noise on launch).
         let scenePos = CGPoint(x: player.position.x, y: player.position.y)
         shipNode.position = scenePos
-        cameraNode.position = scenePos
+        snapCamera(shipAt: scenePos)
         applyEntrance(.launch, to: shipNode, at: scenePos, heading: player.angle)
         Log.scene.debug("reloadForDeparture: launched from spob \(spobID) in \(self.systemName) [\(self.systemID)], \(w.npcs.count) NPCs")
     }
@@ -6403,7 +6574,7 @@ final class GameScene: SKScene {
             layer.container.position = cam
             if !layer.factors.isEmpty {
                 // Wrap across the view (+ 2 star widths a side), as the original does.
-                let w = size.width * cameraZoom + 12, h = size.height * cameraZoom + 12
+                let w = viewSpan.width + 12, h = viewSpan.height + 12
                 func wrapSpan(_ v: CGFloat, _ span: CGFloat) -> CGFloat {
                     var r = (v + span / 2).truncatingRemainder(dividingBy: span)
                     if r < 0 { r += span }
@@ -6779,6 +6950,54 @@ final class GameScene: SKScene {
                 sprite.texture?.filteringMode = filterMode(for: t)
             }
             planetVisuals = fresh
+        }
+    }
+
+    /// Swap in HD art that became ready after this system was built: a
+    /// planet or ship drawn while its art was still being prepared otherwise
+    /// kept the classic sprite until the next jump. Checked twice a second,
+    /// and only things still drawing classic art whose HD art is now ready
+    /// are touched — nothing is rebuilt, animation state is kept.
+    private func adoptLateHDArt() {
+        hdRevisionWait -= frameDT
+        guard hdRevisionWait <= 0 else { return }
+        hdRevisionWait = 0.5
+        let hd = HDGraphics.shared
+        guard settings.hdGraphics, hd.isActive else { return }
+        let revision = hd.revision
+        guard revision != seenHDRevision, world != nil, let game = galaxy?.game else { return }
+        seenHDRevision = revision
+        // Planets and stations.
+        if planetVisuals.contains(where: { v in
+            (planetNodeByID[v.id] as? SKSpriteNode).map { !hd.isHD($0.texture) } ?? false
+        }) {
+            let fresh = Dictionary(makePlanetVisuals(systemID: systemID, game: game).map { ($0.id, $0) },
+                                   uniquingKeysWith: { a, _ in a })
+            for i in planetVisuals.indices {
+                let old = planetVisuals[i]
+                guard let sprite = planetNodeByID[old.id] as? SKSpriteNode, !hd.isHD(sprite.texture),
+                      var v = fresh[old.id], let t = v.texture, hd.isHD(t) else { continue }
+                v.animator = old.animator   // keep its place in the animation
+                if v.frames.isEmpty || !v.isAnimated {
+                    sprite.texture = t
+                } else if let a = v.animator, a.current < v.frames.count {
+                    sprite.texture = v.frames[a.current]
+                }
+                sprite.texture?.filteringMode = filterMode(for: sprite.texture)
+                planetVisuals[i] = v
+            }
+        }
+        // Ships already in flight: their hull frames (the next frame picks from them).
+        for npc in world.npcs {
+            guard let node = npcNodes[npc.entityID], let first = node.textures.first, !hd.isHD(first) else { continue }
+            npcTextureCache[npc.shipTypeID] = nil
+            let textures = npcTextures(for: npc.shipTypeID)
+            if let t = textures.first, hd.isHD(t), textures.count == node.textures.count { node.textures = textures }
+        }
+        // The player's hull, the same way the ship is built after a purchase.
+        if let first = rotationTextures.first, !hd.isHD(first),
+           let base = game.shan(world.player.shipTypeID)?.baseSpriteID, hd.isReady(base) {
+            adoptPlayerHull()
         }
     }
 

@@ -65,6 +65,9 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
     case cycleHyperspaceLink
     /// Route mini map zoom out / in while it is up (0x0044b120 ~3665).
     case routeMapZoomOut, routeMapZoomIn
+    /// Flight camera: step through the views (`CameraView`) and zoom.
+    /// NovaSwift additions with no original key.
+    case cycleCameraView, cameraZoomIn, cameraZoomOut
 
     var id: String { rawValue }
 
@@ -80,7 +83,7 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
 
     enum Category: String, CaseIterable, Identifiable {
         case flight = "Flight", combat = "Combat", targeting = "Targeting"
-        case navigation = "Navigation", interface = "Interface"
+        case navigation = "Navigation", interface = "Interface", camera = "Camera"
         var id: String { rawValue }
     }
 
@@ -97,6 +100,7 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
              .hyperspaceArm, .hailStellar, .cycleHyperspaceLink, .routeMapZoomOut, .routeMapZoomIn: return .navigation
         case .clearSecondary: return .combat
         case .pauseGame, .openMenu, .shipInfo, .dismissMessage, .playerInfo, .missionInfo: return .interface
+        case .cycleCameraView, .cameraZoomIn, .cameraZoomOut: return .camera
         }
     }
 
@@ -151,6 +155,9 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
         case .selfDestruct: return "Self-Destruct"
         case .commandEscortFormation: return "Escorts: Formation"
         case .commandEscortReturnHangar: return "Escorts: Return to Hangar"
+        case .cycleCameraView: return "Change Camera View"
+        case .cameraZoomIn: return "Camera Zoom In"
+        case .cameraZoomOut: return "Camera Zoom Out"
         }
     }
 

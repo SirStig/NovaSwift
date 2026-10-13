@@ -2764,6 +2764,17 @@ struct GameContainerView: View {
         model.settings.modernHUD ? nil : host.hudStyle
     }
 
+    /// Whether ships draw in live 3D (the chase camera needs it).
+    private var live3DOn: Bool {
+        model.settings.hdGraphics && model.settings.hullPresentation == .live
+    }
+
+    /// How much bigger than the play area the scene draws for the chase tilt.
+    private var chaseOverscan: CGSize {
+        guard model.settings.cameraView.effective(live3D: live3DOn) == .chase else { return CGSize(width: 1, height: 1) }
+        return CameraTilt(angle: model.settings.chaseTilt * .pi / 180).overscan
+    }
+
     @ViewBuilder
     private func sceneLayer(_ host: GameHost) -> some View {
         // Flight is driven by keybindings (keyboard) + controller + touch.
@@ -2780,11 +2791,17 @@ struct GameContainerView: View {
             // destination, or empty space to clear both selections — handled
             // natively in `GameScene.mouseDown`/`touchesBegan`, not via a
             // SwiftUI gesture (unreliable layered on `SpriteView`'s native view).
+            // The chase camera tilts the view back in perspective; it's drawn
+            // that much bigger than the play area (and clipped to it) so the
+            // tilted plane still reaches every corner.
+            let overscan = chaseOverscan
             SpriteView(scene: host.scene,
                        preferredFramesPerSecond: model.settings.frameRateCap.fps ?? 120,
                        options: [.ignoresSiblingOrder],
                        debugOptions: model.settings.showFPS ? [.showsFPS, .showsNodeCount] : [])
+                .frame(width: playWidth * overscan.width, height: geo.size.height * overscan.height)
                 .frame(width: playWidth, height: geo.size.height)
+                .clipped()
                 .position(x: playWidth / 2, y: geo.size.height / 2)
                 // Tie this view's identity to the scene instance. `SpriteView`
                 // presents its `scene:` only when the underlying native view is
@@ -3552,6 +3569,19 @@ struct GameContainerView: View {
             else { return }
             routeMapShownAt = Date()
             model.audio.play(.beep1)   // 0x0044b120, snd 150
+        case .cycleCameraView:
+            // A port-only control: step through the views on offer, silently.
+            let views = CameraView.available(live3D: live3DOn)
+            let current = model.settings.cameraView.effective(live3D: live3DOn)
+            let next = views[((views.firstIndex(of: current) ?? 0) + 1) % views.count]
+            model.settings.cameraView = next
+            model.commitSettings()
+            host?.hud.post("Camera: \(next.label)")
+        case .cameraZoomIn, .cameraZoomOut:
+            // The Settings slider's range, a step at a time.
+            let z = model.settings.cameraZoom * (action == .cameraZoomIn ? 1 / 1.15 : 1.15)
+            model.settings.cameraZoom = min(2.5, max(0.5, z))
+            model.commitSettings()
         case .cycleHyperspaceLink:
             if nav.cycleHyperspaceLink() {
                 routeMapShownAt = Date()

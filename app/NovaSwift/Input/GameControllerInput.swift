@@ -68,6 +68,10 @@ final class GameControllerInput {
 
     /// Poll the current controller state into a fresh controller intent, and
     /// edge-fire any newly pressed discrete bindings.
+    /// The flight camera's rotation (`GameScene.viewRotation`): a stick
+    /// direction on screen is this far from the same direction in the world.
+    var headingOffset: Double = 0
+
     func poll() {
         guard let pad = GCController.current?.extendedGamepad else { return }
         var c = ControlIntent()
@@ -95,8 +99,9 @@ final class GameControllerInput {
         let rx = pad.rightThumbstick.xAxis.value
         let ry = pad.rightThumbstick.yAxis.value
         if hypot(rx, ry) > max(0.5, dz) {
-            // Screen up is +y on the stick; heading 0 = up, clockwise.
-            c.desiredHeading = Double(atan2(rx, ry))
+            // Screen up is +y on the stick; heading 0 = up, clockwise. Less
+            // the camera's turn, so the stick aims where it points on screen.
+            c.desiredHeading = Double(atan2(rx, ry)) - headingOffset
         }
 
         // Bindable buttons: continuous actions drive the intent while held;
