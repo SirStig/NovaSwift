@@ -5,7 +5,7 @@
 NOVA Swift is a reimplementation of the Escape Velocity Nova engine (Ambrosia
 Software, 2002), written in Swift from a reverse-engineered reading of the
 original executable. It runs natively on macOS, iPadOS, iOS and tvOS, with a
-Godot frontend for Linux and Windows in progress.
+Godot frontend for Linux and Steam Deck (experimental beta) and Windows (not yet built).
 
 It is not an emulator or a wrapper. The engine reads the game data from your
 own copy of EV Nova and plays it. No game data is included.
@@ -139,6 +139,13 @@ Join the [TestFlight beta](https://testflight.apple.com/join/3FBzwwq1) for Mac,
 iPad, iPhone or Apple TV, then point the app at your EV Nova data:
 [GET_THE_DATA.md](docs/GET_THE_DATA.md).
 
+| Platform | Get it |
+|---|---|
+| macOS, iPad, iPhone, Apple TV | The native Apple app: [TestFlight beta](https://testflight.apple.com/join/3FBzwwq1). Recommended on Mac. |
+| Linux x86_64 and Steam Deck | Godot build from [GitHub Releases](https://github.com/SirStig/NovaSwift/releases): `NovaSwift-linux-x86_64.tar.gz` (see [below](#linux-and-windows)). |
+| Windows | Coming soon. It needs a Windows build. |
+| macOS (alternative) | Godot build `NovaSwift-macos-arm64.zip` from the same Releases page, for testing only. |
+
 Report bugs in the [issue tracker](https://github.com/SirStig/NovaSwift/issues).
 Settings ▸ Support ▸ Report a Bug collects a diagnostics bundle you can attach.
 
@@ -166,21 +173,34 @@ and rendering use SwiftUI and SpriteKit. The Godot 4 frontend, bridged with
 combat, landing, the spaceport, missions, the galaxy map, sound, saving and the
 story runtime, and loads all 13 catalog plug-ins.
 
-Getting a build: there is no CI. Packages are made locally with the scripts below
-([docs/PACKAGING.md](docs/PACKAGING.md)).
+**Download.** The Godot build is on the
+[GitHub Releases page](https://github.com/SirStig/NovaSwift/releases). The first
+release is the pre-release `v0.7.0-beta.1`, an experimental beta of the Godot
+version (0.7.0). Open the Releases page rather than "latest", which skips
+pre-releases. Assets:
 
-- macOS (arm64): `scripts/package-macos.sh`. Built and checked headless.
-- Linux x86_64 and Steam Deck: `scripts/package-linux-docker.sh` builds a tarball in
-  a container. Built and checked headless in a clean Ubuntu 22.04 container; not
-  yet run on a real Steam Deck or with a GPU. Add `NovaSwift.sh` to Steam as a
-  non-Steam game; setup steps are in PACKAGING.md.
-- Windows (x86_64): `scripts/package-windows.ps1` is written but has never been run.
-  It needs a Windows PC with the Swift toolchain.
+- `NovaSwift-linux-x86_64.tar.gz`: Linux x86_64 and Steam Deck. Built and checked
+  headless in a clean Ubuntu 22.04 container; not yet run on a real Steam Deck or
+  with a GPU.
+- `NovaSwift-macos-arm64.zip`: macOS on Apple silicon. For testing; on a Mac the
+  native Apple app above is the better choice. It is not notarised, so
+  right-click the app and choose Open the first time.
+- Windows (x86_64): coming soon. `scripts/package-windows.ps1` is written but has
+  never been run; it needs a Windows PC with the Swift toolchain.
 
-You supply your own EV Nova data, as on Apple platforms. The optional original
-movies need `ffmpeg` installed.
+**First run (Linux and Steam Deck).**
 
-The Linux and Windows builds include an auto-updater ([docs/UPDATER.md](docs/UPDATER.md)):
+1. Extract the tarball anywhere, for example `~/Games/NovaSwift`.
+2. Run `NovaSwift.sh`.
+3. On a Steam Deck, add `NovaSwift.sh` to Steam as a non-Steam game to play in Game Mode.
+4. You need your own copy of EV Nova data; the setup wizard imports it on first
+   launch ([GET_THE_DATA.md](docs/GET_THE_DATA.md)).
+5. Optional: install `ffmpeg` to play the original movies.
+
+If you would rather build it yourself, see [docs/PACKAGING.md](docs/PACKAGING.md).
+
+The Godot build checks GitHub for updates (Settings ▸ Support ▸ Updates; experimental
+builds only appear if "Experimental updates" is on) ([docs/UPDATER.md](docs/UPDATER.md)):
 signed releases, a prompt with Skip This Version / Later / Update Now, an opt-in
 experimental channel and a way back to stable. It is built but not yet tested end
 to end. Work from the latest rounds (original status-line text and travel hints,
