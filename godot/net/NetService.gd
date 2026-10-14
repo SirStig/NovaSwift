@@ -287,7 +287,7 @@ func _chat_line(from_name: String, text: String) -> void:
 
 
 func _push_chat(from_name: String, text: String, system: bool) -> void:
-	chat_log.append({"name": from_name, "text": text, "system": system})
+	chat_log.append({"name": from_name, "text": text, "system": system, "t": Time.get_unix_time_from_system()})
 	while chat_log.size() > 100:
 		chat_log.pop_front()
 	if overlay != null:

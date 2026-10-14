@@ -462,7 +462,7 @@ func _build_frame() -> void:
 	box.add_child(_tabs_host)
 
 	# Banner slot (errors, connecting)
-	var bw := _gutter(MarginContainer.new(), 0, 0)
+	var bw := _gutter(MarginContainer.new(), 0, 6)
 	_banner_box = VBoxContainer.new()
 	_banner_box.add_theme_constant_override("separation", 8)
 	bw.add_child(_banner_box)

@@ -135,6 +135,7 @@ func _run() -> void:
 		if c.is_in_group("story_modal_host"):
 			hosts += 1
 	_ok(hosts == 1, "re-opening replaces the dialog instead of stacking", str(hosts))
+	ss._modal_from_engine = true
 	await _frames(2)
 	_ok(ss._modal == null, "an engine-less text dialog closes itself")
 	ss._open_text_classic(t)
