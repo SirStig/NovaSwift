@@ -1,9 +1,6 @@
 /* Live data for the site, all read straight from public GitHub files:
    - releases      GitHub Releases API (news + download buttons)
    - servers.json  the public server directory (NovaSwift-Plugins)
-   - status.json   last probe of every listed server (written by a scheduled
-                   workflow in NovaSwift-Plugins; browsers can't send the UDP
-                   status query themselves)
    - catalog.json  the community plug-in catalog
    Everything is escaped before it reaches the page: these files take
    community pull requests. Every widget degrades to a plain link. */
@@ -14,7 +11,6 @@
   var SRC = {
     releases: "https://api.github.com/repos/SirStig/NovaSwift/releases?per_page=10",
     servers: RAW + "main/servers/servers.json",
-    status: RAW + "status/status.json",
     catalog: RAW + "main/catalog.json"
   };
   var REGIONS = { "na-east": "N. America East", "na-west": "N. America West", sa: "South America", eu: "Europe", af: "Africa", me: "Middle East", as: "Asia", oc: "Oceania", global: "Global" };
@@ -46,7 +42,7 @@
     if (memo[key]) return memo[key];
     var ck = "nova:" + key, hit = null;
     try { hit = JSON.parse(sessionStorage.getItem(ck) || "null"); } catch (e) {}
-    if (hit && Date.now() - hit.t < 5 * 60000) {
+    if (hit && Date.now() - hit.t < 2 * 60000) {
       // A remembered miss (e.g. no status.json yet) isn't refetched on every page.
       return (memo[key] = hit.miss ? Promise.reject(new Error(key + " missing")) : Promise.resolve(hit.v));
     }
@@ -118,13 +114,13 @@
     }).join("");
   }
 
-  if (document.querySelector("[data-asset], [data-releases]")) {
+  if (document.querySelector("[data-asset], [data-releases], [data-latest-version]")) {
     getJSON("releases").then(function (rel) {
       if (!Array.isArray(rel)) return;
       wireDownloads(rel);
       document.querySelectorAll("[data-releases]").forEach(function (b) { renderNews(b, rel); });
       document.querySelectorAll("[data-latest-version]").forEach(function (el) {
-        var r = rel.filter(function (x) { return !x.draft; })[0];
+        var r = rel.filter(function (x) { return !x.draft && /^v\d/.test(x.tag_name); })[0];   // the game, not server-v…
         if (r) el.textContent = r.tag_name;
       });
     }).catch(function () {});
@@ -132,37 +128,26 @@
 
   /* ================= Servers ================= */
   function loadServers() {
-    return Promise.all([
-      getJSON("servers"),
-      getJSON("status").catch(function () { return null; })
-    ]).then(function (v) {
-      var dir = (v[0] && Array.isArray(v[0].servers)) ? v[0].servers : [];
-      var st = v[1] && v[1].servers ? v[1] : null;
-      dir.forEach(function (s) { s._st = st ? st.servers[s.id] || { online: false } : null; });
-      return { list: dir, status: st };
+    // Just the directory. Live status (online, players, ping) is shown in the game's Browse tab, which
+    // queries each server directly; browsers can't send that UDP query.
+    return getJSON("servers").then(function (v) {
+      return { list: (v && Array.isArray(v.servers)) ? v.servers : [] };
     });
   }
 
   function serverRow(s) {
-    var st = s._st, online = st && st.online;
-    var state = !st ? '<span class="badge">Status unknown</span>'
-      : online ? '<span class="badge ok"><span class="dot ok"></span>Online</span>'
-      : '<span class="badge bad">Offline</span>';
     var addr = esc(s.host) + (s.port && s.port !== 53735 ? ":" + esc(s.port) : "");
-    var players = online ? '<div class="players">' + esc(st.players | 0) + "<small> / " + esc(st.max || s.maxPlayers) + "</small></div>"
-      : '<div class="players"><small>max ' + esc(s.maxPlayers) + "</small></div>";
+    var players = '<div class="players"><small>' + esc(s.maxPlayers) + " slots</small></div>";
     var plugins = (s.plugins || []).map(function (p) { return esc(p.name || p.id); }).join(", ");
     var facts = [
       "<span><b>Region</b> " + esc(REGIONS[s.region] || s.region) + "</span>",
       "<span><b>Rules</b> " + esc(RULES[s.rules] || s.rules) + "</span>",
       "<span><b>Plug-ins</b> " + (plugins || "None (stock EV Nova)") + "</span>",
-      st && st.ver ? "<span><b>Version</b> " + esc(st.ver) + "</span>" : "",
-      st && st.pw ? "<span><b>Password</b> required</span>" : "",
       s.owner ? "<span><b>Host</b> " + esc(s.owner.name) + "</span>" : "",
       s.website && safeURL(s.website) ? '<span><a href="' + safeURL(s.website) + '" target="_blank" rel="noopener nofollow">Website</a></span>' : ""
     ].join("");
-    return '<article class="server' + (st && !online ? " offline" : "") + '" data-region="' + esc(s.region) + '">' +
-      "<div><h3>" + esc(s.name) + " " + state + "</h3>" +
+    return '<article class="server" data-region="' + esc(s.region) + '">' +
+      "<div><h3>" + esc(s.name) + "</h3>" +
       (s.description ? "<p>" + esc(s.description) + "</p>" : "") +
       '<div class="facts">' + facts + "</div></div>" +
       '<div class="right">' + players + '<span class="addr" title="Paste this into Join in the game">' + addr + "</span>" +
@@ -173,7 +158,6 @@
     var listEl = box.querySelector(".server-list");
     var q = box.querySelector('input[type="search"]');
     var region = box.querySelector("select[name=region]");
-    var onlyOnline = box.querySelector("input[name=online]");
     var note = box.querySelector("[data-status-note]");
     var data = [];
 
@@ -182,15 +166,9 @@
       var reg = region ? region.value : "";
       var shown = data.filter(function (s) {
         if (reg && s.region !== reg) return false;
-        if (onlyOnline && onlyOnline.checked && !(s._st && s._st.online)) return false;
         if (term && (s.name + " " + s.description + " " + s.host).toLowerCase().indexOf(term) < 0) return false;
         return true;
-      }).sort(function (a, b) {
-        var ao = a._st && a._st.online ? 1 : 0, bo = b._st && b._st.online ? 1 : 0;
-        if (ao !== bo) return bo - ao;
-        var ap = a._st ? a._st.players | 0 : 0, bp = b._st ? b._st.players | 0 : 0;
-        return bp - ap || String(a.name).localeCompare(b.name);
-      });
+      }).sort(function (a, b) { return String(a.name).localeCompare(b.name); });
       if (!data.length) {
         listEl.innerHTML = '<div class="empty"><h3>No public servers listed yet</h3>' +
           "<p>The directory is brand new. Be the first: run a dedicated server and open a pull request to list it.</p>" +
@@ -207,13 +185,11 @@
         b.textContent = "Copied"; setTimeout(function () { b.textContent = "Copy address"; }, 1500);
       });
     });
-    [q, region, onlyOnline].forEach(function (el) { if (el) el.addEventListener("input", draw); });
+    [q, region].forEach(function (el) { if (el) el.addEventListener("input", draw); });
 
     loadServers().then(function (r) {
       data = r.list;
-      if (note) note.textContent = r.status
-        ? "Status checked " + ago(r.status.updated) + ". In the game, the Public tab pings each server live."
-        : "Live status isn't available right now. In the game, the Public tab pings each server live.";
+      if (note) note.textContent = "Who's online and the ping show up in the game's Multiplayer → Browse tab.";
       draw();
     }).catch(function () {
       listEl.innerHTML = '<div class="empty"><p>Couldn\'t load the server list. <a href="https://github.com/SirStig/NovaSwift-Plugins/blob/main/servers/servers.json" target="_blank" rel="noopener">View it on GitHub</a>.</p></div>';
@@ -296,10 +272,8 @@
     if (need.plugins) getJSON("catalog").then(function (c) {
       document.querySelectorAll('[data-count="plugins"]').forEach(function (el) { el.textContent = ((c && c.plugins) || []).length; });
     }).catch(function () {});
-    if (need.servers || need.online || need.players) loadServers().then(function (r) {
-      var online = r.list.filter(function (s) { return s._st && s._st.online; });
-      var players = online.reduce(function (n, s) { return n + (s._st.players | 0); }, 0);
-      var vals = { servers: r.list.length, online: r.status ? online.length : "–", players: r.status ? players : "–" };
+    if (need.servers) loadServers().then(function (r) {
+      var vals = { servers: r.list.length };
       Object.keys(vals).forEach(function (k) {
         document.querySelectorAll('[data-count="' + k + '"]').forEach(function (el) { el.textContent = vals[k]; });
       });
