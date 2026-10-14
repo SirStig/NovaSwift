@@ -28,12 +28,13 @@ public enum PilotFactory {
 
     public enum NameField { case pilot, nickname, ship }
 
-    /// The ship-name prompt (0x00489d70): STR# 2002 #121 followed by the
-    /// starting hull's name.
+    /// The ship-name prompt (0x00489d70): STR# 2002 #121 ("Now, please christen your brand-new", no
+    /// trailing space in the data), then the exe's " " literal (0x0056ce88), the starting hull's name
+    /// and the ": " literal (0x0056d040).
     public static func shipNamePrompt(scenario: CharRes, game: NovaGame) -> String {
         let prompt = game.stringList(2002)?.string(at: 121) ?? ""
         let hull = game.ship(scenario.shipID)?.name ?? ""
-        return prompt + hull
+        return prompt + " " + hull + ": "
     }
 
     /// Build a new pilot for `scenario`.

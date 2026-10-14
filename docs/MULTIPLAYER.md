@@ -474,3 +474,251 @@ question of which engine a query evaluates against. Mission gating:
 `app/NovaSwift/Story/AppGameServices.swift` — the world-affecting callbacks that would
 need elevating to the authority are `spawnMissionShips`, `setStellarDestroyed`,
 `movePlayer`, `changePlayerShip`, `leaveStellar`, `showNews`.
+
+## Godot (LAN / IP / dedicated server)
+
+The Godot desktop build (Linux, Steam Deck, Windows) runs the **same** `NetSession` +
+Layer-2 sync as the Apple app. Only the transport differs, and it is split in two:
+
+| Layer | Owner | What |
+|---|---|---|
+| Sockets, discovery, lobby UI, dedicated-server mode | GDScript | Godot ENet (`ENetMultiplayerPeer`): LAN broadcast discovery, direct `IP:port`, player-hosted dedicated servers |
+| Session, presence, rules, chat, trade signals, plug-in gate, per-system authority, snapshots/inputs | Swift (`NovaSwiftNet` + `NovaSwiftSync`) | identical to Apple |
+
+Swift pieces (all shared, no Apple-only code):
+
+- `Sources/NovaSwiftNet/ExternalTransport.swift` - a `Transport` whose bytes are pumped by
+  the frontend: `receive(from:data:)`, `peerConnected(id:name:)`, `peerDisconnected(id:)`,
+  `drainOutgoing()`. Peer ids are Godot multiplayer peer ids; the player id string is
+  `String(peer_id)`. `reliable` maps to ENet reliable, `unreliable` to unreliable
+  (snapshots / inputs). A broadcast is one packet with `to = -1`.
+- `Sources/NovaSwiftSync/SystemSyncDriver.swift` - the role logic that used to live in the
+  app's `MultiplayerSession` (authority = smallest co-located id, mirrors, handoff,
+  stakes, per-tick `syncPreStep` / `syncPostStep`). The Apple app now calls it too.
+- `godot/bridge/Sources/NovaSwiftGodot/Net.swift` + the `// MARK: Multiplayer` block in
+  `NovaWorld.swift` - the GDScript API below.
+
+### Topology requirement
+
+`NetSession` assumes it can address any connected peer (trade, per-client snapshots,
+kicks). With ENet use Godot's `MultiplayerPeer` with server relay (the default): the
+server is peer id `1`, clients see each other through it, and `peer_connected` fires on
+every client for every other client. Report each of those via `net_peer_joined`. The
+host (`is_host = true`) must be peer `1`; guests assume the host is peer `1` for the
+plug-in compatibility gate. A **dedicated server** is a host with no pilot: call
+`net_begin` and pump, but never `make_world`/`step` - it relays presence, rules and
+chat and appears in nobody's roster.
+
+### NovaWorld API (snake_case)
+
+| Call | Notes |
+|---|---|
+| `net_begin(local_peer_id, display_name, is_host, rules_json) -> bool` | `rules_json` `""` = host full-stakes / guest safe. Lenient object: `{"preset":"safe"\|"full"}` and/or any of `pvp_damage_real, death_real, friendly_fire, allow_pvp, allow_trade, carry_encounter, game_speed_multiplier`. Replaces a live session. |
+| `net_end()` | Leaves; a final packet (kick) stays drainable. |
+| `net_peer_joined(peer_id, name)` / `net_peer_left(peer_id)` | Feed ENet/Godot connect/disconnect. Idempotent. |
+| `net_receive(peer_id, data: PackedByteArray)` | Feed each received packet. |
+| `net_outgoing() -> Array` | `[{to:int (-1 = all), reliable:bool, data:PackedByteArray}]`; call every frame after `step`. |
+| `net_state() -> String` | `{active,is_host,local_id,players:[{id,name,system_id,ship,in_my_system,is_authority}],authority_id,syncing,rules,errors}` (`errors` returned once). |
+| `net_events() -> String` | Drained JSON array: `player_joined`/`player_left {id,name}`, `chat {id,name,text,local}`, `rules_changed`, `trade {kind,...}`, `ncb_bits`, `kicked`, `version_mismatch`, `plugin_mismatch {missing,extra,wrong_version,as_host}`. |
+| `net_chat(text)`, `net_set_rules(rules_json)` (host only) | |
+| `net_kick(peer_id, ban)` (host only, extra) | |
+| `net_ready_manifest() -> String` | `{plugins:[{id,name,contentHash}],signature,count}` - compare signatures for the lobby list. |
+
+`NovaWorld.step()` runs `syncPreStep` / `syncPostStep` around every 30 Hz sim tick while a
+session is active, exactly like the Apple game loop; with no session it is a no-op.
+Co-located remote players appear as ordinary ships in the world, so they render through
+the normal ship arrays. Presence is announced on the first `step()` after `make_world`
+and on every system change. Not yet bridged: trade UI (invites are auto-declined and
+surfaced as events) and co-op NCB story propagation (received bits arrive as `ncb_bits`
+events; the authority does not yet send them).
+
+### Playing online on Linux / Steam Deck / Windows
+
+The Godot build plays multiplayer over three kinds of connection, all through
+**Multiplayer** on the main menu (or in the pause menu): the same hub on Classic and
+Nova Swift presentations, with mouse, keyboard and gamepad (Steam Deck) support.
+
+| Tab | What it does |
+|---|---|
+| **Host Game** | Name, port (default **53735/udp**), max players, rules (Safe / Full stakes / Custom toggles for PvP, real damage, friendly fire, permadeath, trading), optional password, "visible on the local network". Your game keeps running normally; players who enter your star system play it with you. |
+| **Join** | Type `host`, `host:port` or `[ipv6]:port`, plus the password if there is one. Recent servers are listed; "Save to favourites" keeps one. |
+| **Public** | The community server directory (see below): every listed server is live-pinged for online/offline, players, version match, password and latency; sort by ping; filters for compatible / has players / region; Join or "Add to Saved". |
+| **LAN** | Games and dedicated servers on your network, found by UDP beacons (port 53736). |
+| **Saved** | Favourites, Minecraft-style, with live ping and player counts (a UDP status query to game port + 1). |
+| **Session** | While connected: players (ping, system, authority), the host's Kick / Ban, rules (host can flip Safe / Full), chat, Leave. |
+
+In flight, **T** opens chat (with the modern key layout: **/**), Enter sends, Esc closes; on
+a gamepad use Menu > Multiplayer. Toasts announce joins, leaves, rule changes and kicks.
+Trade invites are surfaced (the bridge has no trade send API yet, so the dialog is a
+notice and the invite is declined).
+
+**Hosting at home (internet).** Forward **UDP 53735** (or your chosen port) on your router
+to the machine running the game, allow it in the firewall (Windows prompts the first time;
+on Linux `sudo ufw allow 53735/udp`), and give friends your public IP (search "what is my
+IP") with the port. Optionally also forward UDP 53736 so your server answers pings in
+friends' Saved list. On a LAN nothing needs forwarding: friends see you under **LAN** or
+join your local address (shown on the Host tab). Steam Deck: same as Linux, in Desktop or
+Game mode.
+
+**What must match.** Everyone needs the same NovaSwift version and the same enabled plug-ins
+(compared by content hash). A mismatch is refused with the reason shown on the hub: version,
+protocol, wrong / missing password, server full, plug-ins (the bridge's diff names what to
+install, disable or update), banned, timeout. The password is sent hashed and game traffic is
+not encrypted: fine for friends and LANs.
+
+**Dedicated server ("like Minecraft").** A headless process that hosts a session without a
+pilot or a window; players join by address.
+
+```
+scripts/run-dedicated-server.sh --name "My Server" --port 53735 --max-players 8 --rules safe --password secret
+# or, from a source checkout / packaged build:
+godot --headless --path godot -- --server --port 53735 --name "My Server"
+./NovaSwift --headless -- --server --config /path/to/server.cfg
+```
+
+Options: `--server --port N --name "..." --password X --max-players N --rules safe|full
+--config FILE --data DIR --log FILE --no-lan --no-stdin`, plus `--public --upnp --region --owner --contact --description --address --website` (see "Host a public server in 5 minutes"); `godot/net/server.cfg` is a documented
+example (`[server]`, and `[rules]` for custom stakes); the command line overrides the file. The
+server needs EV Nova data (`NOVA_DATA_DIR`, `--data`, or the folder the game already imported),
+announces itself on the LAN, writes `user://logs/server.log` and a status line every 60 s, and reads
+console commands on stdin: `help`, `status`, `players`, `kick <id|name> [reason]`, `ban <id|name>`,
+`say <text>`, `rules safe|full`, `quit`. (Under systemd, pass `--no-stdin`; `Ctrl-C` / SIGTERM stop
+it.) Port forwarding is the same as for hosting.
+
+**How the server participates.** `ServerMain` opens an ENet server (peer id **1**) and calls
+`net_begin(1, "[Server]", true, rules)` on its own `NovaWorld`, then pumps it each frame. It never
+calls `make_world` or `step`: no pilot, no presence, never in a star system, so it is never a
+system's authority and appears in nobody's roster. It carries the session rules, chat, moderation
+and the plug-in gate; per-system authority stays with the co-located players. If a bridge refuses
+or predates the `net_*` API, the server falls back to a plain relay (joinable, transport chat).
+
+**Wire.** `godot/net/NetTransport.gd` runs a star topology over ENet (channel 0 reliable, channel 1
+unreliable). The server relays client-to-client game bytes (`[0x10][int32 peer][payload]`), and
+tells every client about every other client (`PEER_JOIN` / `PEER_LEFT`), which the client feeds to
+`net_peer_joined` / `net_peer_left`, so `NetSession` can address any peer. Handshake: HELLO
+(protocol, game version, name, password hash, `net_ready_manifest`) -> WELCOME or REJECT. Timeouts:
+10 s to connect, 8 s to finish the handshake, 20 s of silence (clients ping every 2 s). Frames are
+pumped by the `NetService` autoload, which is inert when no session is active.
+
+**Known gaps.** The pause menu freezes the local sim (`Main.gd` stops calling `step`), so a paused
+player stops sending snapshots; `net_outgoing` is drained once per frame before `step` (one frame of
+latency); the stdin console cannot be joined at exit, so the server ends its own process after
+flushing the log; NAT traversal / relays are not provided (forward the port or use a VPN such as
+Tailscale / ZeroTier); no encryption; trade is a stub.
+
+### Public server directory
+
+There is no backend of ours. Public dedicated servers are listed in a JSON file in a GitHub repo, the same
+way plug-ins are: [`servers/servers.json` in SirStig/NovaSwift-Plugins](https://github.com/SirStig/NovaSwift-Plugins/tree/main/servers)
+(schema `servers.schema.json`, checker `servers/validate.py`, instructions `servers/README.md`). To list a
+server you open a pull request adding an entry (`id`, `name`, `host`, `port`, `region`, `description`,
+`owner{name,contact}`, `rules`, `plugins[{id,name,contentHash}]`, `maxPlayers`, `added`, `website`).
+
+The **Public** tab (`godot/net/ServerDirectory.gd`) downloads
+`https://raw.githubusercontent.com/SirStig/NovaSwift-Plugins/main/servers/servers.json` (HTTPS only), caches it
+in `user://server_directory.json` with its `ETag` (a revalidation answered `304` just renews it) and refreshes
+at most every 24 h or on **Refresh**; offline it shows the cached copy. The file is only a list of addresses.
+Everything live (online, players/max, version, password, latency) comes from a UDP status query to each
+entry (`LanDiscovery.query`, game port + 1; 53736 for the default port), so a stale or dishonest entry shows
+as Offline. Rows sort online-first by ping; **Compatible only** hides servers on another game version.
+Hostnames are resolved once and remembered, and at most 60 entries are queried per cycle.
+
+### Host a public server in 5 minutes
+
+1. **Run it.** On any always-on machine with your EV Nova data (Linux box, Raspberry Pi 5, a spare PC, a VPS):
+   `scripts/run-dedicated-server.sh --name "My Server" --max-players 12 --rules safe --public --region eu --owner "You" --contact "discord: you#0001" --description "Friendly 24/7 server"`
+   (`--address play.example.com` if you have a DNS name; `--port N` to change 53735).
+2. **Open the ports.** Players need **UDP 53735** (the game); the directory's live ping needs **UDP 53736**
+   (game port + 1). Forward both on your router to the machine and allow them in its firewall
+   (`sudo ufw allow 53735:53736/udp`; Windows prompts the first time). A VPS only needs the firewall rule.
+   - **UPnP:** add `--upnp` (or tick **Open the port on my router (UPnP)** in Host Game) to ask the router to
+     do the forwarding for you. It's opt-in because many routers have UPnP switched off and some ISPs put you
+     behind carrier-grade NAT (an address starting `100.64`-`100.127`, or a router "WAN" address different from
+     what "what is my IP" shows), where forwarding is impossible. The server prints what happened.
+   - **Can't forward?** Use [Tailscale](https://tailscale.com) or ZeroTier: everyone joins your `100.x.y.z`
+     address, no forwarding at all (fine for friends; a public listing needs a real public address, so use a VPS).
+3. **Check it.** `scripts/run-dedicated-server.sh --check [--port N] [--address HOST]` prints your public
+   address, warns about CGNAT, and sends a real status query (`NSQ1`) to see whether it is reachable. Many routers can't
+   loop back to their own public address, so the best test is from another network (or ask a friend to look
+   at the Public/Saved tab).
+4. **List it.** `--public` printed a ready-to-paste JSON entry (including the content hash of every plug-in your
+   server runs) and the link to the instructions. Paste it into `servers/servers.json` in a fork of
+   NovaSwift-Plugins, run `python3 servers/validate.py`, open the pull request. Players see it in the Public tab
+   once it is merged. To be found sooner, share `host:port`: **Join** or **Saved** works immediately.
+
+`--public` only prints; it never uploads anything. Long-running: `systemd` unit with `--no-stdin`, or `tmux`.
+
+### Cross-play with the Apple app
+
+**Status.** Godot players and the Apple app currently cannot meet: Apple uses Game Center (internet) and
+Multipeer (nearby), Godot uses ENet. The wire layer for closing that gap now exists and is tested, with **no
+Apple UI yet**:
+
+- `Sources/CENet` - ENet 1.3.18 (MIT, Lee Salzman) vendored as a SwiftPM C target (headers + `module.modulemap`).
+  Godot's networking is the same upstream protocol, so no wrapper or fork is needed.
+- `Sources/NovaSwiftENet/ENetTransport.swift` - a client `Transport` that joins a Godot host or dedicated server
+  by IP:port. It owns the ENet socket, performs the NetProto handshake, answers pings, relays through the
+  server, and feeds an inner `ExternalTransport` so `NetSession` runs unchanged. It lives in its own target
+  and library (`NovaSwiftENet`) instead of behind a compile flag: nothing links ENet unless the app imports it.
+- `Tests/NovaSwiftENetTests` - handshake, peer list, reliable/unreliable relay, rejection (version/password),
+  kick/leave, timeout, against a protocol-faithful stub server on loopback; plus `testAgainstLiveGodotServer`
+  (`NOVASWIFT_ENET_INTEROP=host:port NOVASWIFT_ENET_VERSION=<server game version> swift test --filter testAgainstLiveGodotServer`),
+  which was run against a real headless Godot dedicated server: handshake, WELCOME, ping/pong and clean
+  leave all work. (Note: `swift test` builds every test target, so run it from a package that only contains the
+  ENet targets if another target is mid-edit.)
+
+**Not done (needs app work, deliberately left alone):** hosting from Apple over ENet; a `MultiplayerSession`
+path that creates `ENetTransport` + `NetSession`; a server browser/IP:port screen on iOS / macOS / tvOS (the
+Public directory fetch + UDP status query are small: `URLSession` + a `NWConnection`/BSD UDP socket sending
+`NSQ1`, see below); sharing the plug-in gate (`ENetTransport.manifestJSON(PluginManifest)` already produces the
+format Godot compares). Entitlements: outgoing UDP needs nothing on macOS (sandbox: *Outgoing Connections*) or
+iOS; iOS/tvOS ask for Local Network permission only for LAN addresses. Also still open: both frontends must
+share the same `NovaSwiftNet` protocol version and enabled plug-ins, and the galaxy is the *host's* (as on
+Apple today).
+
+**The wire spec an Apple client must match** (everything below is implemented by `ENetTransport`):
+
+1. *Transport.* UDP, ENet 1.3.x, **IPv4**, default port **53735**. Connect with **3 channels** and the ENet
+   *connect data* = your chosen peer id, a random 32-bit integer **>= 2** (Godot's `ENetMultiplayerPeer`
+   uses it as your peer id and resets the connection if it is < 2 or already in use). The server is peer
+   **1**. No ENet compression, no checksum. Godot adds no framing of its own: an ENet packet is exactly the
+   application packet below.
+2. *Channels.* ENet channel **0** = reliable; ENet channel **2** = unreliable (`UNSEQUENCED |
+   UNRELIABLE_FRAGMENT`). (Godot: `SYSCH_RELIABLE=0`, `SYSCH_UNRELIABLE=1`, user channel 1 = ENet 2.) The server
+   treats anything not on channel 2 as reliable when relaying.
+3. *Packet.* First byte = kind; control kinds carry a UTF-8 JSON object (<= 64 KiB); `DATA` carries game
+   bytes. Kinds: `0x01 HELLO`, `0x02 WELCOME`, `0x03 REJECT`, `0x04 PEER_JOIN`, `0x05 PEER_LEFT`, `0x06 KICK`,
+   `0x07 PING`, `0x08 PONG`, `0x09 CHAT`, `0x10 DATA` (`NetProto.gd`).
+4. *Handshake.* After ENet connects the client sends **HELLO** `{proto: 1, version: <game version string>, name,
+   pw: sha256hex("novaswift:" + password) or "", manifest: <net_ready_manifest JSON or "">}`. The server answers
+   **WELCOME** `{your_id, server_name, host_name, has_local_player, rules (JSON string), peers:[{id,name}], max,
+   proto}` or **REJECT** `{code, message, detail}` with `code` in `proto | version | password | full | plugins |
+   banned | bad_request`, then drops the connection. Client timeouts: 10 s to connect, 8 s for the handshake, 20 s of
+   silence; the client sends **PING** `{t, rtt}` unreliably every 2 s and the server returns **PONG** `{t}`.
+5. *Version and plug-in gate.* `version` must equal the server's `application/config/version` exactly (the
+   Apple build must report the Godot project's version string, currently `0.7.0-beta.1`), and `proto` must be 1.
+   `manifest` is the `net_ready_manifest()` JSON `{plugins:[{id,name,contentHash}], signature, count}`; the server
+   compares canonical forms (sorted keys), so the plug-in set and **content hashes** must be identical.
+6. *Game data.* `DATA` = `0x10` + **int32 little-endian peer id** + payload (the same `NetSession` bytes as
+   Apple's other transports). Client -> server the id is the **destination** (`-1` = everyone else, `1` =
+   server only); server -> client it is the **source**. The server relays client-to-client packets, preserves
+   reliability, and also hands `-1`/`1` traffic to its own session. Peers are announced by `WELCOME.peers`,
+   `PEER_JOIN {id,name}` and `PEER_LEFT {id,reason}`; the server (peer 1) is always a participant, a dedicated
+   server simply has no pilot. `NetSession` player ids are the decimal peer ids (`ExternalTransport`).
+7. *Moderation / chat.* `KICK {reason}` precedes a disconnect; `CHAT {id,name,text}` is only used when the
+   bridge has no chat of its own (normal chat is `NetSession` chat inside `DATA`).
+8. *Status query (for browsing, no connection needed).* UDP datagram `NSQ1` to **53736** for the default port,
+   otherwise **game port + 1**; the reply is `NSB1` + JSON `{name, players, max, ver, pw, port, rules,
+   dedicated}`. Latency = round trip. A LAN host broadcasts the same `NSB1` beacon to 255.255.255.255:53736
+   every 2 s.
+9. *Directory.* `GET https://raw.githubusercontent.com/SirStig/NovaSwift-Plugins/main/servers/servers.json`
+   (`ETag`, refresh <= 24 h), then status-query each entry. The Apple browser should reuse the same file so
+   both frontends show one list.
+
+**Plan to finish it:** (1) `MultiplayerSession` gets a third mode "Join by address" that builds `ENetTransport`
+and `NetSession(transport: transport.inner...)` inside the `.connected` event, then drives `service()` from the
+game loop (or `startPumping()`); (2) a small Swift `ServerDirectory` (URLSession + UDP status query) mirroring
+`ServerDirectory.gd`; (3) a Public/LAN/Saved/IP view in the Apple hub, controller-cursor aware on tvOS;
+(4) an Apple-side version constant shared with the Godot project's `config/version` (release script check);
+(5) optional later: let the Apple app host over ENet too (an ENet server loop around `ExternalTransport`) so iOS can
+host for Godot players.

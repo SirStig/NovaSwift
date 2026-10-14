@@ -221,6 +221,12 @@ func _run() -> void:
 	var scr = PluginsScreen.new()
 	root.add_child(scr)
 	scr.setup(nova)
+	# setup() also starts a live catalog refresh (network); let it finish (or fail) first so a late
+	# reply can't replace the fixture catalog mid-check (this was the intermittent failure).
+	for i in 400:
+		if not bool(JSON.parse_string(pl.catalog_state()).get("refreshing", false)):
+			break
+		await create_timer(0.05).timeout
 	pl.catalog_load_file(cat_path)   # after setup: it loads the offline/bundled catalog first
 	await _frames(4)
 	_check("screen: tabs", scr.tab_buttons.has("Installed") and scr.tab_buttons.has("Browse") and scr.tab_buttons.has("Load order"))

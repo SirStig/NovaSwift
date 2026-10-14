@@ -36,6 +36,8 @@ func _ready() -> void:
 		return
 	if _run_updater_if_requested():
 		return
+	if _run_server_if_requested():
+		return
 	start()
 
 
@@ -65,6 +67,21 @@ func _run_updater_if_requested() -> bool:
 	var up: Control = scene_script.new() as Control
 	layer.add_child(up)
 	up.call("setup", opts)
+	return true
+
+
+## Dedicated server mode (`-- --server ...`, net/ServerMain.gd): headless host, no menus, no Main scene.
+## Loaded at runtime so a broken net script reports instead of taking Boot down.
+func _run_server_if_requested() -> bool:
+	if not OS.get_cmdline_user_args().has("--server") and not OS.get_cmdline_args().has("--server"):
+		return false
+	var sm: Script = load("res://net/ServerMain.gd") as Script
+	if sm == null or not sm.can_instantiate():
+		show_failure(_fail("server", "NovaSwift couldn't start the dedicated server", "A game file failed to load.", "res://net/ServerMain.gd did not compile"))
+		return true
+	var node: Node = sm.new() as Node
+	add_child(node)
+	node.call("start")
 	return true
 
 

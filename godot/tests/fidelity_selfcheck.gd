@@ -39,6 +39,9 @@ func _is(e: InputEvent, action: String) -> bool:
 	return InputMap.event_is_action(e, action)
 
 
+var _home: int = -1
+
+
 func _run() -> void:
 	await process_frame
 	nova = ClassDB.instantiate("NovaWorld")
@@ -48,6 +51,7 @@ func _run() -> void:
 		data = ProjectSettings.globalize_path("res://") + "../data/base"
 	_check("load_game", nova.load_game(data))
 	_check("make_world", nova.make_world(-1))
+	_home = nova.nav_current_system()   # the pilot's own (explored) start system; make_world(sys) in the gate/nearest tests moves pilot.currentSystem to unvisited systems
 
 	_test_keys()
 	_test_planet_select_and_land()
@@ -332,7 +336,7 @@ func _test_nearest_stellar() -> void:
 
 func _test_find() -> void:
 	print("-- map find")
-	nova.make_world(-1)
+	nova.make_world(_home)
 	nova.nav_refresh()
 	var cur: int = nova.nav_current_system()
 	var name: String = nova.nav_system_name(cur)
@@ -394,7 +398,7 @@ func _jump_once() -> bool:
 
 func _test_escorts() -> void:
 	print("-- escorts carried across a jump")
-	nova.make_world(-1)
+	nova.make_world(_home)
 	for i in 5:
 		nova.step(1.0 / 30.0)
 	var rec: int = nova.debug_add_escort(nova.player_ship_type())

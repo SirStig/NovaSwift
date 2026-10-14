@@ -79,10 +79,12 @@ own files (including old Mac `.sit` and `.hqx` archives), and enable, disable
 or delete them. Setting your own load order is an opt-in Enhancement. Anyone
 can add a plug-in to the catalog by pull request.
 
-**Multiplayer.** Co-op over local Wi-Fi or Game Center. A guest visits the
-host's galaxy, and the host sets the rules: PvP, real damage, friendly fire,
-permadeath and trading. There's no server to run. See
-[MULTIPLAYER.md](docs/MULTIPLAYER.md).
+**Multiplayer.** Co-op over local Wi-Fi or Game Center on Apple devices, and
+over LAN, by IP address or on a dedicated server you run yourself on the
+Linux, Steam Deck and Windows builds. Each player keeps their own galaxy and
+pilot; players in the same star system play it together, and the host sets
+the rules: PvP, real damage, friendly fire, permadeath and trading. We run no
+servers. See [MULTIPLAYER.md](docs/MULTIPLAYER.md).
 
 **Pilots and iCloud.** Import Windows `.plt` pilots. Classic Mac pilot import
 is in testing. Pilots save to iCloud on Mac, iPad and iPhone, and your imported

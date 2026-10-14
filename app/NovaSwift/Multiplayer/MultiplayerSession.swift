@@ -96,27 +96,13 @@ final class MultiplayerSession: ObservableObject {
 
     // MARK: - Layer 2 (per-system sim sync)
 
-    /// Maps engine `World` state ⇄ wire snapshots/inputs and owns per-system sync
-    /// state. Lives as long as the session; `reset()` on system/role change.
-    private var coordinator: SystemSyncCoordinator?
-    /// Client side: the freshest snapshot received from the current authority,
-    /// applied on the next `syncPreStep`. Latest-wins (unreliable channel).
-    private var latestSnapshot: (snapshot: WorldSnapshot, from: String)?
-    /// The local player's current system id, for co-location / authority queries.
-    private var localSystemID: Int = -1
+    /// The shared (Apple + Godot) Layer-2 role/sync logic from `NovaSwiftSync`:
+    /// authority selection, mirrors, handoff, snapshots/inputs. Lives as long as
+    /// the session.
+    private var driver: SystemSyncDriver?
     /// The local player's current hull type, announced so co-located peers can
     /// build a correctly-sprited mirror of this ship.
     private var localShipTypeID: Int = -1
-    /// Monotonic counters for the wire (snapshot tick / input seq).
-    private var netTick: UInt32 = 0
-    private var inputSeq: UInt32 = 0
-    /// Set when the system or authority role changed; the next `syncPreStep` tears
-    /// down stale mirrors and resets the coordinator before syncing afresh.
-    private var needsResync = false
-    /// The authority id used on the previous frame, to detect role/authority change.
-    private var lastAuthorityID: String?
-    /// Whether we were the authority last frame — drives the handoff transition.
-    private var wasAuthority = false
 
     // MARK: - Co-op story (NCB) sync
 
@@ -266,9 +252,10 @@ final class MultiplayerSession: ObservableObject {
         wire(session)
         self.transport = transport
         net = session
-        coordinator = SystemSyncCoordinator(localPlayerID: localPlayerID)
-        localSystemID = systemID
-        needsResync = true
+        let drv = SystemSyncDriver(session: session, localSystemID: systemID)
+        drv.onNotAuthority = { [weak self] in self?.bitsInitialized = false }
+        drv.onAuthorityPostStep = { [weak self] net, peers in self?.propagateEarnedBits(net: net, to: peers) }
+        driver = drv
         self.rules = rules
         session.updateLocalPresence(name: displayName, systemID: systemID,
                                     shipTypeHint: localShipTypeID >= 0 ? localShipTypeID : nil)
@@ -282,13 +269,8 @@ final class MultiplayerSession: ObservableObject {
         transport?.disconnect()
         net = nil
         transport = nil
-        coordinator = nil
-        latestSnapshot = nil
-        lastAuthorityID = nil
-        wasAuthority = false
-        needsResync = false
-        netTick = 0
-        inputSeq = 0
+        driver?.reset()
+        driver = nil
         lastKnownBits = []
         bitsInitialized = false
         isActive = false
@@ -442,10 +424,7 @@ final class MultiplayerSession: ObservableObject {
     /// hull) rides along so co-located peers can sprite this ship's mirror.
     func updatePresence(systemID: Int, name: String, shipTypeID: Int? = nil) {
         if let shipTypeID { localShipTypeID = shipTypeID }
-        if systemID != localSystemID {
-            localSystemID = systemID
-            needsResync = true          // new system ⇒ fresh world ⇒ drop mirrors
-        }
+        driver?.setLocalSystem(systemID)   // new system ⇒ fresh world ⇒ drop mirrors
         net?.updateLocalPresence(name: name, systemID: systemID,
                                  shipTypeHint: localShipTypeID >= 0 ? localShipTypeID : nil)
         syncPresence()
@@ -477,8 +456,8 @@ final class MultiplayerSession: ObservableObject {
         session.onRulesChanged = { [weak self] rules in self?.rules = rules }
         // Layer 2: authority collects clients' inputs; client buffers the newest
         // snapshot for the next frame.
-        session.onInput = { [weak self] frame, peer in self?.coordinator?.receiveInput(frame, from: peer) }
-        session.onSnapshot = { [weak self] snapshot, peer in self?.latestSnapshot = (snapshot, peer) }
+        session.onInput = { [weak self] frame, peer in self?.driver?.receiveInput(frame, from: peer) }
+        session.onSnapshot = { [weak self] snapshot, peer in self?.driver?.receiveSnapshot(snapshot, from: peer) }
         // Co-op story: a partner's shared storyline earned bits — union them locally.
         session.onNCB = { [weak self] bits, _ in self?.onRemoteBitsEarned?(Set(bits)) }
         // The host kicked us: leave the session and let the UI explain.
@@ -522,164 +501,21 @@ final class MultiplayerSession: ObservableObject {
 
     // MARK: - Layer 2 role logic + game-loop hooks
 
-    /// Other players sharing the local player's current system.
-    private func coLocatedIDs() -> [String] {
-        guard localSystemID >= 0 else { return [] }
-        return presence.values
-            .filter { $0.currentSystemID == localSystemID && $0.playerID != localPlayerID }
-            .map(\.playerID)
-    }
-
-    /// Who is authority for the local player's current system: the co-located
-    /// player with the smallest id (deterministic, no negotiation). Nil when the
-    /// local player is alone — then there's no sync and the sim runs single-player.
-    private var currentAuthorityID: String? {
-        let others = coLocatedIDs()
-        guard !others.isEmpty else { return nil }
-        return ([localPlayerID] + others).min()
-    }
-
     /// Whether Layer-2 sync is engaged right now (≥2 players co-located).
-    var isSyncingSystem: Bool { isActive && currentAuthorityID != nil }
+    var isSyncingSystem: Bool { isActive && driver?.currentAuthorityID != nil }
 
-    /// Called by the game scene each frame **before** `world.step`. Injects/updates
-    /// co-op ships and, on the authority, feeds clients' inputs into the world. A
-    /// no-op in single-player or when the local player is alone in the system.
-    /// Full teardown of every co-op mirror + visual echo, spawner resumed — used on
-    /// a system change (fresh world) or when we drop back to solo.
-    private func fullClearMirrors(_ world: World, _ coordinator: SystemSyncCoordinator) {
-        let ids = world.npcs.filter { $0.remotePlayer != nil || $0.networkMirror }.map { $0.entityID }
-        for id in ids { world.removeShip(entityID: id) }
-        world.clearVisualProjectiles()
-        world.clearVisualBeams()
-        world.spawningPaused = false
-        coordinator.reset()
-        latestSnapshot = nil
-    }
-
-    /// Promote a mirrored NPC to a real, self-driving ship when we take over as
-    /// authority — keeps the shared cast alive across a handoff instead of clearing
-    /// and re-rolling it. It gets a plausible brain from its hull (armed ⇒ warship).
-    private func promoteNPC(_ ship: Ship, in world: World) {
-        ship.networkMirror = false
-        let type: AIType = ship.weapons.isEmpty ? .braveTrader : .warship
-        ship.brain = AIBrain(aiType: type, govt: ship.government)
-    }
-
-    /// Handle an authority change (host left / handoff) as seamlessly as the case
-    /// allows. Player mirrors are keyed by stable id, so friends' ships carry
-    /// through; only NPCs (whose ids are authority-specific) re-roll.
-    private func handleAuthorityChange(to authority: String?, iAmAuthority: Bool,
-                                       world: World, coordinator: SystemSyncCoordinator) {
-        latestSnapshot = nil
-        if authority == nil {
-            fullClearMirrors(world, coordinator)                 // dropped back to solo
-        } else if iAmAuthority && !wasAuthority {
-            // Client → new host: adopt the mirrored world instead of rebuilding it.
-            let toPromote = coordinator.promoteToAuthority(world: world)
-            for npc in toPromote { promoteNPC(npc, in: world) }
-            world.clearVisualProjectiles(); world.clearVisualBeams()   // we produce real ones now
-            world.spawningPaused = false
-        } else if !iAmAuthority && wasAuthority {
-            // Host → client (rare — a smaller id joined): tear down our own world;
-            // the client branch below repopulates as a mirror of the new host.
-            fullClearMirrors(world, coordinator)
-        } else {
-            // Client → a *different* host: keep player mirrors (stable ids reconcile
-            // in place — no blink), drop only the NPC mirrors (authority-specific ids).
-            let npcIDs = world.npcs.filter { $0.networkMirror }.map { $0.entityID }
-            for id in npcIDs { world.removeShip(entityID: id) }
-            world.clearVisualProjectiles(); world.clearVisualBeams()
-            coordinator.resetForAuthorityChange()                // spawner stays paused (still a client)
-        }
-    }
-
+    /// Called by the game scene each frame **before** `world.step`. A no-op in
+    /// single-player or when the local player is alone in the system.
     func syncPreStep(world: World) {
-        guard isActive, let coordinator, net != nil else { return }
-
-        // Honor the session's stakes (host-set). Applied every frame so a
-        // mid-session rules change takes effect immediately.
-        world.pvpAllowed = rules.allowPvP
-        world.friendlyFireAllowed = rules.friendlyFire
-        world.pvpDamageReal = rules.pvpDamageReal
-        world.playerDeathReal = rules.deathReal
-
-        let authority = currentAuthorityID
-        let iAmAuthority = (authority == localPlayerID)
-        // Whenever we're not the story authority (solo or a client), re-seed the NCB
-        // baseline so bits we earn *outside* a shared moment don't propagate when we
-        // next become the authority — only bits earned while co-hosting are shared.
-        if !iAmAuthority { bitsInitialized = false }
-
-        if needsResync {
-            // A fresh **system** (new world) → full reset from our own galaxy.
-            fullClearMirrors(world, coordinator)
-            needsResync = false
-            wasAuthority = iAmAuthority
-            lastAuthorityID = authority
-        } else if authority != lastAuthorityID {
-            // Authority **handoff** (same system, host left/changed) — handled
-            // seamlessly where possible (see `handleAuthorityChange`).
-            handleAuthorityChange(to: authority, iAmAuthority: iAmAuthority,
-                                  world: world, coordinator: coordinator)
-            wasAuthority = iAmAuthority
-            lastAuthorityID = authority
-        }
-        guard let authority else { return }   // alone → single-player sim
-
-        if authority == localPlayerID {
-            // AUTHORITY: mirror co-located clients and drive them from their input.
-            // We keep simulating our own world (spawner runs) — it's the canonical one.
-            let clients = coLocatedIDs().map { (id: $0, name: presence[$0]?.name ?? $0) }
-            coordinator.syncClients(clients, into: world) { [weak self] id, name in
-                self?.buildMirror(shipTypeID: self?.presence[id]?.shipTypeHint ?? -1,
-                                  government: world.player.government, name: name,
-                                  world: world, at: world.player.position + Vec2(220, 0))
-                    ?? SystemSyncCoordinator.defaultClientShip(id, name)
-            }
-            coordinator.applyInputs(to: world)
-        } else if let (snapshot, from) = latestSnapshot, from == authority {
-            // CLIENT: adopt the authority's world. Hand our own populated cast over
-            // to theirs (pause our spawner + clear our AI once), then mirror theirs.
-            if !world.spawningPaused {
-                world.spawningPaused = true
-                world.removeAINPCs()
-            }
-            coordinator.apply(
-                snapshot, to: world, authorityPeer: from,
-                makeMirror: { [weak self] state in
-                    // A co-op partner — tint to our government so we read as allies.
-                    self?.buildMirror(shipTypeID: state.shipTypeID, government: world.player.government,
-                                      name: state.name, world: world,
-                                      at: Vec2(state.x, state.y), angle: state.angle)
-                        ?? SystemSyncCoordinator.defaultMirror(state)
-                },
-                makeNPCMirror: { [weak self] state in
-                    // An NPC — keep its real government so hostiles still read hostile.
-                    self?.buildMirror(shipTypeID: state.shipTypeID, government: state.government,
-                                      name: state.name, world: world,
-                                      at: Vec2(state.x, state.y), angle: state.angle)
-                        ?? SystemSyncCoordinator.defaultMirror(state)
-                })
-            latestSnapshot = nil
-        }
+        guard isActive, let driver, net != nil else { return }
+        driver.syncPreStep(world: world)
     }
 
     /// Called by the game scene each frame **after** `world.step`. The authority
     /// broadcasts a fresh snapshot; a client sends its input. No-op when alone.
     func syncPostStep(world: World) {
-        guard isActive, let coordinator, let net, let authority = currentAuthorityID else { return }
-        netTick &+= 1
-        if authority == localPlayerID {
-            net.broadcastSnapshot(coordinator.snapshot(of: world, tick: netTick))
-            propagateEarnedBits(net: net, to: coLocatedIDs())
-        } else {
-            inputSeq &+= 1
-            net.sendInput(coordinator.input(from: world.intent, tick: netTick, seq: inputSeq), to: authority)
-            // Replay the authority's one-shot effects (explosions) now — after the
-            // step cleared this frame's events, before the scene drains them.
-            coordinator.flushEffects(into: world)
-        }
+        guard isActive, let driver, net != nil else { return }
+        driver.syncPostStep(world: world)
     }
 
     /// Authority: share control bits its storyline set since last frame with the
@@ -696,18 +532,5 @@ final class MultiplayerSession: ObservableObject {
         guard !added.isEmpty, !peers.isEmpty else { return }
         let list = Array(added)
         for peer in peers { net.sendNCB(list, to: peer) }
-    }
-
-    /// Build a co-op mirror hull from the loaded galaxy (correct sprite/size/
-    /// weapons) at `government` — the local player's govt for a partner (reads as
-    /// ally), the reported govt for an NPC (stays hostile if it was). Returns nil
-    /// when the type can't be resolved so the coordinator's default hull is used.
-    private func buildMirror(shipTypeID: Int, government: Int, name: String, world: World,
-                             at position: Vec2, angle: Double = 0) -> Ship? {
-        guard shipTypeID >= 0,
-              let ship = world.galaxy?.makeShip(shipTypeID, government: government,
-                                                at: position, angle: angle)
-        else { return nil }
-        return ship
     }
 }

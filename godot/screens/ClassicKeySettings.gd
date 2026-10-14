@@ -152,9 +152,22 @@ func _build() -> void:
 	var custom: Dictionary = {}
 	for c in CELLS.size():
 		custom[FIRST_CELL_ITEM + c] = func(parent: Control, rect: Rect2i): me._add_cell(parent, rect, c)
+	# Like Apple: the 594x353 DITL window with the labelled backdrop PICT as user item 3 (top-left of
+	# its rect); the PICT is smaller than the window, so it must not size the window (the OK /
+	# Cancel / Set Default buttons sit below it).
 	var frame: int = 139 if ClassicTheme.pict(139) != null else 133
+	var bg_tex: Texture2D = ClassicTheme.pict(frame)
+	if bg_tex != null:
+		custom[3] = func(parent: Control, rect: Rect2i):
+			var tr := TextureRect.new()
+			tr.texture = bg_tex
+			tr.stretch_mode = TextureRect.STRETCH_KEEP
+			tr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+			tr.position = Vector2(rect.position)
+			tr.size = Vector2(bg_tex.get_size())
+			tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			parent.add_child(tr)
 	dialog = ClassicDialog.from_ditl(_nova, 4002, {
-		"frame_pict": frame if ClassicTheme.pict(frame) != null else -1,
 		"fallback_size": Vector2i(594, 353), "custom": custom,
 		"actions": {ITEM_OK: me._ok, ITEM_CANCEL: me._cancel, ITEM_DEFAULT: me._set_default},
 		"default_item": ITEM_OK, "cancel_item": ITEM_CANCEL})

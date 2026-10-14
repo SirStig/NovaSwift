@@ -33,6 +33,8 @@ signal galaxy_map
 signal missions
 ## "Save Pilot" with Frequent autosave on (the original saves only when you leave a spaceport).
 signal save_pilot
+## "Multiplayer" row: the shell opens the hub. Unconnected, the row only explains.
+signal multiplayer_hub
 
 ## The sidebar header (Apple hud.shipName / hud.systemName); the host may set them before setup().
 var ship_name := ""
@@ -89,6 +91,13 @@ static func _pv(section: String, key: String, default: Variant) -> Variant:
 
 ## Apple GameMenuView: the sidebar. `can_save` gates Save Pilot / Load Pilot / Main Menu (no pilot
 ## to save without data).
+## Row density for the logical viewport height (Steam Deck 1280x800 at UI scale 2 is only 400 px tall):
+## the list always scrolls with pad focus, but compacting shows far more rows at once.
+func _density() -> int:
+	var vh: float = get_viewport().get_visible_rect().size.y if is_inside_tree() else 800.0
+	return 2 if vh < 520.0 else (1 if vh < 700.0 else 0)
+
+
 func _setup_sidebar(nova: Object, can_save: bool) -> void:
 	var root := Control.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -119,14 +128,14 @@ func _setup_sidebar(nova: Object, can_save: bool) -> void:
 	# header: logo, ship / system, close
 	var hm := MarginContainer.new()
 	for side in ["left", "right", "top", "bottom"]:
-		hm.add_theme_constant_override("margin_" + side, 16)
+		hm.add_theme_constant_override("margin_" + side, [16, 10, 6][_density()])
 	v.add_child(hm)
 	var head := HBoxContainer.new()
 	head.add_theme_constant_override("separation", 12)
 	hm.add_child(head)
 	var logo := TextureRect.new()
 	logo.texture = _logo()
-	logo.custom_minimum_size = Vector2(44, 44)
+	logo.custom_minimum_size = Vector2([44, 36, 28][_density()], [44, 36, 28][_density()])
 	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	head.add_child(logo)
@@ -153,10 +162,10 @@ func _setup_sidebar(nova: Object, can_save: bool) -> void:
 	var pad := MarginContainer.new()
 	pad.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for side in ["left", "right", "top", "bottom"]:
-		pad.add_theme_constant_override("margin_" + side, 12)
+		pad.add_theme_constant_override("margin_" + side, [12, 8, 4][_density()])
 	scroll.add_child(pad)
 	var list := VBoxContainer.new()
-	list.add_theme_constant_override("separation", 2)
+	list.add_theme_constant_override("separation", [2, 2, 1][_density()])
 	pad.add_child(list)
 	_row(list, "Resume", "play.fill", T.AMBER, func(): resume.emit())
 	_row(list, "Galaxy Map", "map.fill", T.WHITE, func(): _row_action(galaxy_map, func(): _press_action("galaxy_map")))
@@ -169,9 +178,11 @@ func _setup_sidebar(nova: Object, can_save: bool) -> void:
 	if Prefs.get_value("developer", "debug_mode"):
 		_row(list, "Debug Suite", "ladybug", T.DEBUG_GREEN, func(): _devtools("console"))
 	_gap(list)
-	# TODO(wiring): the Godot build has no multiplayer; the row is Apple's, shown for parity.
 	_row(list, "Multiplayer", "person.2.fill", T.WHITE, func():
-		Alert.show(self, {"title": "Notice", "message": "Multiplayer isn't available in this build yet."}))
+		if multiplayer_hub.get_connections().is_empty():
+			Alert.show(self, {"title": "Notice", "message": "Multiplayer isn't available here."})
+		else:
+			multiplayer_hub.emit())
 	_gap(list)
 	_row(list, "Save Pilot", "square.and.arrow.down", T.WHITE, _save_pilot, can_save)
 	_row(list, "Load Pilot", "folder", T.WHITE, func(): save_quit_to_menu.emit(), can_save)
@@ -186,8 +197,8 @@ func _setup_sidebar(nova: Object, can_save: bool) -> void:
 
 func _gap(list: VBoxContainer) -> void:
 	var m := MarginContainer.new()
-	m.add_theme_constant_override("margin_top", 6)
-	m.add_theme_constant_override("margin_bottom", 6)
+	m.add_theme_constant_override("margin_top", [6, 4, 2][_density()])
+	m.add_theme_constant_override("margin_bottom", [6, 4, 2][_density()])
 	var r := ColorRect.new()
 	r.color = Color(1, 1, 1, 0.08)
 	r.custom_minimum_size = Vector2(0, 1)
@@ -203,7 +214,7 @@ func _row(list: VBoxContainer, title: String, icon_name: String, tint: Color, cb
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.focus_mode = Control.FOCUS_ALL
 	b.disabled = not enabled
-	b.custom_minimum_size = Vector2(0, 43)
+	b.custom_minimum_size = Vector2(0, [43, 36, 26][_density()])
 	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	var icon_color := T.AMBER if tint == T.WHITE else tint
 	b.icon = T.icon(icon_name, 18, icon_color)
@@ -211,7 +222,7 @@ func _row(list: VBoxContainer, title: String, icon_name: String, tint: Color, cb
 	b.add_theme_constant_override("h_separation", 14)
 	for st in ["icon_normal_color", "icon_hover_color", "icon_pressed_color", "icon_focus_color", "icon_disabled_color"]:
 		b.add_theme_color_override(st, Color.WHITE)
-	var pad := Vector2(10, 8)
+	var pad := Vector2(10, [8, 5, 2][_density()])
 	b.add_theme_stylebox_override("normal", T.box(Color(1, 1, 1, 0.05), 10, Color(0, 0, 0, 0), 0, pad))
 	b.add_theme_stylebox_override("hover", T.box(Color(1, 1, 1, 0.10), 10, Color(0, 0, 0, 0), 0, pad))
 	b.add_theme_stylebox_override("pressed", T.box(Color(1, 1, 1, 0.16), 10, Color(0, 0, 0, 0), 0, pad))

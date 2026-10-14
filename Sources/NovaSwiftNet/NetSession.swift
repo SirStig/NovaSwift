@@ -49,6 +49,10 @@ public final class NetSession: TransportDelegate {
     public var onKicked: (() -> Void)?
     /// Fired for a trade handshake message from `peer` (invite/offer/accept/cancel).
     public var onTrade: ((TradeSignal, PeerID) -> Void)?
+    /// Fired when a packet from `peer` can't be decoded as a `NetMessage` - the
+    /// signature of a peer running an incompatible protocol version. Purely
+    /// additive; the packet is still dropped exactly as before.
+    public var onDecodeFailure: ((PeerID) -> Void)?
 
     /// Players this session (as host) has banned — their presence is refused and a
     /// rejoin is ignored until the session ends.
@@ -212,7 +216,10 @@ public final class NetSession: TransportDelegate {
     // MARK: - TransportDelegate
 
     public func transport(_ transport: Transport, didReceive data: Data, from peer: PeerID) {
-        guard let message = try? NetCodec.decode(data) else { return }
+        guard let message = try? NetCodec.decode(data) else {
+            onDecodeFailure?(peer)
+            return
+        }
         switch message {
         case .presence(let p):
             guard !bannedIDs.contains(p.playerID) else { return }   // banned: ignore

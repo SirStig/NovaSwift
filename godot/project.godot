@@ -39,6 +39,8 @@ SettingsPlumbing="*res://SettingsPlumbing.gd"
 PadKeyboard="*res://ui/PadKeyboard.gd"
 ; Gamepad UI cursor (left stick pointer, A click, right stick scroll; synthesises mouse events): ui/PadCursor.gd.
 PadCursor="*res://ui/PadCursor.gd"
+; Multiplayer service (ENet host/join, LAN beacons, chat overlay); inert until a session starts: net/NetService.gd.
+NetService="*res://net/NetService.gd"
 
 [display]
 

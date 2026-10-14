@@ -199,7 +199,12 @@ func _init() -> void:
 	_ok(sp != "", "strict pilot created")
 	nova.pilot_save_now()
 	nova.pilot_save_now()
-	var slotx: String = nova.pilot_add_slot(pilots, str(JSON.parse_string(nova.pilot_groups(pilots))[0].group))
+	var sp_group: String = ""
+	for gr in JSON.parse_string(nova.pilot_groups(pilots)):
+		for sl in gr.slots:
+			if str(sl.id) == sp:
+				sp_group = str(gr.group)
+	var slotx: String = nova.pilot_add_slot(pilots, sp_group)
 	var dead = JSON.parse_string(nova.pilot_killed())
 	_ok(str(dead.result) == "deleted" and str(dead.id) == sp, "Strict Play death deletes the pilot")
 	_ok(not FileAccess.file_exists(nova.pilot_file_path(pilots, sp)), "...its file is gone")

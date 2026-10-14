@@ -314,9 +314,9 @@ func _process(delta: float) -> void:
 	if _hidden():
 		return
 	# Event-driven goals (Apple onPlayerFired / handleDiscrete / landAttempt).
-	if Input.is_action_just_pressed("fire_primary"):
+	if InputMap.has_action("fire_primary") and Input.is_action_just_pressed("fire_primary"):
 		complete("fire")
-	if _has_secondary and (Input.is_action_just_pressed("secondary_next") or Input.is_action_just_pressed("secondary_prev")):
+	if _has_secondary and InputMap.has_action("secondary_next") and InputMap.has_action("secondary_prev") and (Input.is_action_just_pressed("secondary_next") or Input.is_action_just_pressed("secondary_prev")):
 		complete("changeWeapon")
 	if _nova.tutorial_take_landed():
 		complete("land")

@@ -47,12 +47,28 @@ func _rebuild_original(vp: Vector2, count: int) -> void:
 func draw(ci: CanvasItem, vp: Vector2, center: Vector2) -> void:
 	ci.draw_set_transform_matrix(Transform2D.IDENTITY)   # screen space
 	var cam: Vector2 = r.cam_base
-	var drew := false
-	if r.has_data and r.classic_world:
-		drew = _draw_original(ci, vp, center, cam)
-	if not drew:
+	# The original's ambient stars are drawn by `draw_original_add` (an additive layer, see there); only
+	# the plain dot field is drawn here.
+	if not original_active():
 		_draw_plain(ci, stars_far, cam, 0.35, COLOR_STAR_FAR, 1.0, vp)
 		_draw_plain(ci, stars_near, cam, 0.7, COLOR_STAR_NEAR, 1.5, vp)
+	ci.draw_set_transform_matrix(r.base_xf)
+
+
+## Whether the original's spïn-700 starfield is what's drawn (Classic / Enhanced with game data).
+func original_active() -> bool:
+	return r.has_data and r.classic_world and r.sprites.entry(Sprites.STARFIELD, 0) != null
+
+
+## The original's stars on the renderer's ADDITIVE layer: the system's BkgndColor is not black (nebula
+## systems are tinted), and an opaque murk-darkened star sprite drawn normally came out DARKER than that
+## background (dark specks). Added on top of the background a star can only lighten it, and with a black
+## background (the original's) it is identical to the opaque blit.
+func draw_original_add(ci: CanvasItem, vp: Vector2, center: Vector2) -> void:
+	if not original_active():
+		return
+	ci.draw_set_transform_matrix(Transform2D.IDENTITY)   # screen space
+	_draw_original(ci, vp, center, r.cam_base)
 	ci.draw_set_transform_matrix(r.base_xf)
 
 

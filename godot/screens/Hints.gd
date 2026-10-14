@@ -95,6 +95,7 @@ func _process(delta: float) -> void:
 		if want != "":
 			_show(want)
 	if current_id != "":
+		_place_clear_of_dialog()
 		_age += delta
 		if _age >= AUTO_DISMISS:
 			dismiss()
@@ -179,3 +180,39 @@ static func flight_tips() -> Array:
 		"Press %s to land · %s for the galaxy map · %s to cycle targets" % [
 			Controls.describe_keys("land"), Controls.describe_keys("galaxy_map"),
 			Controls.describe_keys("target_next")]]
+
+
+## The docked windows (Classic UI: the spaceport hub + the open Outfitter / BBS / Trade ... window) fill most of
+## a small screen, so the card must never sit on top of them. Put it in the free band above the active
+## window if it fits there, else below it, else in the roomier band shrunk to fit.
+func _place_clear_of_dialog() -> void:
+	if _panel == null or current_id == "flight" or not _panel.is_inside_tree():
+		return
+	var host: Node = _shell.get_parent() if _shell != null else null
+	var sp = host.get("_spaceport") if host != null else null
+	var cl = sp.get("_c") if sp != null else null
+	if cl == null or not bool(cl.active()):
+		return
+	var dlg: Control = cl.top_dialog()
+	if dlg == null or not is_instance_valid(dlg) or not dlg.is_visible_in_tree():
+		return
+	var vp_h: float = _panel.get_viewport_rect().size.y
+	var r: Rect2 = dlg.get_global_rect()
+	var margin := 8.0
+	var ph: float = _panel.size.y
+	if ph <= 1.0:
+		return   # not laid out yet
+	var above: float = r.position.y - margin * 2.0
+	var below: float = vp_h - r.end.y - margin * 2.0
+	_panel.pivot_offset = Vector2(_panel.size.x * 0.5, 0.0)
+	var fit: float = 1.0
+	var at_top: bool = true
+	if above >= ph:
+		at_top = true
+	elif below >= ph:
+		at_top = false
+	else:
+		at_top = above >= below
+		fit = clampf(maxf(above, below) / ph, 0.45, 1.0)
+	_panel.scale = Vector2(fit, fit)
+	_panel.position.y = margin if at_top else vp_h - ph * fit - margin

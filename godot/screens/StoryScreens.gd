@@ -44,6 +44,7 @@ var _modal: Control = null        # dim + panel for the head text / offer
 var _modal_kind := ""             # text | offer
 var _modal_buttons: Array = []    # focusable buttons of the modal, left to right
 var _modal_cancel: Callable = Callable()
+var _modal_from_engine := false   # the modal mirrors engine text/offer state (so it closes if that state vanishes)
 var _prev_focus: Control = null   # what had focus under the modal, restored on close
 var _info: Control = null         # the Player/Mission Info window
 var _info_tab := "general"
@@ -172,11 +173,25 @@ func _process(_delta: float) -> void:
 	if nova.take_forced_launch():
 		forced_launch.emit()
 	if _modal != null:
+		# A dialog whose engine text/offer is gone (dismissed elsewhere, or consumed under it) closes itself.
+		if not _modal_from_engine:
+			return   # opened directly by a caller, not from engine state
+		if _modal_kind == "text" and not nova.story_text_pending():
+			_close_modal()
+			_text_movie_done = false
+		elif _modal_kind == "offer" and not nova.offer_pending():
+			_close_modal()
+		return
+	if _movie_playing:
 		return
 	if nova.story_text_pending():
+		_modal_from_engine = true
 		_open_text()
 	elif nova.offer_pending():
+		_modal_from_engine = true
 		_open_offer()
+	else:
+		_modal_from_engine = false
 
 
 # While a modal is up it owns navigation: up/down never wander to whatever is
@@ -209,6 +224,10 @@ func _input(event: InputEvent) -> void:
 	elif event.is_action_pressed("ui_cancel"):
 		if _modal_cancel.is_valid():
 			_modal_cancel.call()
+		elif _modal_kind == "text":
+			_dismiss_text()   # a dead cancel Callable must still let Esc/B close the text
+		else:
+			_close_modal()
 		get_viewport().set_input_as_handled()
 
 
@@ -221,9 +240,21 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
+## Never two dialogs: whatever modal host is still parented here (a tracked one being replaced, or an orphan whose
+## reference was overwritten) is torn down before a new one goes up.
+func _free_modal_hosts() -> void:
+	for c in get_children():
+		if c.is_in_group("story_modal_host"):
+			remove_child(c)
+			c.queue_free()
+	_modal = null
+
+
 func _open_modal(box: VBoxContainer, kind: String, buttons: Array, cancel: Callable) -> void:
+	_free_modal_hosts()
 	_prev_focus = get_viewport().gui_get_focus_owner()
 	_modal = box.get_meta("root")
+	_modal.add_to_group("story_modal_host")
 	_modal_kind = kind
 	_modal_buttons = buttons
 	_modal_cancel = cancel
@@ -231,11 +262,7 @@ func _open_modal(box: VBoxContainer, kind: String, buttons: Array, cancel: Calla
 
 
 func _close_modal() -> void:
-	if _modal != null:
-		var m := _modal
-		_modal = null
-		m.get_parent().remove_child(m)
-		m.queue_free()
+	_free_modal_hosts()
 	_modal_buttons = []
 	_modal_cancel = Callable()
 	_modal_kind = ""
@@ -402,7 +429,11 @@ func _play_movie(info: Dictionary, then: Callable) -> void:
 	var skip := _btn("Skip", func(): player.skip(), box)
 	_open_modal(box, "movie", [skip], func(): player.skip())
 	_focus(skip)
+	var fired := [false]
 	player.finished.connect(func():
+		if fired[0]:
+			return   # skip + natural end both emit: `then` must run once or it opens the text twice
+		fired[0] = true
 		_movie_playing = false
 		_close_modal()
 		then.call())
@@ -619,8 +650,10 @@ func _info_rect(did: int, idx: int, stock: Rect2i) -> Rect2i:
 
 
 func _modal_host(d: Control, kind: String, buttons: Array, cancel: Callable) -> void:
+	_free_modal_hosts()
 	_prev_focus = get_viewport().gui_get_focus_owner()
 	_modal = CD.modal(self, d, 0.6)
+	_modal.add_to_group("story_modal_host")
 	_modal_kind = kind
 	_modal_buttons = buttons
 	_modal_cancel = cancel

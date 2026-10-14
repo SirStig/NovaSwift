@@ -38,7 +38,7 @@ func _run() -> void:
 	var audio = GameAudio.new()
 	root.add_child(audio)
 	audio.setup(nova)
-	ok = _check("16 voice players", audio.get_child_count() == 16) and ok
+	ok = _check("16 voice players", audio._players.size() == 16) and ok
 	nova.sound_beep(1)
 	var rows: PackedFloat32Array = nova.drain_sound_cues()
 	ok = _check("beep makes a start row", rows.size() == nova.sound_stride() and int(rows[1]) == 150 and int(rows[3]) == 1) and ok

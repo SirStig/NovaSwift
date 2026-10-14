@@ -22,6 +22,7 @@ const MainMenu = preload("res://screens/MainMenu.gd")
 const PauseMenu = preload("res://screens/PauseMenu.gd")
 const Settings = preload("res://screens/Settings.gd")
 const PluginsScreen = preload("res://screens/Plugins.gd")
+const MultiplayerHub = preload("res://screens/multiplayer/MultiplayerHub.gd")   # LAN / IP / dedicated-server hub
 const PluginEditor = preload("res://editor/PluginEditor.gd")
 const EditorTheme = preload("res://editor/EditorTheme.gd")
 const StoryGuide = preload("res://screens/StoryGuide.gd")
@@ -237,6 +238,7 @@ func _open_main_menu() -> void:
 	main_menu.settings.connect(_open_settings.bind(main_menu))
 	main_menu.game_data.connect(func(): _open_data_setup(true))
 	main_menu.plugins.connect(_open_plugins.bind(main_menu))
+	main_menu.multiplayer_hub.connect(_open_multiplayer.bind(main_menu))
 	main_menu.plugin_editor.connect(_open_plugin_editor)
 	main_menu.quit.connect(quit_game)
 	main_menu.enter_ship.connect(_enter_ship)
@@ -520,6 +522,19 @@ func _open_plugins(underneath: Node) -> void:
 		_overlay_pop(tok, underneath))
 
 
+## The Multiplayer hub (main menu / pause menu): host, join by address, LAN, saved servers, in-game session.
+func _open_multiplayer(underneath: Node) -> void:
+	if underneath == null or not is_instance_valid(underneath):
+		return
+	var tok := _overlay_push(underneath)
+	var hub = MultiplayerHub.new()
+	add_child(hub)
+	hub.setup(nova)
+	hub.closed.connect(func():
+		hub.queue_free()
+		_overlay_pop(tok, underneath))
+
+
 ## Story Map / Story Guide over the pause menu (Apple GameMenuView "Story Guide"); the pause
 ## menu stays underneath, inert, and gets focus back when it closes.
 func _open_story_map() -> void:
@@ -569,6 +584,9 @@ func open_pause() -> void:
 	if pause_menu != null:
 		return
 	pause_menu = PauseMenu.new()
+	if nova != null and nova.has_method("pilot_ship_label") and nova.has_pilot_save():
+		pause_menu.ship_name = nova.pilot_ship_label()   # Apple GameMenuView header: ship + system
+		pause_menu.system_name = nova.current_system_name()
 	add_child(pause_menu)
 	if coach != null:
 		pause_menu.save_label = "Leave Training"
@@ -577,6 +595,7 @@ func open_pause() -> void:
 	pause_menu.player_info.connect(func(): close_pause(); player_info_requested.emit())
 	pause_menu.settings.connect(func(): _open_settings(pause_menu))
 	pause_menu.story_map.connect(_open_story_map)
+	pause_menu.multiplayer_hub.connect(func(): _open_multiplayer(pause_menu))
 	pause_menu.save_quit_to_menu.connect(_save_and_menu)
 	pause_menu.quit.connect(quit_game)
 

@@ -1,0 +1,6 @@
+// Vendored ENet 1.3.18 (MIT, Lee Salzman - see ../LICENSE). Used by NovaSwiftENet to speak the same
+// UDP protocol as the Godot build.
+module CENet {
+    header "enet/enet.h"
+    export *
+}

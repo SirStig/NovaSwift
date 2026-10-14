@@ -60,7 +60,7 @@ final class ClosingPassGatesRanksTests: XCTestCase {
             spob(141, govt: 183, flags: 0x21, flags2: 0x2000, minStatus: 32767),    // wormhole, same MinStatus
             spob(142, govt: 50, flags: 0x21, flags2: 0x1000, minStatus: 32767),     // government below 128
             spob(143, govt: 183, flags: 0x21, flags2: 0x1000, minStatus: -32767),   // always open
-            rankResource(200, govt: 183, flags: 0x0200),
+            rankResource(id: 200, govt: 183, flags: 0x0200),
         ])
         var state = PlayerState(credits: 1000)
         state.systemReputation = [128: 500]
@@ -125,7 +125,7 @@ final class ClosingPassGatesRanksTests: XCTestCase {
         let game = makeGame([
             govt(128, classes: [1]), govt(129, classes: [2], allies: [1]),
             govt(130, flags1: 0x0800, classes: [3], allies: [1]), govt(131, classes: [4]),
-            rankResource(200, govt: 128, flags: 0x0100 | 0x0200),
+            rankResource(id: 200, govt: 128, flags: 0x0100 | 0x0200),
         ])
         let ranks: Set<Int> = [200]
         XCTAssertEqual(RankPrivilege.governments(with: RankPrivilege.wontAttack, activeRanks: ranks, game: game), [128, 129],
@@ -141,7 +141,7 @@ final class ClosingPassGatesRanksTests: XCTestCase {
         XCTAssertEqual(dip.rankProtectedGovts, [128, 129])
         // AlwaysLand colours B's planet on the radar and the map.
         let bPlanet = makeGame([govt(128, classes: [1]), govt(129, classes: [2], allies: [1]),
-                                rankResource(200, govt: 128, flags: 0x0200),
+                                rankResource(id: 200, govt: 128, flags: 0x0200),
                                 spob(150, govt: 129, minStatus: 32767), system(128, govt: 129, spobs: [150])])
         var p2 = PlayerState(currentSystem: 128)
         p2.systemReputation = [128: -5]

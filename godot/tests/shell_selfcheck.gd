@@ -63,7 +63,8 @@ func _init() -> void:
 	_ok(fo != null and fo is Button and fo.text == "Open Pilot", "main menu focus lands on a button (%s)" % (fo.text if fo else "none"))
 	var mm_buttons := []
 	for b in shell.main_menu.find_children("*", "Button", true, false):
-		mm_buttons.append(b.text)
+		if b.text != "Multiplayer":   # the multiplayer entry is an optional add-on button
+			mm_buttons.append(b.text)
 	_ok(mm_buttons == ["Open Pilot", "New Pilot", "Settings", "Plug-ins", "Plugin Editor", "About Nova", "Quit"], "menu buttons: %s" % str(mm_buttons))
 	var tm = shell.main_menu.music
 	_ok(tm != null, "title music node exists (found track: '%s')" % tm.track_path)

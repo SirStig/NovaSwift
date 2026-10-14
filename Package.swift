@@ -17,6 +17,8 @@ let package = Package(
         .library(name: "NovaSwiftStory", targets: ["NovaSwiftStory"]),
         // Multiplayer netcode: transport abstraction, presence, session sync.
         .library(name: "NovaSwiftNet", targets: ["NovaSwiftNet"]),
+        // Cross-play: ENet client transport that joins Godot / dedicated servers by IP:port.
+        .library(name: "NovaSwiftENet", targets: ["NovaSwiftENet"]),
         // Multiplayer bridge: maps the engine's World/ControlIntent to/from the
         // net wire types and drives per-system Layer-2 sync. Depends on both.
         .library(name: "NovaSwiftSync", targets: ["NovaSwiftSync"]),
@@ -44,6 +46,25 @@ let package = Package(
                 swiftSettings: optimizedInDebug),
         .target(name: "NovaSwiftStory", dependencies: ["NovaSwiftKit", "NovaSwiftEngine"], path: "Sources/NovaSwiftStory"),
         .target(name: "NovaSwiftNet", path: "Sources/NovaSwiftNet"),
+        // Vendored ENet 1.3.18 (MIT). Kept out of NovaSwiftNet so the Game Center / Multipeer builds don't link it
+        // unless something imports NovaSwiftENet (see docs/MULTIPLAYER.md, "Cross-play with the Apple app").
+        .target(
+            name: "CENet",
+            path: "Sources/CENet",
+            exclude: ["LICENSE"],
+            publicHeadersPath: "include",
+            cSettings: [
+                .define("HAS_FCNTL", to: "1"), .define("HAS_POLL", to: "1"), .define("HAS_GETNAMEINFO", to: "1"),
+                .define("HAS_GETADDRINFO", to: "1"), .define("HAS_INET_PTON", to: "1"), .define("HAS_INET_NTOP", to: "1"),
+                .define("HAS_MSGHDR_FLAGS", to: "1"), .define("HAS_SOCKLEN_T", to: "1"),
+                .unsafeFlags(["-w"]),
+            ]
+        ),
+        .target(
+            name: "NovaSwiftENet",
+            dependencies: ["NovaSwiftNet", "CENet", .product(name: "Crypto", package: "swift-crypto")],
+            path: "Sources/NovaSwiftENet"
+        ),
         .target(
             name: "NovaSwiftSync",
             dependencies: ["NovaSwiftEngine", "NovaSwiftNet"],
@@ -91,6 +112,11 @@ let package = Package(
             name: "NovaSwiftStoryTests",
             dependencies: ["NovaSwiftStory"],
             path: "Tests/NovaSwiftStoryTests"
+        ),
+        .testTarget(
+            name: "NovaSwiftENetTests",
+            dependencies: ["NovaSwiftENet", "NovaSwiftNet", "CENet"],
+            path: "Tests/NovaSwiftENetTests"
         ),
         .testTarget(
             name: "NovaSwiftNetTests",

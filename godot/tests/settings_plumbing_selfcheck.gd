@@ -272,10 +272,12 @@ func _run() -> void:
 	_check("larger HUD on", is_equal_approx(Prefs.hud_scale(), 1.28))
 	Prefs.set_value("accessibility", "larger_hud", false)
 	var hub_hits := [0]
-	Prefs.hub.changed.connect(func(_s, _k): hub_hits[0] += 1)
+	var hub_cb := func(_s, _k): hub_hits[0] += 1
+	Prefs.hub.changed.connect(hub_cb)
 	Prefs.set_value("interface", "show_radar", false)
 	Prefs.set_value("interface", "show_radar", true)
 	_check("Prefs.hub.changed fires per set_value", hub_hits[0] == 2)
+	Prefs.hub.changed.disconnect(hub_cb)   # a lambda left on the static hub outlives the script at quit
 
 	await _check_pad_keyboard()
 

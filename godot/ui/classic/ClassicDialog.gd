@@ -187,12 +187,13 @@ static func panel(nova_obj: Object, opts := {}) -> Control:
 	var y := top_h + 14
 	var plan := []   # [kind, text, rect]
 	if title != "":
-		plan.append(["title", title, Rect2i(20, y, width - 40, 26)])
+		plan.append(["title", title, Rect2i(24, y, width - 56, 26)])
 		y += 36
 	if text != "":
-		var lines := maxi(1, int(ceil(float(text.length()) * 7.0 / float(width - 40))))
+		# The frame art's metal border eats ~12 px on the right: keep the wrap width clear of it.
+		var lines := maxi(1, int(ceil(float(text.length()) * 7.0 / float(width - 56))))
 		var th := lines * 16
-		plan.append(["text", text, Rect2i(20, y, width - 40, th)])
+		plan.append(["text", text, Rect2i(24, y, width - 56, th)])
 		y += th + 12
 	var body_rects := []
 	for b in body:
@@ -512,8 +513,17 @@ func add_edit(initial: String, rect: Rect2i, index := -1) -> LineEdit:
 	e.add_theme_stylebox_override("normal", sb)
 	e.add_theme_stylebox_override("focus", sb)   # the caret is the only focus cue (no outline)
 	e.size = Vector2(rect.size)
+	# A LineEdit can't be shorter than its font line + borders (22 px here vs the DITL's 16 px rows):
+	# keep the box centred on the DITL rect (as the original / Apple's centred TextField) instead of
+	# growing downward over the next row, so the text sits mid-box.
+	var fit := func():
+		var h: float = maxf(float(rect.size.y), e.get_combined_minimum_size().y)
+		e.size = Vector2(float(rect.size.x), h)
+		e.position = Vector2(float(rect.position.x), float(rect.position.y) + (float(rect.size.y) - h) * 0.5)
+	e.minimum_size_changed.connect(fit)
 	e.text_submitted.connect(func(_t): if default_item >= 0: _activate(default_item))
 	add_child(e)
+	fit.call()
 	texts[index] = e
 	_register(index, e, rect, true)
 	return e

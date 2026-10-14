@@ -24,6 +24,7 @@ import Foundation
 import SwiftGodot
 import NovaSwiftEngine
 import NovaSwiftKit
+import NovaSwiftNet
 import NovaSwiftStory
 
 /// Which decoded sheet a `sprite_info` / `sprite_rgba` call wants. One
@@ -61,6 +62,8 @@ class NovaWorld: Node2D {
     // MARK: Engine state
 
     private var world: World?
+    /// Multiplayer session (nil = single-player; every hook below is then a no-op). See Net.swift.
+    private var netBridge: NetBridge?
     private var galaxy: Galaxy?
     private var game: NovaGame?
     private var intent = ControlIntent()
@@ -318,9 +321,12 @@ class NovaWorld: Node2D {
         // backlog, not simulate 4 seconds of combat in one frame.
         let cap = fixed * Double(GameSpeedRules.catchupTickCap(multiplier: speed, base: Self.maxCatchupTicks))
         simAccumulator = min(simAccumulator + max(0, dt) * speed, cap)
+        netBridge?.prepare(world: world, systemID: currentSystemID, shipType: pilot.shipType)
         while simAccumulator >= fixed {
+            netBridge?.preStep(world)     // multiplayer: inject/drive co-op ships, adopt the authority's snapshot
             world.snapshotRenderState()   // pre-tick pose for render interpolation
             world.step(fixed)
+            netBridge?.postStep(world)    // multiplayer: authority broadcasts a snapshot, a client sends input
             plumbing.ticks += 1
             simAccumulator -= fixed
             collectEvents(from: world)    // World.events is cleared by the next step
@@ -339,6 +345,105 @@ class NovaWorld: Node2D {
         tickPeriodicAutosave(dt: dt)  // frequent autosave's in-flight heartbeat
         interpolationAlpha = fixed > 0 ? simAccumulator / fixed : 0
     }
+
+    // MARK: Multiplayer
+    //
+    // The same NetSession + SystemSyncDriver the Apple app runs; GDScript owns the sockets (ENet)
+    // and pumps bytes through net_receive / net_outgoing. Peer ids are Godot multiplayer peer ids
+    // (server = 1) and double as player ids. See Net.swift and docs/MULTIPLAYER.md.
+
+    /// Start a session. `rulesJson` ("" = default: host full-stakes, guest safe) is the lenient
+    /// object `net_state().rules` returns. Replaces any live session. False on a bad id.
+    @Callable(autoSnakeCase: true)
+    func netBegin(localPeerId: Int, displayName: String, isHost: Bool, rulesJson: String) -> Bool {
+        netBridge?.close()
+        netBridge = nil
+        guard localPeerId > 0 else { return false }
+        var errs: [String] = []
+        let base: SessionRules = isHost ? .fullStakes : .safe
+        var rules = base
+        if let r = NetBridge.parseRules(rulesJson, base: base) { rules = r } else { errs.append("net_begin: rules_json is not valid JSON; using defaults") }
+        let nb = NetBridge(localPeerID: localPeerId, displayName: displayName, isHost: isHost,
+                           rules: rules, manifest: NetBridge.currentManifest())
+        errs.forEach { nb.note($0) }
+        // Already flying: announce now rather than on the next step.
+        if let w = world, let sys = currentSystemID { nb.prepare(world: w, systemID: sys, shipType: pilot.shipType) }
+        netBridge = nb
+        if isHost { nb.session.broadcastRules(rules) }
+        return true
+    }
+
+    /// Leave the session. A final packet (e.g. a kick) stays drainable by `net_outgoing`.
+    @Callable(autoSnakeCase: true)
+    func netEnd() { netBridge?.close() }
+
+    @Callable(autoSnakeCase: true)
+    func netPeerJoined(peerId: Int, name: String) { netBridge?.transport.peerConnected(id: peerId, name: name) }
+
+    @Callable(autoSnakeCase: true)
+    func netPeerLeft(peerId: Int) { netBridge?.transport.peerDisconnected(id: peerId) }
+
+    @Callable(autoSnakeCase: true)
+    func netReceive(peerId: Int, data: PackedByteArray) {
+        guard let nb = netBridge, !nb.closed else { return }
+        nb.transport.receive(from: peerId, data: data.asBytes())
+    }
+
+    /// Drain everything to send: `[{to:int (-1 = all), reliable:bool, data:PackedByteArray}]`.
+    /// Call once per frame (after `step`). Releases a closed session once flushed.
+    @Callable(autoSnakeCase: true)
+    func netOutgoing() -> VariantArray {
+        let out = VariantArray()
+        guard let nb = netBridge else { return out }
+        for p in nb.outgoing() {
+            let d = VariantDictionary()
+            d[Variant("to")] = Variant(p.to)
+            d[Variant("reliable")] = Variant(p.reliable)
+            d[Variant("data")] = PackedByteArray(p.data).toVariant()
+            out.append(d.toVariant())
+        }
+        if nb.closed { netBridge = nil }
+        return out
+    }
+
+    /// `{active,is_host,local_id,players:[{id,name,system_id,ship,in_my_system,is_authority}],
+    ///   authority_id,syncing,rules,errors}`. `errors` are returned once, then cleared.
+    @Callable(autoSnakeCase: true)
+    func netState() -> String {
+        guard let nb = netBridge else { return NetBridge.json(NetBridge.inactiveState()) }
+        return NetBridge.json(nb.stateObject(currentSystem: currentSystemID))
+    }
+
+    /// JSON array of UI events, drained: player_joined/player_left {id,name}, chat {id,name,text,local},
+    /// rules_changed {rules}, trade {kind,id,...}, ncb_bits {id,bits}, kicked, version_mismatch {id,message},
+    /// plugin_mismatch {id,name,as_host,missing,extra,wrong_version}.
+    @Callable(autoSnakeCase: true)
+    func netEvents() -> String { NetBridge.json(netBridge?.drainEvents() ?? [] as [[String: Any]]) }
+
+    @Callable(autoSnakeCase: true)
+    func netChat(text: String) { netBridge?.session.sendChat(text) }
+
+    /// Host only: push new rules to everyone (same lenient JSON as `net_begin`). Applied to the sim at once.
+    @Callable(autoSnakeCase: true)
+    func netSetRules(rulesJson: String) {
+        guard let nb = netBridge, nb.isHost, !nb.closed else { return }
+        guard let r = NetBridge.parseRules(rulesJson, base: nb.session.sessionRules) else {
+            nb.note("net_set_rules: invalid JSON")
+            return
+        }
+        nb.session.broadcastRules(r)
+    }
+
+    /// Host only (extra, not in the base contract): remove a player; `ban` also refuses a rejoin.
+    @Callable(autoSnakeCase: true)
+    func netKick(peerId: Int, ban: Bool) {
+        guard let nb = netBridge, nb.isHost, !nb.closed else { return }
+        nb.session.kick(String(peerId), ban: ban)
+    }
+
+    /// This node's enabled plug-ins: `{plugins:[{id,name,contentHash}],signature,count}`.
+    @Callable(autoSnakeCase: true)
+    func netReadyManifest() -> String { NetBridge.manifestJSON(NetBridge.currentManifest()) }
 
     /// How far the current display frame sits into the next pending sim tick,
     /// 0..<1. Every pose this class hands back is already interpolated by it —
@@ -2041,6 +2146,17 @@ class NovaWorld: Node2D {
     @Callable(autoSnakeCase: true) func hasPilotSave() -> Bool { pilotSaveID != nil }
 
     @Callable(autoSnakeCase: true) func pilotName() -> String { pilot.pilotName }
+
+    /// The pause sidebar's header (Apple `hud.shipName` / `hud.systemName`): the ship's own name, else its
+    /// class name; and the system the player is in.
+    @Callable(autoSnakeCase: true) func pilotShipLabel() -> String {
+        if !pilot.shipName.isEmpty { return pilot.shipName }
+        return game?.ship(pilot.shipType)?.displayName ?? ""
+    }
+    @Callable(autoSnakeCase: true) func currentSystemName() -> String {
+        guard let game, let id = currentSystemID else { return "" }
+        return game.system(id)?.displayName ?? ""
+    }
 
     // MARK: New-pilot flow (intro, death, slots and backups, frequent autosave, training)
     //

@@ -54,7 +54,9 @@ func _init() -> void:
 	ed.undo()
 	ed.undo()
 	var clean = JSON.parse_string(ed.status())
-	_ok(clean.dirty == false and clean.canUndo == false, "two undos return to clean")
+	# PluginDocument.isDirty is changeCount != savedChangeCount and undo/redo count as changes (by design, same
+	# as the Apple editor), so undoing everything empties the stack but leaves the document marked unsaved.
+	_ok(clean.canUndo == false and clean.canRedo == true, "two undos empty the undo stack")
 
 	if form != "":
 		var made_form = JSON.parse_string(ed.create(form, "Probe"))

@@ -31,6 +31,7 @@ signal settings
 signal game_data
 signal plugins
 signal plugin_editor
+signal multiplayer_hub
 signal quit
 ## Classic menu: "Enter Ship" -- resume the newest pilot (the host opens the list if none).
 signal enter_ship
@@ -78,6 +79,7 @@ func setup(nova: Object, data_dir: String, has_data: bool) -> void:
 	if has_data:
 		ShellUI.button(box, "Plug-ins", func(): plugins.emit(), nova)
 		ShellUI.button(box, "Plugin Editor", func(): plugin_editor.emit(), nova)
+		ShellUI.button(box, "Multiplayer", func(): multiplayer_hub.emit(), nova)
 	if has_data:
 		ShellUI.button(box, "About Nova", _show_about, nova)
 	ShellUI.button(box, "Quit", func(): quit.emit(), nova)
@@ -122,8 +124,14 @@ func _setup_classic(nova: Object, data_dir: String) -> void:
 	var pe := _pill(row, "Plugin Editor", "wrench.and.screwdriver", "Create and edit plug-ins", func():
 		nova.sound_beep(1)
 		plugin_editor.emit())
+	var mp := _pill(row, "Multiplayer", "person.2.fill", "Host, join by address, LAN and dedicated servers", func():
+		nova.sound_beep(1)
+		multiplayer_hub.emit())
 	pg.focus_neighbor_right = pg.get_path_to(pe)
 	pe.focus_neighbor_left = pe.get_path_to(pg)
+	pe.focus_neighbor_right = pe.get_path_to(mp)
+	mp.focus_neighbor_left = mp.get_path_to(pe)
+	mp.focus_neighbor_top = mp.get_path_to(classic_menu.buttons["quit"]) if classic_menu.buttons.get("quit") != null else NodePath()
 	var q = classic_menu.buttons.get("quit")
 	if q != null:
 		q.focus_neighbor_bottom = q.get_path_to(pg)

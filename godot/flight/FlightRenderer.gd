@@ -111,6 +111,7 @@ func setup(world: Object) -> void:
 	if is_inside_tree():
 		_push_view_span(get_viewport_rect().size)
 	show_behind_parent = true      # the world draws under Main's HUD
+	_add_layer("add", _draw_stars)
 	_add_layer("mix", _draw_world)
 	_add_layer("fill", _draw_fog_world)
 	_add_layer("mix", _draw_hulls)
@@ -347,6 +348,12 @@ func _draw() -> void:
 		return
 	# The system's own sÿst.BkgndColor, not a hardcoded near-black: nebula systems are visibly tinted.
 	draw_rect(Rect2(Vector2.ZERO, get_viewport_rect().size), background)
+
+
+func _draw_stars(ci: CanvasItem) -> void:
+	if not _ready_to_draw():
+		return
+	starfield.draw_original_add(ci, get_viewport_rect().size, play_ctr)
 
 
 func _draw_world(ci: CanvasItem) -> void:

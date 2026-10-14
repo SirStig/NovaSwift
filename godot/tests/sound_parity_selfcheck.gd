@@ -213,6 +213,9 @@ func _landing() -> void:
 		_drain()
 		var r1 = JSON.parse_string(str(nova.press_land()))
 		var c3: Array = _drain()
+		# In clearance range the press only arms the request; the clearance line (and its beep) follows on the next tick.
+		nova.step(1.0 / 30.0)
+		c3.append_array(_drain())
 		var requested: bool = r1 is Dictionary and str(r1.get("result", "")) in ["messages", "landed"]
 		ok = _check("first Land press: a request/denial beep (151) or a direct landing, never 390 before touchdown",
 			requested and (_count(c3, 151) >= 1 or _count(c3, 150) >= 1 or _count(c3, 153) >= 1 or _count(c3, 390) == 1)) and ok
