@@ -5,14 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Multiplayer · NOVA Swift</title>
   <meta name="description" content="Play EV Nova with friends: everyone keeps their own galaxy and pilot, and shared star systems sync completely. Game Center and local Wi-Fi on Apple, LAN, direct IP and dedicated servers on Linux, Steam Deck and Windows." />
-  <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
+  <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon-64.png?v=brand3" />
   <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
   <meta property="og:title" content="NOVA Swift multiplayer" />
   <meta property="og:image" content="https://sirstig.github.io/NovaSwift/assets/launch-banner.png?v=brand2" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=21" />
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" />
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" /></noscript>
+  <link rel="stylesheet" href="styles.css?v=22" />
 </head>
 <body data-page="multiplayer">
   <div class="space-bg" aria-hidden="true"></div>
@@ -50,7 +51,7 @@
   <!-- nav:end -->
 
   <main id="main">
-    <header class="page-hero" style="--hero-img:url(assets/screenshots/host-lobby.webp)">
+    <header class="page-hero" style="--hero-img:url(assets/screenshots/thumb/multiplayer-browse.webp)">
       <div class="wrap">
         <span class="eyebrow">Multiplayer <span class="badge warn">Beta</span></span>
         <h1>Fly the same stars as your friends.</h1>
@@ -105,8 +106,8 @@
           </ul>
         </div>
         <figure class="shot">
-          <img src="assets/screenshots/host-lobby.webp" width="1800" height="1130" loading="lazy"
-               alt="The Host Lobby with a Co-op or Full Stakes switch and options for PvP, real damage, friendly fire, permadeath and trading." />
+          <img src="assets/screenshots/multiplayer-host.webp" width="1800" height="1548" loading="lazy"
+               alt="The Host page: name, port, player limit and password, LAN and UPnP visibility, encryption, and Safe, Full stakes or Custom rules." />
         </figure>
       </div>
     </section>
@@ -124,7 +125,7 @@
               <tr><td><b>Internet with friends</b></td><td><span class="badge ok">Game Center</span></td><td><span class="badge ok">Direct address</span></td><td>Game Center needs no setup. On desktop, the host forwards one UDP port, or everyone uses Tailscale.</td></tr>
               <tr><td><b>Same network</b></td><td><span class="badge ok">Local Wi-Fi</span></td><td><span class="badge ok">LAN browser</span></td><td>Games on your network appear on their own.</td></tr>
               <tr><td><b>Public lobbies</b></td><td><span class="badge ok">Lobby list</span></td><td><span class="badge ok">Server browser</span></td><td>Apple lists open Game Center lobbies through iCloud. Desktop lists community servers.</td></tr>
-              <tr><td><b>Dedicated servers</b></td><td><span class="badge warn">In progress</span></td><td><span class="badge ok">Yes</span></td><td>Always-on servers run by players. <a href="dedicated-server.html">Run your own</a>.</td></tr>
+              <tr><td><b>Dedicated servers</b></td><td><span class="badge ok">Join by address</span></td><td><span class="badge ok">Yes</span></td><td>Always-on servers run by players, with a web admin panel and no game data needed. <a href="dedicated-server.html">Run your own</a>.</td></tr>
               <tr><td><b>Cross-play</b></td><td colspan="2"><span class="badge warn">In progress</span></td><td>Apple and desktop players on the same servers. See below.</td></tr>
             </tbody>
           </table>
@@ -244,7 +245,7 @@
   </footer>
   <!-- footer:end -->
 
-  <script src="starfield.js?v=2"></script>
-  <script src="js/site.js?v=1"></script>
+  <script src="starfield.js?v=2" defer></script>
+  <script src="js/site.js?v=2" defer></script>
 </body>
 </html>

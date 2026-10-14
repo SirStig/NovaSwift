@@ -5,14 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Dedicated server · NOVA Swift</title>
   <meta name="description" content="Run your own NOVA Swift multiplayer server on Linux, Windows, macOS, a Raspberry Pi or a VPS. Downloads, setup, ports, the web admin panel and getting listed." />
-  <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
+  <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon-64.png?v=brand3" />
   <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
   <meta property="og:title" content="Host a NOVA Swift server" />
   <meta property="og:image" content="https://sirstig.github.io/NovaSwift/assets/launch-banner.png?v=brand2" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=21" />
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" />
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" /></noscript>
+  <link rel="stylesheet" href="styles.css?v=22" />
 </head>
 <body data-page="servers">
   <div class="space-bg" aria-hidden="true"></div>
@@ -50,7 +51,7 @@
   <!-- nav:end -->
 
   <main id="main">
-    <header class="page-hero" style="--hero-img:url(assets/screenshots/host-lobby.webp)">
+    <header class="page-hero" style="--hero-img:url(assets/screenshots/thumb/multiplayer-browse.webp)">
       <div class="wrap">
         <div class="crumbs"><a href="multiplayer.html">Multiplayer</a> / Dedicated server</div>
         <h1>Run your own server.</h1>
@@ -81,72 +82,131 @@
         <div class="toc"><b>On this page</b><ol>
           <li><a href="#download">Downloads</a></li>
           <li><a href="#where">Where to run it</a></li>
-          <li><a href="#setup">Set it up</a></li>
+          <li><a href="#setup">Set it up in 5 minutes</a></li>
+          <li><a href="#paths">Pick your path</a></li>
           <li><a href="#ports">Open the ports</a></li>
-          <li><a href="#today">Running a server today</a></li>
-          <li><a href="#config">Settings and console</a></li>
+          <li><a href="#panel">The admin panel</a></li>
+          <li><a href="#config">server.cfg and the console</a></li>
           <li><a href="#always-on">Keep it running</a></li>
           <li><a href="#list">Get listed</a></li>
-          <li><a href="#trouble">Troubleshooting</a></li>
+          <li><a href="#legacy">The old headless mode</a></li>
+          <li><a href="#trouble">FAQ and troubleshooting</a></li>
         </ol></div>
 
         <h2 id="download">Downloads</h2>
-        <p>The <b>NOVA Swift Dedicated Server</b> is a small standalone program. It doesn't need the game, a pilot or any EV Nova data: it carries the session (rules, chat, moderation, plug-in checks) while each player's own game runs their ship. You manage it from a web admin panel in your browser.</p>
-
-        <div class="callout warn"><p><b>Arriving with the next release.</b> The standalone server is being finished now. Until its downloads appear below, you can host with the game's own headless mode: see <a href="#today">Running a server today</a>.</p></div>
+        <p>The <b>NOVA Swift Dedicated Server</b> is one small standalone program. It doesn't need the game, a pilot or any EV Nova data: it carries the session (rules, chat, moderation, the plug-in check) while each player's own game runs their ship. You run it from a web admin panel in your browser.</p>
 
         <div class="cards" style="margin:var(--s3) 0">
           <div class="platform">
-            <header><div><h3>Linux</h3><div class="sub">x86_64 · arm64 (Raspberry Pi)</div></div></header>
-            <div class="actions"><a class="btn btn-ghost" data-asset="server-linux" data-ready="Download" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Not released yet</span></a></div>
-            <p class="meta" data-asset-meta="server-linux"></p>
+            <header><div><h3>Linux</h3><div class="sub">x86_64 · PCs and VPSes</div></div></header>
+            <div class="actions"><a class="btn btn-ghost" data-asset="server-linux-x64" data-ready="Download" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Not released yet</span></a></div>
+            <p class="meta" data-asset-meta="server-linux-x64">NovaSwiftServer-linux-x86_64.tar.gz</p>
           </div>
           <div class="platform">
-            <header><div><h3>Windows</h3><div class="sub">x86_64</div></div></header>
+            <header><div><h3>Linux ARM</h3><div class="sub">arm64 · Raspberry Pi 4/5, Oracle Ampere</div></div></header>
+            <div class="actions"><a class="btn btn-ghost" data-asset="server-linux-arm64" data-ready="Download" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Not released yet</span></a></div>
+            <p class="meta" data-asset-meta="server-linux-arm64">NovaSwiftServer-linux-arm64.tar.gz</p>
+          </div>
+          <div class="platform">
+            <header><div><h3>Windows</h3><div class="sub">x86_64 · double-click to start</div></div></header>
             <div class="actions"><a class="btn btn-ghost" data-asset="server-windows" data-ready="Download" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Not released yet</span></a></div>
-            <p class="meta" data-asset-meta="server-windows"></p>
+            <p class="meta" data-asset-meta="server-windows">NovaSwiftServer-windows-x86_64.zip</p>
           </div>
           <div class="platform">
             <header><div><h3>macOS</h3><div class="sub">Apple Silicon</div></div></header>
             <div class="actions"><a class="btn btn-ghost" data-asset="server-macos" data-ready="Download" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Not released yet</span></a></div>
-            <p class="meta" data-asset-meta="server-macos"></p>
+            <p class="meta" data-asset-meta="server-macos">NovaSwiftServer-macos-arm64.zip</p>
           </div>
         </div>
+        <div class="callout warn"><p><b>Beta.</b> The server is new: the Linux and macOS builds are tested, the Windows build is untested (it may not run yet), and the buttons above light up when the first <code>server-v…</code> release is published. Docker and the Linux installer also come from that release.</p></div>
 
-        <p>What it's built to do:</p>
         <ul>
-          <li><b>No game data.</b> Nothing to copy onto the server; nothing copyrighted on your VPS.</li>
-          <li><b>Web admin panel</b> on port <code>53737</code>: players, kick and ban, rules, plug-ins from the catalog, public listing and logs. A setup wizard runs the first time.</li>
-          <li><b>Safe defaults.</b> It works with no configuration. The admin password is generated on first start and printed once.</li>
-          <li><b>Easy networking.</b> A built-in port check and optional UPnP, with errors in plain language.</li>
-          <li><b>Runs anywhere.</b> Linux, Windows and macOS builds, a Docker image and a systemd unit.</li>
+          <li><b>No game data.</b> Nothing copyrighted to copy onto a VPS.</li>
+          <li><b>Zero setup.</b> It starts with sensible defaults, makes <code>server.cfg</code> next to itself and prints the admin address and a one-time password.</li>
+          <li><b>Web admin panel</b> on port <code>53737</code> with a four-step setup wizard, players (kick, ban, message), live settings, plug-ins from the catalog, the public listing helper, a network check and live logs.</li>
+          <li><b>Plain-language errors</b>, for example "Port 53735 is already in use. Is another server running?".</li>
+          <li><b>Cross-play.</b> Apple, Linux, Steam Deck and Windows players share the same server.</li>
         </ul>
 
         <h2 id="where">Where to run it</h2>
-        <p>The server is light. Anything that can stay switched on will do.</p>
+        <p>The server is light (a few MB of memory per player, no simulation). Anything that can stay switched on will do.</p>
         <div class="table-wrap"><table class="data">
           <thead><tr><th>Where</th><th>Cost</th><th>Good for</th><th>Notes</th></tr></thead>
           <tbody>
             <tr><td><b>Your own PC</b></td><td>Free</td><td>Evenings with friends</td><td>Only up while the PC is on. Needs port forwarding on your router.</td></tr>
             <tr><td><b>Raspberry Pi or old laptop</b></td><td>Free if you have one</td><td>A 24/7 home server</td><td>Uses a few watts. Same port forwarding as a PC.</td></tr>
-            <tr><td><b>A small VPS</b></td><td>A few dollars a month, some free tiers</td><td>A public server</td><td>Has a public address already, so no router setup: open the ports in its firewall.</td></tr>
+            <tr><td><b>A small VPS</b></td><td>Free tiers exist (Google Cloud e2-micro), or a few dollars a month (Hetzner)</td><td>A public server</td><td>Has a public address already: just open the ports in its firewall.</td></tr>
             <tr><td><b>Tailscale or ZeroTier</b></td><td>Free</td><td>Friends only, no forwarding</td><td>Everyone joins the same private network and connects to your <code>100.x.y.z</code> address. Can't be listed publicly.</td></tr>
           </tbody>
         </table></div>
 
-        <h2 id="setup">Set it up</h2>
+        <h2 id="setup">Set it up in 5 minutes</h2>
         <ol class="steps">
           <li><h3>Download and start it</h3>
-            <p>Unpack the download and start the server. On Windows, double-click it. On Linux or macOS, run it from a terminal. It starts with sensible defaults and prints the admin panel address and a one-time admin password.</p></li>
+            <p>Unpack the download. On Windows double-click <code>Start Server.bat</code> (or <code>NovaSwiftServer.exe</code>). On Linux or macOS run <code>./NovaSwiftServer</code> in a terminal. It prints a box with your admin panel address and an <b>admin password shown only once</b>: write it down.</p></li>
           <li><h3>Open the admin panel</h3>
-            <p>Go to <code>http://localhost:53737</code> on the same machine (on a desktop it opens by itself). From another computer use the server's address with port <code>53737</code>. The setup wizard asks for a server name, player limit, rules and an optional join password.</p></li>
-          <li><h3>Choose the rules</h3>
-            <p><b>Safe</b>: PvP damage and death aren't real, good for sparring. <b>Full stakes</b>: they are. <b>Custom</b>: pick PvP, real damage, friendly fire, permadeath and trading yourself.</p></li>
-          <li><h3>Add plug-ins (optional)</h3>
-            <p>Gameplay plug-ins on the server must match what players have enabled. Pick them from the community catalog so players can install the same ones with one click when they join. Art and sound plug-ins are optional for players.</p></li>
-          <li><h3>Open the ports and test</h3>
-            <p>See the next section. Then join from the game with the server's address.</p></li>
+            <p>On a desktop your browser opens by itself on <code>http://localhost:53737</code> and signs you in for the first-run wizard. On a headless machine open the printed address from your own computer (or through an SSH tunnel, see below).</p></li>
+          <li><h3>Answer four questions</h3>
+            <p>The wizard asks for a <b>name</b>, <b>open or password</b> (plus player slots and the <b>rules</b>: Safe, Full stakes or Custom), which <b>plug-ins</b> to run (optional, picked from the community catalog), and whether you want a <b>public listing</b>.</p></li>
+          <li><h3>Open the ports</h3>
+            <p>Forward UDP <code>53735</code> and <code>53736</code> on your router, or open them in your VPS firewall (next sections). The panel's <b>Network</b> page has a "can players reach me?" check and an automatic router (UPnP) button.</p></li>
+          <li><h3>Join it</h3>
+            <p>In the game choose Multiplayer, then Quick Connect, and type the address from the dashboard (it has a Copy button). Anyone on your network sees it under LAN automatically.</p></li>
         </ol>
+
+        <h2 id="paths">Pick your path</h2>
+        <div class="tabs" data-os-tabs>
+          <div role="tablist" aria-label="Where you run the server">
+            <button role="tab" id="r-pc" aria-controls="q-pc" data-key="pc">My PC</button>
+            <button role="tab" id="r-vps" aria-controls="q-vps" data-key="vps">Linux VPS</button>
+            <button role="tab" id="r-docker" aria-controls="q-docker" data-key="docker">Docker</button>
+            <button role="tab" id="r-pi" aria-controls="q-pi" data-key="pi">Raspberry Pi</button>
+          </div>
+          <div role="tabpanel" id="q-pc" aria-labelledby="r-pc">
+            <ol>
+              <li>Download the zip for your system and unpack it anywhere (it keeps its settings and logs in that folder, so it's portable).</li>
+              <li>Start it: double-click on Windows, <code>./NovaSwiftServer</code> on macOS and Linux. On macOS the first run may need <b>right-click, Open</b> because the build isn't notarised yet.</li>
+              <li>Finish the wizard in the browser that opens. Forward the ports (or tick <b>UPnP</b> in Settings).</li>
+              <li>Settings has <b>Start with this computer</b> (a scheduled task on Windows, a login item on macOS) if you want it back after a reboot.</li>
+            </ol>
+          </div>
+          <div role="tabpanel" id="q-vps" aria-labelledby="r-vps" hidden>
+            <p>Works on any Ubuntu/Debian-style VPS: a Google Cloud <b>e2-micro</b> (free tier, Always Free region), Hetzner, DigitalOcean, Oracle Ampere (arm64) and so on.</p>
+            <ol>
+              <li>Create the VM (Ubuntu 22.04+). In the provider's <b>firewall / VPC rules</b> allow <b>UDP 53735-53736</b> from anywhere. Do <b>not</b> open 53737.</li>
+              <li>SSH in and run the installer. It picks x86_64 or arm64, creates a <code>novaswift</code> user, installs to <code>/opt/novaswift-server</code>, adds a systemd service that always restarts, opens the game ports in <code>ufw</code> if present, and prints the admin password:
+                <pre class="code"><code><span class="k">curl</span> -fsSL https://raw.githubusercontent.com/SirStig/NovaSwift/main/packaging/server/install-server.sh | <span class="k">sudo bash</span></code></pre></li>
+              <li>From your own computer, tunnel to the panel and open it:
+                <pre class="code"><code><span class="k">ssh</span> -L 53737:localhost:53737 you@your-vps
+<span class="c"># then browse to http://localhost:53737</span></code></pre></li>
+              <li>Finish the wizard. Put your VPS address (or a DNS name) in <b>Public listing</b> if you want to be listed.</li>
+            </ol>
+            <p>Update later by re-running the same command (your settings stay), or from the panel's Settings page. Remove it with <code>sudo /opt/novaswift-server/uninstall.sh</code>.</p>
+          </div>
+          <div role="tabpanel" id="q-docker" aria-labelledby="r-docker" hidden>
+            <p>The image builds for amd64 and arm64 and contains only the server. Settings, plug-ins and logs live in the <code>./data</code> folder. Get <code>packaging/server/</code> from the repository (or the release page), then:</p>
+            <pre class="code"><code><span class="c"># docker-compose.yml (also in packaging/server/)</span>
+services:
+  novaswift:
+    build:
+      context: ../..                       <span class="c"># the repository root</span>
+      dockerfile: packaging/server/Dockerfile
+    image: novaswift-server
+    restart: always
+    ports:
+      - "53735:53735/udp"
+      - "53736:53736/udp"
+      - "127.0.0.1:53737:53737/tcp"   <span class="c"># admin panel, this machine only</span>
+    volumes:
+      - ./data:/data</code></pre>
+            <pre class="code"><code><span class="k">docker compose up</span> -d
+<span class="k">docker compose logs</span> novaswift | <span class="k">head</span> -30   <span class="c"># admin password is printed once</span></code></pre>
+            <p>Built-in image for a different CPU: <code>docker buildx build --platform linux/amd64,linux/arm64 -f packaging/server/Dockerfile .</code></p>
+          </div>
+          <div role="tabpanel" id="q-pi" aria-labelledby="r-pi" hidden>
+            <p>A Raspberry Pi 4 or 5 (64-bit Raspberry Pi OS or Ubuntu) runs it comfortably. Use the Linux installer from the VPS tab (it picks the arm64 build), then forward UDP 53735-53736 on your router to the Pi. Give the Pi a fixed address in your router so the forwarding keeps working, and open the panel from any computer on your network at <code>http://&lt;pi-address&gt;:53737</code>. Because it's your own network you can leave the panel open; just use a good password.</p>
+          </div>
+        </div>
 
         <h2 id="ports">Open the ports</h2>
         <div class="table-wrap"><table class="data">
@@ -154,22 +214,22 @@
           <tbody>
             <tr><td><code>53735</code></td><td>UDP</td><td>The game itself</td><td><b>Yes</b>, players need it</td></tr>
             <tr><td><code>53736</code></td><td>UDP</td><td>Status pings (server lists, player counts, latency) and LAN discovery. Game port + 1 if you change the game port.</td><td>Yes, to show as online in server lists</td></tr>
-            <tr><td><code>53737</code></td><td>TCP</td><td>Web admin panel (standalone server)</td><td><b>No.</b> Keep it on your own network, or reach it over SSH or a VPN</td></tr>
+            <tr><td><code>53737</code></td><td>TCP</td><td>Web admin panel</td><td><b>No.</b> Keep it on your own network, or reach it over SSH or a VPN. The panel is plain HTTP.</td></tr>
           </tbody>
         </table></div>
         <div class="tabs" data-os-tabs>
-          <div role="tablist" aria-label="Where the server runs">
+          <div role="tablist" aria-label="Firewall and router">
             <button role="tab" id="t-home" aria-controls="p-home" data-key="home">At home</button>
             <button role="tab" id="t-linux" aria-controls="p-linux" data-key="linux">Linux firewall</button>
             <button role="tab" id="t-windows" aria-controls="p-windows" data-key="windows">Windows firewall</button>
             <button role="tab" id="t-vps" aria-controls="p-vps" data-key="vps">VPS</button>
           </div>
           <div role="tabpanel" id="p-home" aria-labelledby="t-home">
-            <p>In your router's settings, forward <b>UDP 53735</b> and <b>UDP 53736</b> to the computer running the server. Or turn on UPnP in the server and let it ask the router (many routers have UPnP off).</p>
-            <p>Then give players your public address (search "what is my IP"). If your router's WAN address is different from that, or starts with <code>100.64</code> to <code>100.127</code>, your provider uses carrier-grade NAT and forwarding can't work: use a VPS or Tailscale instead.</p>
+            <p>In your router's settings, forward <b>UDP 53735</b> and <b>UDP 53736</b> to the computer running the server, or press <b>Try automatic port forwarding (UPnP)</b> on the panel's Network page (many routers have UPnP off).</p>
+            <p>Then give players your public address (the Network page looks it up). If your router's WAN address differs from it, or starts with <code>100.64</code> to <code>100.127</code>, your provider uses carrier-grade NAT and forwarding can't work: use a VPS or Tailscale instead. Many routers can't loop back to their own public address, so test from your phone on mobile data.</p>
           </div>
           <div role="tabpanel" id="p-linux" aria-labelledby="t-linux" hidden>
-            <pre class="code"><code><span class="c"># ufw (Ubuntu, Debian, Raspberry Pi OS)</span>
+            <pre class="code"><code><span class="c"># ufw (Ubuntu, Debian, Raspberry Pi OS); the installer does this for you</span>
 <span class="k">sudo ufw allow</span> 53735:53736/udp
 
 <span class="c"># firewalld (Fedora, RHEL)</span>
@@ -180,82 +240,90 @@
             <pre class="code"><code><span class="k">New-NetFirewallRule</span> -DisplayName "NOVA Swift server" -Direction Inbound -Protocol UDP -LocalPort 53735-53736 -Action Allow</code></pre>
           </div>
           <div role="tabpanel" id="p-vps" aria-labelledby="t-vps" hidden>
-            <p>A VPS already has a public address. Allow <b>UDP 53735-53736</b> in the provider's firewall or security group as well as in the machine's own firewall (see the Linux tab). Don't open 53737; reach the admin panel through an SSH tunnel:</p>
-            <pre class="code"><code><span class="k">ssh</span> -L 53737:localhost:53737 you@your-vps
-<span class="c"># then browse to http://localhost:53737</span></code></pre>
+            <p>Allow <b>UDP 53735-53736</b> in the provider's firewall or security group as well as in the machine's own firewall (see the Linux tab). Google Cloud: VPC network, Firewall, create a rule for <code>udp:53735-53736</code> from <code>0.0.0.0/0</code>. Hetzner: Firewalls, add an inbound UDP rule. Don't open 53737; use the SSH tunnel.</p>
           </div>
         </div>
 
-        <h2 id="today">Running a server today</h2>
-        <p>Until the standalone server ships, the Linux build of the game can run headless as a dedicated server. It needs your EV Nova data on that machine (the folder the game imported, <code>NOVA_DATA_DIR</code> or <code>--data</code>), and it has a console instead of the web panel.</p>
-        <pre class="code"><code><span class="c"># from a source checkout</span>
-<span class="k">scripts/run-dedicated-server.sh</span> --name "My Server" --port 53735 --max-players 8 --rules safe
+        <h2 id="panel">The admin panel</h2>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Page</th><th>What you do there</th></tr></thead>
+          <tbody>
+            <tr><td><b>Dashboard</b></td><td>Status, uptime, players, bandwidth, version, update notice, and the address players type, with a Copy button.</td></tr>
+            <tr><td><b>Players</b></td><td>Who is online (ping, star system, time), kick, ban, message one player, or announce to everyone.</td></tr>
+            <tr><td><b>Settings</b></td><td>Name, description, welcome message, region, slots, join password, rules, ports, LAN visibility, UPnP, admin password, updates, start with the computer. Most changes apply instantly; rules change for players already online.</td></tr>
+            <tr><td><b>Plug-ins</b></td><td>Browse and search the NovaSwift catalog, turn plug-ins on (the server downloads them), or upload your own file. Gameplay plug-ins are <i>required</i>; art and sound plug-ins are automatically <i>optional</i>. Catalog plug-ins get the one-click <b>Install &amp; Join</b> prompt in the game; your own file is marked "players must get this themselves".</td></tr>
+            <tr><td><b>Public listing</b></td><td>Fill in owner and address, see a checklist, copy the ready-made <code>servers.json</code> entry, and open the pull request on GitHub.</td></tr>
+            <tr><td><b>Network</b></td><td>The ports to open, your addresses, a public-IP lookup, a local self-test, UPnP, CGNAT warning, and router, VPS and Tailscale instructions.</td></tr>
+            <tr><td><b>Logs</b></td><td>A live tail of joins, refusals and errors (also saved in <code>logs/server.log</code>).</td></tr>
+            <tr><td><b>Bans</b></td><td>The blocked addresses; add or lift one.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="callout"><p><b>Security.</b> The panel is protected by the generated admin password and a login lockout, but it is plain HTTP. Bind it to this computer only in Settings (<i>Admin panel is reachable from: This computer only</i>) if the machine is on the internet, and use an SSH tunnel. Lost the password? Run <code>NovaSwiftServer --reset-admin-password</code>.</p></div>
 
-<span class="c"># from the packaged Linux build</span>
-<span class="k">./NovaSwift</span> --headless -- --server --config /path/to/server.cfg</code></pre>
-        <p>Useful options: <code>--password X</code>, <code>--rules safe|full</code>, <code>--no-lan</code>, <code>--upnp</code>, <code>--log FILE</code>, <code>--no-stdin</code> (for services), and, with the script, <code>--check</code>, which prints your public address, warns about carrier-grade NAT and tests whether the server answers from outside.</p>
-
-        <h2 id="config">Settings and console</h2>
-        <p>Settings live in <code>server.cfg</code>; command-line flags override the file. An annotated example:</p>
+        <h2 id="config">server.cfg and the console</h2>
+        <p>Everything lives in one <code>server.cfg</code> next to the program (or, if that folder isn't writable, in your user data folder; <code>--data FOLDER</code> picks one). The panel rewrites it when you save, so you rarely touch it. Changes made by hand need a restart.</p>
         <pre class="code"><code>[server]
-name="My NovaSwift Server"
-port=53735
-max_players=8
-password=""
-<span class="c">; safe | full | custom (custom reads [rules])</span>
-rules="safe"
-lan=true
-stdin=true
+name = Joshua's NovaSwift server
+description = Friendly co-op, newbies welcome
+port = 53735                  <span class="c"># UDP; port + 1 answers pings</span>
+max_players = 8
+password =                    <span class="c"># empty = open</span>
+motd = Welcome, pilot!        <span class="c"># shown in chat when someone joins</span>
+region = eu
+lan_announce = true
+upnp = false
 
-<span class="c">;[rules]</span>
-<span class="c">;base="safe"</span>
-<span class="c">;allow_pvp=true</span>
-<span class="c">;pvp_damage_real=false</span>
-<span class="c">;friendly_fire=false</span>
-<span class="c">;death_real=false</span>
-<span class="c">;allow_trade=true</span></code></pre>
-        <p>Console commands (type them into the server window):</p>
+[rules]
+preset = safe                 <span class="c"># safe | full | custom</span>
+<span class="c"># custom only:</span> pvp_damage_real, death_real, friendly_fire, allow_pvp, allow_trade, game_speed
+
+[admin]
+port = 53737
+bind = 0.0.0.0                <span class="c"># 127.0.0.1 = this computer only</span>
+password_hash =               <span class="c"># set from the panel</span>
+
+[plugins]
+enabled = frozen-heart        <span class="c"># catalog ids and uploaded folder names</span>
+
+[public]
+listed = false
+address = play.example.com
+owner = Jane
+contact = discord: jane
+
+[updates]
+check = true
+auto_update = false
+
+[bans]
+203.0.113.7 = griefing</code></pre>
+        <p>Command line: <code>--data DIR</code>, <code>--port N</code>, <code>--admin-port N</code>, <code>--no-browser</code>, <code>--no-stdin</code>, <code>--reset-admin-password</code>, <code>--version</code>. Console commands (type them into the server window):</p>
         <div class="table-wrap"><table class="data">
           <thead><tr><th>Command</th><th>Does</th></tr></thead>
           <tbody>
-            <tr><td><code>status</code></td><td>Name, port, players, rules</td></tr>
-            <tr><td><code>players</code></td><td>Who's connected</td></tr>
+            <tr><td><code>status</code></td><td>Name, uptime, players, rules, address</td></tr>
+            <tr><td><code>players</code></td><td>Who's connected (id, name, ping, address)</td></tr>
             <tr><td><code>kick &lt;id|name&gt; [reason]</code></td><td>Remove a player</td></tr>
-            <tr><td><code>ban &lt;id|name&gt;</code></td><td>Remove and block a player</td></tr>
+            <tr><td><code>ban &lt;id|name&gt;</code> / <code>unban &lt;ip&gt;</code></td><td>Remove and block a player's address, or lift a ban</td></tr>
             <tr><td><code>say &lt;text&gt;</code></td><td>Message everyone</td></tr>
-            <tr><td><code>rules safe|full</code></td><td>Switch the stakes</td></tr>
+            <tr><td><code>rules [safe|full]</code></td><td>Show or switch the stakes</td></tr>
+            <tr><td><code>plugins</code></td><td>Required and optional plug-ins</td></tr>
             <tr><td><code>quit</code></td><td>Stop the server</td></tr>
           </tbody>
         </table></div>
-        <div class="callout"><p><b>Passwords.</b> A join password is sent hashed, but game traffic isn't encrypted by default. Don't reuse a password that matters. Encrypted (DTLS) servers are in testing for Godot-only groups.</p></div>
+        <div class="callout"><p><b>Passwords.</b> A join password is sent hashed, but game traffic isn't encrypted. Don't reuse a password that matters.</p></div>
 
         <h2 id="always-on">Keep it running</h2>
-        <p>On Linux, a systemd service restarts the server if it stops and starts it at boot. Adjust the paths and user:</p>
-        <pre class="code"><code><span class="c"># /etc/systemd/system/novaswift-server.service</span>
-[Unit]
-Description=NOVA Swift dedicated server
-After=network-online.target
-
-[Service]
-User=nova
-WorkingDirectory=/opt/novaswift
-ExecStart=/opt/novaswift/NovaSwift --headless -- --server --config /opt/novaswift/server.cfg --no-stdin
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target</code></pre>
-        <pre class="code"><code><span class="k">sudo systemctl enable</span> --now novaswift-server
-<span class="k">journalctl</span> -u novaswift-server -f</code></pre>
-        <p>No systemd? <code>tmux</code> or <code>screen</code> works too. A Docker image comes with the standalone server.</p>
+        <p>The Linux installer sets up a systemd service that starts at boot and restarts after a crash: <code>sudo systemctl status novaswift-server</code>, <code>journalctl -u novaswift-server -f</code>. Docker uses <code>restart: always</code>. On Windows and macOS use <b>Start with this computer</b> in Settings. The server checks GitHub for new versions (tag <code>server-v…</code>) and shows a notice; it only installs them if you turn on automatic updates.</p>
 
         <h2 id="list">Get listed</h2>
-        <p>The public server list is a JSON file in the <a href="https://github.com/SirStig/NovaSwift-Plugins/tree/main/servers" target="_blank" rel="noopener">NovaSwift-Plugins repository</a>. Both the game's browser and this website read it. To add your server:</p>
+        <p>The public server list is a JSON file in the <a href="https://github.com/SirStig/NovaSwift-Plugins/tree/main/servers" target="_blank" rel="noopener">NovaSwift-Plugins repository</a>. Both the game's browser and the <a href="servers.html">server list</a> on this website read it. The panel's <b>Public listing</b> page does the paperwork:</p>
         <ol class="steps">
-          <li><h3>Get your entry</h3><p>Start the server once with <code>--public</code> (plus <code>--region</code>, <code>--owner</code>, <code>--contact</code>, <code>--description</code> and <code>--address</code> if you have a domain). It prints a ready-to-paste JSON entry, including the content hash of every plug-in it requires. It never uploads anything.</p></li>
-          <li><h3>Add it to servers.json</h3><p>Fork the repository, paste the entry into the <code>servers</code> array of <code>servers/servers.json</code>, and check it with <code>python3 servers/validate.py</code>.</p></li>
-          <li><h3>Open a pull request</h3><p>Title it <code>Add server: &lt;name&gt;</code>. Once it's merged, your server shows up in the game's browser and on the <a href="servers.html">server list</a>.</p></li>
+          <li><h3>Fill in the details</h3><p>A public address (a DNS name is best), your name and a contact such as a Discord name. The checklist tells you what's missing.</p></li>
+          <li><h3>Copy your entry</h3><p>The panel generates the entry, including the content hash of every gameplay plug-in you require. Nothing is uploaded automatically.</p></li>
+          <li><h3>Open the pull request</h3><p>The button opens <code>servers/servers.json</code> on GitHub in edit mode: paste the entry into the list and choose <i>Propose changes</i>. A check runs on it, and once it's merged your server appears in the game and on the website.</p></li>
         </ol>
-        <p>Rules for listing: a public address (no <code>192.168.x.x</code>), no passwords in the entry, honest rules labels, plug-ins players can get from the catalog, family-friendly names, and a contact. Servers that stay offline for a month or two may be removed. Until you're listed, players can join straight away with your address.</p>
+        <p>Rules for listing: a public address (no <code>192.168.x.x</code>), no password, honest rules labels, plug-ins players can get from the catalog, family-friendly names, and a contact. Servers that stay offline for a month or two may be removed. Until you're listed players can join with your address.</p>
         <pre class="code" data-nocopy><code>{
   "id": "example-eu",
   "name": "Example Sector",
@@ -270,16 +338,28 @@ WantedBy=multi-user.target</code></pre>
   "added": "2026-10-13"
 }</code></pre>
 
-        <h2 id="trouble">Troubleshooting</h2>
+        <h2 id="legacy">The old headless mode</h2>
+        <p>Before the standalone server, the Linux game build could run headless with <code>--server</code>. It still works, but it needs your EV Nova data on the machine and has no web panel, so it is <b>legacy</b>: prefer the Dedicated Server above.</p>
+        <pre class="code"><code><span class="k">scripts/run-dedicated-server.sh</span> --name "My Server" --port 53735 --max-players 8 --rules safe</code></pre>
+
+        <h2 id="trouble">FAQ and troubleshooting</h2>
         <div class="faq">
+          <details><summary>Do I need EV Nova or the game on the server?</summary><div>
+            <p>No. The server never reads game data; it only compares players' plug-in lists. Plug-ins you enable are downloaded from the community catalog (or uploaded by you) to the server's own <code>plugins</code> folder.</p></div></details>
+          <details><summary>"Port 53735 is already in use"</summary><div>
+            <p>Another server (or a game you are hosting) is using it. Stop that, or change the port: start with <code>--port 53745</code>, or fix it in <code>server.cfg</code>. The admin panel still opens so you can change the port there.</p></div></details>
           <details><summary>Friends can't connect</summary><div>
-            <p>Check UDP 53735 is forwarded to the right machine and allowed in its firewall. Test from outside your network (many routers can't loop back to their own public address), or run <code>scripts/run-dedicated-server.sh --check</code>. If your provider uses carrier-grade NAT, forwarding won't work: use a VPS or Tailscale.</p></div></details>
+            <p>Check UDP 53735 is forwarded to the right machine and allowed in its firewall. Test from outside your network, and use the panel's Network page. If your provider uses carrier-grade NAT, forwarding won't work: use a VPS or Tailscale.</p></div></details>
           <details><summary>The server shows as offline in lists but people can join</summary><div>
             <p>Status pings use UDP 53736 (game port + 1). Forward and allow that port too.</p></div></details>
-          <details><summary>Players get "version" or "plug-ins" errors</summary><div>
-            <p>Everyone needs a compatible game version and the same gameplay plug-ins as the server. The game lists what to install, disable or update. Cosmetic plug-ins don't count.</p></div></details>
+          <details><summary>Players get "plug-ins" errors</summary><div>
+            <p>Everyone needs the same <i>gameplay</i> plug-ins as the server. The game lists what to install, disable or update, and offers one-click <b>Install &amp; Join</b> for catalog plug-ins. Cosmetic plug-ins don't count. For plug-ins you uploaded yourself, players must get the same file.</p></div></details>
           <details><summary>UPnP didn't work</summary><div>
-            <p>Many routers ship with UPnP turned off, and it can't help behind carrier-grade NAT. Forward the ports by hand instead.</p></div></details>
+            <p>Many routers ship with UPnP turned off, and it can't help behind carrier-grade NAT. Forward the ports by hand.</p></div></details>
+          <details><summary>I forgot the admin password</summary><div>
+            <p>Run the server once with <code>--reset-admin-password</code>. It prints a new password and exits.</p></div></details>
+          <details><summary>Does it work with Apple players?</summary><div>
+            <p>Yes. Mac, iPhone, iPad and Apple TV players join by address, from the server list or Quick Connect, the same as desktop players.</p></div></details>
         </div>
 
         <nav class="next-prev" aria-label="More">
@@ -340,8 +420,8 @@ WantedBy=multi-user.target</code></pre>
   </footer>
   <!-- footer:end -->
 
-  <script src="starfield.js?v=2"></script>
-  <script src="js/site.js?v=1"></script>
-  <script src="js/live.js?v=1" defer></script>
+  <script src="starfield.js?v=2" defer></script>
+  <script src="js/site.js?v=2" defer></script>
+  <script src="js/live.js?v=2" defer></script>
 </body>
 </html>

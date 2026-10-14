@@ -1,0 +1,428 @@
+/* NovaSwift Server admin panel - vanilla JS, no build step. */
+'use strict';
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const app = $('#app');
+const state = { page: 'dashboard', status: null, settings: null, session: null, timer: null, logAfter: 0, logPaused: false, plugTab: 'enabled', plugQ: '', plugFilter: 'all', wiz: null };
+
+const LOGO = '<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="21" fill="none" stroke="#26262d" stroke-width="3"/><path d="M32 8 L38 30 L56 32 L38 34 L32 56 L26 34 L8 32 L26 30 Z" fill="#f2b33d"/></svg>';
+
+async function api(path, method = 'GET', body, raw) {
+  const opt = { method, headers: { 'X-NS-Admin': '1' }, credentials: 'same-origin' };
+  if (raw) { opt.body = raw; opt.headers['Content-Type'] = 'application/octet-stream'; }
+  else if (body !== undefined) { opt.body = JSON.stringify(body); opt.headers['Content-Type'] = 'application/json'; }
+  let r;
+  try { r = await fetch('/api/' + path, opt); } catch (e) { throw new Error('Lost contact with the server. Is it still running?'); }
+  let data = {};
+  try { data = await r.json(); } catch (e) { /* empty */ }
+  if (r.status === 401 && path !== 'login' && path !== 'setup-login') { state.session = { authenticated: false }; render(); throw new Error(data.error || 'Please sign in.'); }
+  if (!r.ok) throw new Error(data.error || ('Request failed (' + r.status + ')'));
+  return data;
+}
+
+function toast(msg, kind = '') {
+  const t = document.createElement('div'); t.className = 'toast ' + kind; t.textContent = msg;
+  $('#toasts').appendChild(t); setTimeout(() => t.remove(), kind === 'bad' ? 9000 : 4500);
+}
+const fail = e => toast(e.message || String(e), 'bad');
+const fmtBytes = n => n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : n >= 1e6 ? (n / 1e6).toFixed(1) + ' MB' : n >= 1e3 ? (n / 1e3).toFixed(0) + ' KB' : n + ' B';
+const fmtRate = n => n >= 1e6 ? (n / 1e6).toFixed(1) + ' MB/s' : n >= 1e3 ? (n / 1e3).toFixed(1) + ' KB/s' : n + ' B/s';
+const fmtDur = s => { s = Math.floor(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : m ? `${m}m ${s % 60}s` : `${s}s`; };
+async function copy(text) { try { await navigator.clipboard.writeText(text); toast('Copied.', 'ok'); } catch (e) { const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); toast('Copied.', 'ok'); } catch (e2) { toast('Select and copy it by hand.', 'bad'); } t.remove(); } }
+
+/* ---------- boot / routing ---------- */
+async function boot() {
+  const params = new URLSearchParams(location.search);
+  try {
+    state.session = await api('session');
+    const code = params.get('setup');
+    if (code && !state.session.authenticated) {
+      try { await api('setup-login', 'POST', { code }); state.session = await api('session'); } catch (e) { toast(e.message, 'bad'); }
+    }
+    if (code) history.replaceState(null, '', '/');
+  } catch (e) { app.innerHTML = `<div class="center"><div class="card panel"><h2>Can't reach the server</h2><p>${esc(e.message)}</p></div></div>`; return; }
+  render();
+}
+
+function render() {
+  clearInterval(state.timer);
+  if (!state.session.authenticated) return renderLogin();
+  if (!state.session.setupDone && !state.wizDismissed) return renderWizard();
+  renderShell();
+}
+
+function renderLogin() {
+  app.innerHTML = `<div class="center"><form class="card panel" id="login">
+    <div class="brand" style="padding:0 0 14px">${LOGO}<div>NovaSwift<small>Dedicated Server</small></div></div>
+    <label><span class="l">Admin password</span><input type="password" id="pw" autocomplete="current-password" autofocus>
+    <span class="hint">It was printed in the console the first time the server started. Lost it? Run the server once with <code>--reset-admin-password</code>.</span></label>
+    <div class="err" id="err"></div>
+    <button class="primary" type="submit">Sign in</button></form></div>`;
+  $('#login').onsubmit = async ev => {
+    ev.preventDefault();
+    try { await api('login', 'POST', { password: $('#pw').value }); state.session = await api('session'); render(); }
+    catch (e) { $('#err').textContent = e.message; }
+  };
+}
+
+/* ---------- wizard ---------- */
+function renderWizard() {
+  if (!state.wiz) {
+    api('settings').then(s => { state.settings = s; state.wiz = { step: 0, s: { ...s }, pick: new Set(), catalog: null, q: '' }; renderWizard(); }).catch(fail);
+    app.innerHTML = '<div class="boot">Loading...</div>'; return;
+  }
+  const w = state.wiz, s = w.s, step = w.step;
+  const steps = ['Name', 'Access', 'Plug-ins', 'Listing'];
+  let body = '';
+  if (step === 0) body = `
+    <h2>Name your server</h2><p class="muted">This is what players see in the server list. You can change everything later.</p>
+    <label><span class="l">Server name</span><input type="text" id="w-name" maxlength="24" value="${esc(s.name)}"></label>
+    <label><span class="l">Description <small>(optional)</small></span><input type="text" id="w-desc" maxlength="300" value="${esc(s.description)}" placeholder="Friendly co-op, newbies welcome"></label>
+    <label><span class="l">Region</span><select id="w-region">${s.regions.map(r => `<option value="${r}" ${r === s.region ? 'selected' : ''}>${esc(regionName(r))}</option>`).join('')}</select></label>`;
+  if (step === 1) body = `
+    <h2>Who can join?</h2>
+    <label class="check"><input type="radio" name="acc" value="open" ${s.password ? '' : 'checked'}><span><b>Open</b><br><small class="muted">Anyone who has the address can join.</small></span></label>
+    <label class="check"><input type="radio" name="acc" value="pw" ${s.password ? 'checked' : ''}><span><b>Password</b><br><small class="muted">Only people you give the password to.</small></span></label>
+    <label id="w-pwrow" ${s.password ? '' : 'hidden'}><span class="l">Password</span><input type="text" id="w-pw" value="${esc(s.password)}" placeholder="something easy to say out loud"></label>
+    <div class="row"><label><span class="l">Player slots</span><input type="number" id="w-max" min="1" max="64" value="${s.maxPlayers}"></label>
+    <label><span class="l">Rules</span><select id="w-rules"><option value="safe" ${s.rulesPreset === 'safe' ? 'selected' : ''}>Safe - fight for fun, nothing is lost</option><option value="full" ${s.rulesPreset === 'full' ? 'selected' : ''}>Full stakes - damage and death are real</option><option value="custom" ${s.rulesPreset === 'custom' ? 'selected' : ''}>Custom (set later)</option></select></label></div>`;
+  if (step === 2) {
+    body = `<h2>Plug-ins</h2><p class="muted">Optional. Players need the same <b>gameplay</b> plug-ins as the server; the game offers them a one-click <b>Install &amp; Join</b>. Skip this to run the stock game. (Art and sound plug-ins never block anyone.)</p>
+      <input type="text" id="w-q" placeholder="Search plug-ins" value="${esc(w.q)}"><div id="w-plugs" style="margin-top:10px;max-height:300px;overflow:auto"></div>`;
+  }
+  if (step === 3) body = `
+    <h2>Public listing</h2>
+    <label class="check"><input type="radio" name="pub" value="no" ${s.publicListed ? '' : 'checked'}><span><b>Just my friends</b><br><small class="muted">Share the address yourself. Also visible to anyone on your home network.</small></span></label>
+    <label class="check"><input type="radio" name="pub" value="yes" ${s.publicListed ? 'checked' : ''}><span><b>List it in the public server list</b><br><small class="muted">The panel prepares the entry; you submit it on GitHub. Needs a server reachable from the internet (a VPS, or a forwarded port).</small></span></label>
+    <div id="w-pubrow" ${s.publicListed ? '' : 'hidden'}><div class="row"><label><span class="l">Your name</span><input type="text" id="w-owner" value="${esc(s.ownerName)}"></label>
+    <label><span class="l">Contact</span><input type="text" id="w-contact" value="${esc(s.ownerContact)}" placeholder="Discord name or email"></label></div>
+    <label><span class="l">Public address</span><input type="text" id="w-addr" value="${esc(s.publicAddress)}" placeholder="play.example.com or your public IP"></label></div>`;
+  app.innerHTML = `<div class="center"><div class="card wizard">
+    <div class="brand" style="padding:0 0 12px">${LOGO}<div>Welcome to NovaSwift<small>Server setup - step ${step + 1} of 4: ${steps[step]}</small></div></div>
+    <div class="steps">${steps.map((_, i) => `<i class="${i <= step ? 'on' : ''}"></i>`).join('')}</div>
+    ${body}<div class="err" id="err"></div>
+    <div class="actions" style="justify-content:space-between;margin-top:10px">
+      <span>${step > 0 ? '<button id="w-back">Back</button>' : '<button id="w-skip" class="small">Skip setup</button>'}</span>
+      <button class="primary" id="w-next">${step === 3 ? 'Finish' : 'Next'}</button></div></div></div>`;
+  const grab = () => {
+    if (step === 0) { s.name = $('#w-name').value; s.description = $('#w-desc').value; s.region = $('#w-region').value; }
+    if (step === 1) { s.password = $('input[name=acc]:checked').value === 'pw' ? $('#w-pw').value : ''; s.maxPlayers = +$('#w-max').value || 8; s.rulesPreset = $('#w-rules').value; }
+    if (step === 3) { s.publicListed = $('input[name=pub]:checked').value === 'yes'; s.ownerName = $('#w-owner').value; s.ownerContact = $('#w-contact').value; s.publicAddress = $('#w-addr').value; }
+  };
+  if (step === 1) $$('input[name=acc]').forEach(r => r.onchange = () => { $('#w-pwrow').hidden = r.value !== 'pw' || !r.checked; if (r.checked && r.value === 'pw') $('#w-pw').focus(); });
+  if (step === 3) $$('input[name=pub]').forEach(r => r.onchange = () => { $('#w-pubrow').hidden = $('input[name=pub]:checked').value !== 'yes'; });
+  if (step === 2) wizPlugins();
+  const back = $('#w-back'); if (back) back.onclick = () => { grab(); w.step--; renderWizard(); };
+  const skip = $('#w-skip'); if (skip) skip.onclick = async () => { try { await api('setup/complete', 'POST', {}); state.session.setupDone = true; render(); } catch (e) { fail(e); } };
+  $('#w-next').onclick = async () => {
+    grab();
+    if (step === 0 && !s.name.trim()) { $('#err').textContent = 'Give the server a name.'; return; }
+    if (step === 1 && $('input[name=acc]:checked').value === 'pw' && !s.password) { $('#err').textContent = 'Type a password, or choose Open.'; return; }
+    if (step < 3) { w.step++; renderWizard(); return; }
+    if (s.publicListed && (!s.ownerName.trim() || !s.ownerContact.trim())) { $('#err').textContent = 'Add your name and a way to contact you, so the list owners can reach you.'; return; }
+    $('#w-next').disabled = true;
+    try {
+      const out = await api('settings', 'POST', s);
+      for (const id of w.pick) await api('plugins/enable', 'POST', { id, enabled: true });
+      await api('setup/complete', 'POST', {});
+      state.session.setupDone = true; state.wiz = null; state.page = 'dashboard'; state.firstDone = true;
+      render();
+    } catch (e) { $('#err').textContent = e.message; $('#w-next').disabled = false; }
+  };
+}
+function regionName(r) { return ({ 'na-east': 'North America (East)', 'na-west': 'North America (West)', sa: 'South America', eu: 'Europe', af: 'Africa', me: 'Middle East', as: 'Asia', oc: 'Oceania', global: 'Anywhere / global' })[r] || r; }
+async function wizPlugins() {
+  const w = state.wiz;
+  const draw = () => {
+    const q = w.q.toLowerCase();
+    const list = (w.catalog || []).filter(p => !q || (p.name + p.summary + p.author).toLowerCase().includes(q));
+    $('#w-plugs').innerHTML = !w.catalog ? '<div class="empty">Loading the plug-in catalog...</div>' : list.length ? list.map(p => `
+      <label class="check"><input type="checkbox" data-id="${esc(p.id)}" ${w.pick.has(p.id) ? 'checked' : ''}><span><b>${esc(p.name)}</b> <small class="muted">by ${esc(p.author)}${p.totalConversion ? ' - total conversion' : ''}</small><br><small class="muted">${esc(p.summary)}</small></span></label>`).join('')
+      : '<div class="empty">Nothing matches.</div>';
+    $$('#w-plugs input').forEach(c => c.onchange = () => { c.checked ? w.pick.add(c.dataset.id) : w.pick.delete(c.dataset.id); });
+  };
+  $('#w-q').oninput = e => { w.q = e.target.value; draw(); };
+  draw();
+  if (!w.catalog) {
+    try { let d = await api('plugins'); if (!d.catalog.length) { await api('plugins/refresh', 'POST', {}); await new Promise(r => setTimeout(r, 2500)); d = await api('plugins'); } w.catalog = d.catalog; if (!d.catalog.length) toast(d.catalogError || "Couldn't load the catalog; you can add plug-ins later.", 'bad'); }
+    catch (e) { w.catalog = []; }
+    if (state.wiz === w && w.step === 2) draw();
+  }
+}
+
+/* ---------- shell ---------- */
+const PAGES = [['dashboard', 'Dashboard'], ['players', 'Players'], ['settings', 'Settings'], ['plugins', 'Plug-ins'], ['public', 'Public listing'], ['network', 'Network'], ['logs', 'Logs'], ['bans', 'Bans']];
+function renderShell() {
+  app.innerHTML = `<div class="shell"><aside class="side">
+    <div class="brand">${LOGO}<div>NovaSwift<small>Dedicated Server</small></div></div>
+    <nav class="nav">${PAGES.map(([id, label]) => `<a data-page="${id}" class="${state.page === id ? 'on' : ''}" tabindex="0">${label}${id === 'players' ? '<span class="badge" id="nb-players" hidden></span>' : ''}</a>`).join('')}</nav>
+    <div class="spacer"></div><small class="muted" style="padding:0 10px" id="side-ver"></small>
+    <a class="btn small" id="logout" style="margin:8px 4px 0">Sign out</a></aside>
+    <main class="main" id="page"></main></div>`;
+  $$('.nav a').forEach(a => { a.onclick = () => go(a.dataset.page); a.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') go(a.dataset.page); }; });
+  $('#logout').onclick = async () => { await api('logout', 'POST', {}).catch(() => {}); state.session = await api('session'); render(); };
+  go(state.page);
+}
+function go(page) {
+  state.page = page; clearInterval(state.timer);
+  $$('.nav a').forEach(a => a.classList.toggle('on', a.dataset.page === page));
+  const fn = { dashboard: pgDashboard, players: pgPlayers, settings: pgSettings, plugins: pgPlugins, public: pgPublic, network: pgNetwork, logs: pgLogs, bans: pgBans }[page];
+  fn();
+}
+async function refreshStatus() {
+  try { state.status = await api('status'); } catch (e) { return null; }
+  const nb = $('#nb-players'); if (nb) { nb.hidden = !state.status.players; nb.textContent = state.status.players; }
+  const sv = $('#side-ver'); if (sv) sv.textContent = 'Server ' + state.status.version;
+  return state.status;
+}
+const pageEl = () => $('#page');
+function head(title, extra = '') { return `<div class="top"><h1>${title}</h1>${extra}</div>`; }
+function loopPage(fn, ms) { fn(); state.timer = setInterval(fn, ms); }
+
+/* ---------- dashboard ---------- */
+function pgDashboard() {
+  pageEl().innerHTML = head('Dashboard', '<span id="d-state"></span>') + '<div id="d-body"><div class="boot">Loading...</div></div>';
+  loopPage(async () => {
+    if (state.page !== 'dashboard') return;
+    const s = await refreshStatus(); if (!s || !$('#d-body')) return;
+    $('#d-state').innerHTML = s.running ? '<span class="pill ok"><i class="dot"></i>Running</span>' : `<span class="pill bad"><i class="dot"></i>${esc(s.stateText)}</span>`;
+    const warns = [];
+    if (!s.running) warns.push(['bad', 'The game server is not running', esc(s.stateText)]);
+    if (s.update.available) warns.push(['warn', `Server ${esc(s.update.latest)} is available`, `You have ${esc(s.version)}. <a href="${esc(s.update.url)}" target="_blank" rel="noopener">Download it</a> or use Settings to update.`]);
+    if (s.missingPlugins.length) warns.push(['warn', 'Some plug-ins are not installed yet', 'Missing: ' + esc(s.missingPlugins.join(', ')) + '. Open Plug-ins to install them; players can not match until then.']);
+    if (s.adminExposed) warns.push(['warn', 'The admin panel is open to your network over plain HTTP', 'Anyone who can reach port ' + s.adminPort + ' can try to sign in. Use a strong password, or choose "this computer only" in Settings and reach it with an SSH tunnel.']);
+    if (s.restartRequired.length) warns.push(['warn', 'Restart needed', esc(s.restartRequired.join(' '))]);
+    $('#d-body').innerHTML = `
+      ${warns.map(w => `<div class="card ${w[0]}"><b>${w[1]}</b><br>${w[2]}</div>`).join('')}
+      <div class="card"><h3>Players join at</h3>
+        <div class="addr"><code id="d-addr">${esc(s.address)}</code><button class="primary" data-copy="${esc(s.address)}">Copy</button></div>
+        <small class="muted">${esc(s.name)} - using ${esc(s.addressSource)}. In the game: Multiplayer, Quick Connect${s.passwordSet ? ', then the password' : ''}. Not reachable from outside? See <a href="#" data-go="network">Network</a>.</small></div>
+      <div class="grid">
+        <div class="stat"><div class="k">Players</div><div class="v">${s.players} / ${s.maxPlayers}</div><div class="s">Peak ${s.peakPlayers} - ${s.joins} joins${s.refusals ? ' - ' + s.refusals + ' refused' : ''}</div></div>
+        <div class="stat"><div class="k">Uptime</div><div class="v">${fmtDur(s.uptime)}</div><div class="s">Rules: ${esc(s.rules)}${s.passwordSet ? ' - password' : ' - open'}</div></div>
+        <div class="stat"><div class="k">Bandwidth</div><div class="v">${fmtRate(s.outBps)}</div><div class="s">out - in ${fmtRate(s.inBps)}</div><div class="s">Total ${fmtBytes(s.bytesSent)} out / ${fmtBytes(s.bytesReceived)} in</div></div>
+        <div class="stat"><div class="k">Version</div><div class="v">${esc(s.version)}</div><div class="s">Protocol ${s.protocol} - game ${esc(s.gameVersion)} - ${esc(s.platform)}</div></div>
+      </div>
+      <div class="card" style="margin-top:16px"><h3>Plug-ins</h3>
+        ${s.requiredPlugins.length ? `<p>Players must have: <span class="chips">${s.requiredPlugins.map(n => `<span class="pill info">${esc(n)}</span>`).join('')}</span></p>` : '<p>Stock game: players need no plug-ins.</p>'}
+        ${s.optionalPlugins.length ? `<p>Optional (art/sound only): <span class="chips">${s.optionalPlugins.map(n => `<span class="pill">${esc(n)}</span>`).join('')}</span></p>` : ''}
+      </div>
+      ${s.recentRefusals.length ? `<div class="card"><h3>Recent refused joins</h3>${s.recentRefusals.map(r => `<div class="muted">${esc(r)}</div>`).join('')}</div>` : ''}
+      ${state.firstDone ? '<div class="card"><b>You are set up.</b> Share the address above. If friends outside your home can\'t connect, open the Network page.</div>' : ''}
+      <small class="muted">Data folder: <code>${esc(s.dataFolder)}</code></small>`;
+    $$('[data-copy]').forEach(b => b.onclick = () => copy(b.dataset.copy));
+    $$('[data-go]').forEach(a => a.onclick = e => { e.preventDefault(); go(a.dataset.go); });
+  }, 2000);
+}
+
+/* ---------- players ---------- */
+function pgPlayers() {
+  pageEl().innerHTML = head('Players') + `<div class="card" id="pl"><div class="boot">Loading...</div></div>
+    <div class="card"><h3>Announce to everyone</h3><div class="row" style="align-items:end"><label style="flex:4 1 300px;margin:0"><span class="l">Message (shown in chat as [Server])</span><input type="text" id="say" maxlength="240"></label><button class="primary" id="say-go" style="flex:0 0 auto">Send</button></div></div>`;
+  $('#say-go').onclick = async () => { const t = $('#say').value.trim(); if (!t) return; try { await api('players/message', 'POST', { text: t }); $('#say').value = ''; toast('Sent.', 'ok'); } catch (e) { fail(e); } };
+  $('#say').onkeydown = e => { if (e.key === 'Enter') $('#say-go').click(); };
+  loopPage(async () => {
+    if (state.page !== 'players') return;
+    let d; try { d = await api('players'); } catch (e) { return; }
+    const box = $('#pl'); if (!box) return;
+    box.innerHTML = d.players.length ? `<table><tr><th>Name</th><th>Ping</th><th>System</th><th>Online</th><th>Address</th><th></th></tr>${d.players.map(p => `<tr>
+      <td><b>${esc(p.name)}</b> <small class="muted">#${p.id}</small></td><td>${p.pingMs >= 0 ? p.pingMs + ' ms' : '-'}</td><td>${p.systemID != null ? p.systemID : '-'}</td><td>${fmtDur(p.seconds)}</td><td class="mono">${esc(p.ip)}</td>
+      <td class="actions"><button class="small" data-msg="${p.id}">Message</button><button class="small" data-kick="${p.id}">Kick</button><button class="small danger" data-ban="${p.id}">Ban</button></td></tr>`).join('')}</table>`
+      : '<div class="empty">Nobody is online right now.<br><small>Players appear here when they join.</small></div>';
+    $$('[data-kick]').forEach(b => b.onclick = () => kick(+b.dataset.kick, false));
+    $$('[data-ban]').forEach(b => b.onclick = () => kick(+b.dataset.ban, true));
+    $$('[data-msg]').forEach(b => b.onclick = async () => { const t = prompt('Message to this player:'); if (t) api('players/message', 'POST', { id: +b.dataset.msg, text: t }).then(() => toast('Sent.', 'ok')).catch(fail); });
+  }, 2000);
+}
+async function kick(id, ban) {
+  const why = prompt(ban ? 'Ban this player\'s address. Reason shown to them (optional):' : 'Kick this player. Reason shown to them (optional):');
+  if (why === null) return;
+  try { await api('players/kick', 'POST', { id, ban, reason: why }); toast(ban ? 'Banned.' : 'Kicked.', 'ok'); } catch (e) { fail(e); }
+}
+
+/* ---------- settings ---------- */
+async function pgSettings() {
+  pageEl().innerHTML = head('Settings') + '<div class="boot">Loading...</div>';
+  let s; try { s = state.settings = await api('settings'); } catch (e) { return fail(e); }
+  const up = await api('update').catch(() => null);
+  const f = (k, label, hint, type = 'text', extra = '') => `<label><span class="l">${label}</span><input type="${type}" data-k="${k}" value="${esc(s[k])}" ${extra}>${hint ? `<span class="hint">${hint}</span>` : ''}</label>`;
+  const c = (k, label, hint) => `<label class="check"><input type="checkbox" data-k="${k}" ${s[k] ? 'checked' : ''}><span>${label}${hint ? `<br><small class="muted">${hint}</small>` : ''}</span></label>`;
+  pageEl().innerHTML = head('Settings') + `<form id="sf">
+    <div class="card"><h3>Server</h3>
+      ${f('name', 'Name', 'Shown in the server list (up to 24 characters).', 'text', 'maxlength="24"')}
+      ${f('description', 'Description', 'One line about your server.')}
+      ${f('motd', 'Welcome message', 'Sent to each player in chat when they join. Leave empty for none.')}
+      <div class="row"><label><span class="l">Region</span><select data-k="region">${s.regions.map(r => `<option value="${r}" ${r === s.region ? 'selected' : ''}>${esc(regionName(r))}</option>`).join('')}</select></label>
+      ${f('maxPlayers', 'Player slots', '1 to 64. The server itself does not use a slot.', 'number', 'min="1" max="64"')}</div>
+      ${f('password', 'Join password', 'Leave empty for an open server.')}</div>
+    <div class="card"><h3>Rules</h3>
+      <label><span class="l">Preset</span><select data-k="rulesPreset"><option value="safe">Safe - players can fight, nothing is lost for real</option><option value="full">Full stakes - damage, death and friendly fire are real</option><option value="custom">Custom</option></select></label>
+      <div id="custom" ${s.rulesPreset === 'custom' ? '' : 'hidden'}>${c('allowPvP', 'Players can fight each other')}${c('pvpDamageReal', 'Damage from other players is real')}${c('deathReal', 'Dying to another player is permanent')}${c('friendlyFire', 'Friendly fire')}${c('allowTrade', 'Players can trade')}</div>
+      ${f('gameSpeed', 'Game speed', '1 is normal (0.25 to 4). Applies to everyone online.', 'number', 'step="0.25" min="0.25" max="4"')}
+      <small class="muted">Rules change instantly for players who are online.</small></div>
+    <div class="card"><h3>Network</h3>
+      ${f('port', 'Game port (UDP)', `Players connect here. Port + 1 (${+s.port + 1}) answers server-list pings. Changing it restarts the game port and drops players.`, 'number', 'min="1024" max="65534"')}
+      ${c('lanAnnounce', 'Show up for people on my home network (LAN)')}
+      ${c('upnp', 'Open the port on my router automatically (UPnP)', 'Works on many home routers. See the Network page for the result.')}
+      <div class="row"><label><span class="l">Admin panel is reachable from</span><select data-k="adminBind"><option value="0.0.0.0">Any computer that can reach it</option><option value="127.0.0.1">This computer only (safest)</option></select><span class="hint">Takes effect after a restart.</span></label>
+      ${f('adminPort', 'Admin panel port (TCP)', 'Takes effect after a restart.', 'number', 'min="1024" max="65535"')}</div></div>
+    <div class="actions" style="justify-content:flex-start;margin-bottom:18px"><button class="primary" type="submit">Save changes</button><span id="sres" class="muted"></span></div></form>
+    <div class="card"><h3>Admin password</h3><div class="row"><label><span class="l">Current</span><input type="password" id="pw0" autocomplete="current-password"></label><label><span class="l">New (8+ characters)</span><input type="password" id="pw1" autocomplete="new-password"></label></div><button id="pw-go">Change password</button></div>
+    <div class="card"><h3>Updates and startup</h3>
+      ${up ? `<p>Server version <b>${esc(up.current)}</b>. ${up.available ? `<span class="pill warn">${esc(up.latest)} is available</span> <a href="${esc(up.url)}" target="_blank" rel="noopener">Release notes and download</a>` : up.latest ? '<span class="pill ok">Up to date</span>' : (up.error ? esc(up.error) : 'Not checked yet.')}</p>
+      <div class="actions" style="justify-content:flex-start"><button id="up-check">Check now</button>${up.available && up.canAutoApply ? '<button class="primary" id="up-apply">Install update</button>' : ''}</div><br>` : ''}
+      ${c('checkForUpdates', 'Check for new server versions')}${c('autoUpdate', 'Install updates automatically', 'Replaces the program file; takes effect after a restart (immediately if run as a service). Off by default.')}
+      <div id="auto"></div></div>
+    <div class="card"><h3>Stop the server</h3><button class="danger" id="stop">Shut down</button> <small class="muted">If the server runs as a service it will start again by itself.</small></div>`;
+  $('[data-k=rulesPreset]').value = s.rulesPreset; $('[data-k=adminBind]').value = s.adminBind;
+  $('[data-k=rulesPreset]').onchange = e => { $('#custom').hidden = e.target.value !== 'custom'; };
+  $('#sf').onsubmit = async ev => {
+    ev.preventDefault();
+    const body = {};
+    $$('[data-k]').forEach(el => { body[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? +el.value : el.value; });
+    try {
+      const r = await api('settings', 'POST', body);
+      $('#sres').textContent = (r.applied || []).join(' ') + (r.restartedNetwork ? ' The game port was reopened; players must rejoin.' : '') + ' ' + (r.needsRestart || []).join(' ');
+      toast('Saved.', 'ok');
+    } catch (e) { fail(e); $('#sres').textContent = ''; }
+  };
+  $('#pw-go').onclick = async () => { try { await api('admin-password', 'POST', { current: $('#pw0').value, new: $('#pw1').value }); toast('Password changed.', 'ok'); $('#pw0').value = $('#pw1').value = ''; } catch (e) { fail(e); } };
+  const uc = $('#up-check'); if (uc) uc.onclick = async () => { await api('update/check', 'POST', {}).catch(fail); pgSettings(); };
+  const ua = $('#up-apply'); if (ua) ua.onclick = async () => { ua.disabled = true; try { const r = await api('update/apply', 'POST', {}); toast(r.message, 'ok'); } catch (e) { fail(e); ua.disabled = false; } };
+  $('#stop').onclick = async () => { if (confirm('Shut the server down? Players will be disconnected.')) { await api('shutdown', 'POST', {}).catch(() => {}); toast('Shutting down.', 'ok'); } };
+  const a = s.autostart;
+  $('#auto').innerHTML = a.supported ? `<label class="check"><input type="checkbox" id="as" ${a.enabled ? 'checked' : ''}><span>Start with this computer<br><small class="muted">${esc(a.note)}</small></span></label>` : `<p class="muted">${esc(a.note)}</p>`;
+  const as = $('#as'); if (as) as.onchange = async () => { try { const r = await api('autostart', 'POST', { enabled: as.checked }); toast(r.message, 'ok'); } catch (e) { as.checked = !as.checked; fail(e); } };
+}
+
+/* ---------- plug-ins ---------- */
+function pgPlugins() {
+  pageEl().innerHTML = head('Plug-ins', '<button id="pl-refresh" class="small">Refresh catalog</button>') + `<div class="tabs"><button data-t="enabled">On this server</button><button data-t="catalog">Browse catalog</button><button data-t="file">Add a file</button></div><div id="pl-body"></div>`;
+  $$('.tabs button').forEach(b => b.onclick = () => { state.plugTab = b.dataset.t; draw(); });
+  $('#pl-refresh').onclick = async () => { await api('plugins/refresh', 'POST', {}).catch(fail); toast('Refreshing...', 'ok'); setTimeout(load, 2000); };
+  let data = null;
+  const load = async () => { try { data = await api('plugins'); draw(); } catch (e) { fail(e); } };
+  const act = async (path, body, msg) => { try { data = await api(path, 'POST', body); if (msg) toast(msg, 'ok'); draw(); } catch (e) { fail(e); } };
+  const jobHTML = j => !j ? '' : j.state === 'failed' ? `<div class="err">${esc(j.message)}</div>` : (j.state === 'done' ? '' : `<div class="muted">${esc(j.message || j.state)}</div><div class="bar"><i style="width:${j.progress != null ? Math.round(j.progress * 100) : 30}%"></i></div>`);
+  function draw() {
+    if (!data || state.page !== 'plugins' || !$('#pl-body')) return;
+    $$('.tabs button').forEach(b => b.classList.toggle('primary', b.dataset.t === state.plugTab));
+    const body = $('#pl-body');
+    if (state.plugTab === 'enabled') {
+      body.innerHTML = `<div class="card"><p class="muted">Players must have every <span class="pill info">required</span> plug-in. <span class="pill">optional</span> ones only change art or sound and never block a join. Current gameplay signature: <code>${esc(data.signature)}</code></p>` +
+        (data.enabled.length ? data.enabled.map(p => `<div class="plug"><div><span class="t">${esc(p.name)}</span> ${p.totalConversion ? '<span class="pill warn">total conversion</span> ' : ''}<span class="pill ${p.role === 'required' ? 'info' : ''}">${p.role === 'pending' ? 'not installed' : p.role}</span> ${p.fromCatalog ? '' : '<span class="pill warn">not in catalog - players must get this themselves</span>'}${jobHTML(p.job)}</div>
+          <div class="actions"><button class="small" data-off="${esc(p.id)}">Turn off</button></div></div>`).join('') : '<div class="empty">No plug-ins. Players use the stock game.<br><small>Browse the catalog to add some.</small></div>') + '</div>';
+      $$('[data-off]').forEach(b => b.onclick = () => act('plugins/enable', { id: b.dataset.off, enabled: false }, 'Turned off. Players with it can no longer join until they disable it.'));
+    } else if (state.plugTab === 'catalog') {
+      const q = state.plugQ.toLowerCase();
+      const list = data.catalog.filter(p => (!q || (p.name + p.summary + p.author + p.tags.join(' ')).toLowerCase().includes(q)) && (state.plugFilter === 'all' || (state.plugFilter === 'tc' ? p.totalConversion : state.plugFilter === 'on' ? p.enabled : !p.totalConversion)));
+      body.innerHTML = `<div class="row" style="margin-bottom:12px"><input type="text" id="pq" placeholder="Search plug-ins" value="${esc(state.plugQ)}"><select id="pf"><option value="all">All</option><option value="plug">Plug-ins</option><option value="tc">Total conversions</option><option value="on">Enabled</option></select></div>
+        ${data.catalogError ? `<div class="card warn">${esc(data.catalogError)}</div>` : ''}${!data.catalog.length ? '<div class="card empty">The catalog is empty or could not be loaded. Check the internet connection and press Refresh catalog.</div>' : ''}
+        <div class="card">${list.map(p => `<div class="plug"><div><span class="t">${esc(p.name)}</span> <small class="muted">${esc(p.version)} by ${esc(p.author)}${p.sizeBytes ? ' - ' + fmtBytes(p.sizeBytes) : ''}</small> ${p.totalConversion ? '<span class="pill warn">total conversion</span>' : ''}${p.cosmetic === true ? ' <span class="pill">optional (art/sound)</span>' : ''}<br><small class="muted">${esc(p.summary)}</small>${jobHTML(p.job)}</div>
+          <div class="actions">${p.enabled ? `<button class="small" data-off="${esc(p.id)}">Turn off</button>` : `<button class="small primary" data-on="${esc(p.id)}">${p.installed ? 'Turn on' : 'Install and turn on'}</button>`}</div></div>`).join('') || '<div class="empty">Nothing matches.</div>'}</div>`;
+      $('#pf').value = state.plugFilter;
+      $('#pq').oninput = e => { state.plugQ = e.target.value; const p = e.target.selectionStart; draw(); const n = $('#pq'); n.focus(); n.setSelectionRange(p, p); };
+      $('#pf').onchange = e => { state.plugFilter = e.target.value; draw(); };
+      $$('[data-on]').forEach(b => b.onclick = () => act('plugins/enable', { id: b.dataset.on, enabled: true }, 'Turned on. Downloading if needed...'));
+      $$('[data-off]').forEach(b => b.onclick = () => act('plugins/enable', { id: b.dataset.off, enabled: false }, 'Turned off.'));
+    } else {
+      body.innerHTML = `<div class="card"><h3>Add a plug-in file</h3><p class="muted">For a plug-in that isn't in the NovaSwift catalog. Choose a <b>.zip</b> (or a loose <b>.rez</b> / <b>.ndat</b>). Players will have to get the same file themselves - the game can only auto-install catalog plug-ins.</p>
+        <input type="file" id="pf-file" accept=".zip,.rez,.ndat,.sit,.hqx,.sea,.bin"><br><br><button class="primary" id="pf-go">Upload and turn on</button> <span id="pf-msg" class="muted"></span></div>
+        ${data.local.length ? `<div class="card"><h3>Files on this server</h3>${data.local.map(p => `<div class="plug"><div><span class="t">${esc(p.name)}</span> <small class="muted">${fmtBytes(p.sizeBytes)}</small> ${p.enabled ? '<span class="pill ok">on</span>' : ''}</div><div class="actions"><button class="small danger" data-rm="${esc(p.id)}">Delete</button></div></div>`).join('')}</div>` : ''}`;
+      $('#pf-go').onclick = async () => {
+        const f = $('#pf-file').files[0]; if (!f) return toast('Choose a file first.', 'bad');
+        $('#pf-msg').textContent = 'Uploading ' + fmtBytes(f.size) + '...'; $('#pf-go').disabled = true;
+        try { const r = await api('plugins/upload?name=' + encodeURIComponent(f.name), 'POST', undefined, f); data = r; toast(r.note, 'ok'); state.plugTab = 'enabled'; draw(); }
+        catch (e) { fail(e); $('#pf-msg').textContent = ''; $('#pf-go').disabled = false; }
+      };
+      $$('[data-rm]').forEach(b => b.onclick = () => { if (confirm('Delete this plug-in from the server?')) act('plugins/remove', { id: b.dataset.rm }, 'Deleted.'); });
+    }
+  }
+  loopPage(() => { if (state.page === 'plugins' && state.plugTab !== 'file' && !(document.activeElement && document.activeElement.id === 'pq')) load(); }, 2500);
+}
+
+/* ---------- public listing ---------- */
+async function pgPublic() {
+  pageEl().innerHTML = head('Public listing') + '<div class="boot">Loading...</div>';
+  let p, s; try { [p, s] = await Promise.all([api('public'), api('settings')]); } catch (e) { return fail(e); }
+  pageEl().innerHTML = head('Public listing') + `
+    <div class="card"><p>The public server list is a file on GitHub, so there is nothing to sign up for and nothing is uploaded automatically. Fill in the details, then submit the entry below as a pull request. Once it is merged, your server appears in everyone's <b>Browse</b> tab.</p>
+    <label class="check"><input type="checkbox" id="pl-on" ${s.publicListed ? 'checked' : ''}><span>I want to list this server publicly <small class="muted">(marks it in this panel; the list itself is edited on GitHub)</small></span></label>
+    <div class="row"><label><span class="l">Public address</span><input type="text" id="pl-addr" value="${esc(s.publicAddress)}" placeholder="play.example.com or a public IP"><span class="hint">What players type to reach you. A DNS name is better than an IP that may change.</span></label>
+    <label><span class="l">Website <small>(optional, https)</small></span><input type="text" id="pl-web" value="${esc(s.website)}"></label></div>
+    <div class="row"><label><span class="l">Your name</span><input type="text" id="pl-own" value="${esc(s.ownerName)}"></label><label><span class="l">Contact</span><input type="text" id="pl-con" value="${esc(s.ownerContact)}" placeholder="Discord name or email"></label></div>
+    <button id="pl-save" class="primary">Save details</button></div>
+    <div class="card"><h3>Checklist</h3>${p.checks.map(c => `<div>${c.ok ? '<span class="pill ok">ok</span>' : '<span class="pill warn">todo</span>'} ${esc(c.text)} ${c.ok ? '' : `<small class="muted">${esc(c.fix)}</small>`}</div>`).join('')}</div>
+    <div class="card"><h3>Your entry</h3><p class="muted">Add this to the <code>servers</code> list in <code>servers/servers.json</code> (it includes the content hash of each gameplay plug-in you run).</p>
+    <textarea id="pl-json" readonly>${esc(p.entry)}</textarea><div class="actions" style="justify-content:flex-start;margin-top:10px"><button id="pl-copy">Copy entry</button>
+    <a class="btn primary" href="${esc(p.editURL)}" target="_blank" rel="noopener">Open the pull request on GitHub</a><a class="btn" href="${esc(p.readme)}" target="_blank" rel="noopener">Instructions</a></div>
+    <p class="muted" style="margin-top:10px">On GitHub: click the edit (pencil) button, paste the entry inside the list, then "Propose changes". GitHub turns that into a pull request for you. The list checks it automatically before it is merged. Re-copy the entry after you change plug-ins.</p></div>`;
+  $('#pl-copy').onclick = () => copy(p.entry);
+  $('#pl-save').onclick = async () => { try { await api('settings', 'POST', { publicListed: $('#pl-on').checked, publicAddress: $('#pl-addr').value, website: $('#pl-web').value, ownerName: $('#pl-own').value, ownerContact: $('#pl-con').value }); toast('Saved.', 'ok'); pgPublic(); } catch (e) { fail(e); } };
+}
+
+/* ---------- network ---------- */
+async function pgNetwork() {
+  pageEl().innerHTML = head('Network - can players reach me?') + '<div id="nw"><div class="boot">Loading...</div></div>';
+  const draw = async () => {
+    let n; try { n = await api('network'); } catch (e) { return fail(e); }
+    if (state.page !== 'network') return;
+    const lan = n.local.filter(a => a.kind === 'lan');
+    $('#nw').innerHTML = `
+      <div class="card"><h3>Ports to open</h3><table><tr><th>Port</th><th>Protocol</th><th>Needed for</th></tr>
+        <tr><td><b>${n.gamePort}</b></td><td>UDP</td><td>Players connecting</td></tr><tr><td><b>${n.queryPort}</b></td><td>UDP</td><td>Server-list pings (optional but recommended)</td></tr></table></div>
+      <div class="card"><h3>Your addresses</h3>
+        ${n.publicChecked ? (n.publicIP ? `<p>Public (internet) address: <b class="mono">${esc(n.publicIP)}</b> <button class="small" data-copy="${esc(n.publicIP)}">Copy</button></p>` : '<p class="err">Could not look up the public address: this computer seems to have no internet access.</p>') : '<p class="muted">Not checked yet.</p>'}
+        ${n.cgnat ? '<div class="card warn"><b>Your internet provider shares one address between customers (CGNAT).</b> Port forwarding can not work. Use a small VPS, or Tailscale/ZeroTier for friends.</div>' : ''}
+        ${lan.length ? `<p>Same home network: ${lan.map(a => `<b class="mono">${esc(a.ip)}:${n.gamePort}</b>`).join(', ')}</p>` : ''}
+        ${n.tailscale ? `<p>Tailscale / VPN: <b class="mono">${esc(n.tailscale)}:${n.gamePort}</b> - friends on your tailnet can join here with no port forwarding.</p>` : ''}
+        <div class="actions" style="justify-content:flex-start"><button id="nw-ip" class="primary">Look up my public address</button><button id="nw-self">Test the server on this computer</button><button id="nw-upnp">Try automatic port forwarding (UPnP)</button></div>
+        <div id="nw-res" style="margin-top:10px"></div>
+        ${n.upnp ? `<p class="${n.upnp.ok ? '' : 'err'}" style="margin-top:10px">UPnP: ${esc(n.upnp.message)}</p>` : ''}</div>
+      <div class="card"><h3>How to let friends in</h3>
+        <details open><summary>At home: forward the port on your router</summary><ol><li>Open your router's page (often <span class="mono">192.168.0.1</span> or <span class="mono">192.168.1.1</span>).</li><li>Find <b>Port forwarding</b> (sometimes "Virtual server" or "NAT").</li><li>Forward <b>UDP ${n.gamePort}</b> and <b>UDP ${n.queryPort}</b> to ${lan.length ? `<span class="mono">${esc(lan[0].ip)}</span>` : 'this computer\'s address'}.</li><li>Allow the program through the firewall if your computer asks.</li><li>Give friends your public address and port ${n.gamePort}. Most routers can't test their own public address from inside the house, so ask a friend to try, or use your phone on mobile data.</li></ol></details>
+        <details><summary>On a VPS (Google Cloud, Hetzner...)</summary><p>Open <b>UDP ${n.gamePort}-${n.queryPort}</b> in the provider's firewall (and <span class="mono">sudo ufw allow ${n.gamePort}:${n.queryPort}/udp</span> if you use ufw). Keep the admin port closed and reach this panel with an SSH tunnel: <span class="mono">ssh -L ${state.status ? state.status.adminPort : 53737}:localhost:${state.status ? state.status.adminPort : 53737} you@server</span>.</p></details>
+        <details><summary>Can't forward ports? Use Tailscale</summary><p>Install <a href="https://tailscale.com" target="_blank" rel="noopener">Tailscale</a> on this computer and on each friend's, sign in to the same account (or share the machine), and have them join the <span class="mono">100.x.y.z</span> address shown above. No router settings needed.</p></details></div>`;
+    $$('[data-copy]').forEach(b => b.onclick = () => copy(b.dataset.copy));
+    $('#nw-ip').onclick = async e => { e.target.disabled = true; try { await api('network/publicip', 'POST', {}); } catch (x) { fail(x); } draw(); };
+    $('#nw-upnp').onclick = async e => { e.target.disabled = true; e.target.textContent = 'Asking your router...'; try { await api('network/upnp', 'POST', {}); } catch (x) { fail(x); } draw(); };
+    $('#nw-self').onclick = async () => { try { const r = await api('network/selftest', 'POST', {}); $('#nw-res').innerHTML = `<span class="pill ${r.ok ? 'ok' : 'bad'}">${r.ok ? 'ok' : 'failed'}</span> ${esc(r.message)}`; } catch (x) { fail(x); } };
+  };
+  draw();
+}
+
+/* ---------- logs ---------- */
+function pgLogs() {
+  pageEl().innerHTML = head('Logs', '<span class="actions" style="margin-left:auto"><button class="small" id="lg-pause">Pause</button><button class="small" id="lg-clear">Clear</button><label style="margin:0"><select id="lg-f"><option value="all">Everything</option><option value="warn">Warnings and errors</option></select></label></span>') + '<div class="log" id="log"></div><small class="muted">Also saved to <code>logs/server.log</code> in the data folder.</small>';
+  state.logAfter = 0; state.logPaused = false;
+  $('#lg-pause').onclick = e => { state.logPaused = !state.logPaused; e.target.textContent = state.logPaused ? 'Resume' : 'Pause'; };
+  $('#lg-clear').onclick = () => { $('#log').innerHTML = ''; };
+  loopPage(async () => {
+    if (state.page !== 'logs' || state.logPaused) return;
+    let d; try { d = await api('logs?after=' + state.logAfter); } catch (e) { return; }
+    const box = $('#log'); if (!box || !d.lines.length) return;
+    const stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
+    const only = $('#lg-f').value === 'warn';
+    for (const l of d.lines) { if (only && l.level === 'info') continue; const div = document.createElement('div'); div.className = l.level; div.textContent = l.t; box.appendChild(div); }
+    state.logAfter = d.last;
+    while (box.childElementCount > 1500) box.firstChild.remove();
+    if (stick) box.scrollTop = box.scrollHeight;
+  }, 1200);
+}
+
+/* ---------- bans ---------- */
+async function pgBans() {
+  pageEl().innerHTML = head('Bans') + '<div id="bn"></div>';
+  const draw = async () => {
+    let d; try { d = await api('bans'); } catch (e) { return fail(e); }
+    $('#bn').innerHTML = `<div class="card"><p class="muted">Bans block an IP address from joining. (Kick or ban a connected player from the Players page.) Players on the same home network share one address, so be careful.</p>
+      ${d.bans.length ? `<table><tr><th>Address</th><th>Note</th><th></th></tr>${d.bans.map(b => `<tr><td class="mono">${esc(b.ip)}</td><td>${esc(b.note)}</td><td class="actions"><button class="small" data-un="${esc(b.ip)}">Unban</button></td></tr>`).join('')}</table>` : '<div class="empty">Nobody is banned.</div>'}</div>
+      <div class="card"><h3>Ban an address</h3><div class="row" style="align-items:end"><label style="margin:0"><span class="l">IP address</span><input type="text" id="bn-ip" placeholder="203.0.113.7"></label><label style="margin:0"><span class="l">Note</span><input type="text" id="bn-note" placeholder="why"></label><button class="primary" id="bn-add" style="flex:0 0 auto">Ban</button></div></div>`;
+    $$('[data-un]').forEach(b => b.onclick = async () => { await api('bans/remove', 'POST', { ip: b.dataset.un }).catch(fail); draw(); });
+    $('#bn-add').onclick = async () => { try { await api('bans/add', 'POST', { ip: $('#bn-ip').value.trim(), note: $('#bn-note').value }); toast('Banned.', 'ok'); draw(); } catch (e) { fail(e); } };
+  };
+  draw();
+}
+
+boot();

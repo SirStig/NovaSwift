@@ -5,14 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Download · NOVA Swift</title>
   <meta name="description" content="Download NOVA Swift for Mac, iPhone, iPad and Apple TV (TestFlight), Linux and Steam Deck (beta), plus the dedicated server. Free and open source; bring your own EV Nova data." />
-  <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
+  <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon-64.png?v=brand3" />
   <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
   <meta property="og:title" content="Download NOVA Swift" />
   <meta property="og:image" content="https://sirstig.github.io/NovaSwift/assets/launch-banner.png?v=brand2" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=21" />
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" />
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" /></noscript>
+  <link rel="stylesheet" href="styles.css?v=22" />
 </head>
 <body data-page="download">
   <div class="space-bg" aria-hidden="true"></div>
@@ -129,7 +130,11 @@
             <span class="badge warn">New</span>
             <p style="margin:0">Host a 24/7 multiplayer server on a spare PC, a Raspberry Pi or a cheap VPS. It doesn't need the game or any EV Nova data, and you run it from a web admin panel.</p>
             <div class="actions">
-              <a class="btn btn-primary" href="dedicated-server.html">Server downloads &amp; setup</a>
+              <a class="btn btn-primary" href="dedicated-server.html">Server setup guide</a>
+              <a class="btn btn-ghost" data-asset="server-linux-x64" data-ready="Linux x86_64" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Linux</span></a>
+              <a class="btn btn-ghost" data-asset="server-linux-arm64" data-ready="Linux arm64" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Linux ARM</span></a>
+              <a class="btn btn-ghost" data-asset="server-windows" data-ready="Windows" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Windows</span></a>
+              <a class="btn btn-ghost" data-asset="server-macos" data-ready="macOS" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>macOS</span></a>
             </div>
           </article>
 
@@ -263,8 +268,8 @@
   </footer>
   <!-- footer:end -->
 
-  <script src="starfield.js?v=2"></script>
-  <script src="js/site.js?v=1"></script>
-  <script src="js/live.js?v=1" defer></script>
+  <script src="starfield.js?v=2" defer></script>
+  <script src="js/site.js?v=2" defer></script>
+  <script src="js/live.js?v=2" defer></script>
 </body>
 </html>

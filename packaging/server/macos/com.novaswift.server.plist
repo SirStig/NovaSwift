@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Optional: start the server at login. The easy way is Settings > "Start with this computer" in the admin panel,
+     which writes this file for you. By hand: edit the paths, copy to ~/Library/LaunchAgents/ and run
+     launchctl load ~/Library/LaunchAgents/com.novaswift.server.plist -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.novaswift.server</string>
+  <key>ProgramArguments</key><array>
+    <string>/Users/YOU/NovaSwiftServer/NovaSwiftServer</string>
+    <string>--no-browser</string><string>--no-stdin</string>
+    <string>--data</string><string>/Users/YOU/NovaSwiftServer</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+</dict></plist>

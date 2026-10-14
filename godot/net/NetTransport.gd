@@ -90,7 +90,7 @@ func host(nova: Object, opts: Dictionary) -> int:
 	port = int(opts.get("port", Proto.DEFAULT_PORT))
 	max_players = clampi(int(opts.get("max_players", 8)), 1, 32)
 	display_name = Proto.clean_name(str(opts.get("display_name", "Pilot")))
-	server_name = Proto.clean_name(str(opts.get("name", display_name + "'s game")), "NovaSwift")
+	server_name = Proto.clean_name(str(opts.get("name", display_name + "'s game")), "NovaSwift", Proto.MAX_SERVER_NAME)
 	password = str(opts.get("password", ""))
 	rules_json = str(opts.get("rules_json", JSON.stringify(Proto.rules_for_preset("safe"))))
 	has_local_player = bool(opts.get("has_local_player", true))

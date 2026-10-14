@@ -166,7 +166,7 @@ static func parse(text: String) -> Dictionary:
 				if p is Dictionary:
 					plugins.append({"id": str((p as Dictionary).get("id", "")), "name": str((p as Dictionary).get("name", (p as Dictionary).get("id", ""))),
 						"contentHash": str((p as Dictionary).get("contentHash", ""))})
-		out.append({"id": str(d.get("id", key)), "name": Proto.clean_name(str(d.get("name", host)), host), "host": host, "port": port,
+		out.append({"id": str(d.get("id", key)), "name": Proto.clean_name(str(d.get("name", host)), host, Proto.MAX_SERVER_NAME), "host": host, "port": port,
 			"region": str(d.get("region", "global")), "description": str(d.get("description", "")).substr(0, 300),
 			"owner": str(owner.get("name", "")), "contact": str(owner.get("contact", "")), "rules": str(d.get("rules", "")),
 			"plugins": plugins, "tc": str(d.get("totalConversion", "")), "max": int(d.get("maxPlayers", 0)), "added": str(d.get("added", "")),

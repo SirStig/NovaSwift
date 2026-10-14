@@ -46,9 +46,15 @@
     if (memo[key]) return memo[key];
     var ck = "nova:" + key, hit = null;
     try { hit = JSON.parse(sessionStorage.getItem(ck) || "null"); } catch (e) {}
-    if (hit && Date.now() - hit.t < 5 * 60000) return (memo[key] = Promise.resolve(hit.v));
-    memo[key] = fetch(SRC[key], { cache: "no-cache" }).then(function (r) {
-      if (!r.ok) throw new Error(key + " " + r.status);
+    if (hit && Date.now() - hit.t < 5 * 60000) {
+      // A remembered miss (e.g. no status.json yet) isn't refetched on every page.
+      return (memo[key] = hit.miss ? Promise.reject(new Error(key + " missing")) : Promise.resolve(hit.v));
+    }
+    memo[key] = fetch(SRC[key]).then(function (r) {
+      if (!r.ok) {
+        if (r.status === 404) try { sessionStorage.setItem(ck, JSON.stringify({ t: Date.now(), miss: true })); } catch (e) {}
+        throw new Error(key + " " + r.status);
+      }
       return r.json();
     }).then(function (v) {
       try { sessionStorage.setItem(ck, JSON.stringify({ t: Date.now(), v: v })); } catch (e) {}
@@ -64,6 +70,8 @@
       windows: /windows.*\.(zip|exe|msi)$/i,
       "macos-godot": /macos.*\.(zip|dmg)$/i,
       "server-linux": /server.*linux.*\.(tar\.gz|tgz|zip)$/i,
+      "server-linux-x64": /server.*linux.*(x86_64|amd64).*\.(tar\.gz|tgz|zip)$/i,
+      "server-linux-arm64": /server.*linux.*(arm64|aarch64).*\.(tar\.gz|tgz|zip)$/i,
       "server-windows": /server.*windows.*\.(zip|exe|msi)$/i,
       "server-macos": /server.*macos.*\.(zip|tar\.gz|dmg)$/i
     };

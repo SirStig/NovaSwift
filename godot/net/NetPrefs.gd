@@ -53,7 +53,7 @@ static func saved() -> Array:
 ## Add or update a favourite (matched by host + port). Returns the list.
 static func save_server(nm: String, host: String, port: int, pw: String = "") -> Array:
 	var list: Array = saved()
-	var entry: Dictionary = {"name": Proto.clean_name(nm, host), "host": host, "port": port, "pw": pw}
+	var entry: Dictionary = {"name": Proto.clean_name(nm, host, Proto.MAX_SERVER_NAME), "host": host, "port": port, "pw": pw}
 	var found: bool = false
 	for i in list.size():
 		var e: Dictionary = list[i]

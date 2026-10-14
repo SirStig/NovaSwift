@@ -26,6 +26,8 @@ let package = Package(
         .library(name: "NovaSwiftPluginStore", targets: ["NovaSwiftPluginStore"]),
         // HD / 3D graphics extensions: HD atlases, model baking (Apple only).
         .library(name: "NovaSwiftHD", targets: ["NovaSwiftHD"]),
+        // Standalone dedicated server with a web admin panel: needs no game and no EV Nova data.
+        .executable(name: "novaswift-server", targets: ["NovaSwiftServer"]),
         // Command-line extractor / inspector.
         .executable(name: "novaswift-extract", targets: ["novaswift-extract"]),
         // HD pack tool: build, bake, compare and benchmark graphics packs.
@@ -82,6 +84,21 @@ let package = Package(
                 .copy("Resources/PluginCatalog.json"),
             ]
         ),
+        // Dedicated server: everything except `main` lives in the Core library so tests can drive it.
+        .target(
+            name: "NovaSwiftServerCore",
+            dependencies: [
+                "NovaSwiftNet", "NovaSwiftENet", "NovaSwiftKit", "NovaSwiftPluginStore",
+                .product(name: "Crypto", package: "swift-crypto"),
+            ],
+            path: "Sources/NovaSwiftServerCore",
+            exclude: ["Web"]
+        ),
+        .executableTarget(
+            name: "NovaSwiftServer",
+            dependencies: ["NovaSwiftServerCore"],
+            path: "Sources/NovaSwiftServer"
+        ),
         .executableTarget(
             name: "novaswift-extract",
             dependencies: ["NovaSwiftKit", "NovaSwiftEngine", "NovaSwiftStory"],
@@ -127,6 +144,11 @@ let package = Package(
             name: "NovaSwiftSyncTests",
             dependencies: ["NovaSwiftSync"],
             path: "Tests/NovaSwiftSyncTests"
+        ),
+        .testTarget(
+            name: "NovaSwiftServerTests",
+            dependencies: ["NovaSwiftServerCore", "NovaSwiftENet", "NovaSwiftNet", "NovaSwiftKit"],
+            path: "Tests/NovaSwiftServerTests"
         ),
         .testTarget(
             name: "NovaSwiftPluginStoreTests",

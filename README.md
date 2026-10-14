@@ -88,6 +88,13 @@ pilot; players in the same star system play it together, and the host sets
 the rules: PvP, real damage, friendly fire, permadeath and trading. We run no
 servers. See [MULTIPLAYER.md](docs/MULTIPLAYER.md).
 
+**Dedicated server.** A standalone, always-on server (Linux x86_64/arm64,
+macOS, Docker; Windows untested) that needs neither the game nor any EV Nova
+data. Run it, open the web admin panel it prints, and answer four setup
+questions: players, kick and ban, rules, catalog plug-ins (players get a
+one-click "Install & Join"), the public-listing helper and a port check are all
+there. See [DEDICATED_SERVER.md](docs/DEDICATED_SERVER.md).
+
 **Pilots and iCloud.** Import Windows `.plt` pilots. Classic Mac pilot import
 is in testing. Pilots save to iCloud on Mac, iPad and iPhone, and your imported
 game data syncs through iCloud on every device, Apple TV included. See

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>NOVA Swift: EV Nova, rebuilt from the ground up</title>
   <meta name="description" content="A free, open-source reimplementation of EV Nova (2002), reverse-engineered from the original. Mac, iPhone, iPad, Apple TV, Linux and Steam Deck. Multiplayer, dedicated servers, community plug-ins and a built-in plug-in editor. Bring your own copy of the game." />
-  <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
+  <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon-64.png?v=brand3" />
   <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
   <meta property="og:title" content="NOVA Swift: EV Nova, rebuilt from the ground up" />
   <meta property="og:description" content="The 2002 space classic, reverse-engineered and rebuilt. Mac, iPhone, iPad, Apple TV, Linux and Steam Deck, with multiplayer and plug-ins." />
@@ -14,8 +14,9 @@
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=21" />
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" />
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" /></noscript>
+  <link rel="stylesheet" href="styles.css?v=22" />
 </head>
 <body data-page="index">
   <div class="space-bg" aria-hidden="true"></div>
@@ -129,24 +130,32 @@
         <p class="note" style="color:var(--muted);margin:0">Click any shot to enlarge.</p>
       </div>
       <div class="gallery" data-lightbox>
-        <a class="wide" href="assets/screenshots/flight-hud.webp" data-caption="Flight, with touch controls and the classic status bar (iPhone).">
-          <img src="assets/screenshots/flight-hud.webp" width="1600" height="736" loading="lazy" alt="Flight view with touch controls for turning, thrust and fire, beside the classic status bar." /><span>Flight</span></a>
-        <a href="assets/screenshots/galaxy-map.webp" data-caption="The galaxy map centred on Sol, with planets, services and hypergate routes.">
-          <img src="assets/screenshots/galaxy-map.webp" width="1600" height="736" loading="lazy" alt="The galaxy map centred on Sol." /><span>Galaxy map</span></a>
-        <a href="assets/screenshots/story-guide.webp" data-caption="The Story Guide: every campaign as a series of steps, with what unlocks the next one.">
-          <img src="assets/screenshots/story-guide.webp" width="1800" height="1130" loading="lazy" alt="The Story Guide with campaign progress bars and a step timeline." /><span>Story Guide</span></a>
-        <a href="assets/screenshots/host-lobby.webp" data-caption="Hosting a multiplayer game: Co-op or Full Stakes, PvP, real damage, friendly fire, permadeath and trading.">
-          <img src="assets/screenshots/host-lobby.webp" width="1800" height="1130" loading="lazy" alt="The Host Lobby with rule switches." /><span>Host a game</span></a>
-        <a href="assets/screenshots/plugin-store.webp" data-caption="The plug-in store: community total conversions, one tap to install.">
-          <img src="assets/screenshots/plugin-store.webp" width="1600" height="736" loading="lazy" alt="The plug-in store listing community total conversions." /><span>Plug-in store</span></a>
-        <a href="assets/screenshots/editor-galaxy.webp" data-caption="The Plug-in Editor's galaxy map: 545 systems coloured by government, with hyperlinks and nebulae.">
-          <img src="assets/screenshots/editor-galaxy.webp" width="1800" height="1131" loading="lazy" alt="The Plug-in Editor's galaxy map." /><span>Plug-in editor</span></a>
-        <a href="assets/screenshots/presentation-modes.webp" data-caption="Classic, Enhanced or Nova Swift: pick the look, then toggle individual pieces.">
-          <img src="assets/screenshots/presentation-modes.webp" width="1800" height="1235" loading="lazy" alt="Interface presets: Classic, Enhanced, Nova Swift and Custom." /><span>Interface modes</span></a>
-        <a href="assets/screenshots/dev-console.webp" data-caption="The built-in debug suite: live logs, frame timings, an entity inspector and a console.">
-          <img src="assets/screenshots/dev-console.webp" width="1800" height="1120" loading="lazy" alt="The debug console." /><span>Debug suite</span></a>
-        <a href="assets/screenshots/story-map.webp" data-caption="The story map, tracing a storyline through the galaxy.">
-          <img src="assets/screenshots/story-map.webp" width="1600" height="736" loading="lazy" alt="The story map." /><span>Story map</span></a>
+        <a class="wide" href="assets/screenshots/desktop-combat.webp" data-caption="Combat near Ryll: a Kestrel and its escorts against Federation raiders, with the classic status bar.">
+          <img src="assets/screenshots/desktop-combat.webp" width="1800" height="1125" loading="lazy" alt="Combat near Ryll: a Kestrel and its escorts against Federation raiders, with the classic status bar." /><span>Combat</span></a>
+        <a href="assets/screenshots/main-menu.webp" data-caption="The original main menu, drawn from your own copy of the game.">
+          <img src="assets/screenshots/thumb/main-menu.webp" width="1800" height="1131" loading="lazy" alt="The original main menu, drawn from your own copy of the game." /><span>Main menu</span></a>
+        <a href="assets/screenshots/map-classic.webp" data-caption="The galaxy map, colour-coded by government, with the Obatta nebula top left.">
+          <img src="assets/screenshots/thumb/map-classic.webp" width="1220" height="1040" loading="lazy" alt="The galaxy map, colour-coded by government, with the Obatta nebula top left." /><span>Galaxy map</span></a>
+        <a href="assets/screenshots/spaceport.webp" data-caption="Landed on Ryll: bar, mission board, trade, shipyard and outfitter.">
+          <img src="assets/screenshots/thumb/spaceport.webp" width="1300" height="1100" loading="lazy" alt="Landed on Ryll: bar, mission board, trade, shipyard and outfitter." /><span>Spaceport</span></a>
+        <a href="assets/screenshots/shipyard.webp" data-caption="The shipyard, with the original ship art and descriptions.">
+          <img src="assets/screenshots/thumb/shipyard.webp" width="1560" height="650" loading="lazy" alt="The shipyard, with the original ship art and descriptions." /><span>Shipyard</span></a>
+        <a href="assets/screenshots/multiplayer-browse.webp" data-caption="The multiplayer browser: saved, LAN and public servers in one list, with live player counts.">
+          <img src="assets/screenshots/thumb/multiplayer-browse.webp" width="1800" height="1008" loading="lazy" alt="The multiplayer browser: saved, LAN and public servers in one list, with live player counts." /><span>Multiplayer</span></a>
+        <a href="assets/screenshots/plugin-store.webp?v=2" data-caption="The plug-in store: community total conversions and add-ons, one click to install.">
+          <img src="assets/screenshots/thumb/plugin-store.webp?v=2" width="1800" height="1131" loading="lazy" alt="The plug-in store: community total conversions and add-ons, one click to install." /><span>Plug-in store</span></a>
+        <a href="assets/screenshots/action-wheel.webp" data-caption="Hold a shoulder button for an action wheel: escorts, cloak, eject and more on a gamepad.">
+          <img src="assets/screenshots/thumb/action-wheel.webp" width="1800" height="1131" loading="lazy" alt="Hold a shoulder button for an action wheel: escorts, cloak, eject and more on a gamepad." /><span>Action wheel</span></a>
+        <a href="assets/screenshots/story-guide.webp?v=2" data-caption="The Story Guide: every campaign as steps, with what unlocks the next one.">
+          <img src="assets/screenshots/thumb/story-guide.webp?v=2" width="1800" height="1114" loading="lazy" alt="The Story Guide: every campaign as steps, with what unlocks the next one." /><span>Story Guide</span></a>
+        <a href="assets/screenshots/iphone-touch.webp" data-caption="On iPhone: touch controls beside the classic status bar.">
+          <img src="assets/screenshots/thumb/iphone-touch.webp" width="1600" height="736" loading="lazy" alt="On iPhone: touch controls beside the classic status bar." /><span>iPhone</span></a>
+        <a href="assets/screenshots/iphone-command-grid.webp" data-caption="The touch command grid on iPhone: hail, board, land, jump, escorts and more.">
+          <img src="assets/screenshots/thumb/iphone-command-grid.webp" width="1600" height="736" loading="lazy" alt="The touch command grid on iPhone: hail, board, land, jump, escorts and more." /><span>Touch commands</span></a>
+        <a href="assets/screenshots/editor-galaxy.webp" data-caption="The Plug-in Editor's galaxy map: 545 systems coloured by government.">
+          <img src="assets/screenshots/thumb/editor-galaxy.webp" width="1800" height="1131" loading="lazy" alt="The Plug-in Editor's galaxy map: 545 systems coloured by government." /><span>Plug-in editor</span></a>
+        <a href="assets/screenshots/dev-console.webp" data-caption="The built-in debug suite: live logs, frame timings, an inspector and a console.">
+          <img src="assets/screenshots/thumb/dev-console.webp" width="1800" height="1120" loading="lazy" alt="The built-in debug suite: live logs, frame timings, an inspector and a console." /><span>Debug suite</span></a>
       </div>
     </div>
   </section>
@@ -162,15 +171,15 @@
           <p class="links"><a href="multiplayer.html">How it works</a><a href="servers.html">Server list</a><a href="dedicated-server.html">Run a server</a></p>
         </div>
         <figure class="shot">
-          <img src="assets/screenshots/host-lobby.webp" width="1800" height="1130" loading="lazy"
-               alt="The Host Lobby with a Co-op or Full Stakes switch and options for PvP, real damage, friendly fire, permadeath and trading." />
+          <img src="assets/screenshots/multiplayer-browse.webp" width="1800" height="1008" loading="lazy"
+               alt="The multiplayer browser listing a dedicated server on the local network, with badges for Dedicated, Safe rules, Compatible and Plug-ins match." />
         </figure>
       </div>
 
       <div class="split reverse">
         <figure class="shot">
-          <img src="assets/screenshots/plugin-manager.webp" width="1800" height="1235" loading="lazy"
-               alt="The Plug-ins screen listing an installed total conversion and a gameplay tweak, with reorder handles and on/off switches." />
+          <img src="assets/screenshots/plugin-store.webp?v=2" width="1800" height="1131" loading="lazy"
+               alt="The Plug-ins store: featured total conversions The Frozen Heart and Femme Fatale above a grid of community plug-ins, each with a Get button." />
         </figure>
         <div class="split-copy">
           <span class="eyebrow">Plug-ins</span>
@@ -205,7 +214,7 @@
       <ul class="matrix">
         <li><b>Story Guide</b><span>Every campaign as steps: what's done, what's locked and which mission opens the next. Reads plug-in storylines too.</span></li>
         <li><b>Your old pilots</b><span>Import Windows pilots straight into the game, classic Mac pilots in testing. iCloud keeps Apple devices in step.</span></li>
-        <li><b>Classic or modern</b><span>The original interface, or the Enhanced and Nova Swift looks. Then switch the map, menus or HUD individually.</span></li>
+        <li><b>The original interface</b><span>The classic menus, map, spaceport and status bar, rebuilt from your own game data at any resolution.</span></li>
         <li><b>HD art and 3D</b><span>Plug-ins can bring high-resolution art and live 3D ships that bank and turn. Hit boxes stay the same.</span></li>
         <li><b>Debug suite</b><span>Searchable live logs, frame time per subsystem, an inspector and a console. Bug reports attach your logs.</span></li>
         <li><b>Controller action wheels</b><span>Hold a shoulder button for weapons, targets and commands. Every menu is reachable with a pad.</span></li>
@@ -337,8 +346,8 @@
   </footer>
   <!-- footer:end -->
 
-  <script src="starfield.js?v=2"></script>
-  <script src="js/site.js?v=1"></script>
-  <script src="js/live.js?v=1" defer></script>
+  <script src="starfield.js?v=2" defer></script>
+  <script src="js/site.js?v=2" defer></script>
+  <script src="js/live.js?v=2" defer></script>
 </body>
 </html>

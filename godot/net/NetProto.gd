@@ -15,6 +15,8 @@ const DEFAULT_PORT := 53735
 ## UDP port LAN beacons are broadcast to / listened on (and the query port of a default-port server).
 const LAN_PORT := 53736
 const MAX_NAME := 24
+## Server names can be longer than pilot names (the public directory allows 40).
+const MAX_SERVER_NAME := 40
 ## The online hosting guide (the players' "how do I host" link; there is no site page for it yet).
 const HOSTING_URL := "https://github.com/SirStig/NovaSwift/blob/main/docs/MULTIPLAYER.md#host-a-public-server-in-5-minutes"
 
@@ -104,15 +106,15 @@ static func format_address(host: String, port: int) -> String:
 
 
 ## Trim, strip control characters, cap the length. Never empty.
-static func clean_name(raw: String, fallback: String = "Pilot") -> String:
+static func clean_name(raw: String, fallback: String = "Pilot", max_len: int = MAX_NAME) -> String:
 	var out: String = ""
 	for i in raw.length():
 		var c: int = raw.unicode_at(i)
 		if c >= 32 and c != 127:
 			out += raw.substr(i, 1)
 	out = out.strip_edges()
-	if out.length() > MAX_NAME:
-		out = out.substr(0, MAX_NAME).strip_edges()
+	if out.length() > max_len:
+		out = out.substr(0, max_len).strip_edges()
 	return out if out != "" else fallback
 
 
@@ -200,7 +202,7 @@ static func unpack_data(pkt: PackedByteArray) -> Dictionary:
 ## {name, players, max, ver, pw, port, rules, dedicated} -> "NSB1" + JSON.
 static func encode_beacon(info: Dictionary, with_cert: bool = false) -> PackedByteArray:
 	var d: Dictionary = {
-		"name": clean_name(str(info.get("name", "NovaSwift")), "NovaSwift"),
+		"name": clean_name(str(info.get("name", "NovaSwift")), "NovaSwift", MAX_SERVER_NAME),
 		"players": int(info.get("players", 0)),
 		"max": int(info.get("max", 0)),
 		"ver": str(info.get("ver", game_version())),
@@ -243,7 +245,7 @@ static func decode_beacon(pkt: PackedByteArray) -> Dictionary:
 	var port: int = int(d.get("port", 0))
 	if port < 1 or port > 65535:
 		return {}
-	return {"name": clean_name(str(d.get("name", "")), "Server"), "players": maxi(0, int(d.get("players", 0))),
+	return {"name": clean_name(str(d.get("name", "")), "Server", MAX_SERVER_NAME), "players": maxi(0, int(d.get("players", 0))),
 		"max": maxi(0, int(d.get("max", 0))), "ver": str(d.get("ver", "")), "pw": bool(d.get("pw", false)),
 		"port": port, "rules": str(d.get("rules", "")), "dedicated": bool(d.get("dedicated", false)),
 		"proto": int(d.get("proto", PROTO)),

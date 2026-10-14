@@ -572,8 +572,13 @@ reason shown on the hub: protocol, wrong / missing password, server full, plug-i
 encryption key. The password is sent hashed; game traffic is plain unless the host turned on **Encrypt connection**
 (see "Encryption").
 
-**Dedicated server ("like Minecraft").** A headless process that hosts a session without a
-pilot or a window; players join by address.
+**Dedicated server ("like Minecraft").** Use the standalone **NovaSwift Dedicated Server**
+(`Sources/NovaSwiftServer*`, guide: [DEDICATED_SERVER.md](DEDICATED_SERVER.md)): one binary, no game and no EV Nova
+data, a web admin panel, Linux / macOS / Docker. It speaks exactly the wire described below (Swift `ENetHostTransport`
+with `dedicated: true`) and was verified against the Godot e2e clients. The Godot `--server` mode described in the rest
+of this section still works but is **legacy**: it needs the game data on the machine and has no panel.
+
+A headless Godot process that hosts a session without a pilot or a window; players join by address.
 
 ```
 scripts/run-dedicated-server.sh --name "My Server" --port 53735 --max-players 8 --rules safe --password secret

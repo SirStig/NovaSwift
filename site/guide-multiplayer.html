@@ -5,14 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Join &amp; host games · NOVA Swift guides</title>
   <meta name="description" content="How to play NOVA Swift with friends: join or host a game, set the rules, match plug-ins, and fix connection problems." />
-  <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
+  <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon-64.png?v=brand3" />
   <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
   <meta property="og:title" content="Join &amp; host games · NOVA Swift" />
   <meta property="og:image" content="https://sirstig.github.io/NovaSwift/assets/launch-banner.png?v=brand2" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=21" />
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" />
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" /></noscript>
+  <link rel="stylesheet" href="styles.css?v=22" />
 </head>
 <body data-page="guides">
   <div class="space-bg" aria-hidden="true"></div>
@@ -50,7 +51,7 @@
   <!-- nav:end -->
 
   <main id="main">
-    <header class="page-hero" style="--hero-img:url(assets/screenshots/multiplayer.webp)">
+    <header class="page-hero" style="--hero-img:url(assets/screenshots/thumb/multiplayer-browse.webp)">
       <div class="wrap">
         <div class="crumbs"><a href="guides.html">Guides</a> / Multiplayer</div>
         <h1>Join &amp; host games</h1>
@@ -88,7 +89,7 @@
           <li><b>Chat works from anywhere</b> in the session, so you can call a friend to your system before they arrive.</li>
           <li><b>Story:</b> a shared encounter runs the authority's storyline. Your outfitter, shipyard, rank and combat rating still come from your own save.</li>
         </ul>
-        <figure><img src="assets/screenshots/multiplayer.webp" width="1600" height="736" loading="lazy" alt="The Multiplayer screen with a list of games." /></figure>
+        <figure><img src="assets/screenshots/multiplayer-browse.webp" width="1800" height="1008" loading="lazy" alt="The Multiplayer browser listing a dedicated server on the local network, with Join and Save buttons." /></figure>
         <div class="callout"><p><b>Beta.</b> The netcode and sync logic are tested, but multiplayer has seen little play on real networks and hardware so far. Expect rough edges and please report them.</p></div>
 
         <h2 id="stakes">Stakes and rules</h2>
@@ -131,7 +132,7 @@
         <p>Open <b>Multiplayer</b> from the main menu, or from the pause menu while flying. The hub works with mouse, keyboard and gamepad. On a pad, <kbd>LB</kbd>/<kbd>RB</kbd> switch tabs, <kbd>Y</kbd> refreshes the list, <kbd>X</kbd> does the page's main action (Quick Connect, or Start hosting) and <kbd>B</kbd> goes back. See the <a href="#browse">Browse view</a> and <a href="#host">hosting</a> sections below.</p>
 
         <h2 id="host">Hosting a game</h2>
-        <p>You can host from the game itself, or run an always-on server with no pilot or window. Hosting from the game is the easy way to play with friends: your game keeps running normally, and anyone who enters your star system plays it with you. For an always-on server see the <a href="dedicated-server.html">dedicated server guide</a>.</p>
+        <p>You can host from the game itself, or run an always-on server with no pilot or window. Hosting from the game is the easy way to play with friends: your game keeps running normally, and anyone who enters your star system plays it with you. For an always-on server see the <a href="dedicated-server.html">dedicated server guide</a>: a separate download that needs neither the game nor any EV Nova data and is set up from a web page.</p>
         <ol class="steps">
           <li><h3>Open Multiplayer, then Host</h3><p>Apple: <b>Online</b> then <b>Host a Lobby</b> (or <b>Local</b> for Wi-Fi). Godot: the <b>Host</b> tab.</p></li>
           <li><h3>Name it and set the rules</h3><p>Choose Safe, Full stakes or (Godot) Custom, as described in <a href="#stakes">Stakes and rules</a>. On Godot you can also set the port, a maximum number of players (2 to 16) and an optional password.</p></li>
@@ -241,7 +242,7 @@
   </footer>
   <!-- footer:end -->
 
-  <script src="starfield.js?v=2"></script>
-  <script src="js/site.js?v=1"></script>
+  <script src="starfield.js?v=2" defer></script>
+  <script src="js/site.js?v=2" defer></script>
 </body>
 </html>

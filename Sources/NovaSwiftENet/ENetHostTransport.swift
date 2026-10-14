@@ -43,9 +43,14 @@ public final class ENetHostTransport: Transport, TransportDelegate {
         public var requirements: PluginRequirements?
         /// Bind 127.0.0.1 only (tests).
         public var loopbackOnly: Bool
+        /// A dedicated server: no pilot of its own. It takes no player slot, is not listed in anyone's roster
+        /// (WELCOME `has_local_player` false, `host_name` "[Server]") and its beacon says `dedicated`.
+        public var dedicated: Bool = false
         public init(port: Int = CrossPlayProtocol.defaultPort, maxPlayers: Int = 8, serverName: String, hostName: String,
                     password: String = "", gameVersion: String = CrossPlayProtocol.appVersion, manifestJSON: String = "",
-                    rulesJSON: String = "{}", rulesName: String = "custom", requirements: PluginRequirements? = nil, loopbackOnly: Bool = false) {
+                    rulesJSON: String = "{}", rulesName: String = "custom", requirements: PluginRequirements? = nil, loopbackOnly: Bool = false,
+                    dedicated: Bool = false) {
+            self.dedicated = dedicated
             self.requirements = requirements
             self.port = port; self.maxPlayers = maxPlayers; self.serverName = serverName; self.hostName = hostName
             self.password = password; self.gameVersion = gameVersion; self.manifestJSON = manifestJSON
@@ -106,6 +111,8 @@ public final class ENetHostTransport: Transport, TransportDelegate {
     private var banned = Set<String>()
     private var closing: [Int: Double] = [:]
     private var clock = 0.0
+    private var sentTotal: UInt64 = 0
+    private var receivedTotal: UInt64 = 0
     private var lastService = ProcessInfo.processInfo.systemUptime
     private var pumpTimer: DispatchSourceTimer?
     private static let debug = ProcessInfo.processInfo.environment["NOVASWIFT_ENET_DEBUG"] != nil
@@ -156,6 +163,7 @@ public final class ENetHostTransport: Transport, TransportDelegate {
         host = h
         isRunning = true
         clock = 0
+        sentTotal = 0; receivedTotal = 0
         lastService = ProcessInfo.processInfo.systemUptime
         emit(.hosting(port: config.port))
     }
@@ -177,6 +185,15 @@ public final class ENetHostTransport: Transport, TransportDelegate {
         beaconLock.lock(); beaconConfig = config; beaconLock.unlock()
     }
 
+    /// Change settings of a running host (name, password, capacity limit, plug-in manifest, rules...). The port and
+    /// `dedicated` flag need a restart. Safe to call from the pumping thread.
+    public func reconfigure(_ change: (inout Config) -> Void) {
+        let port = config.port, dedicated = config.dedicated
+        change(&config)
+        config.port = port; config.dedicated = dedicated
+        beaconLock.lock(); beaconConfig = config; beaconLock.unlock()
+    }
+
     /// Update the advertised content (after the host's plug-in set changes).
     public func updateRequirements(_ r: PluginRequirements?) {
         config.requirements = r
@@ -184,7 +201,7 @@ public final class ENetHostTransport: Transport, TransportDelegate {
     }
 
     private func publishPlayerCount() {
-        let n = clients.count + 1
+        let n = playerCount
         beaconLock.lock(); beaconPlayers = n; beaconLock.unlock()
     }
 
@@ -195,14 +212,25 @@ public final class ENetHostTransport: Transport, TransportDelegate {
         conns.filter { $0.value.ready }.map { PeerInfo(id: $0.key, name: $0.value.name, ip: $0.value.ip, rttMilliseconds: $0.value.rtt) }
             .sorted { $0.id < $1.id }
     }
-    public var playerCount: Int { clients.count + 1 }
+    public var playerCount: Int { clients.count + (config.dedicated ? 0 : 1) }
+    /// Slots for joining players (a dedicated server has no pilot, so every slot is for a client).
+    private var clientCapacity: Int { config.maxPlayers - (config.dedicated ? 0 : 1) }
+
+    /// IPs refused at the handshake (host moderation). Persist it yourself; set it again after a restart.
+    public var bannedIPs: Set<String> {
+        get { banned }
+        set { banned = newValue }
+    }
+    /// Bytes sent / received on the game socket since `start()` (UDP payload plus ENet framing).
+    public var bytesSent: UInt64 { sentTotal }
+    public var bytesReceived: UInt64 { receivedTotal }
 
     /// The `NSB1` payload describing this game (LAN beacon and `NSQ1` reply). Safe to call from any thread.
     public func beacon() -> ServerBeacon {
         beaconLock.lock(); defer { beaconLock.unlock() }
         let c = beaconConfig
         return ServerBeacon(name: c.serverName, players: beaconPlayers, max: c.maxPlayers, ver: c.gameVersion,
-                            pw: !c.password.isEmpty, port: c.port, rules: c.rulesName, dedicated: false,
+                            pw: !c.password.isEmpty, port: c.port, rules: c.rulesName, dedicated: c.dedicated,
                             requirements: c.requirements)
     }
 
@@ -264,6 +292,8 @@ public final class ENetHostTransport: Transport, TransportDelegate {
         timers()
         flushOutgoing()
         enet_host_flush(host)
+        sentTotal += UInt64(host.pointee.totalSentData); host.pointee.totalSentData = 0
+        receivedTotal += UInt64(host.pointee.totalReceivedData); host.pointee.totalReceivedData = 0
     }
 
     private func timers() {
@@ -325,7 +355,7 @@ public final class ENetHostTransport: Transport, TransportDelegate {
             return reject(id, "password", theirPW.isEmpty ? "This server needs a password." : "Wrong password.")
         }
         if !c.ip.isEmpty, banned.contains(c.ip) { return reject(id, "banned", "You are banned from this server.") }
-        if clients.count >= config.maxPlayers - 1 {
+        if clients.count >= clientCapacity {
             return reject(id, "full", "The server is full (\(playerCount)/\(config.maxPlayers)).")
         }
         let theirs = (h["manifest"] as? String) ?? ""
@@ -336,10 +366,11 @@ public final class ENetHostTransport: Transport, TransportDelegate {
         let name = uniqueName(CrossPlayProtocol.cleanName((h["name"] as? String) ?? "", fallback: "Pilot \(id)"), excluding: id)
         c.name = name; c.ready = true
         publishPlayerCount()
-        var list: [[String: Any]] = [["id": ENetTransport.Wire.serverID, "name": config.hostName]]
+        var list: [[String: Any]] = config.dedicated ? [] : [["id": ENetTransport.Wire.serverID, "name": config.hostName]]
         for (oid, o) in conns where oid != id && o.ready { list.append(["id": oid, "name": o.name]) }
         sendControl(id, Kind.welcome, [
-            "your_id": id, "server_name": config.serverName, "host_name": config.hostName, "has_local_player": true,
+            "your_id": id, "server_name": config.serverName, "host_name": config.dedicated ? "[Server]" : config.hostName,
+            "has_local_player": !config.dedicated,
             "rules": config.rulesJSON, "peers": list, "max": config.maxPlayers, "proto": CrossPlayProtocol.version,
         ])
         for (oid, o) in conns where oid != id && o.ready { sendControl(oid, Kind.peerJoin, ["id": id, "name": name]) }
@@ -349,7 +380,7 @@ public final class ENetHostTransport: Transport, TransportDelegate {
     }
 
     private func uniqueName(_ want: String, excluding id: Int) -> String {
-        var taken: Set<String> = [config.hostName.lowercased()]
+        var taken: Set<String> = config.dedicated ? [] : [config.hostName.lowercased()]
         for (oid, o) in conns where oid != id && o.ready { taken.insert(o.name.lowercased()) }
         var name = want
         var n = 2

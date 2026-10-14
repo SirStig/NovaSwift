@@ -5,14 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Plug-in editor · NOVA Swift</title>
   <meta name="description" content="The NOVA Swift Plug-in Editor: edit every EV Nova resource type, draw the galaxy, lay out systems over a live preview and test-fly your plug-in without leaving the editor." />
-  <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
+  <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon-64.png?v=brand3" />
   <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
   <meta property="og:title" content="The NOVA Swift Plug-in Editor" />
   <meta property="og:image" content="https://sirstig.github.io/NovaSwift/assets/screenshots/editor-galaxy.webp" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=21" />
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" />
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" /></noscript>
+  <link rel="stylesheet" href="styles.css?v=22" />
 </head>
 <body data-page="editor">
   <div class="space-bg" aria-hidden="true"></div>
@@ -50,7 +51,7 @@
   <!-- nav:end -->
 
   <main id="main">
-    <header class="page-hero" style="--hero-img:url(assets/screenshots/editor-galaxy.webp)">
+    <header class="page-hero" style="--hero-img:url(assets/screenshots/thumb/editor-galaxy.webp)">
       <div class="wrap">
         <span class="eyebrow">Create</span>
         <h1>A plug-in editor that runs the game.</h1>
@@ -198,7 +199,7 @@
   </footer>
   <!-- footer:end -->
 
-  <script src="starfield.js?v=2"></script>
-  <script src="js/site.js?v=1"></script>
+  <script src="starfield.js?v=2" defer></script>
+  <script src="js/site.js?v=2" defer></script>
 </body>
 </html>

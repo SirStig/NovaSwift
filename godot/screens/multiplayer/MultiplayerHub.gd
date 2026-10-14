@@ -1009,11 +1009,12 @@ func _server_card(parent: Control, d: Dictionary) -> void:
 	var col := _vbox(row, 4)
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	var line := _flow(col, 8, 4)
-	var nl: Label = _t(line, str(d["name"]), 16, "semibold")
+	# The name gets its own full-width line: inside the badge flow it was squeezed to its minimum width.
+	var nl: Label = _t(col, str(d["name"]), 16, "semibold")
 	nl.clip_text = true
 	nl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	nl.custom_minimum_size.x = 60
+	nl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var line := _flow(col, 8, 4)
 	for src in (d.get("sources", []) as Array):
 		_badge(line, str(src), SOURCE_TINT.get(str(src), T.SECONDARY))
 	if bool(d.get("dedicated", false)):

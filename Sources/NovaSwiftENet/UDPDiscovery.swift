@@ -119,11 +119,16 @@ enum UDP {
         var cur: UnsafeMutablePointer<ifaddrs>? = head
         while let p = cur {
             defer { cur = p.pointee.ifa_next }
-            let flags = Int32(p.pointee.ifa_flags)
-            guard let sa = p.pointee.ifa_addr, sa.pointee.sa_family == sa_family_t(AF_INET), flags & IFF_UP != 0 else { continue }
+            let flags = Int(p.pointee.ifa_flags)
+            guard let sa = p.pointee.ifa_addr, sa.pointee.sa_family == sa_family_t(AF_INET), flags & Int(IFF_UP) != 0 else { continue }
             let ip = sa.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr }
             local.insert(string(ip))
-            if flags & IFF_BROADCAST != 0, flags & IFF_LOOPBACK == 0, let b = p.pointee.ifa_dstaddr {
+            #if canImport(Darwin)
+            let broadcastAddr = p.pointee.ifa_dstaddr
+            #else
+            let broadcastAddr = p.pointee.ifa_ifu.ifu_broadaddr
+            #endif
+            if flags & Int(IFF_BROADCAST) != 0, flags & Int(IFF_LOOPBACK) == 0, let b = broadcastAddr {
                 bcast.append(b.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr })
             }
         }
@@ -224,6 +229,9 @@ public final class LANBeaconService {
     public private(set) var lastError = ""
     /// Beacons from this machine for these game ports are ignored (so a host doesn't list itself).
     public var ignoredLocalPorts: Set<Int> = []
+    /// When false an announcing service still answers `NSQ1` status queries but sends no LAN broadcast beacons
+    /// (a dedicated server whose admin switched "show on the local network" off).
+    public var broadcastBeacons = true
 
     private let q: DispatchQueue
     private let listenPort: Int
@@ -338,7 +346,7 @@ public final class LANBeaconService {
 
     private func tick() {
         let now = Date()
-        if let provider, txFD >= 0, now >= announceDue {
+        if broadcastBeacons, let provider, txFD >= 0, now >= announceDue {
             announceDue = now.addingTimeInterval(Self.announceEvery)
             let pkt = provider().encode()
             UDP.send(txFD, pkt, to: UDP.sockaddr(in_addr(s_addr: INADDR_BROADCAST.bigEndian), port: listenPort))

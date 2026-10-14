@@ -5,14 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Installing plug-ins · NOVA Swift guides</title>
   <meta name="description" content="How to install, import, enable and order EV Nova plug-ins and total conversions in NOVA Swift, and how to suggest one for the catalog." />
-  <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
+  <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon-64.png?v=brand3" />
   <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
   <meta property="og:title" content="Installing plug-ins · NOVA Swift" />
   <meta property="og:image" content="https://sirstig.github.io/NovaSwift/assets/launch-banner.png?v=brand2" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=21" />
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" />
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" /></noscript>
+  <link rel="stylesheet" href="styles.css?v=22" />
 </head>
 <body data-page="guides">
   <div class="space-bg" aria-hidden="true"></div>
@@ -50,7 +51,7 @@
   <!-- nav:end -->
 
   <main id="main">
-    <header class="page-hero" style="--hero-img:url(assets/screenshots/plugin-manager.webp)">
+    <header class="page-hero" style="--hero-img:url(assets/screenshots/thumb/plugin-store.webp?v=2)">
       <div class="wrap">
         <div class="crumbs"><a href="guides.html">Guides</a> / Plug-ins</div>
         <h1>Installing plug-ins</h1>
@@ -82,7 +83,7 @@
 
         <h2 id="screen">The Plug-ins screen</h2>
         <p>Open <b>Plug-ins</b> from the main menu (it is also reachable from Settings on Linux and Steam Deck). It has three tabs: <b>Browse</b>, <b>Installed</b> and <b>Load order</b>.</p>
-        <figure><img src="assets/screenshots/plugin-manager.webp" width="1800" height="1235" loading="lazy" alt="The Plug-ins screen listing installed plug-ins." /></figure>
+        <figure><img src="assets/screenshots/plugin-store.webp?v=2" width="1800" height="1131" loading="lazy" alt="The Plug-ins store with featured total conversions and a grid of community plug-ins." /></figure>
         <ul>
           <li><b>Browse</b> is the community catalog: search, filter chips (Popular, Recent, Total conversions, Ships, Story, Graphics, Gameplay, Installed, Updates) and a card for each plug-in with a detail page. A copy of the catalog is kept for offline browsing.</li>
           <li><b>Installed</b> lists what you have, with enable switches, reveal and delete.</li>
@@ -216,7 +217,7 @@
   </footer>
   <!-- footer:end -->
 
-  <script src="starfield.js?v=2"></script>
-  <script src="js/site.js?v=1"></script>
+  <script src="starfield.js?v=2" defer></script>
+  <script src="js/site.js?v=2" defer></script>
 </body>
 </html>

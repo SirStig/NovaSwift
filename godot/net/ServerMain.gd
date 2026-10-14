@@ -110,7 +110,7 @@ static func parse_args(args: PackedStringArray, cfg_override: String = "") -> Di
 		o[k] = cli[k]
 	o["port"] = clampi(int(o["port"]), 1, 65535)
 	o["max_players"] = clampi(int(o["max_players"]), 1, 32)
-	o["name"] = Proto.clean_name(str(o["name"]), "NovaSwift Server")
+	o["name"] = Proto.clean_name(str(o["name"]), "NovaSwift Server", Proto.MAX_SERVER_NAME)
 	if not ["safe", "full", "custom"].has(str(o["rules"])):
 		o["rules"] = "safe"
 	return o

@@ -23,6 +23,8 @@ public enum CrossPlayProtocol {
     public static let beaconMagic = "NSB1"
     public static let queryMagic = "NSQ1"
     public static let maxNameLength = 24
+    /// Server names can be longer than pilot names (the public directory allows 40). `NetProto.MAX_SERVER_NAME`.
+    public static let maxServerNameLength = 40
     public static let directoryURL = URL(string: "https://raw.githubusercontent.com/SirStig/NovaSwift-Plugins/main/servers/servers.json")!
     public static let directoryHelpURL = URL(string: "https://github.com/SirStig/NovaSwift-Plugins/blob/main/servers/README.md")!
 
@@ -32,11 +34,11 @@ public enum CrossPlayProtocol {
     }
 
     /// Trim, strip control characters, cap the length. Never empty (`NetProto.clean_name`).
-    public static func cleanName(_ raw: String, fallback: String = "Pilot") -> String {
+    public static func cleanName(_ raw: String, fallback: String = "Pilot", maxLength: Int = maxNameLength) -> String {
         let filtered = String(String.UnicodeScalarView(raw.unicodeScalars.filter { $0.value >= 32 && $0.value != 127 }))
         var out = filtered.trimmingCharacters(in: .whitespacesAndNewlines)
-        if out.count > maxNameLength {
-            out = String(out.prefix(maxNameLength)).trimmingCharacters(in: .whitespacesAndNewlines)
+        if out.count > maxLength {
+            out = String(out.prefix(maxLength)).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return out.isEmpty ? fallback : out
     }
@@ -263,7 +265,7 @@ public struct ServerBeacon: Equatable, Sendable {
     /// `full: false` is the LAN broadcast form (signature + count only); the unicast `NSQ1` reply is `full`.
     public func encode(full: Bool = true) -> Data {
         var d: [String: Any] = [
-            "name": CrossPlayProtocol.cleanName(name, fallback: "NovaSwift"), "players": players, "max": max, "ver": ver,
+            "name": CrossPlayProtocol.cleanName(name, fallback: "NovaSwift", maxLength: CrossPlayProtocol.maxServerNameLength), "players": players, "max": max, "ver": ver,
             "pw": pw, "port": port, "rules": rules, "dedicated": dedicated, "proto": CrossPlayProtocol.version,
         ]
         if let requirements { d.merge(requirements.fields(full: full)) { a, _ in a } }
@@ -282,7 +284,7 @@ public struct ServerBeacon: Equatable, Sendable {
         let port = int(obj["port"])
         guard (1...65535).contains(port) else { return nil }
         var b = ServerBeacon(
-            name: CrossPlayProtocol.cleanName((obj["name"] as? String) ?? "", fallback: "Server"),
+            name: CrossPlayProtocol.cleanName((obj["name"] as? String) ?? "", fallback: "Server", maxLength: CrossPlayProtocol.maxServerNameLength),
             players: Swift.max(0, int(obj["players"])), max: Swift.max(0, int(obj["max"])),
             ver: (obj["ver"] as? String) ?? "", pw: (obj["pw"] as? Bool) ?? false, port: port,
             rules: (obj["rules"] as? String) ?? "", dedicated: (obj["dedicated"] as? Bool) ?? false,
@@ -369,7 +371,7 @@ public enum ServerDirectory {
             }
             out.append(DirectoryServer(
                 id: (d["id"] as? String) ?? key,
-                name: CrossPlayProtocol.cleanName((d["name"] as? String) ?? host, fallback: host),
+                name: CrossPlayProtocol.cleanName((d["name"] as? String) ?? host, fallback: host, maxLength: CrossPlayProtocol.maxServerNameLength),
                 host: host, port: port, region: (d["region"] as? String) ?? "global",
                 description: String(((d["description"] as? String) ?? "").prefix(300)),
                 ownerName: (owner["name"] as? String) ?? "", contact: (owner["contact"] as? String) ?? "",
@@ -488,7 +490,7 @@ public struct SavedServer: Codable, Equatable, Identifiable, Sendable {
     public var id: String { "\(host.lowercased()):\(port)" }
     public var address: CrossPlayAddress { CrossPlayAddress(host: host, port: port) }
     public init(name: String, host: String, port: Int, password: String = "") {
-        self.name = CrossPlayProtocol.cleanName(name, fallback: host); self.host = host; self.port = port; self.password = password
+        self.name = CrossPlayProtocol.cleanName(name, fallback: host, maxLength: CrossPlayProtocol.maxServerNameLength); self.host = host; self.port = port; self.password = password
     }
 }
 

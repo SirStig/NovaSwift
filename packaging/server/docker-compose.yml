@@ -1,0 +1,16 @@
+# docker compose up -d        (run from this folder)
+# docker compose logs novaswift | head -30      <- the admin password is printed once, on the first start
+services:
+  novaswift:
+    build:
+      context: ../..                    # the repository root
+      dockerfile: packaging/server/Dockerfile
+    image: novaswift-server
+    container_name: novaswift-server
+    restart: always
+    ports:
+      - "53735:53735/udp"               # the game
+      - "53736:53736/udp"               # server-list pings
+      - "127.0.0.1:53737:53737/tcp"     # admin panel: this machine only (use an SSH tunnel from outside)
+    volumes:
+      - ./data:/data                    # server.cfg, plugins/, logs/

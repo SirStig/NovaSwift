@@ -5,14 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Getting started · NOVA Swift guides</title>
   <meta name="description" content="Download NOVA Swift, import your own EV Nova data, create a pilot and make your first flight." />
-  <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
+  <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon-64.png?v=brand3" />
   <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
   <meta property="og:title" content="Getting started · NOVA Swift" />
   <meta property="og:image" content="https://sirstig.github.io/NovaSwift/assets/launch-banner.png?v=brand2" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&amp;family=Saira+Semi+Condensed:wght@500;600;700&amp;display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=21" />
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&amp;family=Saira+Semi+Condensed:wght@500;600;700&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'" />
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&amp;family=Saira+Semi+Condensed:wght@500;600;700&amp;display=swap" /></noscript>
+  <link rel="stylesheet" href="styles.css?v=22" />
 </head>
 <body data-page="guides">
   <div class="space-bg" aria-hidden="true"></div>
@@ -50,7 +51,7 @@
   <!-- nav:end -->
 
   <main id="main">
-    <header class="page-hero" style="--hero-img:url(assets/screenshots/flight-hud.webp)">
+    <header class="page-hero" style="--hero-img:url(assets/screenshots/thumb/desktop-combat.webp)">
       <div class="wrap">
         <div class="crumbs"><a href="guides.html">Guides</a> / Getting started</div>
         <h1>Getting started</h1>
@@ -83,7 +84,7 @@
           <li><a href="#data">Get and import your EV Nova data</a></li>
           <li><a href="#pilot">Create or import a pilot</a></li>
           <li><a href="#icloud">iCloud sync (Apple devices)</a></li>
-          <li><a href="#modes">Presentation modes and Enhancements</a></li>
+          <li><a href="#modes">Enhancements</a></li>
           <li><a href="#first-flight">Your first flight</a></li>
           <li><a href="#updates">Updates</a></li>
           <li><a href="#bugs">Reporting bugs</a></li>
@@ -189,11 +190,9 @@
         <p>On Mac, iPad and iPhone, pilots can save to your private iCloud. Your imported game data can sync the same way, so you import once and every device, Apple TV included, sets itself up. Turn these on or off in Settings under <em>Saved Games</em> (<em>iCloud pilot sync</em> and <em>iCloud game data sync</em>).</p>
         <p>Everything goes to your own private iCloud, never anywhere shared. If sync is unavailable (offline, signed out, out of space) you get a friendly message and play continues locally. Game-data sync is still being finished in this beta, so if your data does not appear on a second device, import it there directly.</p>
 
-        <h2 id="modes">Presentation modes and Enhancements</h2>
-        <p>NOVA Swift plays like the original by default. Two settings let you change that, and both live in Settings.</p>
-        <figure><img src="assets/screenshots/presentation-modes.webp" loading="lazy" width="1800" height="1235" alt="The Presentation settings, showing the Classic, Enhanced and Nova Swift presets" /></figure>
+        <h2 id="modes">Enhancements</h2>
+        <p>NOVA Swift plays like the original by default, with the original interface drawn from your own data. Anything that changes the rules is an Enhancement in Settings.</p>
         <ul>
-          <li><strong>Presentation.</strong> Three presets change how the game looks. <em>Classic</em> is the faithful EV Nova look, drawn from your own data. <em>Enhanced</em> is Classic with the galaxy map opened up to full screen. <em>Nova Swift</em> is the modern interface. Presets are templates: pick one, then fine-tune individual interface options, such as the modern HUD or dialog style. Presentation changes only how things look, not the rules of the game.</li>
           <li><strong>Enhancements.</strong> Extra behaviour the original did not have, each with a one-line note saying what it replaces. Examples are frequent autosave, quick hyperjump, forgiving landing, automatic route plotting, nearest-first targeting, tight formations and a modern key layout. Every one is <strong>off by default</strong>, so the game plays as the original did unless you opt in.</li>
         </ul>
         <p>Game speed is separate. <em>Authentic</em> is the default and matches the original's pace.</p>
@@ -209,7 +208,7 @@
           <li><h3>Upgrade</h3><p>Use the outfitter for weapons and equipment, and the shipyard for new ships. The shipyard also has a ship info screen.</p></li>
           <li><h3>Jump</h3><p>Open the galaxy map (<kbd>M</kbd>), pick a linked system, and use the hyperjump key (<kbd>J</kbd>) once you are clear of the planet and have fuel.</p></li>
         </ol>
-        <figure><img src="assets/screenshots/flight-hud.webp" loading="lazy" width="1600" height="736" alt="Flying a ship in NOVA Swift with the flight HUD" /></figure>
+        <figure><img src="assets/screenshots/desktop-combat.webp" loading="lazy" width="1800" height="1125" alt="Flying a Kestrel in combat with escorts, with the classic status bar on the right" /></figure>
 
         <h2 id="updates">Updates</h2>
         <ul>
@@ -283,7 +282,7 @@
   </footer>
   <!-- footer:end -->
 
-  <script src="starfield.js?v=2"></script>
-  <script src="js/site.js?v=1"></script>
+  <script src="starfield.js?v=2" defer></script>
+  <script src="js/site.js?v=2" defer></script>
 </body>
 </html>
