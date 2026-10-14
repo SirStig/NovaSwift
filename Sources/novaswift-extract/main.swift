@@ -117,9 +117,9 @@ private func printDITL(_ res: Resource) {
         var extra = ""
         switch rawType & 0x7F {
         case 8, 16: // statText / editText: raw ASCII/MacRoman text
-            extra = "  \"\(String(data: payload, encoding: .macOSRoman) ?? "?")\""
+            extra = "  \"\(String(macRoman: payload))\""
         case 4, 5, 6: // button/checkbox/radio: label text
-            extra = "  \"\(String(data: payload, encoding: .macOSRoman) ?? "?")\""
+            extra = "  \"\(String(macRoman: payload))\""
         case 32, 64, 7: // icon/picture/resControl: 2-byte resource id
             if payload.count >= 2 { extra = "  resID=\(be16(payload, 0))" }
         default:
@@ -154,7 +154,7 @@ private func printDLOG(_ res: Resource) {
     if off < d.count {
         let tlen = Int(d[d.startIndex + off]); off += 1
         if off + tlen <= d.count {
-            title = String(data: d.subdata(in: (d.startIndex + off)..<(d.startIndex + off + tlen)), encoding: .macOSRoman) ?? ""
+            title = String(macRoman: d.subdata(in: (d.startIndex + off)..<(d.startIndex + off + tlen)))
         }
     }
     print("  bounds=(\(left),\(top))-(\(right),\(bottom)) \(right-left)x\(bottom-top)  procID=\(procID)  visible=\(visible)  goAway=\(goAway)  refCon=\(refCon)")
@@ -768,9 +768,9 @@ case "tmpl":
     while tp < tdata.endIndex {
         let len = Int(tdata[tp]); tp += 1
         guard tp + len + 4 <= tdata.endIndex else { break }
-        let label = String(data: tdata[tp..<tp+len], encoding: .macOSRoman) ?? "?"
+        let label = String(macRoman: tdata[tp..<tp+len])
         tp += len
-        let code = String(data: tdata[tp..<tp+4], encoding: .macOSRoman) ?? "????"
+        let code = String(macRoman: tdata[tp..<tp+4])
         tp += 4
         rawFields.append(TField(label: label, code: code))
     }

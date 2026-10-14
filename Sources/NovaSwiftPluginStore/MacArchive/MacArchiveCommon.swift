@@ -45,7 +45,7 @@ enum MacBytes {
         Int(b[o]) << 24 | Int(b[o + 1]) << 16 | Int(b[o + 2]) << 8 | Int(b[o + 3])
     }
     static func macRoman(_ b: ArraySlice<UInt8>) -> String {
-        String(bytes: b, encoding: .macOSRoman) ?? String(decoding: b, as: UTF8.self)
+        String(macRoman: b)
     }
     static func fourCC(_ b: [UInt8], _ o: Int) -> String { macRoman(b[o..<o + 4]) }
 

@@ -72,7 +72,7 @@ enum BinHex {
     /// Encoder, used by tests.
     static func encode(_ f: MacFile, name: String) -> [UInt8] {
         var body: [UInt8] = []
-        let nm = Array(name.data(using: .macOSRoman) ?? Data(name.utf8))
+        let nm = MacRoman.encode(name) ?? Array(name.utf8)
         body.append(UInt8(nm.count)); body += nm; body.append(0)
         body += Array(f.fileType.utf8.prefix(4)) + Array(f.creator.utf8.prefix(4))
         body += [0, 0]

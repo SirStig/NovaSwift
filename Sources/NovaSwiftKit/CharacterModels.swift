@@ -44,7 +44,7 @@ import Foundation
         bytes.append(b)
         i += 1
     }
-    return String(bytes: bytes, encoding: .macOSRoman) ?? ""
+    return String(macRoman: bytes)
 }
 
 // MARK: chär — starting scenario / new-pilot template

@@ -22,7 +22,7 @@ import Foundation
     let start = d.startIndex + off, end = min(start + maxLen, d.endIndex)
     var bytes: [UInt8] = []; var i = start
     while i < end, d[i] != 0 { bytes.append(d[i]); i += 1 }
-    return String(bytes: bytes, encoding: .macOSRoman) ?? ""
+    return String(macRoman: bytes)
 }
 
 // MARK: përs — a named AI personality the player can encounter

@@ -54,7 +54,7 @@ import Foundation
         bytes.append(b)
         i += 1
     }
-    return String(bytes: bytes, encoding: .macOSRoman) ?? ""
+    return String(macRoman: bytes)
 }
 
 // MARK: spïn — sprite descriptor (which rlëD, and its tile grid)

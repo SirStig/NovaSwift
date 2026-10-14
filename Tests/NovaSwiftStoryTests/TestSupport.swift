@@ -18,7 +18,7 @@ enum Bytes {
         buf[off + 2] = UInt8((u >> 8) & 0xFF); buf[off + 3] = UInt8(u & 0xFF)
     }
     static func cstr(_ buf: inout [UInt8], _ off: Int, _ s: String) {
-        let bytes = Array(s.data(using: .macOSRoman) ?? Data())
+        let bytes = (MacRoman.encode(s) ?? [])
         for (i, b) in bytes.enumerated() { buf[off + i] = b }
         // remainder already zero (NUL terminator)
     }
@@ -233,7 +233,7 @@ func govtResource(id: Int, classes: [Int], allies: [Int] = [], enemies: [Int] = 
 func stringListResource(_ id: Int, _ items: [String]) -> Resource {
     var b: [UInt8] = [UInt8(items.count >> 8), UInt8(items.count & 0xff)]
     for s in items {
-        let bytes = Array(s.data(using: .macOSRoman) ?? Data())
+        let bytes = (MacRoman.encode(s) ?? [])
         b.append(UInt8(bytes.count)); b += bytes
     }
     return Resource(type: NovaType.strList, id: id, name: "STR#\(id)", data: Data(b))
@@ -273,7 +273,7 @@ func govtResource(id: Int, name: String = "Test Govt", mapColor: (r: UInt8, g: U
 /// string from offset 0, matching `DescRes`). Used to give mission text ids
 /// (completion / ship-done / load-cargo / drop-cargo) real bodies in tests.
 func descResource(id: Int, text: String) -> Resource {
-    let bytes = Array((text.data(using: .macOSRoman) ?? Data())) + [0]
+    let bytes = (MacRoman.encode(text) ?? []) + [0]
     return Resource(type: NovaType.desc, id: id, name: "Desc \(id)", data: Data(bytes))
 }
 

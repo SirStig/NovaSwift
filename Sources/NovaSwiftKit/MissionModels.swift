@@ -56,7 +56,7 @@ import Foundation
         bytes.append(b)
         i += 1
     }
-    return String(bytes: bytes, encoding: .macOSRoman) ?? ""
+    return String(macRoman: bytes)
 }
 
 // MARK: mïsn — mission
@@ -509,8 +509,7 @@ public struct StringListRes: Sendable {
             guard off < d.count else { break }
             let len = Int(d[d.startIndex + off]); off += 1
             guard off + len <= d.count else { break }
-            let s = String(bytes: d[(d.startIndex + off)..<(d.startIndex + off + len)],
-                           encoding: .macOSRoman) ?? ""
+            let s = String(macRoman: d[(d.startIndex + off)..<(d.startIndex + off + len)])
             out.append(s)
             off += len
         }

@@ -150,7 +150,7 @@ public enum EVNovaPilotFile {
         let raw2 = Array(b[start2..<(start2 + n2)])
         var nameBytes: [UInt8] = []
         for c in b[(start2 + n2)...] { if c == 0 { break }; nameBytes.append(c) }
-        let ship = String(bytes: nameBytes.prefix(0x3F), encoding: .macOSRoman) ?? ""
+        let ship = String(macRoman: nameBytes.prefix(0x3F))
         let (block2, big) = try decodeBlock2(raw2)
         let block1 = decodeBlock1(raw1, bigEndian: big)
         return Blocks(format: .windowsPLT, bigEndian: big, block1: block1, block2: block2,
@@ -233,7 +233,7 @@ public enum EVNovaPilotFile {
         let dataLen = Int(be32(b, 83)), resLen = Int(be32(b, 87))
         let resOff = 128 + (dataLen + 127) / 128 * 128
         guard resLen > 0, resOff + resLen <= b.count else { return nil }
-        let name = String(bytes: b[2..<(2 + Int(b[1]))], encoding: .macOSRoman) ?? ""
+        let name = String(macRoman: b[2..<(2 + Int(b[1]))])
         return (name, Data(b[resOff..<(resOff + resLen)]))
     }
 

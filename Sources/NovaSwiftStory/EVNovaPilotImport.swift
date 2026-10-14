@@ -390,7 +390,7 @@ public enum EVNovaPilotImporter {
                 bytes = Array(f.prefix { $0 != 0 })
             }
             if bytes.count > limit - 1 { bytes = Array(bytes.prefix(limit - 1)) }
-            return String(bytes: bytes, encoding: .macOSRoman) ?? ""
+            return String(macRoman: bytes)
         }
     }
 }

@@ -114,7 +114,7 @@ public struct ColrRes {
             guard off < d.count else { return "" }
             let end = min(d.startIndex + off + length, d.endIndex)
             let bytes = d[(d.startIndex + off)..<end].prefix { $0 != 0 }
-            return String(data: Data(bytes), encoding: .macOSRoman) ?? ""
+            return String(macRoman: Data(bytes))
         }
 
         buttonUp   = color(0)

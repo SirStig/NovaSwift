@@ -165,7 +165,7 @@ enum StuffIt {
     static func buildV5(folder: String, files: [(name: String, data: [UInt8], rsrc: [UInt8])]) -> [UInt8] {
         func be32(_ v: Int) -> [UInt8] { [UInt8(v >> 24 & 255), UInt8(v >> 16 & 255), UInt8(v >> 8 & 255), UInt8(v & 255)] }
         func be16(_ v: Int) -> [UInt8] { [UInt8(v >> 8 & 255), UInt8(v & 255)] }
-        func mr(_ s: String) -> [UInt8] { Array(s.data(using: .macOSRoman) ?? Data(s.utf8)) }
+        func mr(_ s: String) -> [UInt8] { MacRoman.encode(s) ?? Array(s.utf8) }
         var banner = Array("StuffIt (c)1997-2002 Aladdin Systems, Inc., http://www.aladdinsys.com/StuffIt/\r\n".utf8)
         banner += [UInt8](repeating: 0, count: max(0, 80 - banner.count))
         let archiveHdrLen = 100
@@ -223,7 +223,7 @@ enum StuffIt {
         func header(name: String, rm: Int, dm: Int, rLen: Int, dLen: Int, rp: Int, dp: Int, rc: UInt16, dc: UInt16) -> [UInt8] {
             var h = [UInt8](repeating: 0, count: 112)
             h[0] = UInt8(rm); h[1] = UInt8(dm)
-            let nm = Array((name.data(using: .macOSRoman) ?? Data(name.utf8)).prefix(63))
+            let nm = Array((MacRoman.encode(name) ?? Array(name.utf8)).prefix(63))
             h[2] = UInt8(nm.count); h.replaceSubrange(3..<3 + nm.count, with: nm)
             h.replaceSubrange(84..<88, with: be32(rLen)); h.replaceSubrange(88..<92, with: be32(dLen))
             h.replaceSubrange(92..<96, with: be32(rp)); h.replaceSubrange(96..<100, with: be32(dp))

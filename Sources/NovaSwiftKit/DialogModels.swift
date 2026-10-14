@@ -182,7 +182,7 @@ public struct DITLRes: Equatable, Sendable {
             case 4, 5, 6, 8, 16:
                 guard off + 14 + length <= d.count else { return items }
                 let payload = d.subdata(in: (base + off + 14)..<(base + off + 14 + length))
-                text = String(data: payload, encoding: .macOSRoman) ?? ""
+                text = String(macRoman: payload)
                 off += 14 + length
             case 7, 32, 64:
                 guard off + 16 <= d.count else { return items }
@@ -260,8 +260,7 @@ public struct DLOGRes: Equatable, Sendable {
         if d.count > 20 {
             let len = Int(d[base + 20])
             if 21 + len <= d.count {
-                t = String(data: d.subdata(in: (base + 21)..<(base + 21 + len)),
-                           encoding: .macOSRoman) ?? ""
+                t = String(macRoman: d.subdata(in: (base + 21)..<(base + 21 + len)))
             }
         }
         title = t

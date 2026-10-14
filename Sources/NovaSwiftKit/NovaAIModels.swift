@@ -62,7 +62,7 @@ import Foundation
         bytes.append(b)
         i += 1
     }
-    return String(bytes: bytes, encoding: .macOSRoman) ?? ""
+    return String(macRoman: bytes)
 }
 
 /// Resolve a `wëap`/`shïp` "explosion" field to a `bööm` resource id: raw `-1` =

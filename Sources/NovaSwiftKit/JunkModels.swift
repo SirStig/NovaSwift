@@ -45,7 +45,7 @@ import Foundation
         bytes.append(b)
         i += 1
     }
-    return String(bytes: bytes, encoding: .macOSRoman) ?? ""
+    return String(macRoman: bytes)
 }
 
 /// A junk cargo type: salvage/specialty trade goods sellable/buyable only at

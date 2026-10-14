@@ -109,7 +109,7 @@ public final class BinaryReader {
     public func readPString() throws -> String {
         let length = Int(try readU8())
         let raw = try readData(length)
-        return String(data: raw, encoding: .macOSRoman) ?? ""
+        return String(macRoman: raw)
     }
 
     /// NUL-terminated Mac Roman C string read from a fixed-size field. Stops at the
@@ -125,6 +125,6 @@ public final class BinaryReader {
             if b == 0 { break }
             out.append(b)
         }
-        return String(data: Data(out), encoding: .macOSRoman) ?? ""
+        return String(macRoman: Data(out))
     }
 }

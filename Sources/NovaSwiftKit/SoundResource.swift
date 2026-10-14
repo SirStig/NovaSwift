@@ -122,8 +122,8 @@ public enum SndDecoder {
         case cmpEncoding:
             guard let channels = u32(h + 4), channels <= 1 else { throw Error.multiChannel }
             guard let fmt = u32(h + 0x28), let size = u16(h + 0x3E) else { throw Error.unsupportedEncoding(encoding) }
-            let name = String(bytes: [UInt8(fmt >> 24), UInt8((fmt >> 16) & 0xFF),
-                                      UInt8((fmt >> 8) & 0xFF), UInt8(fmt & 0xFF)], encoding: .macOSRoman) ?? "?"
+            let name = String(macRoman: [UInt8(fmt >> 24), UInt8((fmt >> 16) & 0xFF),
+                                      UInt8((fmt >> 8) & 0xFF), UInt8(fmt & 0xFF)])
             guard name == "NONE" || name == "ima4" else { throw Error.unsupportedCompression(name) }
             dataStart = h + 0x40; bits = size; compression = name
         default:

@@ -12,7 +12,7 @@ public enum IniStringOverrides {
     /// Parse the ini (Mac Roman, CR/LF line ends, `;` comments). Keys are
     /// `[STR# id][n]`; unknown sections and keys are ignored.
     public static func parse(_ data: Data) -> [Int: [Int: String]] {
-        let text = String(data: data, encoding: .macOSRoman) ?? ""
+        let text = String(macRoman: data)
         var out: [Int: [Int: String]] = [:]
         var section: Int?
         let lines = text.replacingOccurrences(of: "\r\n", with: "\n")
@@ -54,7 +54,7 @@ extension NovaGame {
         guard !d.isEmpty else { return "" }
         let length = Int(d[d.startIndex])
         guard d.count >= 1 + length else { return nil }
-        return String(data: d.subdata(in: (d.startIndex + 1)..<(d.startIndex + 1 + length)), encoding: .macOSRoman)
+        return String(macRoman: d.subdata(in: (d.startIndex + 1)..<(d.startIndex + 1 + length)))
     }
 
     /// `STR ` `overrideBase + index` when present (even if empty), else entry

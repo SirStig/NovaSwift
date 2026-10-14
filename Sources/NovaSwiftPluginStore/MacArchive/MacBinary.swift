@@ -32,7 +32,7 @@ enum MacBinary {
     /// Encoder (MacBinary II), used by tests.
     static func encode(_ f: MacFile, name: String) -> [UInt8] {
         var h = [UInt8](repeating: 0, count: 128)
-        let nm = Array((name.data(using: .macOSRoman) ?? Data(name.utf8)).prefix(63))
+        let nm = Array((MacRoman.encode(name) ?? Array(name.utf8)).prefix(63))
         h[1] = UInt8(nm.count); h.replaceSubrange(2..<2 + nm.count, with: nm)
         h.replaceSubrange(65..<69, with: Array(f.fileType.utf8.prefix(4)))
         h.replaceSubrange(69..<73, with: Array(f.creator.utf8.prefix(4)))

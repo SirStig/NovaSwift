@@ -171,7 +171,7 @@ extension NovaGame {
         let length = Int(d[d.startIndex])
         guard length > 0, d.count >= 1 + length else { return nil }
         let raw = d.subdata(in: (d.startIndex + 1)..<(d.startIndex + 1 + length))
-        return String(data: raw, encoding: .macOSRoman)
+        return String(macRoman: raw)
     }
 
     /// The base credit price for `commodity`: `STR ` 9300+index when the data

@@ -39,7 +39,7 @@ final class DialogModelsTests: XCTestCase {
         let u = UInt32(bitPattern: Int32(refCon))
         out += [UInt8(u >> 24), UInt8((u >> 16) & 0xFF), UInt8((u >> 8) & 0xFF), UInt8(u & 0xFF)]
         out += be16(itemsID)
-        let bytes = Array(title.data(using: .macOSRoman)!)
+        let bytes = MacRoman.encode(title)!
         out += [UInt8(bytes.count)] + bytes
         return Data(out)
     }

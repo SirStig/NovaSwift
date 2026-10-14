@@ -16,7 +16,7 @@ final class AudioResourceModelTests: XCTestCase {
             p[off + 1] = UInt8(u & 0xFF)
         }
         for (off, s) in strings {
-            let bytes = [UInt8](s.data(using: .macOSRoman) ?? Data())
+            let bytes = (MacRoman.encode(s) ?? [])
             for (i, b) in bytes.enumerated() where off + i < size { p[off + i] = b }
         }
         return Data(p)

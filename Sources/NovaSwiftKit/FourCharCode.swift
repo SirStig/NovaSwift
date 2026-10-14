@@ -21,8 +21,8 @@ public struct FourCharCode: Hashable, Comparable, CustomStringConvertible, Senda
     /// Build from a display string (e.g. "shïp"), encoding it as Mac Roman.
     /// Returns nil if the string is not exactly four Mac Roman bytes.
     public init?(_ string: String) {
-        guard let d = string.data(using: .macOSRoman), d.count == 4 else { return nil }
-        self.init(bytes: [UInt8](d))
+        guard let d = MacRoman.encode(string), d.count == 4 else { return nil }
+        self.init(bytes: d)
     }
 
     public var bytes: [UInt8] {
@@ -34,7 +34,7 @@ public struct FourCharCode: Hashable, Comparable, CustomStringConvertible, Senda
 
     /// Human-readable form, decoded as Mac Roman (so `shïp` renders correctly).
     public var stringValue: String {
-        String(data: Data(bytes), encoding: .macOSRoman) ?? "????"
+        String(macRoman: Data(bytes))
     }
 
     /// Hex form of the raw bytes, useful when a code is non-printable.

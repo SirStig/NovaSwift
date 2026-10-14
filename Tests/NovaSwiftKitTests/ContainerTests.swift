@@ -104,7 +104,7 @@ enum ClassicForkBuilder {
             [UInt8(truncatingIfNeeded: v >> 24), UInt8(truncatingIfNeeded: v >> 16),
              UInt8(truncatingIfNeeded: v >> 8), UInt8(truncatingIfNeeded: v)]
         }
-        let typeBytes = [UInt8](typeString.data(using: .macOSRoman)!)
+        let typeBytes = MacRoman.encode(typeString)!
 
         // --- Data section: each resource = u32 length + payload ---
         let dataOffset = 256
@@ -120,7 +120,7 @@ enum ClassicForkBuilder {
         var nameList: [UInt8] = []
         var nameOffsets: [Int] = []
         for r in resources {
-            let nb = [UInt8](r.name.data(using: .macOSRoman) ?? Data())
+            let nb = (MacRoman.encode(r.name) ?? [])
             nameOffsets.append(nameList.count)
             nameList.append(UInt8(nb.count))
             nameList += nb

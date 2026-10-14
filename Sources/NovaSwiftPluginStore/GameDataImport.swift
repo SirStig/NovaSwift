@@ -294,7 +294,9 @@ public enum GameDataImport {
             ins.warnings.append("Couldn't read: " + unreadable.joined(separator: ", ") + " (damaged or not a resource file).")
         }
         ins.valid = ins.error.isEmpty && !files.isEmpty && unreadable.count < files.count && ins.missingEssentials.isEmpty
-        if !ins.valid && ins.error.isEmpty && !ins.missingEssentials.isEmpty {
+        if !ins.valid && ins.error.isEmpty && unreadable.count == files.count {
+            ins.error = "None of those files could be read as EV Nova data (" + unreadable.joined(separator: ", ") + ")."
+        } else if !ins.valid && ins.error.isEmpty && !ins.missingEssentials.isEmpty {
             ins.error = "This isn't a complete set yet - still missing: " + ins.missingEssentials.joined(separator: ", ") + ". Pick the whole game folder to get everything at once."
         } else if !ins.valid && ins.error.isEmpty {
             ins.error = "None of those files could be read as EV Nova data."
@@ -309,8 +311,8 @@ public enum GameDataImport {
             let d = [UInt8](r.data)
             let n = Int(d[6])
             guard n > 0, 7 + n <= d.count else { continue }
-            if let s = String(bytes: d[7..<(7 + n)], encoding: .macOSRoman) ?? String(bytes: d[7..<(7 + n)], encoding: .isoLatin1),
-               !s.isEmpty { return s }
+            let s = String(macRoman: d[7..<(7 + n)])
+            if !s.isEmpty { return s }
         }
         return nil
     }

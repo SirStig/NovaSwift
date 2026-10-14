@@ -67,7 +67,7 @@ public enum RezWriter {
                 records.append(contentsOf: type.bytes)
                 var id = Int16(truncatingIfNeeded: r.id).bigEndian
                 withUnsafeBytes(of: &id) { records.append(contentsOf: $0) }
-                var name = [UInt8]((r.name.data(using: .macOSRoman) ?? Data()).prefix(nameFieldLength - 1))
+                var name = [UInt8]((MacRoman.encode(r.name) ?? []).prefix(nameFieldLength - 1))
                 name += [UInt8](repeating: 0, count: nameFieldLength - name.count)
                 records.append(contentsOf: name)
                 index += 1

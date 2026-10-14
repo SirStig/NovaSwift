@@ -345,7 +345,7 @@ public enum PICT {
             let maskSize = try u32(p + 0x44)
             let desc = p + 0x48 + matteSize + maskSize
             guard try u32(desc) == 0x56 else { return nil }
-            let codec = String(bytes: slice(desc + 4, 4), encoding: .macOSRoman) ?? "????"
+            let codec = String(macRoman: slice(desc + 4, 4))
             let dataSize = try u32(desc + 0x2C)
             guard width > 0, height > 0, width < 8192, height < 8192 else {
                 throw PICTError.badSize(width, height)

@@ -47,15 +47,13 @@ public enum FieldCodec {
             if b == 0 { break }
             bytes.append(b); i += 1
         }
-        return String(bytes: bytes, encoding: .macOSRoman) ?? ""
+        return String(macRoman: bytes)
     }
 
     /// Encode as Mac Roman, replacing unmappable characters with `?`.
     public static func macRoman(_ s: String) -> [UInt8] {
-        if let d = s.data(using: .macOSRoman) { return [UInt8](d) }
-        return s.flatMap { ch -> [UInt8] in
-            String(ch).data(using: .macOSRoman).map { [UInt8]($0) } ?? [0x3F]
-        }
+        if let d = MacRoman.encode(s) { return d }
+        return s.flatMap { ch -> [UInt8] in MacRoman.encode(String(ch)) ?? [0x3F] }
     }
 
     static func writeCString(_ d: inout Data, _ off: Int, _ size: Int, _ s: String) {
@@ -76,7 +74,7 @@ public enum FieldCodec {
         guard off >= 0, off < d.count else { return "" }
         let n = min(Int(d[d.startIndex + off]), size - 1, max(0, d.count - off - 1))
         let slice = d[(d.startIndex + off + 1)..<(d.startIndex + off + 1 + n)]
-        return String(bytes: slice, encoding: .macOSRoman) ?? ""
+        return String(macRoman: slice)
     }
 
     static func writePString(_ d: inout Data, _ off: Int, _ size: Int, _ s: String) {

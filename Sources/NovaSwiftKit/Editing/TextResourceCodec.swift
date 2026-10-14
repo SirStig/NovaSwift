@@ -30,7 +30,7 @@ public enum TextResourceCodec {
             guard off < data.count else { break }
             let len = Int(data[data.startIndex + off]); off += 1
             guard off + len <= data.count else { break }
-            out.append(String(bytes: data[(data.startIndex + off)..<(data.startIndex + off + len)], encoding: .macOSRoman) ?? "")
+            out.append(String(macRoman: data[(data.startIndex + off)..<(data.startIndex + off + len)]))
             off += len
         }
         return out
@@ -54,7 +54,7 @@ public enum TextResourceCodec {
     public static func decodeString(_ data: Data) -> String {
         guard let first = data.first else { return "" }
         let len = min(Int(first), data.count - 1)
-        return String(bytes: data[(data.startIndex + 1)..<(data.startIndex + 1 + len)], encoding: .macOSRoman) ?? ""
+        return String(macRoman: data[(data.startIndex + 1)..<(data.startIndex + 1 + len)])
     }
 
     public static func encodeString(_ s: String) -> Data {
@@ -107,7 +107,7 @@ public struct DescRecord: Sendable, Hashable {
 
     public init(_ data: Data) {
         let nul = data.firstIndex(of: 0) ?? data.endIndex
-        text = String(bytes: data[data.startIndex..<nul], encoding: .macOSRoman) ?? ""
+        text = String(macRoman: data[data.startIndex..<nul])
         let t = data.distance(from: data.startIndex, to: nul) + 1
         guard t < data.count else {
             pictureID = 0; movieFile = ""; flags = 0; extra = Data(); hasTrailer = false

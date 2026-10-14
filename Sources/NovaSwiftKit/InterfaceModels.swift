@@ -91,7 +91,7 @@ public struct IntfRes {
         // Font name: NUL-terminated Mac Roman in a fixed 64-byte field at 96.
         let fontEnd = min(d.startIndex + 160, d.endIndex)
         let fontBytes = d[(d.startIndex + 96)..<fontEnd].prefix { $0 != 0 }
-        statusFont = String(data: Data(fontBytes), encoding: .macOSRoman) ?? ""
+        statusFont = String(macRoman: Data(fontBytes))
         statusFontSize   = i16(160)
         subtitleFontSize = i16(162)
         backgroundPictID = i16(164)
