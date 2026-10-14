@@ -22,3 +22,7 @@ export_credentials.cfg
 *.tpz
 
 # NOTE: *.gd.uid / *.uid files ARE committed (Godot 4.4+ resource UIDs; keep them with their scripts).
+
+# Local play-testing harness (interactive bot driver) — not part of the game or its test suite.
+tests/playbot.gd
+tests/playbot.gd.uid
