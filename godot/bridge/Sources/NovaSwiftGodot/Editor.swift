@@ -817,7 +817,7 @@ class NovaEditor: RefCounted {
             return ["mode": "desc", "text": TextResourceCodec.display(rec.text), "picture": rec.pictureID,
                     "movie": rec.movieFile, "flags": rec.flags, "trailer": rec.hasTrailer]
         }
-        let text = String(data: data, encoding: .macOSRoman) ?? ""
+        let text = String(macRoman: data)
         return ["mode": "plain", "text": TextResourceCodec.display(text)]
     }
 

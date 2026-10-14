@@ -1,4 +1,5 @@
 import Foundation
+import NovaSwiftKit
 
 /// StuffIt archive container parsing (classic "SIT!"/"rLau" and StuffIt 5).
 enum StuffIt {

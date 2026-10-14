@@ -57,8 +57,8 @@ static func locate_in(roots: PackedStringArray, name: String) -> String:
 	for r in roots:
 		for ext in EXTENSIONS:
 			var file: String = name + ext
-			var p: String = String(r).path_join(file)
-			if FileAccess.file_exists(p):
+			var p: String = _file_ci(String(r), file)
+			if p != "":
 				return p
 			var hit: String = _find_nested(String(r), file, 3)
 			if hit != "":
@@ -79,13 +79,46 @@ static func locate(data_dir: String, name: String) -> String:
 		for ext in EXTENSIONS:
 			var file: String = name + ext
 			# Direct hits first, then one level deeper (imported data may nest).
-			for base in [data_dir.path_join(folder), data_dir]:
-				var p: String = base.path_join(file)
-				if FileAccess.file_exists(p):
+			for base in [_dir_ci(data_dir, folder), data_dir]:
+				var p: String = _file_ci(str(base), file)
+				if p != "":
 					return p
 			var hit := _find_nested(data_dir, file, 3)
-			if hit != "" and (folder == "Nova Files" or hit.contains(folder)):
+			if hit != "" and (folder == "Nova Files" or hit.to_lower().contains(folder.to_lower())):
 				return hit
+	return ""
+
+
+## `dir/file` matched case-insensitively (the original ran on case-insensitive Windows/Mac
+## filesystems; Linux is case-sensitive), exact spelling first. "" if absent.
+static func _file_ci(dir: String, file: String) -> String:
+	if dir == "":
+		return ""
+	var exact: String = dir.path_join(file)
+	if FileAccess.file_exists(exact):
+		return exact
+	var d := DirAccess.open(dir)
+	if d == null:
+		return ""
+	var low: String = file.to_lower()
+	for n in d.get_files():
+		if n.to_lower() == low:
+			return dir.path_join(n)
+	return ""
+
+
+## `dir/sub` folder matched case-insensitively; "" if absent.
+static func _dir_ci(dir: String, sub: String) -> String:
+	var exact: String = dir.path_join(sub)
+	if DirAccess.dir_exists_absolute(exact):
+		return exact
+	var d := DirAccess.open(dir)
+	if d == null:
+		return ""
+	var low: String = sub.to_lower()
+	for n in d.get_directories():
+		if n.to_lower() == low:
+			return dir.path_join(n)
 	return ""
 
 
@@ -95,8 +128,9 @@ static func _find_nested(dir: String, file: String, depth: int) -> String:
 		return ""
 	for sub in d.get_directories():
 		var p := dir.path_join(sub)
-		if FileAccess.file_exists(p.path_join(file)):
-			return p.path_join(file)
+		var f := _file_ci(p, file)
+		if f != "":
+			return f
 		if depth > 1:
 			var hit := _find_nested(p, file, depth - 1)
 			if hit != "":

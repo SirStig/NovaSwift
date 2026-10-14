@@ -241,7 +241,10 @@ public enum TCAddOns {
             }
         }
         if let baseDir {
-            add(&novaFiles, baseDir.appendingPathComponent("Nova Files", isDirectory: true))
+            // Case-insensitive: Linux filesystems are case-sensitive, the original's weren't.
+            let kids = (try? FileManager.default.contentsOfDirectory(atPath: baseDir.path)) ?? []
+            let name = kids.first { $0.caseInsensitiveCompare("Nova Files") == .orderedSame } ?? "Nova Files"
+            add(&novaFiles, baseDir.appendingPathComponent(name, isDirectory: true))
             add(&novaFiles, baseDir)
         }
         plugIns = plugIns.filter { FileManager.default.fileExists(atPath: $0.path) }

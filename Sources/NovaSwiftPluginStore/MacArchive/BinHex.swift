@@ -1,4 +1,5 @@
 import Foundation
+import NovaSwiftKit
 
 /// BinHex 4.0 (.hqx) codec, written from the public format description.
 enum BinHex {

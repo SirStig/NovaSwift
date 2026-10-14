@@ -294,7 +294,7 @@ public enum GameDataImport {
             ins.warnings.append("Couldn't read: " + unreadable.joined(separator: ", ") + " (damaged or not a resource file).")
         }
         ins.valid = ins.error.isEmpty && !files.isEmpty && unreadable.count < files.count && ins.missingEssentials.isEmpty
-        if !ins.valid && ins.error.isEmpty && unreadable.count == files.count {
+        if !ins.valid && ins.error.isEmpty && !files.isEmpty && unreadable.count == files.count {
             ins.error = "None of those files could be read as EV Nova data (" + unreadable.joined(separator: ", ") + ")."
         } else if !ins.valid && ins.error.isEmpty && !ins.missingEssentials.isEmpty {
             ins.error = "This isn't a complete set yet - still missing: " + ins.missingEssentials.joined(separator: ", ") + ". Pick the whole game folder to get everything at once."

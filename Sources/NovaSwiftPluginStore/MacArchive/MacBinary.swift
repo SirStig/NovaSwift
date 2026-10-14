@@ -1,4 +1,5 @@
 import Foundation
+import NovaSwiftKit
 
 /// MacBinary I / II / III container codec.
 enum MacBinary {

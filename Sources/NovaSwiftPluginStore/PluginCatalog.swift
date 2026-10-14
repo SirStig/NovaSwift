@@ -16,11 +16,29 @@ public enum PluginCatalog {
     }
 
     private static func loadBundled() -> PluginCatalogDocument {
-        guard let url = Bundle.module.url(forResource: "PluginCatalog", withExtension: "json"),
+        guard let url = bundledURL(),
               let data = try? Data(contentsOf: url),
               let doc = try? PluginCatalogProvider.decode(data) else {
             return PluginCatalogDocument(plugins: [])
         }
         return doc
+    }
+
+    /// Off Darwin, SwiftPM's `Bundle.module` traps when the resource bundle isn't beside the
+    /// executable -- and the Godot Linux/Windows packages ship only the native libraries. Look
+    /// for it ourselves and fall back to an empty catalog (the remote one is fetched anyway).
+    private static func bundledURL() -> URL? {
+        #if canImport(Darwin)
+        return Bundle.module.url(forResource: "PluginCatalog", withExtension: "json")
+        #else
+        let bundleName = "NovaSwift_NovaSwiftPluginStore.resources"
+        var dirs: [URL] = [Bundle.main.bundleURL, URL(fileURLWithPath: FileManager.default.currentDirectoryPath)]
+        if let exe = Bundle.main.executableURL { dirs.append(exe.deletingLastPathComponent()) }
+        for d in dirs {
+            let u = d.appendingPathComponent(bundleName).appendingPathComponent("PluginCatalog.json")
+            if FileManager.default.fileExists(atPath: u.path) { return u }
+        }
+        return nil
+        #endif
     }
 }
