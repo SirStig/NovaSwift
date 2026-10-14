@@ -547,6 +547,9 @@ final class GameScene: SKScene {
     /// re-tint when the system actually changes (jumps swap the world in place).
     private var appliedBackdrop: NovaColor?
 
+    /// Co-op: a menu is open but other pilots share the system, so the scene keeps stepping with idle controls
+    /// instead of freezing (`GameContainerView.setScenePaused`).
+    var idleControls = false
     private var lastUpdate: TimeInterval = 0
     /// A paused scene gets no `update`, so the first frame after a resume would
     /// measure the whole pause (menus, map, a spaceport visit) as one frame and
@@ -1821,7 +1824,7 @@ final class GameScene: SKScene {
         } else {
             intent = playerIntent(input?.intent ?? .init())
         }
-        world.intent = intent
+        world.intent = idleControls ? ControlIntent() : intent
 
         // Frame profiler: while the debug suite is attached, partition this frame
         // into named phases. The engine reports its sim sub-phases through

@@ -117,6 +117,11 @@ cp -f "$BIN"/*.so* "$OUT/"
 install -m 755 packaging/linux/NovaSwift.sh "$OUT/NovaSwift.sh"
 install -m 644 packaging/linux/novaswift.desktop "$OUT/novaswift.desktop"
 cp -f godot/icon.png "$OUT/novaswift.png"
+# Bundled decode-only ffmpeg for the original movies (scripts/build-mini-ffmpeg.sh linux).
+[ -x godot/bin/ffmpeg/linux/ffmpeg ] || scripts/build-mini-ffmpeg.sh linux
+install -m 755 godot/bin/ffmpeg/linux/ffmpeg "$OUT/ffmpeg"
+install -m 644 godot/bin/ffmpeg/linux/LICENSE.txt "$OUT/FFMPEG-LICENSE.txt"
+"$OUT/ffmpeg" -hide_banner -encoders | grep -q " mjpeg " || { echo "error: bundled ffmpeg does not run" >&2; exit 1; }
 cat > "$OUT/README.txt" <<'TXT'
 NOVA Swift — Linux / Steam Deck build
 Run ./NovaSwift.sh (or add it to Steam as a Non-Steam Game).
@@ -129,14 +134,14 @@ TXT
 # Verify: with a clean environment every library must resolve inside OUT or the system.
 echo "→ verifying dependency resolution"
 bad=0
-for so in "$OUT"/*.so*; do
+for so in "$OUT"/*.so* $( [ -f "$OUT/ffmpeg" ] && echo "$OUT/ffmpeg" ); do
   if env -i PATH="$PATH" ldd "$so" | grep -q "not found"; then
     echo "error: unresolved dependencies in $(basename "$so"):" >&2
     env -i PATH="$PATH" ldd "$so" | grep "not found" >&2; bad=1
   fi
 done
 # glibc floor report (SteamOS 3 = 2.38+; fail if we need newer than 2.38).
-maxglibc="$(objdump -T "$OUT"/*.so* "$OUT/NovaSwift.x86_64" 2>/dev/null | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -V | tail -1 || true)"
+maxglibc="$(objdump -T "$OUT"/*.so* "$OUT/NovaSwift.x86_64" $( [ -f "$OUT/ffmpeg" ] && echo "$OUT/ffmpeg" ) 2>/dev/null | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -V | tail -1 || true)"
 echo "  highest GLIBC symbol required: ${maxglibc:-unknown}"
 if [ -n "${maxglibc:-}" ] && [ "$(printf '%s\n2.38\n' "$maxglibc" | sort -V | tail -1)" != "2.38" ]; then
   echo "error: needs glibc $maxglibc > 2.38 (SteamOS 3) — build on an older distro" >&2; bad=1

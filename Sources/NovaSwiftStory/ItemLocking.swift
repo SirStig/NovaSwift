@@ -54,10 +54,11 @@ extension NovaGame {
             spob.government == g || (!independent && GovtRelations.allied(spob.government, g, govts: table))
         }
         switch requireGovt {
-        case 128...383:   return hereOrAlly(requireGovt - 128)
-        case 1128...1383: return independent || hereOrAlly(requireGovt - 1128)
-        case 2128...2383: return !hereOrAlly(requireGovt - 2128)
-        case 3128...3383: return !(independent || hereOrAlly(requireGovt - 3128))
+        // The band value carries the gövt id itself, offset by 0 / 1000 / 2000 / 3000.
+        case 128...383:   return hereOrAlly(requireGovt)
+        case 1128...1383: return independent || hereOrAlly(requireGovt - 1000)
+        case 2128...2383: return !hereOrAlly(requireGovt - 2000)
+        case 3128...3383: return !(independent || hereOrAlly(requireGovt - 3000))
         default:          return true
         }
     }

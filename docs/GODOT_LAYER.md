@@ -1142,8 +1142,10 @@ name and are renamed, so a crash never leaves a half-file in the cache):
 - otherwise a JPEG frame sequence + `movie.json` (+ `audio.wav` if the clip has sound). Homebrew's
   ffmpeg lacks libtheora, so macOS dev machines take this path. `MoviePlayer.gd` plays either kind.
 
-ffmpeg is found on `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` (`ffmpeg.exe` on
-Windows). It is optional: when missing, or the conversion fails, `Movies.ready()/transcode()` return
+ffmpeg is the bundled decode-only build first (beside the executable, then
+`res://bin/ffmpeg/<platform>/` for editor runs; `scripts/build-mini-ffmpeg.sh`, no Theora, so it always
+takes the frames path — see `docs/PACKAGING.md`), then `PATH`, `/opt/homebrew/bin`, `/usr/local/bin`,
+`/usr/bin` (`ffmpeg.exe` on Windows). It is optional: when missing, or the conversion fails, `Movies.ready()/transcode()` return
 `{}` and callers skip the clip exactly as the original does with its "QuickTime Movies" preference off
 (`Ui_PlayMovieFileModal` 0x0049db00 returns at once). `Prefs [classic] play_movies` is that preference.
 

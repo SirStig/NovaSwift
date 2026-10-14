@@ -24,6 +24,9 @@
 extends RefCounted
 
 const Proto = preload("res://net/NetProto.gd")
+const NetCrypto = preload("res://net/NetCrypto.gd")
+const NetPrefs = preload("res://net/NetPrefs.gd")
+const NetPlugins = preload("res://net/NetPlugins.gd")
 
 signal event(ev: Dictionary)
 
@@ -32,6 +35,9 @@ const HANDSHAKE_TIMEOUT := 8.0
 const IDLE_TIMEOUT := 20.0
 const PING_EVERY := 2.0
 const SERVER_ID := 1
+## How long a joining client waits for the server's plain UDP status reply (is it encrypted? which key?) before
+## connecting in plain mode.
+const PROBE_TIMEOUT := 1.2
 
 var peer: ENetMultiplayerPeer = null
 ## "none" | "server" | "client"
@@ -57,6 +63,13 @@ var peers: Dictionary = {}
 ## True when this process has a local player in the session (a Host Game); false for a dedicated server.
 var has_local_player: bool = true
 var banned: Dictionary = {}
+## True when the ENet link is DTLS-encrypted (host: started with encryption; client: connected with a pinned key).
+var encrypted: bool = false
+## Host side: {key, cert, pem, fp} while hosting encrypted (the beacon / status reply advertises pem + fp).
+var dtls_creds: Dictionary = {}
+var _probe: PacketPeerUDP = null
+var _probe_t0: float = 0.0
+var _join_opts: Dictionary = {}
 ## id -> clock time to really disconnect: lets a REJECT / KICK packet flush before the link goes down.
 var _closing: Dictionary = {}
 
@@ -87,6 +100,18 @@ func host(nova: Object, opts: Dictionary) -> int:
 	if err != OK:
 		_emit({"type": "error", "message": _bind_error(err)})
 		return err
+	encrypted = false
+	dtls_creds = {}
+	if bool(opts.get("dtls", false)):
+		dtls_creds = opts.get("dtls_creds", {}) as Dictionary if opts.get("dtls_creds", null) is Dictionary else NetCrypto.server_credentials()
+		var topt: TLSOptions = NetCrypto.server_options(dtls_creds)
+		var derr: int = ERR_UNAVAILABLE if topt == null else p.host.dtls_server_setup(topt)
+		if derr != OK:
+			p.close()
+			dtls_creds = {}
+			_emit({"type": "error", "message": "Couldn't enable encryption (%s). This build may lack TLS support; host without \"Encrypt connection\"." % error_string(derr)})
+			return derr
+		encrypted = true
 	_attach(p)
 	mode = "server"
 	state = "connected"
@@ -98,28 +123,95 @@ func host(nova: Object, opts: Dictionary) -> int:
 
 
 ## Connect to host:port. Returns OK or an Error code (the connection itself completes asynchronously).
-func join(nova: Object, host_name: String, host_port: int, name: String, pw: String = "") -> int:
+## First a short plain UDP status query (game port + 1) learns whether the server is encrypted and which key it
+## uses; no answer = plain. opts: {accept_new_key: bool} to re-pin a server whose key changed.
+func join(nova: Object, host_name: String, host_port: int, name: String, pw: String = "", opts: Dictionary = {}) -> int:
 	close("restart", false)
 	bridge = nova
 	display_name = Proto.clean_name(name)
 	password = pw
 	port = host_port
 	address = Proto.format_address(host_name, host_port)
-	var p: ENetMultiplayerPeer = ENetMultiplayerPeer.new()
-	var err: int = p.create_client(host_name, host_port)
-	if err != OK:
-		_emit({"type": "error", "message": "Couldn't start connecting to %s (%s)." % [address, error_string(err)]})
-		return err
-	_attach(p)
+	_join_opts = opts.duplicate()
+	_join_opts["host"] = host_name
+	encrypted = false
 	mode = "client"
 	state = "connecting"
 	_t_state = _clock
 	_emit({"type": "connecting", "address": address})
+	var ip: String = host_name if host_name.is_valid_ip_address() else IP.resolve_hostname(host_name)
+	if ip == "" or bool(opts.get("skip_probe", false)):
+		return _start_client(host_name, host_port, {})
+	_probe = PacketPeerUDP.new()
+	var qport: int = Proto.LAN_PORT if host_port == Proto.DEFAULT_PORT else host_port + 1
+	if _probe.set_dest_address(ip, qport) != OK:
+		_probe = null
+		return _start_client(host_name, host_port, {})
+	_probe.put_packet(Proto.query_packet())
+	_probe_t0 = _clock
+	return OK
+
+
+func _poll_probe() -> void:
+	var info: Dictionary = {}
+	while _probe.get_available_packet_count() > 0:
+		info = Proto.decode_beacon(_probe.get_packet())
+		if not info.is_empty():
+			break
+	if info.is_empty() and _clock - _probe_t0 < PROBE_TIMEOUT:
+		return
+	_probe.close()
+	_probe = null
+	var err: int = _start_client(str(_join_opts["host"]), port, info)
+	if err != OK and mode == "client":
+		_fail_client("error", "Couldn't start connecting to %s (%s)." % [address, error_string(err)])
+
+
+## Decide plain / DTLS from the status reply `info` (may be empty), then open the ENet client.
+func _start_client(host_name: String, host_port: int, info: Dictionary) -> int:
+	var tls: TLSOptions = null
+	var pinned: Dictionary = NetPrefs.trusted_key(host_name, host_port)
+	var server_dtls: bool = bool(info.get("dtls", false)) or (info.is_empty() and not pinned.is_empty())
+	if server_dtls:
+		var pem: String = str(info.get("cert", ""))
+		if pem == "" and not pinned.is_empty():
+			pem = str(pinned.get("pem", ""))
+		var fp: String = NetCrypto.fingerprint(pem)
+		if pem == "" or fp == "":
+			_fail_client("error", "%s uses an encrypted connection but did not share its key. Try again, or make sure its status port (UDP %d) is reachable." % [address, host_port + 1])
+			return OK
+		if not pinned.is_empty() and str(pinned.get("fp", "")) != fp and not bool(_join_opts.get("accept_new_key", false)):
+			_fail_client("key_changed", "The encryption key of %s has CHANGED since you first joined (was %s, now %s). This can mean the server was reinstalled - or that someone is intercepting the connection. Only continue if you expected it." % [
+				address, NetCrypto.short_fp(str(pinned.get("fp", ""))), NetCrypto.short_fp(fp)],
+				{"host": host_name, "port": host_port, "old_fp": str(pinned.get("fp", "")), "new_fp": fp, "pem": pem})
+			return OK
+		tls = NetCrypto.client_options(pem)
+		if tls == null:
+			_fail_client("error", "%s sent an unreadable encryption key." % address)
+			return OK
+		if pinned.is_empty() or str(pinned.get("fp", "")) != fp:
+			NetPrefs.trust_key(host_name, host_port, pem, fp)   # trust on first use (or after the player accepted a change)
+			_emit({"type": "key_pinned", "address": address, "fp": fp, "first": pinned.is_empty()})
+	var p: ENetMultiplayerPeer = ENetMultiplayerPeer.new()
+	var err: int = p.create_client(host_name, host_port)
+	if err != OK:
+		return err
+	if tls != null:
+		var derr: int = p.host.dtls_client_setup(NetCrypto.COMMON_NAME, tls)
+		if derr != OK:
+			p.close()
+			_fail_client("error", "Couldn't start the encrypted connection (%s)." % error_string(derr))
+			return OK
+		encrypted = true
+	_attach(p)
+	mode = "client"
+	state = "connecting"
+	_t_state = _clock
 	return OK
 
 
 func is_active() -> bool:
-	return peer != null and mode != "none"
+	return (peer != null or _probe != null) and mode != "none"
 
 
 func is_connected_to_session() -> bool:
@@ -128,6 +220,9 @@ func is_connected_to_session() -> bool:
 
 ## Leave / stop hosting. `announce` = emit the "disconnected" event.
 func close(reason: String = "", announce: bool = true) -> void:
+	if _probe != null:
+		_probe.close()
+		_probe = null
 	if peer == null:
 		mode = "none"
 		state = "idle"
@@ -140,6 +235,8 @@ func close(reason: String = "", announce: bool = true) -> void:
 	_end_bridge()
 	peer.close()
 	peer = null
+	encrypted = false
+	dtls_creds = {}
 	var was: String = mode
 	mode = "none"
 	state = "closed"
@@ -171,6 +268,10 @@ func _attach(p: ENetMultiplayerPeer) -> void:
 # --- per-frame ---------------------------------------------------------------------------------------
 
 func poll(delta: float) -> void:
+	if peer == null and _probe != null:
+		_clock += delta
+		_poll_probe()
+		return
 	if peer == null:
 		return
 	_clock += delta
@@ -213,7 +314,7 @@ func _poll_client_connection() -> void:
 		_send_control(SERVER_ID, Proto.K_HELLO, {"proto": Proto.PROTO, "version": Proto.game_version(),
 			"name": display_name, "pw": Proto.hash_password(password), "manifest": manifest})
 	if state == "connecting" and _clock - _t_state > CONNECT_TIMEOUT:
-		_fail_client("timeout", "Timed out connecting to %s. Check the address, that the server is running, and that port %d/udp is open." % [address, port])
+		_fail_client("timeout", "Timed out connecting to %s. Check the address, that the server is running, and that port %d/udp is open.%s" % [address, port, _tls_hint()])
 	elif state == "handshaking" and _clock - _t_state > HANDSHAKE_TIMEOUT:
 		_fail_client("timeout", "%s didn't answer the handshake. It may be a different game or a stalled server." % address)
 
@@ -222,9 +323,15 @@ func _check_client_disconnect() -> void:
 	if peer.get_connection_status() != MultiplayerPeer.CONNECTION_DISCONNECTED:
 		return
 	if state == "connecting":
-		_fail_client("timeout", "Couldn't reach %s. Check the address, that the server is running, and that port %d/udp is open." % [address, port])
+		_fail_client("timeout", "Couldn't reach %s. Check the address, that the server is running, and that port %d/udp is open.%s" % [address, port, _tls_hint()])
 	else:
 		_fail_client("disconnected", _closed_reason if _closed_reason != "" else "Lost the connection to the server.")
+
+
+func _tls_hint() -> String:
+	if encrypted:
+		return " This connection is encrypted: the server must also be running with encryption and the same key."
+	return " (If the server uses an encrypted connection, its status port - UDP %d - must be reachable so this game can detect that.)" % (port + 1)
 
 
 func _client_timers() -> void:
@@ -253,17 +360,22 @@ func _server_timers() -> void:
 
 
 ## Client-side failure: report once, tear down.
-func _fail_client(kind: String, message: String) -> void:
+func _fail_client(kind: String, message: String, detail: Dictionary = {}) -> void:
 	var was_connected: bool = state == "connected"
 	_end_bridge()
 	if peer != null:
 		peer.close()
 	peer = null
+	if _probe != null:
+		_probe.close()
+		_probe = null
 	mode = "none"
 	state = "closed"
 	peers.clear()
 	if kind == "timeout" and not was_connected:
 		_emit({"type": "timeout", "message": message})
+	elif kind == "key_changed" or kind == "error":
+		_emit({"type": "rejected" if kind == "key_changed" else "error", "code": kind, "message": message, "detail": detail, "address": address})
 	else:
 		_emit({"type": "disconnected", "reason": message})
 
@@ -347,10 +459,7 @@ func _server_hello(id: int, hello: Dictionary) -> void:
 	if int(hello.get("proto", 0)) != Proto.PROTO:
 		_reject(id, Proto.REJECT_PROTO, "This server speaks a different multiplayer protocol (server %d, you %d). Update NovaSwift." % [Proto.PROTO, int(hello.get("proto", 0))], {})
 		return
-	var ver: String = str(hello.get("version", ""))
-	if ver != Proto.game_version():
-		_reject(id, Proto.REJECT_VERSION, "Game version mismatch: the server runs %s, you run %s." % [Proto.game_version(), ver], {"server": Proto.game_version(), "client": ver})
-		return
+	info["name"] = Proto.clean_name(str(hello.get("name", "")), "Pilot %d" % id)
 	if password != "" and Proto.hash_password(password) != str(hello.get("pw", "")):
 		_reject(id, Proto.REJECT_PASSWORD, "Wrong password." if str(hello.get("pw", "")) != "" else "This server needs a password.", {})
 		return
@@ -367,7 +476,9 @@ func _server_hello(id: int, hello: Dictionary) -> void:
 		mine = str(bridge.net_ready_manifest())
 	var theirs: String = str(hello.get("manifest", ""))
 	if mine != "" and theirs != "" and Proto.manifest_signature(mine) != Proto.manifest_signature(theirs):
-		_reject(id, Proto.REJECT_PLUGINS, "Your enabled plug-ins don't match the server's. Match its plug-in list, then rejoin.", {"server_manifest": mine, "client_manifest": theirs})
+		var li: Dictionary = NetPlugins.local_info(bridge, true)
+		_reject(id, Proto.REJECT_PLUGINS, "Your enabled plug-ins don't match the server's. Match its plug-in list, then rejoin.",
+			{"server_manifest": mine, "client_manifest": theirs, "server_tc": str(li.get("tc", "")), "server_addons": li.get("addons", [])})
 		return
 	var nm: String = _unique_name(Proto.clean_name(str(hello.get("name", "")), "Pilot %d" % id), id)
 	info["name"] = nm
@@ -379,7 +490,8 @@ func _server_hello(id: int, hello: Dictionary) -> void:
 		if int(oid) != id and bool((peers[oid] as Dictionary).get("ready", false)):
 			list.append({"id": int(oid), "name": str((peers[oid] as Dictionary)["name"])})
 	_send_control(id, Proto.K_WELCOME, {"your_id": id, "server_name": server_name, "host_name": display_name if has_local_player else "[Server]",
-		"has_local_player": has_local_player, "rules": rules_json, "peers": list, "max": max_players, "proto": Proto.PROTO})
+		"has_local_player": has_local_player, "rules": rules_json, "peers": list, "max": max_players, "proto": Proto.PROTO,
+		"version": Proto.game_version()})
 	for oid in peers:
 		if int(oid) != id and bool((peers[oid] as Dictionary).get("ready", false)):
 			_send_control(int(oid), Proto.K_PEER_JOIN, {"id": id, "name": nm})
@@ -403,7 +515,8 @@ func _unique_name(want: String, id: int) -> String:
 
 func _reject(id: int, code: String, message: String, detail: Dictionary) -> void:
 	_send_control(id, Proto.K_REJECT, {"code": code, "message": message, "detail": detail})
-	_emit({"type": "refused", "id": id, "code": code, "message": message, "ip": str((peers[id] as Dictionary).get("ip", ""))})
+	_emit({"type": "refused", "id": id, "code": code, "message": message, "ip": str((peers[id] as Dictionary).get("ip", "")),
+		"name": str((peers[id] as Dictionary).get("name", ""))})
 	_closing[id] = _clock + 0.3
 	peers.erase(id)
 
@@ -521,7 +634,8 @@ func _client_welcome(w: Dictionary) -> void:
 			bridge.net_peer_joined(oid, onm)
 	_last_rx = _clock
 	_emit({"type": "connected", "address": address, "server_name": server_name, "id": local_id, "bridge": bridge_active,
-		"has_host_player": has_local_player, "host_name": host_label, "rules": rules_json})
+		"has_host_player": has_local_player, "host_name": host_label, "rules": rules_json,
+		"server_version": str(w.get("version", "")), "version_differs": str(w.get("version", "")) != "" and str(w.get("version", "")) != Proto.game_version()})
 
 
 func _client_reject(r: Dictionary) -> void:

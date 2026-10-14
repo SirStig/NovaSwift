@@ -87,6 +87,10 @@ final class AppModel: ObservableObject {
     /// Inactive until a session is started; reached everywhere via `model.session`.
     let session = MultiplayerSession()
 
+    /// Cross-play (ENet): server browser, saved servers, plug-in swap for a join. See `Multiplayer/CrossPlayModel.swift`.
+    let crossPlay = CrossPlayModel()
+    private var crossPlayObserver: AnyCancellable?
+
     #if canImport(GameKit)
     /// Game Center sign-in state for online co-op. Authentication is kicked off at
     /// launch (`RootView`); it gates the "Online Co-op" entry.
@@ -181,6 +185,8 @@ final class AppModel: ObservableObject {
         sessionObserver = session.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
+        crossPlayObserver = crossPlay.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        wireCrossPlay()
         #if canImport(CloudKit)
         // Forward game-data sync state (remote availability, phase) the same way
         // so the setup wizard's restore card appears/updates live.
@@ -206,19 +212,14 @@ final class AppModel: ObservableObject {
         session.onTradeCommitted = { [weak self] give, receive in
             guard let self else { return }
             var s = pilot.state
-            s.credits = max(0, s.credits - give.credits) + receive.credits
-            for (id, tons) in give.cargo {
-                let left = (s.cargo[id] ?? 0) - tons
-                s.cargo[id] = left > 0 ? left : nil
-            }
-            for (id, tons) in receive.cargo { s.cargo[id, default: 0] += tons }
-            for (id, n) in give.outfits {
-                let left = (s.outfits[id] ?? 0) - n
-                s.outfits[id] = left > 0 ? left : nil
-            }
-            for (id, n) in receive.outfits { s.outfits[id, default: 0] += n }
+            // The same arithmetic the Godot build applies (NovaSwiftNet.TradeRules).
+            TradeRules.apply(give: give, receive: receive, credits: &s.credits, cargo: &s.cargo, outfits: &s.outfits)
             pilot.state = s
             pilot.save()
+        }
+        session.tradeHoldings = { [weak self] in
+            guard let s = self?.pilot.state else { return (0, [:], [:]) }
+            return (s.credits, s.cargo, s.outfits)
         }
         #if canImport(GameKit)
         // Forward Game Center sign-in changes so the "Online Co-op" entry updates.
@@ -404,24 +405,58 @@ final class AppModel: ObservableObject {
 
     // MARK: Multiplayer plug-in compatibility
 
-    /// Content hashes cached by a per-file stamp (id + size + mtime), so building
-    /// the manifest only rehashes plug-ins whose files actually changed.
-    private var pluginHashCache: [String: String] = [:]
+    /// Gameplay hashes + cosmetic flags cached by a per-file stamp (id + size + mtime), so building the manifest
+    /// only re-reads plug-ins whose files actually changed. Persisted: classifying parses every container.
+    private var pluginHashCache: [String: PluginGameplay.Result] = AppModel.loadGameplayCache()
+    private static let gameplayCacheKey = "com.novaswift.mp.gameplayCache.v1"
 
-    /// The local player's enabled-plug-in manifest, used to verify two players run
-    /// the same content before playing together. Cheap after the first call (hashes
-    /// are cached until a plug-in's files change).
+    private static func loadGameplayCache() -> [String: PluginGameplay.Result] {
+        guard let d = UserDefaults.standard.data(forKey: gameplayCacheKey),
+              let v = try? JSONDecoder().decode([String: PluginGameplay.Result].self, from: d) else { return [:] }
+        return v
+    }
+    private func saveGameplayCache() {
+        // Bounded: only stamps of currently-discovered plug-ins are kept.
+        let live = Set(data.plugins.map { pluginStamp($0) })
+        let kept = pluginHashCache.filter { live.contains($0.key) }
+        if let d = try? JSONEncoder().encode(kept) { UserDefaults.standard.set(d, forKey: Self.gameplayCacheKey) }
+    }
+
+    /// The local player's enabled-plug-in manifest, used to verify two players run the same GAMEPLAY content
+    /// before playing together (`PluginGameplay`: art / sound / UI-only plug-ins are flagged `cosmetic` and
+    /// never gate a join). Cheap after the first call; `warmPluginManifest()` does the first call off the main thread.
     func currentPluginManifest() -> PluginManifest {
         let requirements = data.plugins.filter(\.isEnabled).map { bundle -> PluginRequirement in
             let stamp = pluginStamp(bundle)
-            let hash = pluginHashCache[stamp] ?? {
-                let h = GameLibrary.contentHash(of: bundle)
-                pluginHashCache[stamp] = h
-                return h
+            let result = pluginHashCache[stamp] ?? {
+                let r = PluginGameplay.analyze(bundle)
+                pluginHashCache[stamp] = r
+                saveGameplayCache()
+                return r
             }()
-            return PluginRequirement(id: bundle.id, name: bundle.name, contentHash: hash)
+            return PluginRequirement(id: bundle.id, name: bundle.name, contentHash: result.hash, cosmetic: result.cosmetic)
         }
         return PluginManifest(requirements)
+    }
+
+    /// What this install can offer a server / compare against one: gameplay plug-ins, the enabled total
+    /// conversion and its add-ons.
+    func currentPluginRequirements() -> PluginRequirements {
+        let tc = data.plugins.first { $0.isEnabled && $0.isTotalConversion }
+        return PluginRequirements(plugins: currentPluginManifest().plugins, totalConversion: tc?.id, addOns: tc?.addOnIDs ?? [])
+    }
+
+    /// Classifies + hashes the enabled plug-ins off the main thread so the first Multiplayer open doesn't hitch.
+    func warmPluginManifest() async {
+        let missing = data.plugins.filter { $0.isEnabled && pluginHashCache[pluginStamp($0)] == nil }
+        guard !missing.isEmpty else { return }
+        let stamps = missing.map { ($0, pluginStamp($0)) }
+        let results = await Task.detached(priority: .utility) {
+            stamps.map { ($0.1, PluginGameplay.analyze($0.0)) }
+        }.value
+        for (stamp, r) in results { pluginHashCache[stamp] = r }
+        saveGameplayCache()
+        objectWillChange.send()
     }
 
     private func pluginStamp(_ bundle: PluginBundle) -> String {

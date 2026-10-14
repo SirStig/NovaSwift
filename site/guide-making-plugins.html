@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Making a plug-in · NOVA Swift guides</title>
+  <meta name="description" content="Build your own EV Nova plug-in with the built-in Plug-in Editor: resources, galaxy and system editing, test runs, saving and sharing." />
+  <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
+  <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
+  <meta property="og:title" content="Making a plug-in · NOVA Swift" />
+  <meta property="og:image" content="https://sirstig.github.io/NovaSwift/assets/launch-banner.png?v=brand2" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=21" />
+</head>
+<body data-page="guides">
+  <div class="space-bg" aria-hidden="true"></div>
+  <canvas id="stars" aria-hidden="true"></canvas>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <!-- nav:start -->
+  <nav class="nav" aria-label="Main">
+    <div class="nav-inner">
+      <a class="brand" href="index.html" aria-label="NOVA Swift home">
+        <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+        <b>NOVA<i>·</i>SWIFT</b>
+      </a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="nav-links">
+        <span class="bars" aria-hidden="true"></span><span class="sr">Menu</span>
+      </button>
+      <div class="nav-links" id="nav-links">
+        <a href="index.html#features" data-nav="index">Game</a>
+        <a href="download.html" data-nav="download">Download</a>
+        <a href="guides.html" data-nav="guides">Guides</a>
+        <a href="multiplayer.html" data-nav="multiplayer">Multiplayer</a>
+        <a href="servers.html" data-nav="servers">Servers</a>
+        <a href="plugins.html" data-nav="plugins">Plug-ins</a>
+        <a href="editor.html" data-nav="editor">Editor</a>
+        <a href="progress.html" data-nav="progress">Progress</a>
+      </div>
+      <div class="nav-cta">
+        <a class="btn btn-ghost sm icon-only" href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener" aria-label="Source code on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.7 1.2 3.4.9.1-.7.4-1.2.7-1.5-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.6 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
+        </a>
+        <a class="btn btn-primary sm" href="download.html">Play free</a>
+      </div>
+    </div>
+  </nav>
+  <!-- nav:end -->
+
+  <main id="main">
+    <header class="page-hero" style="--hero-img:url(assets/screenshots/editor-galaxy.webp)">
+      <div class="wrap">
+        <div class="crumbs"><a href="guides.html">Guides</a> / Plug-ins</div>
+        <h1>Making a plug-in</h1>
+        <p class="lead">Make ships, systems, missions and whole new games. This guide walks through the built-in editor, from a new plug-in to a catalog listing.</p>
+      </div>
+    </header>
+
+    <div class="wrap doc">
+      <!-- guidenav:start -->
+      <nav class="doc-nav" aria-label="Guides">
+        <h4>Start here</h4>
+        <a href="guide-getting-started.html">Getting started</a>
+        <a href="guide-controls.html">Controls &amp; controllers</a>
+        <a href="guide-steam-deck.html">Steam Deck &amp; Linux</a>
+        <a href="faq.html">FAQ &amp; troubleshooting</a>
+        <h4>Multiplayer</h4>
+        <a href="guide-multiplayer.html">Join &amp; host games</a>
+        <a href="dedicated-server.html">Dedicated server</a>
+        <a href="servers.html">Server list</a>
+        <h4>Plug-ins</h4>
+        <a href="guide-plugins.html">Installing plug-ins</a>
+        <a href="guide-making-plugins.html">Making a plug-in</a>
+        <a href="editor.html">The plug-in editor</a>
+      </nav>
+      <!-- guidenav:end -->
+
+      <article class="prose">
+        <div class="toc"><b>On this page</b><ol><li><a href="#what">What a plug-in is</a></li><li><a href="#editor">The Plug-in Editor</a></li><li><a href="#new">Creating a plug-in</a></li><li><a href="#forms">Editing resources</a></li><li><a href="#maps">Galaxy and system editors</a></li><li><a href="#art">Graphics, sound, HD</a></li><li><a href="#story">Missions and NCB</a></li><li><a href="#test">Test Run</a></li><li><a href="#save">Saving</a></li><li><a href="#testgame">Testing in the game</a></li><li><a href="#share">Sharing and the catalog</a></li></ol></div>
+
+        <h2 id="what">What a plug-in is</h2>
+        <p>An EV Nova plug-in is a file of <b>resources</b>: small typed records that define the game's content. A plug-in adds new records or overrides existing ones by id. Some of the types you will meet:</p>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Type</th><th>Defines</th></tr></thead>
+          <tbody>
+            <tr><td><code>shïp</code></td><td>A ship hull: speed, armor, shields, cargo, slots.</td></tr>
+            <tr><td><code>oütf</code></td><td>An outfit you can buy and install.</td></tr>
+            <tr><td><code>wëap</code></td><td>A weapon: shots, beams, missiles.</td></tr>
+            <tr><td><code>spöb</code></td><td>A planet or station.</td></tr>
+            <tr><td><code>sÿst</code></td><td>A star system.</td></tr>
+            <tr><td><code>mïsn</code>, <code>crön</code></td><td>Missions, and timed events that run in the background.</td></tr>
+            <tr><td><code>gövt</code>, <code>përs</code>, <code>flët</code></td><td>Governments, named pilots and fleets.</td></tr>
+            <tr><td><code>shän</code>, <code>spïn</code></td><td>How a ship is drawn, and how a planet's or shot's sprite is picked.</td></tr>
+            <tr><td><code>dësc</code>, <code>STR#</code></td><td>Descriptions and text.</td></tr>
+          </tbody>
+        </table></div>
+        <p>A plug-in only needs to contain what it adds or changes. It loads on top of the base game's data, and later plug-ins override earlier ones. A <b>total conversion</b> replaces the base scenario entirely. The community reference for all of this is the <b>EV Nova Bible</b>, the original developer documentation of every resource type and field. It is the source for the field names and the control-bit rules used below, so keep a copy open while you work.</p>
+
+        <h2 id="editor">The Plug-in Editor</h2>
+        <p>NOVA Swift has a built-in editor so you do not need a separate resource tool. On <b>Mac</b> it is a full-window editor opened from the <b>Plugin Editor</b> button next to <b>Plugins</b> on the main menu. The Linux and Steam Deck app also has a <b>Plugin Editor</b> on its main menu with the same layout and tools. The editor is not on iPhone, iPad or Apple TV. See also <a href="editor.html">the editor page</a>.</p>
+        <figure><img src="assets/screenshots/editor-ship.webp" width="1800" height="1131" loading="lazy" alt="The Plug-in Editor showing a ship's fields and sprite preview." /></figure>
+        <p>The editor works in a <b>diff layer</b>: your plug-in holds only what you added or overrode, and the base data is context. Saving never writes out base resources unless you force a full export, which shows a warning. Everything you export as a plain plug-in must load in the original EV Nova too. HD art is an extra layer that the original ignores.</p>
+        <p>The Godot editor's tools are: Overview, Resources, Galaxy Map, Star System, Story &amp; Bits, Validation, Project &amp; Export and Bundle Files. It shares its document, undo and checks with the Mac editor, but it is newer and has seen less use.</p>
+
+        <h2 id="new">Creating a plug-in</h2>
+        <ol class="steps">
+          <li><h3>Open the editor and start a new plug-in</h3><p>From the main menu choose Plugin Editor. Create a new document, or open an existing plug-in to change it. The Overview tool shows what your plug-in adds or changes, and recent plug-ins.</p></li>
+          <li><h3>Set the project details</h3><p>In Project &amp; Export, give it a name and author.</p></li>
+          <li><h3>Add or override resources</h3><p>Duplicate a base ship or planet and change it, or add a new resource with a free id. You can rename, change the id, duplicate, delete or revert any resource. Changed resources show how they differ from the base game.</p></li>
+        </ol>
+
+        <h2 id="forms">Editing resources</h2>
+        <p>The Resources tool lists every type with a search box. Selecting a resource opens a form built from the real field layouts of the game, grouped into cards. Fields that point at other resources (a ship's weapons, a planet's graphic) open a searchable picker, and flags appear as a checkbox grid. Editors cover 23 resource types, and any other type can be edited as raw hex so nothing is locked. Ship, weapon and outfit overviews show stats computed by the game engine's own math, and a hardpoint editor lets you place weapon and engine exit points on the ship's sprite.</p>
+        <p>Every change is one undo step. A validation pass flags problems the game would trip over, such as references to missing resources, ids out of range, field limits and bad control-bit syntax, and explains each in plain language.</p>
+        <figure><img src="assets/screenshots/editor-galaxy.webp" width="1800" height="1131" loading="lazy" alt="The galaxy map editor with systems and hyperlinks." /></figure>
+
+        <h2 id="maps">Galaxy and system editors</h2>
+        <ul>
+          <li><b>Galaxy Map:</b> drag systems, and add or remove hyperlinks between them. The Mac editor also shows government colours and nebulae.</li>
+          <li><b>Star System:</b> place planets and stations (stellars) and manage the system's links. On Mac, it uses the real sprites and an embedded live game preview that reloads as you edit.</li>
+        </ul>
+        <figure><img src="assets/screenshots/editor-system.webp" width="1800" height="1131" loading="lazy" alt="The star system editor with stellars placed around a sun." /></figure>
+
+        <h2 id="art">Graphics, sound and HD art</h2>
+        <p>Graphics and sound editors let you import <b>PNG</b> images and <b>WAV</b> sounds, previewing them as the game will use them. Sprite sheets can be imported as a grid or per-frame with a chosen rotation count. The sprite viewer has a frame scrubber and playback, and sounds show a waveform.</p>
+        <p>For HD art and 3D models, the Mac editor can attach an HD sprite or model to any resource, show it side by side with the classic art, and save it into a <code>.nsx</code> folder or embed it in the plug-in file. See <a href="guide-plugins.html#hd">HD art packs</a> for how players use it. Gameplay and hit boxes stay classic whichever art you use.</p>
+
+        <h2 id="story">Missions and the control-bit (NCB) tools</h2>
+        <p>Missions and crons are wired together by <b>control bits</b> and small scripts called NCB. Availability tests look like <code>!(b511 | b515) &amp; !b350</code>, and set expressions look like <code>b350 b6666</code>. The tokens are the Bible's: <code>bN</code> a control bit, <code>oN</code> an outfit, <code>eN</code> an explored system, and so on, with set operations to start, abort or fail a mission, grant outfits, move the player and more.</p>
+        <p>One catch from the original: flat chains such as <code>b1 | b2 | b3</code> are not evaluated like ordinary boolean logic. The Bible advises using parentheses to group each operation, and so does the editor's checker.</p>
+        <p>The <b>Story &amp; Bits</b> tool gives you a control-bit index (which missions set and test each bit), a mission flow graph with search and an "only my changes" view, and mission and cron cards. It reports dead ends and missions that can never be offered. The same data powers the in-game Story Guide.</p>
+
+        <h2 id="test">Test Run and debug panel</h2>
+        <p>The <b>Test Run</b> button starts a real game on your plug-in layered over the base game, using a throwaway pilot, so you do not need to save or install first. You can land at the real spaceport (trade, outfitter, shipyard, bar, mission board), and missions and crons run. A debug panel lets you spawn ships and fleets, give outfits, set control bits, start missions, jump anywhere, change the time scale, turn on god mode and use the console.</p>
+        <figure><img src="assets/screenshots/editor-testrun.webp" width="1800" height="1131" loading="lazy" alt="A test run with the debug panel open." /></figure>
+        <div class="callout"><p><b>Not simulated in a test run.</b> Landing clearance, bribes and tribute, escort commands in the comm windows, capturing from the plunder dialog (use the panel's Capture instead), hypergates, wormholes and domination. Check those in the real game.</p></div>
+
+        <h2 id="save">Saving and exporting</h2>
+        <p>Save as a Windows-style <code>.rez</code> (loads in EV Nova CE) or as a classic Mac resource-fork file. A multi-file plug-in is saved back to its own files and only changed ones are rewritten. A total conversion folder opens and saves as a unit. The editor autosaves a recovery copy every 60 seconds while there are unsaved changes, and offers to restore after a crash. The Mac editor can also Install your plug-in straight into the game.</p>
+        <p>On Mac the app is sandboxed, so saving asks you to choose a location.</p>
+
+        <h2 id="testgame">Testing in the real game</h2>
+        <ol class="steps">
+          <li><h3>Install it</h3><p>Use the editor's Install, or the Plug-ins screen's <b>Import</b>. See <a href="guide-plugins.html">Installing plug-ins</a>.</p></li>
+          <li><h3>Check the load order</h3><p>If another plug-in overrides the same resources, yours may be hidden. The editor shows conflicts with other enabled plug-ins.</p></li>
+          <li><h3>Play it</h3><p>Start a new pilot if you made a total conversion. Use the Debug suite console to jump and set things up quickly.</p></li>
+          <li><h3>Test with the original, if you can</h3><p>A plain <code>.rez</code> export should also work in EV Nova CE. That is the best check that you stayed compatible.</p></li>
+        </ol>
+
+        <h2 id="share">Sharing and listing in the catalog</h2>
+        <p>Zip your plug-in folder as usual and host it at a public, direct HTTPS download. Players can then import it, or you can list it in the catalog so it appears in everyone's Plug-ins screen and on <a href="plugins.html">the website</a>.</p>
+        <ol class="steps">
+          <li><h3>Fork the repo</h3><p><a href="https://github.com/SirStig/NovaSwift-Plugins">SirStig/NovaSwift-Plugins</a>.</p></li>
+          <li><h3>Add an entry to <code>catalog.json</code></h3><p>Copy an existing one. Required fields are <code>id</code>, <code>name</code>, <code>author</code>, <code>version</code>, <code>summary</code>, <code>isTotalConversion</code> and <code>downloadURLs</code>.</p></li>
+          <li><h3>Run the checks</h3><p>Install <code>jsonschema</code>, then run the validator, optionally with <code>--urls</code> to fetch every link.</p></li>
+          <li><h3>Open a pull request</h3><p>A GitHub Action runs the same checks.</p></li>
+        </ol>
+        <pre class="code"><code>pip install jsonschema
+python3 scripts/validate.py
+python3 scripts/validate.py --urls</code></pre>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Field</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><code>id</code></td><td>Lowercase with dashes, such as <code>evo-facelift</code>. It becomes the folder name on players' devices, so never change it.</td></tr>
+            <tr><td><code>name</code>, <code>author</code></td><td>Display text.</td></tr>
+            <tr><td><code>version</code></td><td>Free text compared number by number (1.10 is newer than 1.9). Bump it for each release so players see Update.</td></tr>
+            <tr><td><code>summary</code></td><td>One or two sentences for the card (240 characters max).</td></tr>
+            <tr><td><code>description</code></td><td>Longer text; Markdown is allowed.</td></tr>
+            <tr><td><code>tags</code></td><td>The app's filters use <code>story</code>, <code>graphics</code>, <code>gameplay</code>, <code>ships</code> and <code>patch</code>.</td></tr>
+            <tr><td><code>isTotalConversion</code></td><td>True for total conversions (they are not a tag).</td></tr>
+            <tr><td><code>downloadURLs</code></td><td>Direct HTTPS links to the file itself, tried in order. Not a web page, and nothing behind a login or captcha.</td></tr>
+            <tr><td><code>sizeBytes</code>, <code>sha256</code></td><td>Download size and SHA-256 of the first link. A checksum is welcome.</td></tr>
+            <tr><td><code>homepageURL</code>, <code>sourceURL</code>, <code>license</code></td><td>Where to learn more, and the license or redistribution note.</td></tr>
+            <tr><td><code>iconURL</code>, <code>screenshotURLs</code></td><td>HTTPS links. Skip them if you cannot use the art; the app shows a placeholder.</td></tr>
+            <tr><td><code>dependencies</code></td><td>Ids of other catalog plug-ins that are installed first.</td></tr>
+          </tbody>
+        </table></div>
+        <p>The schema also allows optional fields such as <code>minNovaSwiftVersion</code>, <code>addedDate</code>, <code>updatedDate</code> and <code>popularity</code>; see <code>schema/catalog.schema.json</code> in the repo. The catalog does not accept EV Nova base data, and only rehosts a plug-in when the author's readme says that is allowed (see <a href="guide-plugins.html#suggest">the rules</a>).</p>
+        <div class="callout tip"><p><b>Multiplayer.</b> Servers and players are matched on gameplay content. If your plug-in is mostly art and sound, players can keep playing together without having the same version. A plug-in that changes ships, systems or missions must match exactly.</p></div>
+
+        <nav class="next-prev" aria-label="More guides">
+          <a href="guide-plugins.html"><small>Previous</small><b>Installing plug-ins</b></a>
+          <span></span>
+        </nav>
+      </article>
+    </div>
+  </main>
+
+  <!-- footer:start -->
+  <footer class="footer">
+    <div class="wrap">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="index.html">
+            <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+            <b>NOVA<i>·</i>SWIFT</b>
+          </a>
+          <p>EV Nova, rebuilt from the ground up. Free and open source. Bring your own copy of the game.</p>
+        </div>
+        <div>
+          <h4>Play</h4>
+          <a href="download.html">Download</a>
+          <a href="guide-getting-started.html">Getting started</a>
+          <a href="guide-controls.html">Controls</a>
+          <a href="guide-steam-deck.html">Steam Deck</a>
+          <a href="faq.html">FAQ</a>
+        </div>
+        <div>
+          <h4>Multiplayer</h4>
+          <a href="multiplayer.html">How it works</a>
+          <a href="servers.html">Server list</a>
+          <a href="dedicated-server.html">Dedicated server</a>
+          <a href="guide-multiplayer.html">Join &amp; host guide</a>
+        </div>
+        <div>
+          <h4>Create</h4>
+          <a href="plugins.html">Community plug-ins</a>
+          <a href="editor.html">Plug-in editor</a>
+          <a href="guide-making-plugins.html">Make a plug-in</a>
+          <a href="progress.html">Fidelity progress</a>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <a href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">Report a bug</a>
+          <a href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Releases</a>
+          <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/CHARTER.md" target="_blank" rel="noopener">Charter</a>
+        </div>
+      </div>
+      <p class="legal">
+        EV Nova and its data are copyrighted by their owners and are not distributed here. You supply your own copy.
+        Screenshots show EV Nova's game content running in NOVA Swift. The NOVA Swift banner, logo and icon are original.
+        NOVA Swift's code is open source. It is a fan preservation project, not affiliated with or endorsed by Ambrosia Software or ATMOS.
+      </p>
+    </div>
+  </footer>
+  <!-- footer:end -->
+
+  <script src="starfield.js?v=2"></script>
+  <script src="js/site.js?v=1"></script>
+</body>
+</html>

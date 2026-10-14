@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Installing plug-ins · NOVA Swift guides</title>
+  <meta name="description" content="How to install, import, enable and order EV Nova plug-ins and total conversions in NOVA Swift, and how to suggest one for the catalog." />
+  <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
+  <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
+  <meta property="og:title" content="Installing plug-ins · NOVA Swift" />
+  <meta property="og:image" content="https://sirstig.github.io/NovaSwift/assets/launch-banner.png?v=brand2" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=21" />
+</head>
+<body data-page="guides">
+  <div class="space-bg" aria-hidden="true"></div>
+  <canvas id="stars" aria-hidden="true"></canvas>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <!-- nav:start -->
+  <nav class="nav" aria-label="Main">
+    <div class="nav-inner">
+      <a class="brand" href="index.html" aria-label="NOVA Swift home">
+        <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+        <b>NOVA<i>·</i>SWIFT</b>
+      </a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="nav-links">
+        <span class="bars" aria-hidden="true"></span><span class="sr">Menu</span>
+      </button>
+      <div class="nav-links" id="nav-links">
+        <a href="index.html#features" data-nav="index">Game</a>
+        <a href="download.html" data-nav="download">Download</a>
+        <a href="guides.html" data-nav="guides">Guides</a>
+        <a href="multiplayer.html" data-nav="multiplayer">Multiplayer</a>
+        <a href="servers.html" data-nav="servers">Servers</a>
+        <a href="plugins.html" data-nav="plugins">Plug-ins</a>
+        <a href="editor.html" data-nav="editor">Editor</a>
+        <a href="progress.html" data-nav="progress">Progress</a>
+      </div>
+      <div class="nav-cta">
+        <a class="btn btn-ghost sm icon-only" href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener" aria-label="Source code on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.7 1.2 3.4.9.1-.7.4-1.2.7-1.5-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.6 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
+        </a>
+        <a class="btn btn-primary sm" href="download.html">Play free</a>
+      </div>
+    </div>
+  </nav>
+  <!-- nav:end -->
+
+  <main id="main">
+    <header class="page-hero" style="--hero-img:url(assets/screenshots/plugin-manager.webp)">
+      <div class="wrap">
+        <div class="crumbs"><a href="guides.html">Guides</a> / Plug-ins</div>
+        <h1>Installing plug-ins</h1>
+        <p class="lead">Add ships, stories, art and whole new games to NOVA Swift. Install from the catalog in one tap, or bring in your own files.</p>
+      </div>
+    </header>
+
+    <div class="wrap doc">
+      <!-- guidenav:start -->
+      <nav class="doc-nav" aria-label="Guides">
+        <h4>Start here</h4>
+        <a href="guide-getting-started.html">Getting started</a>
+        <a href="guide-controls.html">Controls &amp; controllers</a>
+        <a href="guide-steam-deck.html">Steam Deck &amp; Linux</a>
+        <a href="faq.html">FAQ &amp; troubleshooting</a>
+        <h4>Multiplayer</h4>
+        <a href="guide-multiplayer.html">Join &amp; host games</a>
+        <a href="dedicated-server.html">Dedicated server</a>
+        <a href="servers.html">Server list</a>
+        <h4>Plug-ins</h4>
+        <a href="guide-plugins.html">Installing plug-ins</a>
+        <a href="guide-making-plugins.html">Making a plug-in</a>
+        <a href="editor.html">The plug-in editor</a>
+      </nav>
+      <!-- guidenav:end -->
+
+      <article class="prose">
+        <div class="toc"><b>On this page</b><ol><li><a href="#screen">The Plug-ins screen</a></li><li><a href="#catalog">Installing from the catalog</a></li><li><a href="#import">Importing your own files</a></li><li><a href="#order">Load order</a></li><li><a href="#tc">Total conversions</a></li><li><a href="#hd">HD art packs</a></li><li><a href="#multiplayer">In multiplayer</a></li><li><a href="#where">Where files live</a></li><li><a href="#suggest">Suggest a plug-in</a></li></ol></div>
+
+        <h2 id="screen">The Plug-ins screen</h2>
+        <p>Open <b>Plug-ins</b> from the main menu (it is also reachable from Settings on Linux and Steam Deck). It has three tabs: <b>Browse</b>, <b>Installed</b> and <b>Load order</b>.</p>
+        <figure><img src="assets/screenshots/plugin-manager.webp" width="1800" height="1235" loading="lazy" alt="The Plug-ins screen listing installed plug-ins." /></figure>
+        <ul>
+          <li><b>Browse</b> is the community catalog: search, filter chips (Popular, Recent, Total conversions, Ships, Story, Graphics, Gameplay, Installed, Updates) and a card for each plug-in with a detail page. A copy of the catalog is kept for offline browsing.</li>
+          <li><b>Installed</b> lists what you have, with enable switches, reveal and delete.</li>
+          <li><b>Load order</b> shows the order plug-ins load in (see below).</li>
+        </ul>
+        <p>You can also browse the same catalog on the website: <a href="plugins.html">Plug-in catalog</a>.</p>
+
+        <h2 id="catalog">Installing from the catalog</h2>
+        <ol class="steps">
+          <li><h3>Find a plug-in</h3><p>Search, or use a filter chip. Open a card for the description, author, size and screenshots.</p></li>
+          <li><h3>Tap Install</h3><p>The app downloads the file straight from the author's own link (or the project's archive), checks it, unpacks it and puts it in your plug-ins folder. If the plug-in depends on another one, that is installed first.</p></li>
+          <li><h3>Apply</h3><p>Changes take effect by reloading the game data, and a loading screen shows while that runs. The Apple app reloads after each change. On Linux and Steam Deck changes are batched and applied when you press <b>Apply</b>, leave the screen, or an install finishes.</p></li>
+        </ol>
+        <p>Downloads are HTTPS only, and the app never copies or mirrors files itself. When a new version is released, the card shows an <b>Update</b> button.</p>
+        <div class="callout"><p><b>You need EV Nova's data first.</b> Plug-ins sit on top of the original game's data files, which you supply yourself. See <a href="guide-getting-started.html">Getting started</a>.</p></div>
+
+        <h2 id="import">Importing your own files</h2>
+        <p>Use <b>Import</b> (top bar) to add plug-ins you downloaded elsewhere. NOVA Swift reads:</p>
+        <ul>
+          <li>Windows-style <code>.rez</code> and <code>.ndat</code> files;</li>
+          <li>classic Mac plug-ins with a resource fork, including old <code>.sit</code> (StuffIt), <code>.hqx</code> (BinHex) and related archives, which are unpacked with the resource fork kept;</li>
+          <li><code>.zip</code> archives and plug-in folders.</li>
+        </ul>
+        <p>The Linux and Steam Deck Import dialog is labelled for <code>.zip</code>, <code>.rez</code>, <code>.ndat</code> or a folder. StuffIt X (<code>.sitx</code>) is proprietary and is not supported. On iPhone, iPad and Apple TV, files can also come in from the Files app, the share sheet or AirDrop.</p>
+        <div class="callout tip"><p><b>Tip.</b> Imported plug-ins show an <i>Imported</i> badge and can be deleted. Plug-ins that live in the game's own "Nova Plug-ins" folder are marked <i>Built in</i> and are read-only here.</p></div>
+
+        <h2 id="order">Enabling, disabling and load order</h2>
+        <p>By default NOVA Swift follows the original game: every installed plug-in loads automatically, in alphabetical order, and later plug-ins override earlier ones where they define the same resource. To toggle or reorder individual plug-ins, turn on the <b>Manual plug-in order</b> enhancement in Settings, under Enhancements (it is off by default). Then each plug-in gets an enable switch and Up and Down buttons (or drag to reorder) on the Load order tab.</p>
+        <p>If two plug-ins fight over the same ship or system, the one lower in the order wins. Put the plug-in you care about last.</p>
+
+        <h2 id="tc">Total conversions</h2>
+        <p>A total conversion (TC) replaces the whole scenario, not just a bit of it. While a TC is on, only its own plug-ins load, as in the original game. To play one:</p>
+        <ol class="steps">
+          <li><h3>Install and switch it on</h3><p>From the Plug-ins screen. Only one TC can be active, and it is the only plug-in type that can be switched on or off without Manual plug-in order.</p></li>
+          <li><h3>Start a new pilot</h3><p>With the conversion switched on, create a new pilot so you start in its scenario.</p></li>
+          <li><h3>Optional add-ons</h3><p>The Installed tab can show an <b>Add-ons for</b> list for the selected TC. Plug-ins you add there load after the conversion's own files, in the order shown. The app flags how likely each is to work with it.</p></li>
+        </ol>
+
+        <h2 id="hd">HD art packs</h2>
+        <p>Plug-ins can include high-resolution sprites and 3D models in an optional layer that the original game ignores. It is shipped as a <code>.nsx</code> folder (with a <code>manifest.json</code>), or embedded in the plug-in file. Gameplay, hit boxes and frame counts never change.</p>
+        <ul>
+          <li>HD art is off by default. Turn it on in Settings, under Graphics, as <b>HD graphics from plug-ins</b>. If HD art turns up while it is off, the game asks once if you want to enable it.</li>
+          <li>Put a <code>.nsx</code> folder inside the plug-in's folder, or loose in your plug-ins folder for a standalone pack. It is found up to four folders deep, and a pack inside a plug-in turns on and off with that plug-in.</li>
+          <li>HD art and 3D models are currently an Apple-platform feature. Anything not ready draws the classic sprite.</li>
+        </ul>
+
+        <h2 id="multiplayer">Plug-ins in multiplayer</h2>
+        <p>Players in a game must have the same <b>gameplay</b> plug-ins, matched by content hash. Plug-ins that only change art, sound, music, movies, fonts or text are <b>cosmetic</b> and never block a join. A plug-in that mixes both counts as gameplay.</p>
+        <p>If a server needs plug-ins you do not have, Linux and Steam Deck offer <b>Install &amp; Join</b> when they are all in the catalog. Otherwise the join screen lists what to install, update or disable. Details are in <a href="guide-multiplayer.html#match">Join &amp; host games</a>.</p>
+
+        <h2 id="where">Where the files live</h2>
+        <p>Imports and downloads go to a plug-ins folder inside the app's own data folder. On Linux and Steam Deck the data folder is below, with plug-ins in its <code>Plug-ins</code> subfolder.</p>
+        <div class="tabs" data-os-tabs>
+          <div role="tablist" aria-label="Platform">
+            <button role="tab" id="t-where-apple" aria-controls="p-where-apple" data-key="apple">Mac, iPhone, iPad, Apple TV</button>
+            <button role="tab" id="t-where-linux" aria-controls="p-where-linux" data-key="linux">Linux</button>
+            <button role="tab" id="t-where-deck" aria-controls="p-where-deck" data-key="deck">Steam Deck</button>
+            <button role="tab" id="t-where-windows" aria-controls="p-where-windows" data-key="windows">Windows</button>
+          </div>
+          <div role="tabpanel" id="p-where-apple" aria-labelledby="t-where-apple"><p>The app keeps its plug-ins in its own container, so use <b>Import</b> or the catalog rather than copying files by hand. On iPhone, iPad and Apple TV, bring files in through Import.</p></div>
+          <div role="tabpanel" id="p-where-linux" aria-labelledby="t-where-linux" hidden><pre class="code"><code>~/.local/share/NovaSwift/Plug-ins        <span class="c"># or $XDG_DATA_HOME/NovaSwift/Plug-ins</span></code></pre><p>A "Nova Plug-ins" folder inside or next to your chosen EV Nova data folder is also scanned, which matches the original install layout.</p></div>
+          <div role="tabpanel" id="p-where-deck" aria-labelledby="t-where-deck" hidden><p>Same as Linux, in Desktop or Game mode: <code>~/.local/share/NovaSwift/Plug-ins</code>. Use the Import button in Game mode and the file picker.</p></div>
+          <div role="tabpanel" id="p-where-windows" aria-labelledby="t-where-windows" hidden><pre class="code"><code>%APPDATA%\NovaSwift\Plug-ins</code></pre><p>The Windows build is not released yet. This is where it will look.</p></div>
+        </div>
+
+        <h2 id="suggest">Suggest a plug-in for the catalog</h2>
+        <p>The catalog is a list in a public GitHub repo, <a href="https://github.com/SirStig/NovaSwift-Plugins">SirStig/NovaSwift-Plugins</a>. The app reads its <code>catalog.json</code>. There are no plug-in files in the repo; each entry points at a public download. Rules:</p>
+        <ul>
+          <li><b>Link to a public, direct download.</b> The link must open the file itself (<code>.zip</code>, <code>.rez</code>, <code>.ndat</code>, or a classic <code>.sit</code>, <code>.hqx</code>, <code>.sea</code> or <code>.bin</code>), not a web page with a button, and nothing behind a login, captcha or click-through. HTTPS only.</li>
+          <li><b>Do not rehost without the author's permission.</b> That includes icons and screenshots.</li>
+          <li><b>No EV Nova base data</b> and no art taken from it. Plug-ins that need the base game are fine.</li>
+          <li><b>Self-hosted copies are rare.</b> The project only hosts a copy (marked <code>rehosted</code>) when the author's own readme says it may be redistributed, and the entry must quote those words.</li>
+        </ul>
+        <p>To add one, fork the repo, add an entry to <code>catalog.json</code>, run <code>python3 scripts/validate.py</code>, and open a pull request. Not comfortable with JSON? Open a "Plug-in request" issue instead. The field list is in <a href="guide-making-plugins.html#share">Making a plug-in</a>. Authors can ask for an entry to be removed or corrected at any time.</p>
+
+        <nav class="next-prev" aria-label="More guides">
+          <a href="guide-multiplayer.html"><small>Previous</small><b>Join &amp; host games</b></a>
+          <a class="next" href="guide-making-plugins.html"><small>Next</small><b>Making a plug-in</b></a>
+        </nav>
+      </article>
+    </div>
+  </main>
+
+  <!-- footer:start -->
+  <footer class="footer">
+    <div class="wrap">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="index.html">
+            <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+            <b>NOVA<i>·</i>SWIFT</b>
+          </a>
+          <p>EV Nova, rebuilt from the ground up. Free and open source. Bring your own copy of the game.</p>
+        </div>
+        <div>
+          <h4>Play</h4>
+          <a href="download.html">Download</a>
+          <a href="guide-getting-started.html">Getting started</a>
+          <a href="guide-controls.html">Controls</a>
+          <a href="guide-steam-deck.html">Steam Deck</a>
+          <a href="faq.html">FAQ</a>
+        </div>
+        <div>
+          <h4>Multiplayer</h4>
+          <a href="multiplayer.html">How it works</a>
+          <a href="servers.html">Server list</a>
+          <a href="dedicated-server.html">Dedicated server</a>
+          <a href="guide-multiplayer.html">Join &amp; host guide</a>
+        </div>
+        <div>
+          <h4>Create</h4>
+          <a href="plugins.html">Community plug-ins</a>
+          <a href="editor.html">Plug-in editor</a>
+          <a href="guide-making-plugins.html">Make a plug-in</a>
+          <a href="progress.html">Fidelity progress</a>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <a href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">Report a bug</a>
+          <a href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Releases</a>
+          <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/CHARTER.md" target="_blank" rel="noopener">Charter</a>
+        </div>
+      </div>
+      <p class="legal">
+        EV Nova and its data are copyrighted by their owners and are not distributed here. You supply your own copy.
+        Screenshots show EV Nova's game content running in NOVA Swift. The NOVA Swift banner, logo and icon are original.
+        NOVA Swift's code is open source. It is a fan preservation project, not affiliated with or endorsed by Ambrosia Software or ATMOS.
+      </p>
+    </div>
+  </footer>
+  <!-- footer:end -->
+
+  <script src="starfield.js?v=2"></script>
+  <script src="js/site.js?v=1"></script>
+</body>
+</html>

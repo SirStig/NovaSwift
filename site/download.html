@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Download · NOVA Swift</title>
+  <meta name="description" content="Download NOVA Swift for Mac, iPhone, iPad and Apple TV (TestFlight), Linux and Steam Deck (beta), plus the dedicated server. Free and open source; bring your own EV Nova data." />
+  <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
+  <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
+  <meta property="og:title" content="Download NOVA Swift" />
+  <meta property="og:image" content="https://sirstig.github.io/NovaSwift/assets/launch-banner.png?v=brand2" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=21" />
+</head>
+<body data-page="download">
+  <div class="space-bg" aria-hidden="true"></div>
+  <canvas id="stars" aria-hidden="true"></canvas>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <!-- nav:start -->
+  <nav class="nav" aria-label="Main">
+    <div class="nav-inner">
+      <a class="brand" href="index.html" aria-label="NOVA Swift home">
+        <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+        <b>NOVA<i>·</i>SWIFT</b>
+      </a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="nav-links">
+        <span class="bars" aria-hidden="true"></span><span class="sr">Menu</span>
+      </button>
+      <div class="nav-links" id="nav-links">
+        <a href="index.html#features" data-nav="index">Game</a>
+        <a href="download.html" data-nav="download">Download</a>
+        <a href="guides.html" data-nav="guides">Guides</a>
+        <a href="multiplayer.html" data-nav="multiplayer">Multiplayer</a>
+        <a href="servers.html" data-nav="servers">Servers</a>
+        <a href="plugins.html" data-nav="plugins">Plug-ins</a>
+        <a href="editor.html" data-nav="editor">Editor</a>
+        <a href="progress.html" data-nav="progress">Progress</a>
+      </div>
+      <div class="nav-cta">
+        <a class="btn btn-ghost sm icon-only" href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener" aria-label="Source code on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.7 1.2 3.4.9.1-.7.4-1.2.7-1.5-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.6 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
+        </a>
+        <a class="btn btn-primary sm" href="download.html">Play free</a>
+      </div>
+    </div>
+  </nav>
+  <!-- nav:end -->
+
+  <main id="main">
+    <header class="page-hero" style="--hero-img:url(assets/launch-banner.webp)">
+      <div class="wrap">
+        <span class="eyebrow">Free · Open source</span>
+        <h1>Download NOVA Swift.</h1>
+        <p class="lead">Pick your platform. Everything is free. You'll need your own copy of EV Nova; the game imports it on first launch.</p>
+      </div>
+    </header>
+
+    <section class="section">
+      <div class="wrap">
+        <div class="platform-grid">
+
+          <article class="platform featured">
+            <header>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="4" width="16" height="11" rx="1"/><path d="M2 19h20"/></svg>
+              <div><h3>Apple</h3><div class="sub">Mac · iPhone · iPad · Apple&nbsp;TV</div></div>
+            </header>
+            <span class="badge info">TestFlight beta</span>
+            <ul>
+              <li>The native app, and the best choice on a Mac.</li>
+              <li>Game Center and local Wi-Fi multiplayer, public lobby list.</li>
+              <li>The full Plug-in Editor (Mac).</li>
+              <li>Pilots and imported data sync over iCloud.</li>
+              <li>Apple TV needs a game controller.</li>
+            </ul>
+            <div class="actions">
+              <a class="btn btn-primary" href="https://testflight.apple.com/join/3FBzwwq1" target="_blank" rel="noopener">Join the TestFlight beta</a>
+            </div>
+            <p class="meta">Install TestFlight from the App Store first, then open the link on each device.</p>
+          </article>
+
+          <article class="platform">
+            <header>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="1" y="6" width="22" height="12" rx="3"/><rect x="7" y="8" width="10" height="8"/></svg>
+              <div><h3>Linux &amp; Steam Deck</h3><div class="sub">x86_64 · Godot build</div></div>
+            </header>
+            <span class="badge warn">Experimental beta</span>
+            <ul>
+              <li>Extract anywhere and run <code>NovaSwift.sh</code>.</li>
+              <li>On the Deck, add it to Steam as a non-Steam game for Game Mode.</li>
+              <li>LAN, direct-IP and community-server multiplayer.</li>
+              <li>Checks GitHub for updates in Settings.</li>
+            </ul>
+            <div class="actions">
+              <a class="btn btn-primary" data-asset="linux" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Download for Linux</a>
+              <a class="btn btn-ghost sm" href="guide-steam-deck.html">Steam Deck &amp; Linux guide</a>
+            </div>
+            <p class="meta" data-asset-meta="linux">NovaSwift-linux-x86_64.tar.gz</p>
+          </article>
+
+          <article class="platform">
+            <header>
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5l7.5-1v7H3zM11.5 4.3L21 3v8.5h-9.5zM3 12.5h7v7l-7-1zM11.5 12.5H21V21l-9.5-1.3z"/></svg>
+              <div><h3>Windows</h3><div class="sub">x86_64 · Godot build</div></div>
+            </header>
+            <span class="badge">Coming soon</span>
+            <ul>
+              <li>Same game and multiplayer as the Linux build.</li>
+              <li>Packaging is ready; it needs a Windows build and testing.</li>
+              <li>The dedicated server is built for Windows too.</li>
+            </ul>
+            <div class="actions">
+              <a class="btn btn-ghost" data-asset="windows" data-ready="Download for Windows" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Not released yet</span></a>
+              <a class="btn btn-ghost sm" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Watch releases on GitHub</a>
+            </div>
+            <p class="meta" data-asset-meta="windows"></p>
+          </article>
+
+        </div>
+
+        <div class="cards two" style="margin-top:var(--s3)">
+          <article class="platform">
+            <header>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="18" height="7" rx="1"/><rect x="3" y="14" width="18" height="7" rx="1"/><path d="M7 6.5h.01M7 17.5h.01"/></svg>
+              <div><h3>Dedicated server</h3><div class="sub">Linux · Windows · macOS · Docker</div></div>
+            </header>
+            <span class="badge warn">New</span>
+            <p style="margin:0">Host a 24/7 multiplayer server on a spare PC, a Raspberry Pi or a cheap VPS. It doesn't need the game or any EV Nova data, and you run it from a web admin panel.</p>
+            <div class="actions">
+              <a class="btn btn-primary" href="dedicated-server.html">Server downloads &amp; setup</a>
+            </div>
+          </article>
+
+          <article class="platform">
+            <header>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/></svg>
+              <div><h3>Build from source</h3><div class="sub">Swift · Xcode · Godot</div></div>
+            </header>
+            <span class="badge">Open source</span>
+            <p style="margin:0">The Apple app builds with Xcode on a Mac. The Godot desktop packages are described in <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/PACKAGING.md" target="_blank" rel="noopener">PACKAGING.md</a>. A Godot build for macOS is on the releases page for testing only (unsigned: right-click, Open the first time).</p>
+            <div class="actions">
+              <a class="btn btn-ghost" href="#source">Build instructions</a>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt">
+      <div class="wrap">
+        <div class="head">
+          <span class="eyebrow">Before you play</span>
+          <h2>What you'll need.</h2>
+        </div>
+        <div class="cards">
+          <div class="card">
+            <h3>Your EV Nova data</h3>
+            <p>NOVA Swift is an engine, not a copy of the game. You need the data files from your own EV Nova install (the Windows version's files or a Mac <code>Nova Files</code> folder). The setup wizard finds and imports them.</p>
+            <a class="more" href="guide-getting-started.html#data">Adding your data</a>
+          </div>
+          <div class="card">
+            <h3>A reasonable machine</h3>
+            <p>macOS 14 or later, iOS and iPadOS 17 or later, tvOS 17 or later, or a 64-bit (x86_64) Linux PC or Steam Deck. The Linux beta is new, so expect rough edges.</p>
+            <a class="more" href="faq.html">FAQ</a>
+          </div>
+          <div class="card">
+            <h3>Optional extras</h3>
+            <p>A game controller for the couch, <code>ffmpeg</code> on Linux to play the original movies, and plug-ins from the community catalog.</p>
+            <a class="more" href="plugins.html">Community plug-ins</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="wrap">
+        <div class="head-row">
+          <div class="head">
+            <span class="eyebrow">Releases</span>
+            <h2>What's new.</h2>
+          </div>
+          <a class="btn btn-ghost sm" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">All releases</a>
+        </div>
+        <div class="news" data-releases="3">
+          <article>
+            <time>Oct 2026</time>
+            <h3>Linux &amp; Steam Deck 0.7.0-beta.1</h3>
+            <p>The first desktop build outside Apple platforms.</p>
+            <a class="more" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Release notes →</a>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt" id="source">
+      <div class="wrap split">
+        <div class="split-copy">
+          <span class="eyebrow">Build it yourself</span>
+          <h2>From source.</h2>
+          <p>The Apple app needs a Mac with Xcode. Clone the repository, run the setup script, put your EV Nova data in <code>data/base/</code>, open the project and run any target: macOS, iOS, iPadOS or tvOS.</p>
+          <p>The Godot frontend and the dedicated server have their own packaging scripts for Linux, Windows and macOS.</p>
+          <p class="links"><a href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener">Repository</a><a href="https://github.com/SirStig/NovaSwift/blob/main/docs/PACKAGING.md" target="_blank" rel="noopener">PACKAGING.md</a></p>
+        </div>
+        <pre class="code"><code><span class="c"># clone and fetch dependencies</span>
+<span class="k">git clone</span> https://github.com/SirStig/NovaSwift.git
+<span class="k">cd</span> NovaSwift &amp;&amp; scripts/setup.sh
+
+<span class="c"># put your own EV Nova data in data/base/, then</span>
+<span class="k">open</span> app/NovaSwift.xcodeproj</code></pre>
+      </div>
+    </section>
+  </main>
+
+  <!-- footer:start -->
+  <footer class="footer">
+    <div class="wrap">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="index.html">
+            <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+            <b>NOVA<i>·</i>SWIFT</b>
+          </a>
+          <p>EV Nova, rebuilt from the ground up. Free and open source. Bring your own copy of the game.</p>
+        </div>
+        <div>
+          <h4>Play</h4>
+          <a href="download.html">Download</a>
+          <a href="guide-getting-started.html">Getting started</a>
+          <a href="guide-controls.html">Controls</a>
+          <a href="guide-steam-deck.html">Steam Deck</a>
+          <a href="faq.html">FAQ</a>
+        </div>
+        <div>
+          <h4>Multiplayer</h4>
+          <a href="multiplayer.html">How it works</a>
+          <a href="servers.html">Server list</a>
+          <a href="dedicated-server.html">Dedicated server</a>
+          <a href="guide-multiplayer.html">Join &amp; host guide</a>
+        </div>
+        <div>
+          <h4>Create</h4>
+          <a href="plugins.html">Community plug-ins</a>
+          <a href="editor.html">Plug-in editor</a>
+          <a href="guide-making-plugins.html">Make a plug-in</a>
+          <a href="progress.html">Fidelity progress</a>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <a href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">Report a bug</a>
+          <a href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Releases</a>
+          <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/CHARTER.md" target="_blank" rel="noopener">Charter</a>
+        </div>
+      </div>
+      <p class="legal">
+        EV Nova and its data are copyrighted by their owners and are not distributed here. You supply your own copy.
+        Screenshots show EV Nova's game content running in NOVA Swift. The NOVA Swift banner, logo and icon are original.
+        NOVA Swift's code is open source. It is a fan preservation project, not affiliated with or endorsed by Ambrosia Software or ATMOS.
+      </p>
+    </div>
+  </footer>
+  <!-- footer:end -->
+
+  <script src="starfield.js?v=2"></script>
+  <script src="js/site.js?v=1"></script>
+  <script src="js/live.js?v=1" defer></script>
+</body>
+</html>

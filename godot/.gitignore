@@ -26,3 +26,6 @@ export_credentials.cfg
 # Local play-testing harness (interactive bot driver) — not part of the game or its test suite.
 tests/playbot.gd
 tests/playbot.gd.uid
+
+# Bundled decode-only ffmpeg (scripts/build-mini-ffmpeg.sh).
+bin/ffmpeg/

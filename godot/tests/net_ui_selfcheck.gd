@@ -71,6 +71,7 @@ func _run() -> void:
 	_test_address()
 	_test_beacon()
 	_test_rules_and_manifest()
+	_test_plugin_gate()
 	_test_prefs()
 	_test_server_args()
 	_test_directory()
@@ -178,6 +179,28 @@ func _test_server_args() -> void:
 	DirAccess.remove_absolute(cfg)
 
 
+func _test_plugin_gate() -> void:
+	var NP: GDScript = load("res://net/NetPlugins.gd") as GDScript
+	var local: Dictionary = {"plugins": [{"id": "a", "name": "A", "contentHash": "1111111111111111aaaa"}, {"id": "x", "name": "X", "contentHash": "ffff"}], "tc": "", "addons": [], "sig": "s", "count": 2}
+	var req: Array = [{"id": "a", "name": "A", "contentHash": "1111111111111111bbbb"}, {"id": "b", "name": "B", "contentHash": "2222"}, {"id": "c", "name": "C", "hash": "9"}]
+	var cmp: Dictionary = NP.compare(req, "", local)
+	_ok(not bool(cmp["ok"]) and str(cmp["rows"][0]["state"]) == "ok" and str(cmp["rows"][1]["state"]) == "missing", "plugins: matching prefix hash is ok, absent plug-in is missing")
+	local["plugins"][0]["contentHash"] = "9999999999999999"
+	cmp = NP.compare(req, "", local)
+	_ok(str(cmp["rows"][0]["state"]) == "wrong" and (cmp["extra"] as Array).size() == 1 and str(cmp["extra"][0]["id"]) == "x", "plugins: other version and extras are reported")
+	_ok(bool(NP.compare([{"id": "a", "name": "A", "hash": "9999999999999999"}], "tc1", {"plugins": [{"id": "a", "name": "A", "contentHash": "9999999999999999"}], "tc": "tc1"})["ok"]), "plugins: an identical set (and total conversion) matches")
+	_ok(NP.compare([], "tcS", {"plugins": [], "tc": "tcL"})["tc_mismatch"], "plugins: a different total conversion is flagged")
+	var w: Dictionary = NP.plugin_wire(local, true)
+	_ok((w["plugins"] as Array).size() == 2 and str(w["plugins"][0]["hash"]).length() <= 16, "plugins: the wire form carries short hashes")
+	var beacon: Dictionary = Proto.decode_beacon(Proto.encode_beacon({"name": "s", "port": 1, "plugin_wire": w, "dtls": true, "fp": "f", "cert": "C"}, true))
+	_ok(int((beacon["plugins"] as Array).size()) == 2 and bool(beacon["dtls"]) and str(beacon["cert"]) == "C" and str(beacon["sig"]) == "s" and int(beacon["proto"]) == Proto.PROTO, "beacon: status reply carries plug-ins, key and protocol")
+	var plain: Dictionary = Proto.decode_beacon(Proto.encode_beacon({"name": "s", "port": 1, "plugin_wire": w, "dtls": true, "fp": "f", "cert": "C"}, false))
+	_ok((plain["plugins"] as Array).is_empty() and str(plain["cert"]) == "" and str(plain["sig"]) == "s", "beacon: the LAN broadcast carries only the signature, no list or certificate")
+	var m_a: String = "{\"signature\":\"1\",\"plugins\":[{\"id\":\"a\",\"name\":\"A\",\"contentHash\":\"h\"}],\"cosmetic\":[]}"
+	var m_b: String = "{\"signature\":\"1\",\"plugins\":[{\"id\":\"a\",\"name\":\"A\",\"contentHash\":\"h\"}],\"cosmetic\":[{\"id\":\"skin\",\"name\":\"Skin\"}]}"
+	_ok(Proto.manifest_signature(m_a) == Proto.manifest_signature(m_b), "manifest: cosmetic plug-ins never change the gate signature")
+
+
 func _test_hub() -> void:
 	var svc: Node = root.get_node_or_null("NetService")
 	if svc == null:
@@ -189,12 +212,29 @@ func _test_hub() -> void:
 	for t in Hub.TABS:
 		var hub: CanvasLayer = Hub.new()
 		root.add_child(hub)
-		hub.setup(fake, "Host Game" if t == "Session" else t)
+		hub.setup(fake, "Host" if t == "Session" else t)
 		await process_frame
 		_ok(hub.is_inside_tree() and hub.first_control != null, "hub: builds the %s tab headless" % t)
 		hub.queue_free()
 		await process_frame
 	_ok(not svc.hub_open, "hub: releases the keyboard on close")
+	_ok(Hub.TABS == ["Session", "Browse", "Host"], "hub: tabs are Browse / Host (+ Session while connected)")
+	var hb: CanvasLayer = Hub.new()
+	root.add_child(hb)
+	hb.setup(fake, "")
+	await process_frame
+	_ok(hb.tab == "Browse", "hub: opens on Browse")
+	var rows: Array = hb._browse_rows()
+	_ok(rows is Array, "hub: merged browse list builds")
+	var merged: Dictionary = {"sources": ["Saved"], "host": "h", "port": 1, "name": "A", "players": -1, "state": "checking", "pw": false}
+	Hub._merge_row(merged, {"sources": ["Public"], "host": "h", "port": 1, "name": "B", "players": 3, "state": "online", "pw": true, "region": "eu"})
+	_ok((merged["sources"] as Array).size() == 2 and int(merged["players"]) == 3 and str(merged["state"]) == "online" and bool(merged["pw"]) and str(merged["name"]) == "A" and str(merged["region"]) == "eu",
+		"hub: a saved + public duplicate merges into one row")
+	hb._quick_connect()
+	await process_frame
+	_ok(root.find_child("NovaAlert", true, false) != null, "hub: Quick Connect opens its dialog")
+	hb.queue_free()
+	await process_frame
 
 
 func _wait_for(cond: Callable, ts: Array, seconds: float) -> bool:
@@ -222,15 +262,15 @@ func _test_enet() -> void:
 	_ok(err == OK and sn.begun.size() == 1 and sn.begun[0][0] == 1 and sn.begun[0][2] == true, "enet: server up, bridge net_begin(1, ..., host)")
 	var all: Array = [srv, c1, c2]
 	# wrong password
-	c1.join(c1n, "127.0.0.1", PORT, "Alice", "nope")
+	c1.join(c1n, "127.0.0.1", PORT, "Alice", "nope", {"skip_probe": true})
 	var rej: bool = await _wait_for(func() -> bool: return evs.any(func(e: Dictionary) -> bool: return e["type"] == "rejected" and e["code"] == "password"), all, 3.0)
 	_ok(rej, "enet: wrong password is rejected with a reason")
 	# manifest mismatch
-	c1n.manifest = "{\"signature\":\"zzz\",\"plugins\":[]}"
+	c1n.manifest = "{\"signature\":\"zzz\",\"plugins\":[{\"id\":\"x\",\"name\":\"X\",\"contentHash\":\"h\"}]}"
 	c1 = Transport.new()
 	c1.connect("event", func(e: Dictionary) -> void: evs.append(e))
 	evs.clear()
-	c1.join(c1n, "127.0.0.1", PORT, "Alice", "pw")
+	c1.join(c1n, "127.0.0.1", PORT, "Alice", "pw", {"skip_probe": true})
 	all = [srv, c1, c2]
 	rej = await _wait_for(func() -> bool: return evs.any(func(e: Dictionary) -> bool: return e["type"] == "rejected" and e["code"] == "plugins"), all, 3.0)
 	_ok(rej, "enet: plug-in manifest mismatch is rejected")
@@ -239,8 +279,8 @@ func _test_enet() -> void:
 	c1 = Transport.new()
 	c1.connect("event", func(e: Dictionary) -> void: evs.append(e))
 	evs.clear()
-	c1.join(c1n, "127.0.0.1", PORT, "Alice", "pw")
-	c2.join(c2n, "127.0.0.1", PORT, "Bob", "pw")
+	c1.join(c1n, "127.0.0.1", PORT, "Alice", "pw", {"skip_probe": true})
+	c2.join(c2n, "127.0.0.1", PORT, "Bob", "pw", {"skip_probe": true})
 	all = [srv, c1, c2]
 	var good: bool = await _wait_for(func() -> bool: return c1.state == "connected" and c2.state == "connected" and srv.ready_count() == 2, all, 4.0)
 	_ok(good, "enet: two clients complete the handshake")
@@ -264,7 +304,7 @@ func _test_enet() -> void:
 		var c3: RefCounted = Transport.new()
 		var evs3: Array = []
 		c3.connect("event", func(e: Dictionary) -> void: evs3.append(e))
-		c3.join(FakeNova.new(), "127.0.0.1", PORT, "Cara", "pw")
+		c3.join(FakeNova.new(), "127.0.0.1", PORT, "Cara", "pw", {"skip_probe": true})
 		all.append(c3)
 		var full: bool = await _wait_for(func() -> bool: return evs3.any(func(e: Dictionary) -> bool: return e["type"] == "rejected" and e["code"] == "full"), all, 3.0)
 		_ok(full, "enet: a full server refuses with 'full'")
@@ -321,10 +361,12 @@ func _test_directory() -> void:
 	var ea: Dictionary = r["entries"][0]
 	var eb: Dictionary = r["entries"][1]
 	var live_a: Dictionary = {"ok": true, "rtt_ms": 80, "info": {"players": 2, "max": 8, "ver": Proto.game_version(), "pw": true}}
-	var live_b: Dictionary = {"ok": true, "rtt_ms": 30, "info": {"players": 0, "max": 4, "ver": "0.0.0-other", "pw": false}}
+	var live_b: Dictionary = {"ok": true, "rtt_ms": 30, "info": {"players": 0, "max": 4, "ver": "0.0.0-other", "pw": false, "proto": 99}}
 	var rows: Array = [Directory.row_for(ea, live_a, false), Directory.row_for(eb, live_b, false), Directory.row_for(ea, {}, false)]
 	_ok(str(rows[0]["state"]) == "online" and bool(rows[0]["compatible"]) and bool(rows[0]["pw"]), "directory: online row, compatible, password")
-	_ok(not bool(rows[1]["compatible"]) and str(rows[2]["state"]) == "offline", "directory: version mismatch and offline rows")
+	_ok(not bool(rows[1]["compatible"]) and str(rows[2]["state"]) == "offline", "directory: protocol mismatch and offline rows")
+	var live_c: Dictionary = {"ok": true, "rtt_ms": 30, "info": {"players": 0, "max": 4, "ver": "0.0.0-other", "pw": false}}
+	_ok(bool(Directory.row_for(eb, live_c, false)["compatible"]), "directory: a different game version with the same protocol is still compatible")
 	_ok(str(Directory.row_for(ea, {}, true)["state"]) == "checking", "directory: checking state")
 	var sorted: Array = Directory.sort_rows(rows)
 	_ok(int(sorted[0]["ping"]) == 30 and str(sorted[2]["state"]) == "offline", "directory: sorted by ping, offline last")

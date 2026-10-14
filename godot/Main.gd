@@ -393,7 +393,11 @@ func _process(delta: float) -> void:
 		_flight.set_active(false)
 		return
 	if _shell.is_paused():
-		return   # pause menu up: the sim, HUD and last frame stay frozen
+		# Pause menu up: the HUD and last frame stay frozen. In a multiplayer session with other pilots the SIM keeps
+		# stepping (idle controls) so the authority keeps serving snapshots and presence keeps flowing; alone, it freezes.
+		if _net_background_step(delta):
+			_drain_events_to_log(0.0)
+		return
 
 	# A suppressed action becomes live again once it's been let go.
 	for action in _suppressed.keys():
@@ -423,6 +427,7 @@ func _process(delta: float) -> void:
 	hud.visible = not (_has_data and ClassicTheme.classic("hud"))
 
 	if _nav.blocks_flight() or _interact.blocks_flight() or _story.blocks_flight():   # map / hail / plunder dialog up: sim paused
+		_net_background_step(delta)   # (in a multiplayer session the sim keeps running, controls idle)
 		_flight_frame(0.0, false)
 		_drain_events_to_log(0.0)   # map / dialog up: the sim is paused, so is the message clock
 		queue_redraw()
@@ -462,6 +467,19 @@ func _process(delta: float) -> void:
 	_drain_events_to_log(delta)
 	_update_top_label()
 	queue_redraw()
+
+
+## While a menu/map/dialog holds the local sim paused: in a multiplayer session that has other players, keep the
+## sim stepping with idle controls (so this machine, if it is the authority of a shared system, keeps simulating and
+## streaming snapshots, and a client keeps sending its input and presence). Returns true when it stepped.
+## Single-player and alone-in-a-session are unchanged (frozen). Docked: not stepped (the ship is landed).
+func _net_background_step(delta: float) -> bool:
+	var ns: Node = get_node_or_null("/root/NetService")
+	if ns == null or not ns.has_method("wants_background_sim") or not ns.wants_background_sim():
+		return false
+	nova.set_intent(false, false, false, false, false, false, false)
+	nova.step(delta)
+	return true
 
 
 ## Tells the gamepad UI cursor (ui/PadCursor.gd) who owns the pad: "flight" while flying with the HUD (A fires),

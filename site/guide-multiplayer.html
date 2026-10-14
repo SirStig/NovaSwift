@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Join &amp; host games · NOVA Swift guides</title>
+  <meta name="description" content="How to play NOVA Swift with friends: join or host a game, set the rules, match plug-ins, and fix connection problems." />
+  <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
+  <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
+  <meta property="og:title" content="Join &amp; host games · NOVA Swift" />
+  <meta property="og:image" content="https://sirstig.github.io/NovaSwift/assets/launch-banner.png?v=brand2" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=21" />
+</head>
+<body data-page="guides">
+  <div class="space-bg" aria-hidden="true"></div>
+  <canvas id="stars" aria-hidden="true"></canvas>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <!-- nav:start -->
+  <nav class="nav" aria-label="Main">
+    <div class="nav-inner">
+      <a class="brand" href="index.html" aria-label="NOVA Swift home">
+        <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+        <b>NOVA<i>·</i>SWIFT</b>
+      </a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="nav-links">
+        <span class="bars" aria-hidden="true"></span><span class="sr">Menu</span>
+      </button>
+      <div class="nav-links" id="nav-links">
+        <a href="index.html#features" data-nav="index">Game</a>
+        <a href="download.html" data-nav="download">Download</a>
+        <a href="guides.html" data-nav="guides">Guides</a>
+        <a href="multiplayer.html" data-nav="multiplayer">Multiplayer</a>
+        <a href="servers.html" data-nav="servers">Servers</a>
+        <a href="plugins.html" data-nav="plugins">Plug-ins</a>
+        <a href="editor.html" data-nav="editor">Editor</a>
+        <a href="progress.html" data-nav="progress">Progress</a>
+      </div>
+      <div class="nav-cta">
+        <a class="btn btn-ghost sm icon-only" href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener" aria-label="Source code on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.7 1.2 3.4.9.1-.7.4-1.2.7-1.5-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.6 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
+        </a>
+        <a class="btn btn-primary sm" href="download.html">Play free</a>
+      </div>
+    </div>
+  </nav>
+  <!-- nav:end -->
+
+  <main id="main">
+    <header class="page-hero" style="--hero-img:url(assets/screenshots/multiplayer.webp)">
+      <div class="wrap">
+        <div class="crumbs"><a href="guides.html">Guides</a> / Multiplayer</div>
+        <h1>Join &amp; host games</h1>
+        <p class="lead">Fly with friends in the same star system. This page covers joining, hosting, the rules, plug-in matching and what to do when a connection fails.</p>
+      </div>
+    </header>
+
+    <div class="wrap doc">
+      <!-- guidenav:start -->
+      <nav class="doc-nav" aria-label="Guides">
+        <h4>Start here</h4>
+        <a href="guide-getting-started.html">Getting started</a>
+        <a href="guide-controls.html">Controls &amp; controllers</a>
+        <a href="guide-steam-deck.html">Steam Deck &amp; Linux</a>
+        <a href="faq.html">FAQ &amp; troubleshooting</a>
+        <h4>Multiplayer</h4>
+        <a href="guide-multiplayer.html">Join &amp; host games</a>
+        <a href="dedicated-server.html">Dedicated server</a>
+        <a href="servers.html">Server list</a>
+        <h4>Plug-ins</h4>
+        <a href="guide-plugins.html">Installing plug-ins</a>
+        <a href="guide-making-plugins.html">Making a plug-in</a>
+        <a href="editor.html">The plug-in editor</a>
+      </nav>
+      <!-- guidenav:end -->
+
+      <article class="prose">
+        <div class="toc"><b>On this page</b><ol><li><a href="#how">How multiplayer works</a></li><li><a href="#stakes">Stakes and rules</a></li><li><a href="#apple">Apple app</a></li><li><a href="#browse">Linux, Steam Deck, Windows</a></li><li><a href="#host">Hosting a game</a></li><li><a href="#match">What has to match</a></li><li><a href="#chat">Chat and trading</a></li><li><a href="#crossplay">Cross-play</a></li><li><a href="#trouble">Troubleshooting</a></li></ol></div>
+
+        <h2 id="how">How multiplayer works</h2>
+        <p>Everyone keeps their own galaxy and their own pilot save. Multiplayer is an overlay, never a merge. You fly your game as usual; when two or more players are in the <b>same star system</b>, that system is synced for all of them. Ships, combat, shots and events are shared, so you can help each other, fight together, or fight each other. In different systems nothing heavy is synced, you just see who is where.</p>
+        <p>The typical use: "I'm stuck, come help me". Your friend jumps to your system and drops in.</p>
+        <ul>
+          <li><b>Authority is per system.</b> One of the players in a system runs that system for everyone in it (the lowest player id). The others see the authority's version of the system. If that player leaves, another takes over, with a brief hiccup. Your own galaxy elsewhere is never touched.</li>
+          <li><b>Chat works from anywhere</b> in the session, so you can call a friend to your system before they arrive.</li>
+          <li><b>Story:</b> a shared encounter runs the authority's storyline. Your outfitter, shipyard, rank and combat rating still come from your own save.</li>
+        </ul>
+        <figure><img src="assets/screenshots/multiplayer.webp" width="1600" height="736" loading="lazy" alt="The Multiplayer screen with a list of games." /></figure>
+        <div class="callout"><p><b>Beta.</b> The netcode and sync logic are tested, but multiplayer has seen little play on real networks and hardware so far. Expect rough edges and please report them.</p></div>
+
+        <h2 id="stakes">Stakes and rules</h2>
+        <p>The host picks the rules when opening the game, and every joiner sees them. They only govern what happens between players while you share a system.</p>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Preset</th><th>What it means</th></tr></thead>
+          <tbody>
+            <tr><td><b>Safe</b></td><td>Sparring. PvP is allowed but damage and death are not real for visitors.</td></tr>
+            <tr><td><b>Full stakes</b></td><td>Your ship is your real ship. Damage and death count in your own save, and trades move real items.</td></tr>
+            <tr><td><b>Custom</b> (Godot hub)</td><td>Pick each rule yourself.</td></tr>
+          </tbody>
+        </table></div>
+        <p>The individual rules are: allow PvP, real PvP damage, friendly fire (splash damage hits allies), permadeath (destroyed ships are really lost) and allow trading. Until PvP is switched on, players who share a government cannot hurt each other. The host's game speed also applies to everyone, so all ships run on one clock.</p>
+        <div class="callout warn"><p><b>Full stakes is real.</b> A permadeath game can end your pilot. Back up your pilot first, or stay on Safe.</p></div>
+
+        <h2 id="apple">Apple app: Mac, iPhone, iPad, Apple TV</h2>
+<p>On Mac, iPhone, iPad and Apple TV, open <b>Multiplayer</b> from the main menu. The hub has two tabs, <b>Local</b> and <b>Online</b>.</p>
+<h3>Internet play (Game Center)</h3>
+<p>Online play runs on Apple's Game Center, so you must be signed in to Game Center in the system Settings. Apple handles matchmaking and relays the traffic. NOVA Swift runs no servers.</p>
+<ul>
+<li><b>Host a Lobby:</b> name it, pick the stakes, then invite friends over Game Center. Invites show up in your friend's app on their own, even if they are in flight.</li>
+<li><b>Quick Match:</b> matches you with anyone who has exactly your plug-in set. An empty queue is normal for a game this size.</li>
+<li><b>Public Lobbies:</b> a list of lobbies whose hosts chose to list them.</li>
+</ul>
+<h3>Public lobby list and knocking</h3>
+<p>When you host, hosting is invite-only unless you tick <b>List this lobby publicly</b>. Listing shows your pilot name to everyone, which is why it is off by default. The list is stored in Apple's CloudKit, not on a NOVA Swift server.</p>
+<p>To join a listed lobby you "knock". The host sees your request and, if they accept, sends you a real Game Center invite. Nobody can pull themselves into a game. If the host ignores or declines you, you only see your request time out; there is no rejection message.</p>
+<h3>Local Wi-Fi</h3>
+<p>The <b>Local</b> tab hosts or joins a named lobby on the same network (Apple's MultipeerConnectivity). Nearby lobbies appear in a list. Separate groups on one network do not mix.</p>
+
+        <h2 id="browse">Linux, Steam Deck and Windows: the Multiplayer hub</h2>
+        <p>The Godot app joins games over ENet (UDP), by address, on your LAN, or from a public list. There is no Game Center here. Windows is not released yet, but the hub is the same code. The hub has up to three tabs:</p>
+        <ul>
+          <li><b>Browse</b> (the default): one list of every server you can reach. <b>Saved</b> servers are pinned at the top with a filled star, then LAN games and the public directory, merged by address. Each row shows its status, name, address, players, ping and a <b>Join</b> button. Use the search box and filter chips (All, Saved, LAN, Public, Compatible only, Has players, No password, and region) to narrow it down. <b>Refresh</b> re-queries the list.</li>
+          <li><b>Host</b>: start your own game (see below).</li>
+          <li><b>Session</b>: appears only while you are connected. It shows the players, rules, chat and a <b>Leave</b> button (<b>Stop hosting</b> if you host). The host also gets Kick and Ban here.</li>
+        </ul>
+        <p><b>Quick Connect</b> is a button in the hub's header. Type <code>host</code>, <code>host:port</code> or <code>[ipv6]:port</code>, add a password if there is one, and optionally turn on <b>Save this server</b> to keep it in your Saved list. You can also tap the star on any row to save or remove it.</p>
+        <p>The <b>Public</b> source is a list of community servers that is downloaded over HTTPS and cached, then live-checked for online status, players, password, version and ping. The list is only addresses, so an out-of-date entry just shows as offline. Browse the same list on the web at <a href="servers.html">the server list</a>.</p>
+        <p>Open <b>Multiplayer</b> from the main menu, or from the pause menu while flying. The hub works with mouse, keyboard and gamepad. On a pad, <kbd>LB</kbd>/<kbd>RB</kbd> switch tabs, <kbd>Y</kbd> refreshes the list, <kbd>X</kbd> does the page's main action (Quick Connect, or Start hosting) and <kbd>B</kbd> goes back. See the <a href="#browse">Browse view</a> and <a href="#host">hosting</a> sections below.</p>
+
+        <h2 id="host">Hosting a game</h2>
+        <p>You can host from the game itself, or run an always-on server with no pilot or window. Hosting from the game is the easy way to play with friends: your game keeps running normally, and anyone who enters your star system plays it with you. For an always-on server see the <a href="dedicated-server.html">dedicated server guide</a>.</p>
+        <ol class="steps">
+          <li><h3>Open Multiplayer, then Host</h3><p>Apple: <b>Online</b> then <b>Host a Lobby</b> (or <b>Local</b> for Wi-Fi). Godot: the <b>Host</b> tab.</p></li>
+          <li><h3>Name it and set the rules</h3><p>Choose Safe, Full stakes or (Godot) Custom, as described in <a href="#stakes">Stakes and rules</a>. On Godot you can also set the port, a maximum number of players (2 to 16) and an optional password.</p></li>
+          <li><h3>Choose who can see you</h3><p>Godot: <b>Visible on the local network (LAN)</b> is on by default. Tick <b>Open the port on my router (UPnP)</b> to try automatic port forwarding. Apple: tick <b>List this lobby publicly</b> only if you want strangers to find you.</p></li>
+          <li><h3>Start hosting and share the address</h3><p>The Host page shows your local address and port. Friends on your network join with that. Over the internet they need your public IP and the forwarded port.</p></li>
+        </ol>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Port</th><th>Used for</th></tr></thead>
+          <tbody>
+            <tr><td><code>53735/udp</code></td><td>The game itself (default; you can change it).</td></tr>
+            <tr><td><code>53736/udp</code></td><td>Status pings, so your server shows players and latency in other people's lists. It is the game port + 1 if you changed the port.</td></tr>
+          </tbody>
+        </table></div>
+        <h3>Port forwarding</h3>
+        <p>On a LAN nothing needs forwarding. Over the internet, forward UDP 53735 (and 53736 if you want to show up in lists with live info) on your router to the machine running the game, and allow it in the firewall. Windows asks the first time; on Linux that can be <code>sudo ufw allow 53735/udp</code>. The Host page's UPnP option asks your router to do this for you, but many routers have UPnP off.</p>
+        <h3>Passwords and encryption</h3>
+        <p>A password is optional and is sent hashed. Godot's Host page also has an <b>Encrypt connection</b> toggle (DTLS). Players pin the server's key the first time they join. Plain clients cannot join an encrypted game, so leave it off if people on other builds need to connect. Without it, traffic is not encrypted, which is fine for friends and LANs.</p>
+
+        <h2 id="match">What has to match</h2>
+        <ul>
+          <li><b>Network protocol version.</b> Builds with the same protocol connect even if the app version differs; the hub just notes "different version". A protocol change is rare and needs an update.</li>
+          <li><b>Gameplay plug-ins.</b> Anyone joining must have the same gameplay plug-ins (and total conversion) as the host, compared by content hash, so the same version. Otherwise the same ship or system id would mean different things on each side.</li>
+          <li><b>Cosmetic plug-ins are free.</b> Plug-ins that only change art, sound, music, movies, fonts or interface text never block a join, and two copies that differ only in artwork still match.</li>
+        </ul>
+        <p>If the plug-ins differ, the join is refused and the screen says what is missing, extra or the wrong version. On Linux and Steam Deck, when everything the server needs is in the plug-in catalog, you get one prompt: <b>Install &amp; Join</b>. It installs and enables the server's plug-ins (and switches off your extras and selects its total conversion), reloads the game data, then joins again. Your own plug-in set is remembered and restored when the session ends. This needs to be done from the main menu, not mid-flight. If something is not in the catalog, you get the detailed list plus the server's website or contact, if known. More in <a href="guide-plugins.html#multiplayer">Installing plug-ins</a>.</p>
+
+        <h2 id="chat">Chat and trading</h2>
+        <p>In flight, press <kbd>T</kbd> to open chat (<kbd>/</kbd> if you use the modern key layout), <kbd>Enter</kbd> to send and <kbd>Esc</kbd> to close. On a gamepad use Menu, then Multiplayer. Joins, leaves, rule changes and kicks show as short toasts. The chat panel also lists the players with ping and system.</p>
+        <p><b>Trading</b> lets two players swap credits, cargo and outfits, if the host allows trading. Both sides see the other's offer live; changing either offer clears both confirmations, and the swap happens only when both accept. Each side applies it to its own save. On Apple it starts from the player's Trade button in the lobby roster. On Godot there is a Trade button on the player rows in chat, and the trade window shows what you give next to what you receive. Test it on Safe stakes first.</p>
+
+        <h2 id="crossplay">Cross-play: Apple and Godot</h2>
+        <p>Today the Apple app and the Godot app cannot join each other's games. Apple uses Game Center and local Wi-Fi, Godot uses ENet. The groundwork to join Godot hosts and dedicated servers from Apple devices is built and tested at the protocol level, and both apps share the same protocol version and plug-in rules. It is not wired into the Apple app's Multiplayer screens yet, so there is no button for it. We will announce it when it ships.</p>
+
+        <h2 id="trouble">Troubleshooting</h2>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Message</th><th>What it means and what to do</th></tr></thead>
+          <tbody>
+            <tr><td>Incompatible multiplayer protocol (<code>proto</code>)</td><td>You and the host run builds with different network protocols. Update the older one.</td></tr>
+            <tr><td>Game version mismatch (<code>version</code>)</td><td>The host asks for the same NOVA Swift version. Update to match.</td></tr>
+            <tr><td>Wrong or missing password (<code>password</code>)</td><td>Ask the host for the password and try again.</td></tr>
+            <tr><td>Server full (<code>full</code>)</td><td>The host's player limit is reached.</td></tr>
+            <tr><td>Plug-ins differ (<code>plugins</code>)</td><td>See <a href="#match">What has to match</a>. Use Install &amp; Join, or install, update or disable what the list says.</td></tr>
+            <tr><td>Banned (<code>banned</code>)</td><td>The host banned you from this game.</td></tr>
+            <tr><td>Couldn't connect (<code>timeout</code>)</td><td>Nothing answered. Check the address, that the server is running, and that its UDP port (default 53735) is forwarded and allowed through the firewall.</td></tr>
+          </tbody>
+        </table></div>
+        <h3>Behind CGNAT, or can't forward ports</h3>
+        <p>Some internet providers put you behind carrier-grade NAT, where port forwarding is impossible. A sign is a router "WAN" address that differs from what a "what is my IP" site shows, or an address starting 100.64 to 100.127. NOVA Swift does not provide NAT traversal or relays. Use a VPN-style overlay such as <a href="https://tailscale.com">Tailscale</a> or <a href="https://www.zerotier.com">ZeroTier</a>: everyone joins the host's overlay address and no forwarding is needed. For a public listing, host on a VPS or another machine with a real public address.</p>
+        <div class="callout tip"><p><b>Tip.</b> Many routers cannot connect to their own public address from inside the network. To test your port forwarding, ask a friend on another network to try, or look at your server from another connection.</p></div>
+        <p>Next steps: run an always-on server with the <a href="dedicated-server.html">dedicated server guide</a>, and find public games on the <a href="servers.html">server list</a>.</p>
+
+        <nav class="next-prev" aria-label="More guides">
+          <a href="guide-steam-deck.html"><small>Previous</small><b>Steam Deck &amp; Linux</b></a>
+          <a class="next" href="guide-plugins.html"><small>Next</small><b>Installing plug-ins</b></a>
+        </nav>
+      </article>
+    </div>
+  </main>
+
+  <!-- footer:start -->
+  <footer class="footer">
+    <div class="wrap">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="index.html">
+            <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+            <b>NOVA<i>·</i>SWIFT</b>
+          </a>
+          <p>EV Nova, rebuilt from the ground up. Free and open source. Bring your own copy of the game.</p>
+        </div>
+        <div>
+          <h4>Play</h4>
+          <a href="download.html">Download</a>
+          <a href="guide-getting-started.html">Getting started</a>
+          <a href="guide-controls.html">Controls</a>
+          <a href="guide-steam-deck.html">Steam Deck</a>
+          <a href="faq.html">FAQ</a>
+        </div>
+        <div>
+          <h4>Multiplayer</h4>
+          <a href="multiplayer.html">How it works</a>
+          <a href="servers.html">Server list</a>
+          <a href="dedicated-server.html">Dedicated server</a>
+          <a href="guide-multiplayer.html">Join &amp; host guide</a>
+        </div>
+        <div>
+          <h4>Create</h4>
+          <a href="plugins.html">Community plug-ins</a>
+          <a href="editor.html">Plug-in editor</a>
+          <a href="guide-making-plugins.html">Make a plug-in</a>
+          <a href="progress.html">Fidelity progress</a>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <a href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">Report a bug</a>
+          <a href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Releases</a>
+          <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/CHARTER.md" target="_blank" rel="noopener">Charter</a>
+        </div>
+      </div>
+      <p class="legal">
+        EV Nova and its data are copyrighted by their owners and are not distributed here. You supply your own copy.
+        Screenshots show EV Nova's game content running in NOVA Swift. The NOVA Swift banner, logo and icon are original.
+        NOVA Swift's code is open source. It is a fan preservation project, not affiliated with or endorsed by Ambrosia Software or ATMOS.
+      </p>
+    </div>
+  </footer>
+  <!-- footer:end -->
+
+  <script src="starfield.js?v=2"></script>
+  <script src="js/site.js?v=1"></script>
+</body>
+</html>

@@ -4,275 +4,275 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>NOVA Swift: EV Nova, rebuilt from the ground up</title>
-  <meta name="description" content="A reverse-engineered engine for EV Nova (2002), native on Mac, iPad, iPhone and Apple TV. Co-op multiplayer, plug-ins and a built-in plug-in editor. Bring your own copy of the game." />
-
+  <meta name="description" content="A free, open-source reimplementation of EV Nova (2002), reverse-engineered from the original. Mac, iPhone, iPad, Apple TV, Linux and Steam Deck. Multiplayer, dedicated servers, community plug-ins and a built-in plug-in editor. Bring your own copy of the game." />
   <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
   <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
-
   <meta property="og:title" content="NOVA Swift: EV Nova, rebuilt from the ground up" />
-  <meta property="og:description" content="A reverse-engineered engine for the 2002 space classic. Native on Mac, iPad, iPhone and Apple TV." />
+  <meta property="og:description" content="The 2002 space classic, reverse-engineered and rebuilt. Mac, iPhone, iPad, Apple TV, Linux and Steam Deck, with multiplayer and plug-ins." />
   <meta property="og:type" content="website" />
   <meta property="og:image" content="https://sirstig.github.io/NovaSwift/assets/launch-banner.png?v=brand2" />
   <meta name="twitter:card" content="summary_large_image" />
-
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
-
-  <link rel="stylesheet" href="styles.css?v=13" />
+  <link rel="stylesheet" href="styles.css?v=21" />
 </head>
-<body>
+<body data-page="index">
   <div class="space-bg" aria-hidden="true"></div>
   <canvas id="stars" aria-hidden="true"></canvas>
-
   <a class="skip" href="#main">Skip to content</a>
 
-  <nav class="nav">
+  <!-- nav:start -->
+  <nav class="nav" aria-label="Main">
     <div class="nav-inner">
-      <a class="brand" href="#top" aria-label="NOVA Swift, back to top">
+      <a class="brand" href="index.html" aria-label="NOVA Swift home">
         <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
         <b>NOVA<i>·</i>SWIFT</b>
       </a>
-      <div class="nav-links">
-        <a href="#features">Features</a>
-        <a href="#progress">Progress</a>
-        <a href="#get">Get it</a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="nav-links">
+        <span class="bars" aria-hidden="true"></span><span class="sr">Menu</span>
+      </button>
+      <div class="nav-links" id="nav-links">
+        <a href="index.html#features" data-nav="index">Game</a>
+        <a href="download.html" data-nav="download">Download</a>
+        <a href="guides.html" data-nav="guides">Guides</a>
+        <a href="multiplayer.html" data-nav="multiplayer">Multiplayer</a>
+        <a href="servers.html" data-nav="servers">Servers</a>
+        <a href="plugins.html" data-nav="plugins">Plug-ins</a>
+        <a href="editor.html" data-nav="editor">Editor</a>
+        <a href="progress.html" data-nav="progress">Progress</a>
       </div>
       <div class="nav-cta">
-        <a class="btn btn-ghost sm" href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener" aria-label="Source code on GitHub">
+        <a class="btn btn-ghost sm icon-only" href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener" aria-label="Source code on GitHub">
           <svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.7 1.2 3.4.9.1-.7.4-1.2.7-1.5-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.6 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
-          <span>GitHub</span>
         </a>
-        <a class="btn btn-ghost sm" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Linux beta</a>
-        <a class="btn btn-primary sm" href="https://testflight.apple.com/join/3FBzwwq1" target="_blank" rel="noopener">Join the beta</a>
+        <a class="btn btn-primary sm" href="download.html">Play free</a>
       </div>
     </div>
   </nav>
-
-  <span id="top"></span>
+  <!-- nav:end -->
 
   <main id="main">
 
-  <header class="hero">
-    <div class="wrap hero-grid">
-      <div class="hero-copy">
-        <h1>EV&nbsp;Nova, rebuilt from <span class="grad">the ground up.</span></h1>
-        <p class="lead">A reverse-engineered engine for the 2002 classic, native on Mac, iPad, iPhone and Apple&nbsp;TV, with a beta for Linux and Steam&nbsp;Deck (Windows coming). Bring your own copy.</p>
-        <div class="cta">
-          <a class="btn btn-primary" href="https://testflight.apple.com/join/3FBzwwq1" target="_blank" rel="noopener">Apple beta (TestFlight)</a>
-          <a class="btn btn-primary" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Linux &amp; Steam Deck (Beta)</a>
-          <a class="btn btn-ghost" href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener">Read the source</a>
+  <header class="hero-full">
+    <div class="key-art">
+      <picture>
+        <source srcset="assets/launch-banner.webp?v=brand2" type="image/webp" />
+        <img src="assets/launch-banner.png?v=brand2" width="1584" height="672" fetchpriority="high"
+             alt="The NOVA Swift wordmark in fire-lit gunmetal beside a blue-green planet, with a bright nova and ships inbound." />
+      </picture>
+    </div>
+    <div class="wrap hero-band">
+      <div class="hero-band-inner">
+        <div>
+          <span class="eyebrow">Free · Open source · Public beta</span>
+          <h1>EV&nbsp;Nova, rebuilt from <span class="grad">the ground&nbsp;up.</span></h1>
+          <p class="lead">The 2002 space classic, taken apart function by function and rebuilt to play exactly like the original. Then given what it never had: multiplayer, controllers, touch, a plug-in store and an editor that runs the game.</p>
+          <div class="cta">
+            <a class="btn btn-primary lg" href="download.html">Download free</a>
+            <a class="btn btn-ghost lg" href="guide-getting-started.html">How to start</a>
+          </div>
+          <ul class="platforms" aria-label="Platforms">
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="4" width="16" height="11" rx="1"/><path d="M2 19h20"/></svg>Mac, iPhone, iPad</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="4" width="20" height="13" rx="1"/><path d="M8 21h8"/></svg>Apple&nbsp;TV</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 17l6-5-6-5M12 19h8"/></svg>Linux <span class="tag">Beta</span></li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="1" y="6" width="22" height="12" rx="3"/><rect x="7" y="8" width="10" height="8"/></svg>Steam&nbsp;Deck <span class="tag">Beta</span></li>
+            <li><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5l7.500-1v7H3zM11.500 4.300L21 3v8.500h-9.500zM3 12.500h7v7l-7-1zM11.500 12.500H21V21l-9.500-1.300z"/></svg>Windows <span class="tag">Soon</span></li>
+          </ul>
+        </div>
+        <div class="stats" aria-label="Live numbers">
+          <a href="plugins.html"><b data-count="plugins">60+</b><span>community plug-ins</span></a>
+          <a href="servers.html"><b data-count="online">–</b><span>public servers online</span></a>
+          <a href="download.html"><b class="ver" data-latest-version>v0.7</b><span>latest build</span></a>
         </div>
       </div>
-      <figure class="hero-art">
-        <picture>
-          <source srcset="assets/launch-banner.webp?v=brand2" type="image/webp" />
-          <img src="assets/launch-banner.png?v=brand2" width="1584" height="672" fetchpriority="high"
-               alt="The NOVA Swift wordmark in fire-lit gunmetal beside a blue-green planet, with a bright nova and ships inbound." />
-        </picture>
-      </figure>
     </div>
   </header>
 
-  <section class="section" id="progress">
-    <div class="wrap split">
-      <div class="split-copy">
-        <h2>Checked against the original code.</h2>
-        <p>The original Windows executable was taken apart, function by function, and the gameplay systems were rebuilt against it: flight, combat, the NPC AI, the economy, missions and the star map. 16 of the 179 plan items were reopened after a later re-read of the executable. All 16 are now implemented and awaiting build and testing. The list is in <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/STATUS.md" target="_blank" rel="noopener">STATUS.md</a>.</p>
-        <p>Original behaviour is the default. Anything that changes the rules is an optional Enhancement, off until you turn it on.</p>
-        <p class="links"><a href="progress.html">Progress by function</a><a href="https://github.com/SirStig/NovaSwift/blob/main/docs/reverse-engineering/README.md" target="_blank" rel="noopener">Reverse-engineering notes</a></p>
-      </div>
-      <figure class="chart">
-        <img src="assets/fidelity-summary.svg?v=fb690c58" width="640" height="500" loading="lazy"
-             alt="Functions compared and matching, one row per part of the original code. Green is matching, teal is done differently on purpose." />
-        <figcaption>Each block is about 5% of one part of the original code. Green matches, teal is done differently on purpose. The number at the end of a row is matching functions out of those to port.</figcaption>
-      </figure>
-    </div>
-  </section>
-
-  <span id="new"></span>
   <section class="section" id="features">
     <div class="wrap">
       <div class="head">
-        <h2>A plug-in editor that runs the game.</h2>
-        <p>Built into the Mac app. Edit any resource, draw the galaxy, then fly your plug-in without leaving the editor.</p>
+        <span class="eyebrow">The game</span>
+        <h2>The galaxy you remember. Played the way it was.</h2>
+        <p>Trade, fight, take sides in a war and follow six storylines across hundreds of systems. NOVA Swift reads your own copy of EV Nova and runs it on a new engine, so the ships, missions and story are the real ones.</p>
       </div>
-      <figure class="panel">
-        <img src="assets/screenshots/editor-galaxy.webp" width="1800" height="1131" loading="lazy"
-             alt="The Plug-in Editor's galaxy map: 545 systems coloured by government, hyperlinks, nebulae and a government legend, with the editing tools on the left." />
-        <figcaption>The galaxy map editor, with one-way hyperlinks flagged in red.</figcaption>
-      </figure>
-      <div class="pair">
-        <figure>
-          <img src="assets/screenshots/editor-ship.webp" width="1800" height="1131" loading="lazy"
-               alt="The Fed Destroyer open in the editor: a spinning sprite preview with its layers, and flight, shield, armour and cargo stats." />
-          <figcaption>Ships show their sprite, layers and the stats the engine will actually use.</figcaption>
-        </figure>
-        <figure>
-          <img src="assets/screenshots/editor-system.webp" width="1800" height="1131" loading="lazy"
-               alt="The Sol system in the editor: planets and stations laid out on a grid above a live game preview, with the system's traffic table on the right." />
-          <figcaption>Lay out a system and watch it run in the live preview below.</figcaption>
+      <div class="cards">
+        <div class="card accent">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 12l2 2 4-4"/><path d="M12 2l8 4v6c0 5-3.500 8.500-8 10-4.500-1.500-8-5-8-10V6z"/></svg></div>
+          <h3>Checked against the original</h3>
+          <p>The Windows executable was decompiled and every gameplay system compared against it: flight, combat, AI, economy, missions, the map. Original behaviour is the default; anything new is an opt-in Enhancement.</p>
+          <a class="more" href="progress.html">See the progress</a>
+        </div>
+        <div class="card accent">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="7" width="20" height="11" rx="4"/><path d="M7 11v3M5.500 12.500h3M15 12h.01M18 13h.01"/></svg></div>
+          <h3>Mouse, keys, pad or touch</h3>
+          <p>Classic keyboard controls, full gamepad support with action wheels, a controller cursor for every menu, and touch controls built for a phone. Steam Deck and Apple TV play from the couch.</p>
+          <a class="more" href="guide-controls.html">Controls guide</a>
+        </div>
+        <div class="card accent">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="15" r="3"/><path d="M10.500 9.500l4 3.500"/><path d="M3 20c.5-2.500 2.500-4 5-4M21 5c-.5 2.500-2.500 4-5 4"/></svg></div>
+          <h3>Fly with friends</h3>
+          <p>Each player keeps their own galaxy and pilot. Jump into the same system and you play together: escort, fight side by side, or duel. Game Center on Apple, servers and direct IP everywhere.</p>
+          <a class="more" href="multiplayer.html">How multiplayer works</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section tight">
+    <div class="wrap">
+      <div class="head-row">
+        <div class="head">
+          <span class="eyebrow">Screenshots</span>
+          <h2>Captured in the game.</h2>
+        </div>
+        <p class="note" style="color:var(--muted);margin:0">Click any shot to enlarge.</p>
+      </div>
+      <div class="gallery" data-lightbox>
+        <a class="wide" href="assets/screenshots/flight-hud.webp" data-caption="Flight, with touch controls and the classic status bar (iPhone).">
+          <img src="assets/screenshots/flight-hud.webp" width="1600" height="736" loading="lazy" alt="Flight view with touch controls for turning, thrust and fire, beside the classic status bar." /><span>Flight</span></a>
+        <a href="assets/screenshots/galaxy-map.webp" data-caption="The galaxy map centred on Sol, with planets, services and hypergate routes.">
+          <img src="assets/screenshots/galaxy-map.webp" width="1600" height="736" loading="lazy" alt="The galaxy map centred on Sol." /><span>Galaxy map</span></a>
+        <a href="assets/screenshots/story-guide.webp" data-caption="The Story Guide: every campaign as a series of steps, with what unlocks the next one.">
+          <img src="assets/screenshots/story-guide.webp" width="1800" height="1130" loading="lazy" alt="The Story Guide with campaign progress bars and a step timeline." /><span>Story Guide</span></a>
+        <a href="assets/screenshots/host-lobby.webp" data-caption="Hosting a multiplayer game: Co-op or Full Stakes, PvP, real damage, friendly fire, permadeath and trading.">
+          <img src="assets/screenshots/host-lobby.webp" width="1800" height="1130" loading="lazy" alt="The Host Lobby with rule switches." /><span>Host a game</span></a>
+        <a href="assets/screenshots/plugin-store.webp" data-caption="The plug-in store: community total conversions, one tap to install.">
+          <img src="assets/screenshots/plugin-store.webp" width="1600" height="736" loading="lazy" alt="The plug-in store listing community total conversions." /><span>Plug-in store</span></a>
+        <a href="assets/screenshots/editor-galaxy.webp" data-caption="The Plug-in Editor's galaxy map: 545 systems coloured by government, with hyperlinks and nebulae.">
+          <img src="assets/screenshots/editor-galaxy.webp" width="1800" height="1131" loading="lazy" alt="The Plug-in Editor's galaxy map." /><span>Plug-in editor</span></a>
+        <a href="assets/screenshots/presentation-modes.webp" data-caption="Classic, Enhanced or Nova Swift: pick the look, then toggle individual pieces.">
+          <img src="assets/screenshots/presentation-modes.webp" width="1800" height="1235" loading="lazy" alt="Interface presets: Classic, Enhanced, Nova Swift and Custom." /><span>Interface modes</span></a>
+        <a href="assets/screenshots/dev-console.webp" data-caption="The built-in debug suite: live logs, frame timings, an entity inspector and a console.">
+          <img src="assets/screenshots/dev-console.webp" width="1800" height="1120" loading="lazy" alt="The debug console." /><span>Debug suite</span></a>
+        <a href="assets/screenshots/story-map.webp" data-caption="The story map, tracing a storyline through the galaxy.">
+          <img src="assets/screenshots/story-map.webp" width="1600" height="736" loading="lazy" alt="The story map." /><span>Story map</span></a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="split">
+        <div class="split-copy">
+          <span class="eyebrow">Multiplayer <span class="badge warn">Beta</span></span>
+          <h2>Your galaxy. Their galaxy. Same star system.</h2>
+          <p>Multiplayer is an overlay on your own game. Everyone keeps their own save and roams freely; when two pilots meet in a system, that system syncs completely. "I'm stuck, come help me" is one jump away.</p>
+          <p>On Apple devices, play over Game Center or local Wi-Fi and find open lobbies in the public list. On Linux, Steam Deck and Windows, join by address, browse LAN games, or pick a community server. Cross-play between the two is being wired up now.</p>
+          <p class="links"><a href="multiplayer.html">How it works</a><a href="servers.html">Server list</a><a href="dedicated-server.html">Run a server</a></p>
+        </div>
+        <figure class="shot">
+          <img src="assets/screenshots/host-lobby.webp" width="1800" height="1130" loading="lazy"
+               alt="The Host Lobby with a Co-op or Full Stakes switch and options for PvP, real damage, friendly fire, permadeath and trading." />
         </figure>
       </div>
-      <div class="split clip">
+
+      <div class="split reverse">
+        <figure class="shot">
+          <img src="assets/screenshots/plugin-manager.webp" width="1800" height="1235" loading="lazy"
+               alt="The Plug-ins screen listing an installed total conversion and a gameplay tweak, with reorder handles and on/off switches." />
+        </figure>
+        <div class="split-copy">
+          <span class="eyebrow">Plug-ins</span>
+          <h2>Twenty years of mods, one tap away.</h2>
+          <p>Browse the community catalog in the game and install with one tap, or import your own files: old Mac <code>.sit</code> and <code>.hqx</code> archives included. Total conversions, new ships, story add-ons and HD art. Turn any of them off again with a switch.</p>
+          <p class="links"><a href="plugins.html">Browse the catalog</a><a href="guide-plugins.html">Installing plug-ins</a></p>
+        </div>
+      </div>
+
+      <div class="split">
+        <div class="split-copy">
+          <span class="eyebrow">Plug-in editor</span>
+          <h2>An editor that runs the game.</h2>
+          <p>Edit every resource type, draw the galaxy, lay out systems over a live preview, then press Test Run and fly your plug-in with a debug panel: spawn fleets, grant outfits, set control bits, start missions.</p>
+          <p class="links"><a href="editor.html">Tour the editor</a><a href="guide-making-plugins.html">Make your first plug-in</a></p>
+        </div>
         <figure class="shot">
           <video src="assets/video/editor-testrun.mp4" poster="assets/video/editor-testrun-poster.webp"
                  width="1600" height="1004" autoplay muted loop playsinline preload="metadata"
                  aria-label="A test run: a Federation group and pirate raiders spawned from the debug panel close in around the player's Fed Destroyer."></video>
         </figure>
-        <div class="split-copy">
-          <h3>Fly it before you ship it.</h3>
-          <p>Test Run starts a real game session on your plug-in. Spawn fleets as friends or enemies, grant outfits, set control bits, start missions and jump anywhere, with god mode on while you look around.</p>
-        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section alt">
+    <div class="wrap">
+      <div class="head">
+        <span class="eyebrow">And more</span>
+        <h2>Small things that add up.</h2>
       </div>
       <ul class="matrix">
-        <li><b>Every resource type</b><span>Forms for 23 types, checked byte-for-byte against the stock data, with a hex view for the rest.</span></li>
-        <li><b>Galaxy map</b><span>Drag systems, draw and erase hyperlinks, and set government colours and nebulae.</span></li>
-        <li><b>Star systems</b><span>Place planets and stations with their real sprites, beside a live game preview.</span></li>
-        <li><b>Test run</b><span>Start a game on your plug-in with a debug panel: spawn fleets, grant outfits, set bits, start missions.</span></li>
-        <li><b>Story tools</b><span>A control-bit index and a mission flow graph, so you can follow a storyline end to end.</span></li>
-        <li><b>Graphics and sound</b><span>Import PNG and WAV, edit ship hardpoints, attach HD art, and save as <code>.rez</code> or classic files.</span></li>
+        <li><b>Story Guide</b><span>Every campaign as steps: what's done, what's locked and which mission opens the next. Reads plug-in storylines too.</span></li>
+        <li><b>Your old pilots</b><span>Import Windows pilots straight into the game, classic Mac pilots in testing. iCloud keeps Apple devices in step.</span></li>
+        <li><b>Classic or modern</b><span>The original interface, or the Enhanced and Nova Swift looks. Then switch the map, menus or HUD individually.</span></li>
+        <li><b>HD art and 3D</b><span>Plug-ins can bring high-resolution art and live 3D ships that bank and turn. Hit boxes stay the same.</span></li>
+        <li><b>Debug suite</b><span>Searchable live logs, frame time per subsystem, an inspector and a console. Bug reports attach your logs.</span></li>
+        <li><b>Controller action wheels</b><span>Hold a shoulder button for weapons, targets and commands. Every menu is reachable with a pad.</span></li>
       </ul>
     </div>
   </section>
 
-  <section class="section">
+  <section class="section" id="progress">
     <div class="wrap split">
       <div class="split-copy">
-        <h2>Plug-ins, one tap away.</h2>
-        <p>Browse the community catalog and install in one tap, or import your own files, old Mac <code>.sit</code> and <code>.hqx</code> archives included. Turn any of them off again with a switch.</p>
-        <p class="links"><a href="https://github.com/SirStig/NovaSwift-Plugins" target="_blank" rel="noopener">Add your plug-in to the catalog</a></p>
+        <span class="eyebrow">Fidelity</span>
+        <h2>671 of 671 functions compared.</h2>
+        <p>Every portable function of the original game has been compared with NOVA Swift and fixed to match, or replaced on purpose where it has to be (the save format, the controls). That's how much has been checked, not a promise there are no bugs; NOVA Swift is in beta.</p>
+        <p>If something plays differently from the original, it's a bug. <a href="https://github.com/SirStig/NovaSwift/issues/new/choose" target="_blank" rel="noopener">Report it</a>.</p>
+        <p class="links"><a href="progress.html">Progress by function</a><a href="https://github.com/SirStig/NovaSwift/blob/main/docs/reverse-engineering/README.md" target="_blank" rel="noopener">Reverse-engineering notes</a></p>
       </div>
-      <figure class="shot">
-        <img src="assets/screenshots/plugin-manager.webp" width="1800" height="1235" loading="lazy"
-             alt="The Plug-ins screen listing an installed total conversion and a gameplay tweak, with reorder handles and on/off switches." />
+      <figure class="chart">
+        <img src="assets/fidelity-summary.svg?v=fb690c58" width="640" height="500" loading="lazy"
+             alt="Functions compared and matching, one row per part of the original code. Green is matching, teal is done differently on purpose." />
+        <figcaption>Each block is about 5% of one part of the original code. Green matches, teal is done differently on purpose.</figcaption>
       </figure>
     </div>
   </section>
 
   <section class="section">
     <div class="wrap">
-      <div class="head">
-        <h2>Fly the same galaxy as your friends.</h2>
-        <p>Co-op over local Wi-Fi or Game Center. Friends join the host's galaxy, and there's no server to run. The host decides the rules.</p>
-      </div>
-      <figure class="panel">
-        <img src="assets/screenshots/host-lobby.webp" width="1800" height="1130" loading="lazy"
-             alt="The Host Lobby with a Co-op or Full Stakes switch and options for PvP, real damage, friendly fire, permadeath and trading." />
-      </figure>
-      <ul class="rules" aria-label="Rules the host can set">
-        <li>PvP</li>
-        <li>Real damage</li>
-        <li>Friendly fire</li>
-        <li>Permadeath</li>
-        <li>Player trading</li>
-      </ul>
-    </div>
-  </section>
-
-  <section class="section">
-    <div class="wrap split reverse">
-      <figure class="shot">
-        <img src="assets/screenshots/story-guide.webp" width="1800" height="1130" loading="lazy"
-             alt="The Story Guide: campaigns with progress bars beside a step timeline, showing locked steps and the mission that unlocks each one." />
-      </figure>
-      <div class="split-copy">
-        <h2>Never lose the thread of a storyline.</h2>
-        <p>The Story Guide shows each campaign as a series of steps: what you've done, what's locked, and which mission opens the next one. It reads plug-in storylines too.</p>
-      </div>
-    </div>
-  </section>
-
-  <section class="section">
-    <div class="wrap split">
-      <div class="split-copy">
-        <h2>Classic, or a little more modern.</h2>
-        <p>Play with the original interface, or switch to the Enhanced or Nova Swift look. Then turn individual pieces, like the map, menus or HUD, on or off.</p>
-      </div>
-      <figure class="shot">
-        <img src="assets/screenshots/presentation-modes.webp" width="1800" height="1235" loading="lazy"
-             alt="The Interface settings with Classic, Enhanced, Nova Swift and Custom presets above toggles for the map, menus, dialogs and HUD." />
-      </figure>
-    </div>
-  </section>
-
-  <section class="section">
-    <div class="wrap">
-      <div class="head">
-        <h2>A debug suite, built in.</h2>
-        <p>Live logs you can search and filter, frame time per subsystem, an inspector for any ship or planet, and a command console. Bug reports attach your logs for you.</p>
-      </div>
-      <figure class="panel">
-        <img src="assets/screenshots/dev-console.webp" width="1800" height="1120" loading="lazy"
-             alt="The debug console: a filtered live log, a command prompt, an entity inspector and a frame-time breakdown by subsystem." />
-      </figure>
-    </div>
-  </section>
-
-  <section class="section">
-    <div class="wrap two-col">
-      <div>
-        <h2>Your pilots come with you.</h2>
-        <p>Import your old Windows pilots straight into the game, with classic Mac pilots in testing. Pilots save to iCloud, so you can pick up on your iPad or iPhone where you left off on your Mac. Your imported game data syncs to every device, Apple&nbsp;TV included.</p>
-      </div>
-      <div>
-        <h2>HD art and 3D models.</h2>
-        <p>Plug-ins can bring high-resolution art and 3D ship and planet models. Models draw into the classic frames, or live in 3D, turning and banking with the ship. Hit boxes and gameplay stay the same either way.</p>
-      </div>
-    </div>
-  </section>
-
-  <section class="section">
-    <div class="wrap">
-      <div class="head">
-        <h2>Made for touch, too.</h2>
-        <p>EV Nova never ran on a phone. These are captures from an iPhone.</p>
-      </div>
-      <div class="strip">
-        <figure>
-          <img src="assets/screenshots/flight-hud.webp" width="1600" height="736" loading="lazy"
-               alt="Flight view with touch controls for turning, thrust and fire, beside the classic status bar." />
-          <figcaption>Touch controls and the classic status bar.</figcaption>
-        </figure>
-        <figure>
-          <img src="assets/screenshots/galaxy-map.webp" width="1600" height="736" loading="lazy"
-               alt="The galaxy map centred on Sol, with planets, their services and hypergate routes." />
-          <figcaption>The galaxy map.</figcaption>
-        </figure>
-        <figure>
-          <img src="assets/screenshots/multiplayer.webp" width="1600" height="736" loading="lazy"
-               alt="The multiplayer screen with Local and Online tabs and a Host a Lobby button." />
-          <figcaption>Local and online lobbies.</figcaption>
-        </figure>
-        <figure>
-          <img src="assets/screenshots/plugin-store.webp" width="1600" height="736" loading="lazy"
-               alt="The plug-in store listing community total conversions, each with a Get button." />
-          <figcaption>The plug-in store.</figcaption>
-        </figure>
-      </div>
-    </div>
-  </section>
-
-  <section class="section" id="get">
-    <div class="wrap get">
-      <div>
-        <h2>Download, or build it.</h2>
-        <p class="lead sm"><strong>Mac, iPad, iPhone, Apple&nbsp;TV:</strong> join the TestFlight beta (the native app, and the best choice on a Mac). <strong>Linux and Steam Deck:</strong> download the experimental Godot beta (<code>v0.7.0-beta.1</code>, <code>NovaSwift-linux-x86_64.tar.gz</code>) from GitHub Releases. <strong>Windows:</strong> coming soon, it needs a Windows build. A Godot build for macOS (<code>NovaSwift-macos-arm64.zip</code>) is there too, for testing only; it is not notarised, so right-click and choose Open the first time.</p>
-        <p class="lead sm">Linux and Steam Deck: extract anywhere (for example <code>~/Games/NovaSwift</code>) and run <code>NovaSwift.sh</code>. On the Deck, add it to Steam as a non-Steam game for Game Mode. You need your own EV Nova data; the setup wizard imports it on first launch. Optional <code>ffmpeg</code> enables the original movies. The Godot build checks GitHub for updates in Settings, Support, Updates (experimental builds only with &ldquo;Experimental updates&rdquo; on). Nothing has run on real Deck hardware yet. Building it yourself needs a Mac with Xcode, or see <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/PACKAGING.md" target="_blank" rel="noopener">PACKAGING.md</a> for the Godot packages.</p>
-        <div class="cta">
-          <a class="btn btn-primary" href="https://testflight.apple.com/join/3FBzwwq1" target="_blank" rel="noopener">Join the beta</a>
-          <a class="btn btn-ghost" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Linux / Steam Deck (Godot beta)</a>
-          <a class="btn btn-ghost" href="https://github.com/SirStig/NovaSwift/blob/main/docs/GET_THE_DATA.md" target="_blank" rel="noopener">Adding your data</a>
+      <div class="head-row">
+        <div class="head">
+          <span class="eyebrow">News</span>
+          <h2>Latest releases.</h2>
         </div>
+        <a class="btn btn-ghost sm" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">All releases</a>
       </div>
-      <pre class="code"><code><span class="c"># clone and fetch dependencies</span>
-<span class="k">git clone</span> https://github.com/SirStig/NovaSwift.git
-<span class="k">cd</span> NovaSwift &amp;&amp; scripts/setup.sh
+      <div class="news" data-releases="3">
+        <article>
+          <time>Oct 2026 · <span class="badge warn">Beta</span></time>
+          <h3>Linux &amp; Steam Deck 0.7.0-beta.1</h3>
+          <p>The first desktop build outside Apple platforms: Linux and Steam Deck, with an experimental macOS build for testing.</p>
+          <a class="more" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Release notes →</a>
+        </article>
+      </div>
+    </div>
+  </section>
 
-<span class="c"># put your own EV Nova data in data/base/</span>
-
-<span class="c"># open in Xcode, pick a target, Run</span>
-<span class="k">open</span> app/NovaSwift.xcodeproj</code></pre>
+  <section class="section alt">
+    <div class="wrap">
+      <div class="head">
+        <span class="eyebrow">Get flying</span>
+        <h2>Three steps to the cockpit.</h2>
+      </div>
+      <div class="cards">
+        <a class="card" href="download.html">
+          <h3>1. Download</h3>
+          <p>TestFlight on Mac, iPhone, iPad and Apple TV. A beta build for Linux and Steam Deck. Windows is next.</p>
+          <span class="more">Downloads</span>
+        </a>
+        <a class="card" href="guide-getting-started.html#data">
+          <h3>2. Add your EV Nova data</h3>
+          <p>NOVA Swift ships no game data. Point the setup wizard at your copy of EV Nova and it imports everything it needs.</p>
+          <span class="more">Setup guide</span>
+        </a>
+        <a class="card" href="guide-getting-started.html#first-flight">
+          <h3>3. Make a pilot and launch</h3>
+          <p>Pick a starting scenario, or import a pilot from the original. Your first trade run is a landing away.</p>
+          <span class="more">First flight</span>
+        </a>
+      </div>
     </div>
   </section>
 
@@ -280,25 +280,51 @@
     <div class="wrap">
       <div class="rule">
         <h2>You bring the game.</h2>
-        <p>EV Nova's content belongs to its owners. NOVA Swift ships no game data and never will. It reads a copy you own, the same way OpenMW and OpenRA work.</p>
+        <p>EV Nova's content belongs to its owners. NOVA Swift ships no game data and never will. It reads a copy you own, the same way OpenMW and OpenRA work. <a href="faq.html#data">Where to get EV Nova</a>.</p>
       </div>
     </div>
   </section>
 
   </main>
 
+  <!-- footer:start -->
   <footer class="footer">
     <div class="wrap">
-      <div class="footer-top">
-        <a class="brand" href="#top">
-          <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
-          <b>NOVA<i>·</i>SWIFT</b>
-        </a>
-        <div class="footer-links">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="index.html">
+            <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+            <b>NOVA<i>·</i>SWIFT</b>
+          </a>
+          <p>EV Nova, rebuilt from the ground up. Free and open source. Bring your own copy of the game.</p>
+        </div>
+        <div>
+          <h4>Play</h4>
+          <a href="download.html">Download</a>
+          <a href="guide-getting-started.html">Getting started</a>
+          <a href="guide-controls.html">Controls</a>
+          <a href="guide-steam-deck.html">Steam Deck</a>
+          <a href="faq.html">FAQ</a>
+        </div>
+        <div>
+          <h4>Multiplayer</h4>
+          <a href="multiplayer.html">How it works</a>
+          <a href="servers.html">Server list</a>
+          <a href="dedicated-server.html">Dedicated server</a>
+          <a href="guide-multiplayer.html">Join &amp; host guide</a>
+        </div>
+        <div>
+          <h4>Create</h4>
+          <a href="plugins.html">Community plug-ins</a>
+          <a href="editor.html">Plug-in editor</a>
+          <a href="guide-making-plugins.html">Make a plug-in</a>
+          <a href="progress.html">Fidelity progress</a>
+        </div>
+        <div>
+          <h4>Project</h4>
           <a href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener">GitHub</a>
-          <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">Issues</a>
-          <a href="https://github.com/SirStig/NovaSwift-Plugins" target="_blank" rel="noopener">Plug-ins</a>
-          <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/GET_THE_DATA.md" target="_blank" rel="noopener">Get the data</a>
+          <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">Report a bug</a>
+          <a href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Releases</a>
           <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/CHARTER.md" target="_blank" rel="noopener">Charter</a>
         </div>
       </div>
@@ -309,7 +335,10 @@
       </p>
     </div>
   </footer>
+  <!-- footer:end -->
 
   <script src="starfield.js?v=2"></script>
+  <script src="js/site.js?v=1"></script>
+  <script src="js/live.js?v=1" defer></script>
 </body>
 </html>

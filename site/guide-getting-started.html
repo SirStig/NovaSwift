@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Getting started · NOVA Swift guides</title>
+  <meta name="description" content="Download NOVA Swift, import your own EV Nova data, create a pilot and make your first flight." />
+  <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
+  <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
+  <meta property="og:title" content="Getting started · NOVA Swift" />
+  <meta property="og:image" content="https://sirstig.github.io/NovaSwift/assets/launch-banner.png?v=brand2" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&amp;family=Saira+Semi+Condensed:wght@500;600;700&amp;display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=21" />
+</head>
+<body data-page="guides">
+  <div class="space-bg" aria-hidden="true"></div>
+  <canvas id="stars" aria-hidden="true"></canvas>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <!-- nav:start -->
+  <nav class="nav" aria-label="Main">
+    <div class="nav-inner">
+      <a class="brand" href="index.html" aria-label="NOVA Swift home">
+        <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+        <b>NOVA<i>·</i>SWIFT</b>
+      </a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="nav-links">
+        <span class="bars" aria-hidden="true"></span><span class="sr">Menu</span>
+      </button>
+      <div class="nav-links" id="nav-links">
+        <a href="index.html#features" data-nav="index">Game</a>
+        <a href="download.html" data-nav="download">Download</a>
+        <a href="guides.html" data-nav="guides">Guides</a>
+        <a href="multiplayer.html" data-nav="multiplayer">Multiplayer</a>
+        <a href="servers.html" data-nav="servers">Servers</a>
+        <a href="plugins.html" data-nav="plugins">Plug-ins</a>
+        <a href="editor.html" data-nav="editor">Editor</a>
+        <a href="progress.html" data-nav="progress">Progress</a>
+      </div>
+      <div class="nav-cta">
+        <a class="btn btn-ghost sm icon-only" href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener" aria-label="Source code on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.7 1.2 3.4.9.1-.7.4-1.2.7-1.5-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.6 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
+        </a>
+        <a class="btn btn-primary sm" href="download.html">Play free</a>
+      </div>
+    </div>
+  </nav>
+  <!-- nav:end -->
+
+  <main id="main">
+    <header class="page-hero" style="--hero-img:url(assets/screenshots/flight-hud.webp)">
+      <div class="wrap">
+        <div class="crumbs"><a href="guides.html">Guides</a> / Getting started</div>
+        <h1>Getting started</h1>
+        <p class="lead">Install NOVA Swift, bring your own EV Nova data, make a pilot and take off. NOVA Swift is in beta, so expect rough edges.</p>
+      </div>
+    </header>
+
+    <div class="wrap doc">
+      <!-- guidenav:start -->
+      <nav class="doc-nav" aria-label="Guides">
+        <h4>Start here</h4>
+        <a href="guide-getting-started.html">Getting started</a>
+        <a href="guide-controls.html">Controls &amp; controllers</a>
+        <a href="guide-steam-deck.html">Steam Deck &amp; Linux</a>
+        <a href="faq.html">FAQ &amp; troubleshooting</a>
+        <h4>Multiplayer</h4>
+        <a href="guide-multiplayer.html">Join &amp; host games</a>
+        <a href="dedicated-server.html">Dedicated server</a>
+        <a href="servers.html">Server list</a>
+        <h4>Plug-ins</h4>
+        <a href="guide-plugins.html">Installing plug-ins</a>
+        <a href="guide-making-plugins.html">Making a plug-in</a>
+        <a href="editor.html">The plug-in editor</a>
+      </nav>
+      <!-- guidenav:end -->
+
+      <article class="prose">
+        <div class="toc"><b>On this page</b><ol>
+          <li><a href="#download">Download</a></li>
+          <li><a href="#data">Get and import your EV Nova data</a></li>
+          <li><a href="#pilot">Create or import a pilot</a></li>
+          <li><a href="#icloud">iCloud sync (Apple devices)</a></li>
+          <li><a href="#modes">Presentation modes and Enhancements</a></li>
+          <li><a href="#first-flight">Your first flight</a></li>
+          <li><a href="#updates">Updates</a></li>
+          <li><a href="#bugs">Reporting bugs</a></li>
+        </ol></div>
+
+        <p>NOVA Swift is a free, open-source reimplementation of the 2002 game EV Nova. It is a game engine, not the game itself: it runs the data from your own copy of EV Nova. No game data ships with it.</p>
+
+        <h2 id="download">Download</h2>
+        <p>Pick the version for your device.</p>
+
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Device</th><th>What to get</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>Mac, iPhone, iPad, Apple TV</td><td>The native Swift app, through <a href="https://testflight.apple.com/join/3FBzwwq1" target="_blank" rel="noopener">TestFlight</a></td><td>Beta. Recommended on Mac.</td></tr>
+            <tr><td>Linux (x86_64) and Steam Deck</td><td><code>NovaSwift-linux-x86_64.tar.gz</code> from <a href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">GitHub Releases</a> (the <code>v0.7.0-beta.1</code> pre-release)</td><td>Experimental beta. See the <a href="guide-steam-deck.html">Steam Deck &amp; Linux guide</a>.</td></tr>
+            <tr><td>Windows</td><td>Not released yet</td><td>Coming later. It needs a Windows build.</td></tr>
+            <tr><td>Mac (alternative)</td><td><code>NovaSwift-macos-arm64.zip</code> from the same Releases page</td><td>Test build only, untested. Use the TestFlight app instead.</td></tr>
+          </tbody>
+        </table></div>
+
+        <div class="tabs" data-os-tabs>
+          <div role="tablist" aria-label="Platform">
+            <button role="tab" id="t-apple" aria-controls="p-apple" data-key="apple">Mac, iPhone, iPad, Apple TV</button>
+            <button role="tab" id="t-linux" aria-controls="p-linux" data-key="linux">Linux and Steam Deck</button>
+          </div>
+          <div role="tabpanel" id="p-apple" aria-labelledby="t-apple">
+            <ol class="steps">
+              <li><h3>Install TestFlight</h3><p>Get Apple's free TestFlight app from the App Store on the device you want to play on.</p></li>
+              <li><h3>Join the beta</h3><p>Open <a href="https://testflight.apple.com/join/3FBzwwq1" target="_blank" rel="noopener">the invitation link</a> and install NOVA Swift. The same link covers Mac, iPad, iPhone and Apple TV.</p></li>
+              <li><h3>Launch and follow the setup wizard</h3><p>On first launch the Data Setup wizard asks for your EV Nova data. See <a href="#data">the next section</a>.</p></li>
+            </ol>
+            <div class="callout"><p>Apple TV needs a game controller. The Siri Remote cannot fly a ship. See <a href="guide-controls.html">Controls &amp; controllers</a>.</p></div>
+          </div>
+          <div role="tabpanel" id="p-linux" aria-labelledby="t-linux" hidden>
+            <ol class="steps">
+              <li><h3>Download the tarball</h3><p>Open the <a href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Releases page</a> and download <code>NovaSwift-linux-x86_64.tar.gz</code> from <code>v0.7.0-beta.1</code>. Use the Releases page rather than "latest", which skips pre-releases.</p></li>
+              <li><h3>Extract and run</h3><p>Extract it anywhere, for example <code>~/Games/NovaSwift</code>, then run <code>NovaSwift.sh</code>.</p></li>
+              <li><h3>Import your data</h3><p>The Data Setup wizard opens first. See <a href="#data">the next section</a>.</p></li>
+            </ol>
+          </div>
+        </div>
+
+        <h2 id="data">Get and import your EV Nova data</h2>
+        <p>NOVA Swift uses a bring-your-own-data model. EV Nova's data is copyrighted, so we cannot include it. Owning EV Nova is fine; passing its data files around is not. The game only reads your files and never changes the originals.</p>
+
+        <h3>Where to find the data</h3>
+        <p>EV Nova is no longer sold in any store. Ambrosia Software is gone, and the game was never on Steam, GOG or the App Store. If you own a copy, there are two common ways to get at the data:</p>
+        <ul>
+          <li><strong>Easiest:</strong> download the Windows build's <code>.zip</code> from <a href="https://andrews05.github.io/evstuff/" target="_blank" rel="noopener">andrews05.github.io/evstuff</a> and unzip it. You do not need to install, launch or register anything. The unzipped folder already contains the game's <code>.rez</code> data files, ready to import.</li>
+          <li><strong>From a Mac install:</strong> the community "EV Nova mod 4" build runs on current macOS. Launch it once and its <code>Nova Files</code> folder is ready to import. The Data Setup wizard also explains <strong>Decoder Ring</strong>, a 2023 tool from Ambrosia's former president Andrew Welch that makes a valid registration code for a copy you own. Registration is only needed to run the classic app, not to import data.</li>
+        </ul>
+
+        <h3>What you can import</h3>
+        <p>The wizard accepts any of these:</p>
+        <ul>
+          <li>The unzipped Windows folder, or your EV Nova application folder</li>
+          <li>The <code>Nova Files</code> folder</li>
+          <li>Single <code>.rez</code> or <code>.ndat</code> files (<code>.ndat</code> is the cross-platform form of the Mac resource files)</li>
+          <li>On the Linux and Steam Deck build, the Windows <code>.zip</code> as it is, with no unzipping</li>
+        </ul>
+        <p>Picking the whole game folder is best, because it also brings the soundtrack and the original fonts. On the Linux and Steam Deck build it also brings the race movies and <code>EVNova.ini</code>, and a <code>Nova Plug-ins</code> folder beside the game is imported as plug-ins.</p>
+
+        <ol class="steps">
+          <li><h3>Start the app</h3><p>On first launch, the Data Setup wizard appears. On the Linux and Steam Deck build it is the only thing the game shows until your data is imported, plus Settings and Quit.</p></li>
+          <li><h3>Choose your data</h3><p>Tell the wizard whether you already have the files. On Apple devices, tap or click <strong>Choose Data…</strong> and pick the folder or files. On Linux, pick the folder, <code>.zip</code> or files; installs the game finds by itself are listed on the page.</p></li>
+          <li><h3>Wait for the copy</h3><p>NOVA Swift copies and checks your data. The Linux and Steam Deck wizard confirms the data tables and menu art are readable, shows the detected version, checks free disk space, and only replaces older data once the new copy passes.</p></li>
+          <li><h3>Play</h3><p>When the wizard says it is done, choose <strong>Play</strong>.</p></li>
+        </ol>
+
+        <h3>Where your data goes</h3>
+        <p>The wizard copies your files into NOVA Swift's own data folder, so your originals are never touched and app updates never touch the copy.</p>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Platform</th><th>Data folder</th></tr></thead>
+          <tbody>
+            <tr><td>Linux and Steam Deck</td><td><code>~/.local/share/NovaSwift/data</code></td></tr>
+            <tr><td>Windows (when released)</td><td><code>%APPDATA%\NovaSwift\data</code></td></tr>
+            <tr><td>macOS (Godot build)</td><td><code>~/Library/Application Support/NovaSwift/data</code></td></tr>
+          </tbody>
+        </table></div>
+        <p>The Apple app keeps its own copy inside its sandbox, so there is nothing to manage by hand.</p>
+
+        <div class="callout tip"><p><b>Change your data later.</b> On the Linux and Steam Deck build, go to Settings, then Data &amp; Advanced, then <em>Re-import / Change Game Data…</em>.</p></div>
+
+        <h3>Apple TV</h3>
+        <p>Apple TV has no Files app, so it cannot browse your computer. There are two routes:</p>
+        <ul>
+          <li><strong>iCloud:</strong> if you imported on another Apple device with iCloud on, Apple TV restores your data automatically on first launch.</li>
+          <li><strong>Web importer:</strong> otherwise the setup wizard shows an address like <code>http://&lt;your-tv's-ip&gt;:8017</code>. Open it in a browser on a Mac, PC or phone on the same Wi-Fi, then drop your <code>Nova Files</code> folder (or the <code>.ndat</code>/<code>.rez</code> files in it) onto the page. Nothing leaves your local network.</li>
+        </ul>
+        <p>tvOS may clear local storage when the TV runs low on space. If that happens, restore from iCloud or send the files again the same way.</p>
+
+        <h2 id="pilot">Create or import a pilot</h2>
+        <p>Choose <strong>New Pilot</strong> from the main menu, type a name and pick a starting scenario. The scenarios come from your own game data, just like the original game's character setup, and total conversion plug-ins can add their own. On the Linux and Steam Deck build the dice button beside the name field fills in a random name, handy with a controller.</p>
+
+        <h3>Importing old pilots</h3>
+        <ul>
+          <li><strong>Windows pilots (<code>.plt</code>):</strong> import them from the pilot list. NOVA Swift shows a summary first, then saves the pilot and lets you play it. On the Linux and Steam Deck build use <strong>Import EV Nova Pilot…</strong> in the Open Pilot screen.</li>
+          <li><strong>Classic Mac pilots:</strong> support is in testing. It may not work for every file yet.</li>
+        </ul>
+        <p>Pilots are saved as <code>.evpilot</code> files with rotating backups. On Linux and Steam Deck they default to <code>~/Documents/NovaSwift/Pilots</code> (the folder can be changed in Settings, Data &amp; Advanced, Saved Games).</p>
+
+        <h2 id="icloud">iCloud sync (Apple devices)</h2>
+        <p>On Mac, iPad and iPhone, pilots can save to your private iCloud. Your imported game data can sync the same way, so you import once and every device, Apple TV included, sets itself up. Turn these on or off in Settings under <em>Saved Games</em> (<em>iCloud pilot sync</em> and <em>iCloud game data sync</em>).</p>
+        <p>Everything goes to your own private iCloud, never anywhere shared. If sync is unavailable (offline, signed out, out of space) you get a friendly message and play continues locally. Game-data sync is still being finished in this beta, so if your data does not appear on a second device, import it there directly.</p>
+
+        <h2 id="modes">Presentation modes and Enhancements</h2>
+        <p>NOVA Swift plays like the original by default. Two settings let you change that, and both live in Settings.</p>
+        <figure><img src="assets/screenshots/presentation-modes.webp" loading="lazy" width="1800" height="1235" alt="The Presentation settings, showing the Classic, Enhanced and Nova Swift presets" /></figure>
+        <ul>
+          <li><strong>Presentation.</strong> Three presets change how the game looks. <em>Classic</em> is the faithful EV Nova look, drawn from your own data. <em>Enhanced</em> is Classic with the galaxy map opened up to full screen. <em>Nova Swift</em> is the modern interface. Presets are templates: pick one, then fine-tune individual interface options, such as the modern HUD or dialog style. Presentation changes only how things look, not the rules of the game.</li>
+          <li><strong>Enhancements.</strong> Extra behaviour the original did not have, each with a one-line note saying what it replaces. Examples are frequent autosave, quick hyperjump, forgiving landing, automatic route plotting, nearest-first targeting, tight formations and a modern key layout. Every one is <strong>off by default</strong>, so the game plays as the original did unless you opt in.</li>
+        </ul>
+        <p>Game speed is separate. <em>Authentic</em> is the default and matches the original's pace.</p>
+
+        <h2 id="first-flight">Your first flight</h2>
+        <p>If you played EV Nova, you already know how this goes. If not, here is the loop.</p>
+        <ol class="steps">
+          <li><h3>Take off</h3><p>You start docked on a planet. Choose <strong>Launch</strong> from the spaceport screen. The first time you play, short tutorial hints appear. You can switch them off or bring them all back in Gameplay settings.</p></li>
+          <li><h3>Fly</h3><p>Turn, thrust and fire with the keyboard, a controller or the on-screen touch controls. Defaults are in <a href="guide-controls.html">Controls &amp; controllers</a>.</p></li>
+          <li><h3>Land</h3><p>Select a planet or station and press the Land key (<kbd>L</kbd> by default) while you are close and slow enough.</p></li>
+          <li><h3>Trade</h3><p>The spaceport has a commodity exchange. Buy cargo where it is cheap, fly to a system where it sells for more, and sell. This is how most new pilots earn their first credits.</p></li>
+          <li><h3>Take missions</h3><p>The Mission BBS lists jobs offered on the planet. Accept one, then check Mission Info (<kbd>I</kbd> by default) for your current objectives. The in-game <em>Story Guide</em> can show where storylines continue.</p></li>
+          <li><h3>Upgrade</h3><p>Use the outfitter for weapons and equipment, and the shipyard for new ships. The shipyard also has a ship info screen.</p></li>
+          <li><h3>Jump</h3><p>Open the galaxy map (<kbd>M</kbd>), pick a linked system, and use the hyperjump key (<kbd>J</kbd>) once you are clear of the planet and have fuel.</p></li>
+        </ol>
+        <figure><img src="assets/screenshots/flight-hud.webp" loading="lazy" width="1600" height="736" alt="Flying a ship in NOVA Swift with the flight HUD" /></figure>
+
+        <h2 id="updates">Updates</h2>
+        <ul>
+          <li><strong>Apple devices:</strong> TestFlight delivers new builds. Turn on automatic updates in TestFlight if you want them as they arrive.</li>
+          <li><strong>Linux and Steam Deck:</strong> the game checks GitHub for a newer release when the main menu opens, at most once a day, and asks before downloading anything. Choose <em>Skip This Version</em>, <em>Later</em> or <em>Update Now</em>. Control it in Settings, Data &amp; Advanced, <em>Updates</em>. <em>Experimental updates</em> is off by default and also offers test builds that may be unstable. The updater is built but has not been tested end to end yet, so if it fails, you can always download the new tarball by hand. Your pilots and data live outside the install folder and stay put.</li>
+        </ul>
+
+        <h2 id="bugs">Reporting bugs</h2>
+        <p>This is a beta, so bugs are expected. A good report helps a lot.</p>
+        <ol class="steps">
+          <li><h3>Build a diagnostics bundle</h3><p>On Apple devices go to Settings, Support, then <strong>Report a Bug</strong>. It bundles your pilot and recent logs into one file. On the Linux and Steam Deck build, the <em>Report a Bug…</em> button is on the Data &amp; Advanced settings page.</p></li>
+          <li><h3>File an issue</h3><p>Open the <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">GitHub issue tracker</a>, describe what happened and what you expected, and attach the bundle.</p></li>
+        </ol>
+        <p>If something plays differently from the original game, say so. There is a <a href="https://github.com/SirStig/NovaSwift/issues/new/choose" target="_blank" rel="noopener">fidelity issue</a> template for exactly that.</p>
+
+        <nav class="next-prev" aria-label="More guides">
+          <span></span>
+          <a class="next" href="guide-controls.html"><small>Next</small><b>Controls &amp; controllers</b></a>
+        </nav>
+      </article>
+    </div>
+  </main>
+
+  <!-- footer:start -->
+  <footer class="footer">
+    <div class="wrap">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="index.html">
+            <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+            <b>NOVA<i>·</i>SWIFT</b>
+          </a>
+          <p>EV Nova, rebuilt from the ground up. Free and open source. Bring your own copy of the game.</p>
+        </div>
+        <div>
+          <h4>Play</h4>
+          <a href="download.html">Download</a>
+          <a href="guide-getting-started.html">Getting started</a>
+          <a href="guide-controls.html">Controls</a>
+          <a href="guide-steam-deck.html">Steam Deck</a>
+          <a href="faq.html">FAQ</a>
+        </div>
+        <div>
+          <h4>Multiplayer</h4>
+          <a href="multiplayer.html">How it works</a>
+          <a href="servers.html">Server list</a>
+          <a href="dedicated-server.html">Dedicated server</a>
+          <a href="guide-multiplayer.html">Join &amp; host guide</a>
+        </div>
+        <div>
+          <h4>Create</h4>
+          <a href="plugins.html">Community plug-ins</a>
+          <a href="editor.html">Plug-in editor</a>
+          <a href="guide-making-plugins.html">Make a plug-in</a>
+          <a href="progress.html">Fidelity progress</a>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <a href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">Report a bug</a>
+          <a href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Releases</a>
+          <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/CHARTER.md" target="_blank" rel="noopener">Charter</a>
+        </div>
+      </div>
+      <p class="legal">
+        EV Nova and its data are copyrighted by their owners and are not distributed here. You supply your own copy.
+        Screenshots show EV Nova's game content running in NOVA Swift. The NOVA Swift banner, logo and icon are original.
+        NOVA Swift's code is open source. It is a fan preservation project, not affiliated with or endorsed by Ambrosia Software or ATMOS.
+      </p>
+    </div>
+  </footer>
+  <!-- footer:end -->
+
+  <script src="starfield.js?v=2"></script>
+  <script src="js/site.js?v=1"></script>
+</body>
+</html>

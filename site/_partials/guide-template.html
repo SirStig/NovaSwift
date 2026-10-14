@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GUIDE TITLE · NOVA Swift guides</title>
+  <meta name="description" content="ONE SENTENCE SUMMARY." />
+  <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
+  <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
+  <meta property="og:title" content="GUIDE TITLE · NOVA Swift" />
+  <meta property="og:image" content="https://sirstig.github.io/NovaSwift/assets/launch-banner.png?v=brand2" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=21" />
+</head>
+<body data-page="guides">
+  <div class="space-bg" aria-hidden="true"></div>
+  <canvas id="stars" aria-hidden="true"></canvas>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <!-- nav:start -->
+  <!-- nav:end -->
+
+  <main id="main">
+    <header class="page-hero" style="--hero-img:url(assets/screenshots/HERO.webp)">
+      <div class="wrap">
+        <div class="crumbs"><a href="guides.html">Guides</a> / SECTION</div>
+        <h1>GUIDE TITLE</h1>
+        <p class="lead">One or two sentence intro.</p>
+      </div>
+    </header>
+
+    <div class="wrap doc">
+      <!-- guidenav:start -->
+      <!-- guidenav:end -->
+
+      <article class="prose">
+        <div class="toc"><b>On this page</b><ol><li><a href="#a">First section</a></li></ol></div>
+
+        <h2 id="a">First section</h2>
+        <p>Body text. Use <kbd>Esc</kbd> for keys, <code>file.cfg</code> for names.</p>
+
+        <div class="callout tip"><p><b>Tip.</b> Green = helpful tip. Also .callout (blue, info), .callout.warn (amber), .callout.bad (red).</p></div>
+
+        <ol class="steps">
+          <li><h3>Step title</h3><p>Step body.</p></li>
+        </ol>
+
+        <pre class="code"><code><span class="c"># a comment line (not copied by the Copy button)</span>
+<span class="k">command</span> --flag value</code></pre>
+
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Action</th><th>Keyboard</th><th>Gamepad</th></tr></thead>
+          <tbody><tr><td>Thrust</td><td><kbd>↑</kbd></td><td>RT</td></tr></tbody>
+        </table></div>
+
+        <!-- Platform-specific content: tabs. data-os-tabs preselects the visitor's OS
+             (keys: apple, linux, deck, windows). -->
+        <div class="tabs" data-os-tabs>
+          <div role="tablist" aria-label="Platform">
+            <button role="tab" id="t-apple" aria-controls="p-apple" data-key="apple">Mac, iPhone, iPad, Apple TV</button>
+            <button role="tab" id="t-linux" aria-controls="p-linux" data-key="linux">Linux</button>
+          </div>
+          <div role="tabpanel" id="p-apple" aria-labelledby="t-apple"><p>…</p></div>
+          <div role="tabpanel" id="p-linux" aria-labelledby="t-linux" hidden><p>…</p></div>
+        </div>
+
+        <nav class="next-prev" aria-label="More guides">
+          <a href="guide-PREV.html"><small>Previous</small><b>Prev title</b></a>
+          <a class="next" href="guide-NEXT.html"><small>Next</small><b>Next title</b></a>
+        </nav>
+      </article>
+    </div>
+  </main>
+
+  <!-- footer:start -->
+  <!-- footer:end -->
+
+  <script src="starfield.js?v=2"></script>
+  <script src="js/site.js?v=1"></script>
+</body>
+</html>

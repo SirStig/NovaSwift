@@ -30,7 +30,7 @@ public final class ENetTransport: Transport, TransportDelegate {
     // MARK: Wire constants (mirror godot/net/NetProto.gd)
 
     public enum Wire {
-        public static let protocolVersion = 1
+        public static let protocolVersion = CrossPlayProtocol.version
         public static let defaultPort = 53735
         public static let serverID = 1
         // First byte of every packet.
@@ -49,7 +49,7 @@ public final class ENetTransport: Transport, TransportDelegate {
         public var port: Int
         public var displayName: String
         public var password: String
-        /// Must equal the server's game version string (`application/config/version`), or it refuses us.
+        /// The app release string; informational (the gate is `CrossPlayProtocol.version`).
         public var gameVersion: String
         /// `ENetTransport.manifestJSON(_:)` of this player's enabled plug-ins; "" skips the check.
         public var manifestJSON: String
@@ -84,6 +84,9 @@ public final class ENetTransport: Transport, TransportDelegate {
     public private(set) var state: State = .idle
     public private(set) var serverName = ""
     public private(set) var rttMilliseconds = -1
+    /// After a `.rejected(code: "plugins")`: the server's manifest JSON (REJECT `detail.server_manifest`), for the
+    /// "what do I need to install" diff. Additive; nil otherwise.
+    public private(set) var rejectServerManifest: String?
     public var onEvent: ((Event) -> Void)?
     /// Seconds to wait for ENet to connect / the server to answer HELLO (Godot uses 10 / 8).
     public var connectTimeout = Wire.connectTimeout
@@ -249,6 +252,7 @@ public final class ENetTransport: Transport, TransportDelegate {
             let b = Self.json(pkt)
             closedReason = (b["message"] as? String) ?? "The server refused the connection."
             let code = (b["code"] as? String) ?? "refused"
+            rejectServerManifest = (b["detail"] as? [String: Any])?["server_manifest"] as? String
             finish(.closed); emit(.rejected(code: code, message: closedReason))
         case Wire.kPeerJoin:
             guard state == .connected else { return }
@@ -344,10 +348,20 @@ public final class ENetTransport: Transport, TransportDelegate {
 
     /// The `manifest` string in the same shape as the Godot bridge's `net_ready_manifest()`.
     public static func manifestJSON(_ m: PluginManifest) -> String {
+        let m = m.gameplayOnly   // cosmetic plug-ins never go on the wire
         let obj: [String: Any] = ["plugins": m.plugins.map { ["id": $0.id, "name": $0.name, "contentHash": $0.contentHash] },
                                   "signature": m.signature, "count": m.count]
         guard let d = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]) else { return "" }
         return String(decoding: d, as: UTF8.self)
+    }
+
+    /// Parse a `net_ready_manifest()`-shaped JSON back into a `PluginManifest` (nil if malformed).
+    public static func parseManifest(_ json: String) -> PluginManifest? {
+        guard let o = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any],
+              let list = o["plugins"] as? [[String: Any]] else { return nil }
+        return PluginManifest(list.map {
+            PluginRequirement(id: ($0["id"] as? String) ?? "", name: ($0["name"] as? String) ?? "", contentHash: ($0["contentHash"] as? String) ?? "")
+        })
     }
 
     private static func json(_ pkt: [UInt8]) -> [String: Any] {

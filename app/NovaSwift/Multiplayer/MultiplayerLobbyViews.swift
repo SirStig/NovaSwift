@@ -1,6 +1,35 @@
 import SwiftUI
 import NovaSwiftKit
 import NovaSwiftNet
+import NovaSwiftENet
+
+/// Who can join a hosted game (the Host form's single choice, instead of four separate screens).
+enum HostAudience: String, CaseIterable, Identifiable {
+    case friends = "Friends"        // Game Center invite
+    case publicLobby = "Online"     // Game Center + listed in the public CloudKit lobby list
+    case nearby = "Nearby"          // MultipeerConnectivity, Apple devices on this Wi-Fi
+    case direct = "Direct / IP"     // ENet: Godot players, dedicated-server style, anyone with the address
+    var id: String { rawValue }
+    var blurb: String {
+        switch self {
+        case .friends: return "Invite friends through Game Center. Apple devices only."
+        case .publicLobby: return "Listed publicly; people ask to join and you approve each. Apple devices only."
+        case .nearby: return "Anyone on this Wi-Fi network running NovaSwift on an Apple device."
+        case .direct: return "Anyone with your address, including Linux, Windows and Steam Deck players. Needs the port reachable."
+        }
+    }
+}
+
+/// Everything the Host form collects.
+struct HostRequest {
+    var audience: HostAudience
+    var name: String
+    var rules: SessionRules
+    var port: Int
+    var password: String
+    var maxPlayers: Int
+    var announceOnLAN: Bool
+}
 
 /// Configure a lobby before it opens: its name and the session rules (stakes).
 /// Presented when you tap "Host a Lobby". Responsive — a scrolling stack that
@@ -13,7 +42,16 @@ struct HostSetupView: View {
     /// (lobbyName, rules, listPublicly) — start hosting. `listPublicly` is always
     /// false unless `showsPublicListing`.
     var onHost: (String, SessionRules, Bool) -> Void
+    /// Non-empty: show the "Who can join" choice (and, for Direct / IP, port / password / players). The Host
+    /// button then calls `onHostRequest` instead of `onHost`.
+    var audiences: [HostAudience] = []
+    var onHostRequest: ((HostRequest) -> Void)? = nil
 
+    @State private var audience: HostAudience = .direct
+    @State private var portText = String(CrossPlayProtocol.defaultPort)
+    @State private var password = ""
+    @State private var maxPlayers = 4
+    @State private var announceOnLAN = true
     @State private var lobbyName = ""
     /// Off by default: publishing puts your pilot name and lobby name in a list
     /// every player can read, and that should be a decision, not a surprise.
@@ -35,6 +73,14 @@ struct HostSetupView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    if !audiences.isEmpty {
+                        field(title: "Who can join") {
+                            NovaSegmentedPicker(selection: $audience, options: audiences) { $0.rawValue }
+                            Text(audience.blurb).novaFont(.caption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
                     field(title: "Lobby Name") {
                         #if os(tvOS)
                         // Cursor-clickable stand-in for the fullscreen
@@ -87,7 +133,29 @@ struct HostSetupView: View {
                     }
                     .tint(amber)
 
-                    if showsPublicListing {
+                    if !audiences.isEmpty && audience == .direct {
+                        field(title: "Network") {
+                            HStack {
+                                Text("Port").novaFont(.body).foregroundStyle(.white)
+                                Spacer()
+                                NovaTextField(placeholder: "53735", text: $portText).frame(width: 110)
+                            }
+                            HStack {
+                                Text("Password").novaFont(.body).foregroundStyle(.white)
+                                Spacer()
+                                NovaTextField(placeholder: "none", text: $password).frame(width: 180)
+                            }
+                            NovaMenuPicker(title: "Players", selection: $maxPlayers, options: [2, 3, 4, 6, 8, 12, 16]) { "\($0)" }
+                            Toggle("Show on my local network", isOn: $announceOnLAN)
+                                .cursorClickable { announceOnLAN.toggle() }
+                            Text("UPnP isn't available on Apple devices: forward UDP \(portText.isEmpty ? "53735" : portText) (and \((Int(portText) ?? 53735) + 1) so the server list can ping you) on your router, or use a VPN such as Tailscale. For an always-on server, run the NovaSwift Dedicated Server instead.")
+                                .novaFont(.caption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .tint(amber)
+                    }
+
+                    if showsPublicListing || (!audiences.isEmpty && audience == .publicLobby) {
                         field(title: "Visibility") {
                             Toggle("List this lobby publicly", isOn: $listPublicly)
                                 .cursorClickable { listPublicly.toggle() }
@@ -101,8 +169,14 @@ struct HostSetupView: View {
                     }
 
                     Button {
-                        onHost(lobbyName.trimmingCharacters(in: .whitespacesAndNewlines), rules,
-                               showsPublicListing && listPublicly)
+                        let name = lobbyName.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if let onHostRequest, !audiences.isEmpty {
+                            onHostRequest(HostRequest(audience: audience, name: name, rules: rules,
+                                                      port: min(max(Int(portText) ?? CrossPlayProtocol.defaultPort, 1), 65535),
+                                                      password: password, maxPlayers: maxPlayers, announceOnLAN: announceOnLAN))
+                        } else {
+                            onHost(name, rules, showsPublicListing && listPublicly)
+                        }
                     } label: {
                         Text("Open Lobby")
                             .novaFont(.button, weight: .medium)
@@ -185,6 +259,13 @@ struct LobbyRosterView: View {
                         .novaFont(.caption).foregroundStyle(.secondary)
                 }
                 .padding(.top, 8)
+
+                if let note = session.hostNotice ?? session.tradeNotice {
+                    Label(note, systemImage: "info.circle.fill")
+                        .novaFont(.caption).foregroundStyle(Color(red: 1, green: 0.6, blue: 0.2))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal)
+                }
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Players").novaFont(.button, weight: .medium).foregroundStyle(.white)

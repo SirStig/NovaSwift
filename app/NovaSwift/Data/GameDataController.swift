@@ -382,6 +382,11 @@ final class GameDataController: ObservableObject {
                                     persisted: persisted.map { PluginEnableState(id: $0.id, isEnabled: $0.isEnabled) },
                                     inMemoryEnabled: inMemory, manual: manualPluginOrder,
                                     tcAddOns: tcAddOnLists)
+        // Multiplayer: a session may run on the server's plug-in set. Applied on top of the player's own
+        // (persisted) choices and never saved, so dropping the override restores them exactly.
+        if let only = sessionPluginOverride {
+            for i in plugins.indices { plugins[i].isEnabled = only.contains(plugins[i].id) }
+        }
         pluginsAreManual = manualPluginOrder
         Log.data.debug("reload: \(self.plugins.count, privacy: .public) plug-in(s) discovered, \(self.plugins.filter(\.isEnabled).count, privacy: .public) enabled")
 
@@ -479,7 +484,25 @@ final class GameDataController: ObservableObject {
         if loaded { reload() }
     }
 
+    // MARK: Multiplayer session plug-in override
+
+    /// While non-nil, exactly these plug-in ids are enabled, whatever the player's saved choices say. Nothing
+    /// is persisted: set it back to nil and the player's own set is back. Used to join a server that runs
+    /// a different plug-in set (docs/MULTIPLAYER.md, "Plug-ins and multiplayer").
+    private(set) var sessionPluginOverride: Set<String>?
+
+    /// The ids of the plug-ins that are enabled right now (with the session override applied).
+    var enabledPluginIDs: Set<String> { Set(plugins.filter(\.isEnabled).map(\.id)) }
+
+    /// Applies (or, with nil, clears) the session override and reloads the game data. The caller must have torn
+    /// down any running flight scene first: the loaded `NovaGame` is replaced.
+    func setSessionPluginOverride(_ ids: Set<String>?) async {
+        sessionPluginOverride = ids
+        await reloadAsync()
+    }
+
     func setPlugin(_ id: String, enabled: Bool) {
+        guard sessionPluginOverride == nil else { return }   // the Plugins screen is read-only during a borrowed set
         // The enable switch is the manual-order enhancement, except for total
         // conversions: choosing one to play is always the player's call.
         guard PluginSet.setEnabled(&plugins, id: id, enabled: enabled, manual: manualPluginOrder) else { return }

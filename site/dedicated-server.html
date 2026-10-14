@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dedicated server · NOVA Swift</title>
+  <meta name="description" content="Run your own NOVA Swift multiplayer server on Linux, Windows, macOS, a Raspberry Pi or a VPS. Downloads, setup, ports, the web admin panel and getting listed." />
+  <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
+  <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
+  <meta property="og:title" content="Host a NOVA Swift server" />
+  <meta property="og:image" content="https://sirstig.github.io/NovaSwift/assets/launch-banner.png?v=brand2" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=21" />
+</head>
+<body data-page="servers">
+  <div class="space-bg" aria-hidden="true"></div>
+  <canvas id="stars" aria-hidden="true"></canvas>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <!-- nav:start -->
+  <nav class="nav" aria-label="Main">
+    <div class="nav-inner">
+      <a class="brand" href="index.html" aria-label="NOVA Swift home">
+        <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+        <b>NOVA<i>·</i>SWIFT</b>
+      </a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="nav-links">
+        <span class="bars" aria-hidden="true"></span><span class="sr">Menu</span>
+      </button>
+      <div class="nav-links" id="nav-links">
+        <a href="index.html#features" data-nav="index">Game</a>
+        <a href="download.html" data-nav="download">Download</a>
+        <a href="guides.html" data-nav="guides">Guides</a>
+        <a href="multiplayer.html" data-nav="multiplayer">Multiplayer</a>
+        <a href="servers.html" data-nav="servers">Servers</a>
+        <a href="plugins.html" data-nav="plugins">Plug-ins</a>
+        <a href="editor.html" data-nav="editor">Editor</a>
+        <a href="progress.html" data-nav="progress">Progress</a>
+      </div>
+      <div class="nav-cta">
+        <a class="btn btn-ghost sm icon-only" href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener" aria-label="Source code on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.7 1.2 3.4.9.1-.7.4-1.2.7-1.5-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.6 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
+        </a>
+        <a class="btn btn-primary sm" href="download.html">Play free</a>
+      </div>
+    </div>
+  </nav>
+  <!-- nav:end -->
+
+  <main id="main">
+    <header class="page-hero" style="--hero-img:url(assets/screenshots/host-lobby.webp)">
+      <div class="wrap">
+        <div class="crumbs"><a href="multiplayer.html">Multiplayer</a> / Dedicated server</div>
+        <h1>Run your own server.</h1>
+        <p class="lead">A server keeps a multiplayer game open around the clock, so friends can drop in whenever they like. Run it on a spare PC, a Raspberry Pi or a cheap VPS, and list it for everyone if you want.</p>
+      </div>
+    </header>
+
+    <div class="wrap doc">
+      <!-- guidenav:start -->
+      <nav class="doc-nav" aria-label="Guides">
+        <h4>Start here</h4>
+        <a href="guide-getting-started.html">Getting started</a>
+        <a href="guide-controls.html">Controls &amp; controllers</a>
+        <a href="guide-steam-deck.html">Steam Deck &amp; Linux</a>
+        <a href="faq.html">FAQ &amp; troubleshooting</a>
+        <h4>Multiplayer</h4>
+        <a href="guide-multiplayer.html">Join &amp; host games</a>
+        <a href="dedicated-server.html">Dedicated server</a>
+        <a href="servers.html">Server list</a>
+        <h4>Plug-ins</h4>
+        <a href="guide-plugins.html">Installing plug-ins</a>
+        <a href="guide-making-plugins.html">Making a plug-in</a>
+        <a href="editor.html">The plug-in editor</a>
+      </nav>
+      <!-- guidenav:end -->
+
+      <article class="prose">
+        <div class="toc"><b>On this page</b><ol>
+          <li><a href="#download">Downloads</a></li>
+          <li><a href="#where">Where to run it</a></li>
+          <li><a href="#setup">Set it up</a></li>
+          <li><a href="#ports">Open the ports</a></li>
+          <li><a href="#today">Running a server today</a></li>
+          <li><a href="#config">Settings and console</a></li>
+          <li><a href="#always-on">Keep it running</a></li>
+          <li><a href="#list">Get listed</a></li>
+          <li><a href="#trouble">Troubleshooting</a></li>
+        </ol></div>
+
+        <h2 id="download">Downloads</h2>
+        <p>The <b>NOVA Swift Dedicated Server</b> is a small standalone program. It doesn't need the game, a pilot or any EV Nova data: it carries the session (rules, chat, moderation, plug-in checks) while each player's own game runs their ship. You manage it from a web admin panel in your browser.</p>
+
+        <div class="callout warn"><p><b>Arriving with the next release.</b> The standalone server is being finished now. Until its downloads appear below, you can host with the game's own headless mode: see <a href="#today">Running a server today</a>.</p></div>
+
+        <div class="cards" style="margin:var(--s3) 0">
+          <div class="platform">
+            <header><div><h3>Linux</h3><div class="sub">x86_64 · arm64 (Raspberry Pi)</div></div></header>
+            <div class="actions"><a class="btn btn-ghost" data-asset="server-linux" data-ready="Download" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Not released yet</span></a></div>
+            <p class="meta" data-asset-meta="server-linux"></p>
+          </div>
+          <div class="platform">
+            <header><div><h3>Windows</h3><div class="sub">x86_64</div></div></header>
+            <div class="actions"><a class="btn btn-ghost" data-asset="server-windows" data-ready="Download" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Not released yet</span></a></div>
+            <p class="meta" data-asset-meta="server-windows"></p>
+          </div>
+          <div class="platform">
+            <header><div><h3>macOS</h3><div class="sub">Apple Silicon</div></div></header>
+            <div class="actions"><a class="btn btn-ghost" data-asset="server-macos" data-ready="Download" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Not released yet</span></a></div>
+            <p class="meta" data-asset-meta="server-macos"></p>
+          </div>
+        </div>
+
+        <p>What it's built to do:</p>
+        <ul>
+          <li><b>No game data.</b> Nothing to copy onto the server; nothing copyrighted on your VPS.</li>
+          <li><b>Web admin panel</b> on port <code>53737</code>: players, kick and ban, rules, plug-ins from the catalog, public listing and logs. A setup wizard runs the first time.</li>
+          <li><b>Safe defaults.</b> It works with no configuration. The admin password is generated on first start and printed once.</li>
+          <li><b>Easy networking.</b> A built-in port check and optional UPnP, with errors in plain language.</li>
+          <li><b>Runs anywhere.</b> Linux, Windows and macOS builds, a Docker image and a systemd unit.</li>
+        </ul>
+
+        <h2 id="where">Where to run it</h2>
+        <p>The server is light. Anything that can stay switched on will do.</p>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Where</th><th>Cost</th><th>Good for</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><b>Your own PC</b></td><td>Free</td><td>Evenings with friends</td><td>Only up while the PC is on. Needs port forwarding on your router.</td></tr>
+            <tr><td><b>Raspberry Pi or old laptop</b></td><td>Free if you have one</td><td>A 24/7 home server</td><td>Uses a few watts. Same port forwarding as a PC.</td></tr>
+            <tr><td><b>A small VPS</b></td><td>A few dollars a month, some free tiers</td><td>A public server</td><td>Has a public address already, so no router setup: open the ports in its firewall.</td></tr>
+            <tr><td><b>Tailscale or ZeroTier</b></td><td>Free</td><td>Friends only, no forwarding</td><td>Everyone joins the same private network and connects to your <code>100.x.y.z</code> address. Can't be listed publicly.</td></tr>
+          </tbody>
+        </table></div>
+
+        <h2 id="setup">Set it up</h2>
+        <ol class="steps">
+          <li><h3>Download and start it</h3>
+            <p>Unpack the download and start the server. On Windows, double-click it. On Linux or macOS, run it from a terminal. It starts with sensible defaults and prints the admin panel address and a one-time admin password.</p></li>
+          <li><h3>Open the admin panel</h3>
+            <p>Go to <code>http://localhost:53737</code> on the same machine (on a desktop it opens by itself). From another computer use the server's address with port <code>53737</code>. The setup wizard asks for a server name, player limit, rules and an optional join password.</p></li>
+          <li><h3>Choose the rules</h3>
+            <p><b>Safe</b>: PvP damage and death aren't real, good for sparring. <b>Full stakes</b>: they are. <b>Custom</b>: pick PvP, real damage, friendly fire, permadeath and trading yourself.</p></li>
+          <li><h3>Add plug-ins (optional)</h3>
+            <p>Gameplay plug-ins on the server must match what players have enabled. Pick them from the community catalog so players can install the same ones with one click when they join. Art and sound plug-ins are optional for players.</p></li>
+          <li><h3>Open the ports and test</h3>
+            <p>See the next section. Then join from the game with the server's address.</p></li>
+        </ol>
+
+        <h2 id="ports">Open the ports</h2>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Port</th><th>Protocol</th><th>What it's for</th><th>Open to the internet?</th></tr></thead>
+          <tbody>
+            <tr><td><code>53735</code></td><td>UDP</td><td>The game itself</td><td><b>Yes</b>, players need it</td></tr>
+            <tr><td><code>53736</code></td><td>UDP</td><td>Status pings (server lists, player counts, latency) and LAN discovery. Game port + 1 if you change the game port.</td><td>Yes, to show as online in server lists</td></tr>
+            <tr><td><code>53737</code></td><td>TCP</td><td>Web admin panel (standalone server)</td><td><b>No.</b> Keep it on your own network, or reach it over SSH or a VPN</td></tr>
+          </tbody>
+        </table></div>
+        <div class="tabs" data-os-tabs>
+          <div role="tablist" aria-label="Where the server runs">
+            <button role="tab" id="t-home" aria-controls="p-home" data-key="home">At home</button>
+            <button role="tab" id="t-linux" aria-controls="p-linux" data-key="linux">Linux firewall</button>
+            <button role="tab" id="t-windows" aria-controls="p-windows" data-key="windows">Windows firewall</button>
+            <button role="tab" id="t-vps" aria-controls="p-vps" data-key="vps">VPS</button>
+          </div>
+          <div role="tabpanel" id="p-home" aria-labelledby="t-home">
+            <p>In your router's settings, forward <b>UDP 53735</b> and <b>UDP 53736</b> to the computer running the server. Or turn on UPnP in the server and let it ask the router (many routers have UPnP off).</p>
+            <p>Then give players your public address (search "what is my IP"). If your router's WAN address is different from that, or starts with <code>100.64</code> to <code>100.127</code>, your provider uses carrier-grade NAT and forwarding can't work: use a VPS or Tailscale instead.</p>
+          </div>
+          <div role="tabpanel" id="p-linux" aria-labelledby="t-linux" hidden>
+            <pre class="code"><code><span class="c"># ufw (Ubuntu, Debian, Raspberry Pi OS)</span>
+<span class="k">sudo ufw allow</span> 53735:53736/udp
+
+<span class="c"># firewalld (Fedora, RHEL)</span>
+<span class="k">sudo firewall-cmd</span> --permanent --add-port=53735-53736/udp &amp;&amp; <span class="k">sudo firewall-cmd</span> --reload</code></pre>
+          </div>
+          <div role="tabpanel" id="p-windows" aria-labelledby="t-windows" hidden>
+            <p>Windows asks the first time the server starts: allow it on private and public networks. To add the rule yourself, in an administrator PowerShell:</p>
+            <pre class="code"><code><span class="k">New-NetFirewallRule</span> -DisplayName "NOVA Swift server" -Direction Inbound -Protocol UDP -LocalPort 53735-53736 -Action Allow</code></pre>
+          </div>
+          <div role="tabpanel" id="p-vps" aria-labelledby="t-vps" hidden>
+            <p>A VPS already has a public address. Allow <b>UDP 53735-53736</b> in the provider's firewall or security group as well as in the machine's own firewall (see the Linux tab). Don't open 53737; reach the admin panel through an SSH tunnel:</p>
+            <pre class="code"><code><span class="k">ssh</span> -L 53737:localhost:53737 you@your-vps
+<span class="c"># then browse to http://localhost:53737</span></code></pre>
+          </div>
+        </div>
+
+        <h2 id="today">Running a server today</h2>
+        <p>Until the standalone server ships, the Linux build of the game can run headless as a dedicated server. It needs your EV Nova data on that machine (the folder the game imported, <code>NOVA_DATA_DIR</code> or <code>--data</code>), and it has a console instead of the web panel.</p>
+        <pre class="code"><code><span class="c"># from a source checkout</span>
+<span class="k">scripts/run-dedicated-server.sh</span> --name "My Server" --port 53735 --max-players 8 --rules safe
+
+<span class="c"># from the packaged Linux build</span>
+<span class="k">./NovaSwift</span> --headless -- --server --config /path/to/server.cfg</code></pre>
+        <p>Useful options: <code>--password X</code>, <code>--rules safe|full</code>, <code>--no-lan</code>, <code>--upnp</code>, <code>--log FILE</code>, <code>--no-stdin</code> (for services), and, with the script, <code>--check</code>, which prints your public address, warns about carrier-grade NAT and tests whether the server answers from outside.</p>
+
+        <h2 id="config">Settings and console</h2>
+        <p>Settings live in <code>server.cfg</code>; command-line flags override the file. An annotated example:</p>
+        <pre class="code"><code>[server]
+name="My NovaSwift Server"
+port=53735
+max_players=8
+password=""
+<span class="c">; safe | full | custom (custom reads [rules])</span>
+rules="safe"
+lan=true
+stdin=true
+
+<span class="c">;[rules]</span>
+<span class="c">;base="safe"</span>
+<span class="c">;allow_pvp=true</span>
+<span class="c">;pvp_damage_real=false</span>
+<span class="c">;friendly_fire=false</span>
+<span class="c">;death_real=false</span>
+<span class="c">;allow_trade=true</span></code></pre>
+        <p>Console commands (type them into the server window):</p>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Command</th><th>Does</th></tr></thead>
+          <tbody>
+            <tr><td><code>status</code></td><td>Name, port, players, rules</td></tr>
+            <tr><td><code>players</code></td><td>Who's connected</td></tr>
+            <tr><td><code>kick &lt;id|name&gt; [reason]</code></td><td>Remove a player</td></tr>
+            <tr><td><code>ban &lt;id|name&gt;</code></td><td>Remove and block a player</td></tr>
+            <tr><td><code>say &lt;text&gt;</code></td><td>Message everyone</td></tr>
+            <tr><td><code>rules safe|full</code></td><td>Switch the stakes</td></tr>
+            <tr><td><code>quit</code></td><td>Stop the server</td></tr>
+          </tbody>
+        </table></div>
+        <div class="callout"><p><b>Passwords.</b> A join password is sent hashed, but game traffic isn't encrypted by default. Don't reuse a password that matters. Encrypted (DTLS) servers are in testing for Godot-only groups.</p></div>
+
+        <h2 id="always-on">Keep it running</h2>
+        <p>On Linux, a systemd service restarts the server if it stops and starts it at boot. Adjust the paths and user:</p>
+        <pre class="code"><code><span class="c"># /etc/systemd/system/novaswift-server.service</span>
+[Unit]
+Description=NOVA Swift dedicated server
+After=network-online.target
+
+[Service]
+User=nova
+WorkingDirectory=/opt/novaswift
+ExecStart=/opt/novaswift/NovaSwift --headless -- --server --config /opt/novaswift/server.cfg --no-stdin
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+        <pre class="code"><code><span class="k">sudo systemctl enable</span> --now novaswift-server
+<span class="k">journalctl</span> -u novaswift-server -f</code></pre>
+        <p>No systemd? <code>tmux</code> or <code>screen</code> works too. A Docker image comes with the standalone server.</p>
+
+        <h2 id="list">Get listed</h2>
+        <p>The public server list is a JSON file in the <a href="https://github.com/SirStig/NovaSwift-Plugins/tree/main/servers" target="_blank" rel="noopener">NovaSwift-Plugins repository</a>. Both the game's browser and this website read it. To add your server:</p>
+        <ol class="steps">
+          <li><h3>Get your entry</h3><p>Start the server once with <code>--public</code> (plus <code>--region</code>, <code>--owner</code>, <code>--contact</code>, <code>--description</code> and <code>--address</code> if you have a domain). It prints a ready-to-paste JSON entry, including the content hash of every plug-in it requires. It never uploads anything.</p></li>
+          <li><h3>Add it to servers.json</h3><p>Fork the repository, paste the entry into the <code>servers</code> array of <code>servers/servers.json</code>, and check it with <code>python3 servers/validate.py</code>.</p></li>
+          <li><h3>Open a pull request</h3><p>Title it <code>Add server: &lt;name&gt;</code>. Once it's merged, your server shows up in the game's browser and on the <a href="servers.html">server list</a>.</p></li>
+        </ol>
+        <p>Rules for listing: a public address (no <code>192.168.x.x</code>), no passwords in the entry, honest rules labels, plug-ins players can get from the catalog, family-friendly names, and a contact. Servers that stay offline for a month or two may be removed. Until you're listed, players can join straight away with your address.</p>
+        <pre class="code" data-nocopy><code>{
+  "id": "example-eu",
+  "name": "Example Sector",
+  "host": "nova.example.com",
+  "port": 53735,
+  "region": "eu",
+  "description": "Friendly 24/7 server, safe rules, stock EV Nova.",
+  "owner": { "name": "Jane", "contact": "discord: jane" },
+  "rules": "safe",
+  "plugins": [],
+  "maxPlayers": 12,
+  "added": "2026-10-13"
+}</code></pre>
+
+        <h2 id="trouble">Troubleshooting</h2>
+        <div class="faq">
+          <details><summary>Friends can't connect</summary><div>
+            <p>Check UDP 53735 is forwarded to the right machine and allowed in its firewall. Test from outside your network (many routers can't loop back to their own public address), or run <code>scripts/run-dedicated-server.sh --check</code>. If your provider uses carrier-grade NAT, forwarding won't work: use a VPS or Tailscale.</p></div></details>
+          <details><summary>The server shows as offline in lists but people can join</summary><div>
+            <p>Status pings use UDP 53736 (game port + 1). Forward and allow that port too.</p></div></details>
+          <details><summary>Players get "version" or "plug-ins" errors</summary><div>
+            <p>Everyone needs a compatible game version and the same gameplay plug-ins as the server. The game lists what to install, disable or update. Cosmetic plug-ins don't count.</p></div></details>
+          <details><summary>UPnP didn't work</summary><div>
+            <p>Many routers ship with UPnP turned off, and it can't help behind carrier-grade NAT. Forward the ports by hand instead.</p></div></details>
+        </div>
+
+        <nav class="next-prev" aria-label="More">
+          <a href="guide-multiplayer.html"><small>Previous</small><b>Join &amp; host games</b></a>
+          <a class="next" href="servers.html"><small>Next</small><b>Server list</b></a>
+        </nav>
+      </article>
+    </div>
+  </main>
+
+  <!-- footer:start -->
+  <footer class="footer">
+    <div class="wrap">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="index.html">
+            <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+            <b>NOVA<i>·</i>SWIFT</b>
+          </a>
+          <p>EV Nova, rebuilt from the ground up. Free and open source. Bring your own copy of the game.</p>
+        </div>
+        <div>
+          <h4>Play</h4>
+          <a href="download.html">Download</a>
+          <a href="guide-getting-started.html">Getting started</a>
+          <a href="guide-controls.html">Controls</a>
+          <a href="guide-steam-deck.html">Steam Deck</a>
+          <a href="faq.html">FAQ</a>
+        </div>
+        <div>
+          <h4>Multiplayer</h4>
+          <a href="multiplayer.html">How it works</a>
+          <a href="servers.html">Server list</a>
+          <a href="dedicated-server.html">Dedicated server</a>
+          <a href="guide-multiplayer.html">Join &amp; host guide</a>
+        </div>
+        <div>
+          <h4>Create</h4>
+          <a href="plugins.html">Community plug-ins</a>
+          <a href="editor.html">Plug-in editor</a>
+          <a href="guide-making-plugins.html">Make a plug-in</a>
+          <a href="progress.html">Fidelity progress</a>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <a href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">Report a bug</a>
+          <a href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Releases</a>
+          <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/CHARTER.md" target="_blank" rel="noopener">Charter</a>
+        </div>
+      </div>
+      <p class="legal">
+        EV Nova and its data are copyrighted by their owners and are not distributed here. You supply your own copy.
+        Screenshots show EV Nova's game content running in NOVA Swift. The NOVA Swift banner, logo and icon are original.
+        NOVA Swift's code is open source. It is a fan preservation project, not affiliated with or endorsed by Ambrosia Software or ATMOS.
+      </p>
+    </div>
+  </footer>
+  <!-- footer:end -->
+
+  <script src="starfield.js?v=2"></script>
+  <script src="js/site.js?v=1"></script>
+  <script src="js/live.js?v=1" defer></script>
+</body>
+</html>

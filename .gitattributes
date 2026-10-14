@@ -1,0 +1,2 @@
+# Shell scripts run inside Linux containers even from a Windows clone: never CRLF.
+*.sh text eol=lf

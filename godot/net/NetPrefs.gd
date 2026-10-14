@@ -106,7 +106,8 @@ static func clear_recent() -> void:
 ## The Host Game form's remembered values over sensible defaults.
 static func host_form() -> Dictionary:
 	var d: Dictionary = {"name": "", "max": 4, "preset": "safe", "password": "", "lan": true, "port": Proto.DEFAULT_PORT,
-		"allow_pvp": true, "pvp_damage_real": false, "friendly_fire": false, "death_real": false, "allow_trade": true}
+		"allow_pvp": true, "pvp_damage_real": false, "friendly_fire": false, "death_real": false, "allow_trade": true,
+		"encrypt": false}
 	var v: Variant = _stored("host")
 	if v is Dictionary:
 		for k in (v as Dictionary):
@@ -119,3 +120,46 @@ static func save_host_form(form: Dictionary) -> void:
 	keep["password"] = ""   # never written to disk
 	Prefs.set_value(SECTION, "host", keep)
 	Prefs.save()
+
+
+# --- pinned server keys (DTLS trust on first use) --------------------------------------------------------
+
+## "host:port" -> {fp, pem, first_seen}
+static func trusted_keys() -> Dictionary:
+	var v: Variant = _stored("trusted_keys")
+	return (v as Dictionary).duplicate(true) if v is Dictionary else {}
+
+
+static func trusted_key(host: String, port: int) -> Dictionary:
+	var e: Variant = trusted_keys().get("%s:%d" % [host, port])
+	return e as Dictionary if e is Dictionary else {}
+
+
+static func trust_key(host: String, port: int, pem: String, fp: String) -> void:
+	var all: Dictionary = trusted_keys()
+	all["%s:%d" % [host, port]] = {"fp": fp, "pem": pem, "first_seen": int(Time.get_unix_time_from_system())}
+	Prefs.set_value(SECTION, "trusted_keys", all)
+	Prefs.save()
+
+
+static func forget_key(host: String, port: int) -> void:
+	var all: Dictionary = trusted_keys()
+	all.erase("%s:%d" % [host, port])
+	Prefs.set_value(SECTION, "trusted_keys", all)
+	Prefs.save()
+
+
+# --- the player's own plug-in set while a session has swapped it (restored when the session ends) ------------
+
+static func plugin_restore() -> Dictionary:
+	var v: Variant = _stored("plugin_restore")
+	return (v as Dictionary).duplicate(true) if v is Dictionary else {}
+
+
+static func set_plugin_restore(d: Dictionary) -> void:
+	Prefs.set_value(SECTION, "plugin_restore", d)
+	Prefs.save()
+
+
+static func clear_plugin_restore() -> void:
+	set_plugin_restore({})

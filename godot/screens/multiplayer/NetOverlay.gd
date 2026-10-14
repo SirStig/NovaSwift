@@ -1,4 +1,4 @@
-# NOVA Swift -- in-game multiplayer overlay: chat feed, chat entry, player list, toasts, trade-offer stub.
+# NOVA Swift -- in-game multiplayer overlay: chat feed, chat entry, player list, toasts.
 # Drawn with the NovaSwift UI kit (translucent rounded panels, kit fonts, coloured senders, faded timestamps), the
 # Godot counterpart of the Apple ChatOverlayView.
 #
@@ -11,9 +11,7 @@
 #   * chat entry - T (modern key layout: /) opens it, Enter sends, Esc / pad B closes; gamepad: Menu > Multiplayer > Chat
 #   * player list- opens beside the chat entry: avatar, name, host / authority badges, ping pill, system
 #   * toasts     - joined / left / kicked / rules changed, top centre, 4 s, tinted pill with a glyph
-#   * trade stub - the bridge surfaces trade invites as events but has no trade send API yet (invites are
-#                  auto-declined), so the dialog only tells the player who asked and that trading is not
-#                  available in this build
+#   * trading    - the Trade button on a player row (chat open) starts a trade; the window itself is TradeDialog.gd
 #
 # Loaded with preload() (no class_name), like Controls.gd.
 extends CanvasLayer
@@ -24,6 +22,7 @@ const Alert = preload("res://ui/novaswift/NovaAlert.gd")
 const Hub = preload("res://screens/multiplayer/MultiplayerHub.gd")
 
 signal chat_submitted(text: String)
+signal trade_requested(peer_id: int)
 signal chat_opened
 signal chat_closed
 
@@ -341,11 +340,10 @@ func set_players(players: Array, local_id: int) -> void:
 			var ms: int = int(p["rtt"])
 			var pc: Color = T.GREEN if ms < 80 else (T.ORANGE if ms < 160 else T.RED)
 			_text(h, "%d ms" % ms, 11, "semibold", pc)
-		h.custom_minimum_size.x = 230
+		if not mine:
+			var tb: Button = NC.button("Trade", "bordered", func() -> void: trade_requested.emit(id), "arrow.left.arrow.right")
+			tb.custom_minimum_size.y = 26
+			tb.focus_mode = Control.FOCUS_NONE
+			h.add_child(tb)
+		h.custom_minimum_size.x = 280
 		_players_box.add_child(h)
-
-
-## Trade invites arrive from the bridge as events; there is no send API yet, so this is a notice only.
-func show_trade_offer(from_name: String) -> void:
-	Alert.show(self, {"title": "Trade request", "message": "%s wants to trade with you.\n\nPlayer-to-player trading isn't available in the Godot build yet; the request was declined for you." % from_name,
-		"buttons": [{"title": "OK", "role": "cancel"}]})

@@ -81,7 +81,9 @@ can add a plug-in to the catalog by pull request.
 
 **Multiplayer.** Co-op over local Wi-Fi or Game Center on Apple devices, and
 over LAN, by IP address or on a dedicated server you run yourself on the
-Linux, Steam Deck and Windows builds. Each player keeps their own galaxy and
+Linux, Steam Deck and Windows builds. Apple and Godot players can join each
+other (ENet): the Apple hub lists nearby games, the public server directory and
+saved servers in one place, and any Apple device can host a game by IP. Each player keeps their own galaxy and
 pilot; players in the same star system play it together, and the host sets
 the rules: PvP, real damage, friendly fire, permadeath and trading. We run no
 servers. See [MULTIPLAYER.md](docs/MULTIPLAYER.md).

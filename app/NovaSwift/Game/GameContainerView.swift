@@ -1513,7 +1513,11 @@ struct GameContainerView: View {
     /// stop updating), so any "nothing moves" report should start by checking
     /// Console for an unexpected `true` here that never flips back.
     private func setScenePaused(_ paused: Bool, reason: String) {
-        host?.scene.isPaused = paused
+        // Co-op: with other pilots in this system the sim has to keep running (they're still flying in it, and
+        // the authority still has to snapshot) - a menu only takes the controls away, like the Godot build.
+        let keepRunning = paused && model.session.isActive && model.session.isSyncingSystem
+        host?.scene.idleControls = keepRunning
+        host?.scene.isPaused = paused && !keepRunning
         HangWatchdog.note("scene \(paused ? "paused" : "resumed") (\(reason))")
         Log.scene.debug("isPaused -> \(paused, privacy: .public) (\(reason, privacy: .public))")
     }

@@ -3,7 +3,8 @@
   Build the NOVA Swift Godot package for Windows x86_64 (run on a Windows PC).
 .DESCRIPTION
   Needs (all on PATH): Swift 6.x for Windows (swift.org installer, incl. Visual Studio Build Tools +
-  Windows SDK), Git, and Godot 4.7.2 (godot.exe / console build) with the Windows export template
+  Windows SDK), Git, Docker Desktop (Linux containers; builds the bundled movie decoder the first
+  time, see scripts/build-mini-ffmpeg.sh), and Godot 4.7.2 (godot.exe / console build) with the Windows export template
   installed (Editor > Manage Export Templates, or %APPDATA%\Godot\export_templates\4.7.2.stable\).
   Output: godot\export\NovaSwift-windows-x86_64.zip. No EV Nova data is included (BYO-data).
   Usage:  powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 [-Godot C:\path\godot.exe] [-SkipBuild]
@@ -45,6 +46,19 @@ if (-not (Test-Path "$Out\NovaSwift.exe")) { throw "export failed (Windows expor
 Copy-Item "$rtBin\*.dll" $Out -Force
 foreach ($n in "NovaSwiftGodot.dll", "SwiftGodot.dll") { if (-not (Test-Path "$Out\$n")) { Copy-Item "$Bin\$n" $Out } }
 Copy-Item godot\icon.png "$Out\icon.png"
+# Bundled decode-only ffmpeg for the original movies. Built once (mingw-w64 cross-build in the same
+# swift:6.3-jammy container the Linux package uses) and cached in godot\bin\ffmpeg\windows\.
+$Ff = "godot\bin\ffmpeg\windows"
+if (-not (Test-Path "$Ff\ffmpeg.exe")) {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        throw "godot\bin\ffmpeg\windows\ffmpeg.exe missing and docker not found: install Docker Desktop, or copy that folder from a machine that ran scripts/build-mini-ffmpeg.sh windows"
+    }
+    Write-Host "Building bundled ffmpeg (first time only, ~10 min)..."
+    docker run --rm --platform linux/amd64 -v "${PWD}:/work" -w /work swift:6.3-jammy bash -lc "scripts/build-mini-ffmpeg.sh windows"
+    if ($LASTEXITCODE -or -not (Test-Path "$Ff\ffmpeg.exe")) { throw "bundled ffmpeg build failed (see .ffmpeg-build\*-windows.log)" }
+}
+Copy-Item "$Ff\ffmpeg.exe" "$Out\ffmpeg.exe"
+Copy-Item "$Ff\LICENSE.txt" "$Out\FFMPEG-LICENSE.txt"
 @"
 NOVA Swift - Windows build
 Run NovaSwift.exe (NovaSwift.console.exe shows a log window).
@@ -56,6 +70,9 @@ put your own EV Nova data in %USERPROFILE%\.local\share\NovaSwift\data, or pick 
 $log = & "$Out\NovaSwift.console.exe" --headless --quit-after 60 2>&1 | Out-String
 Write-Host $log
 if ($log -match "Can't open dynamic library|SCRIPT ERROR|Error loading extension") { throw "smoke test failed" }
+# The bundled ffmpeg must run on this machine (decode-only: no Theora encoder, mjpeg present).
+$enc = & "$Out\ffmpeg.exe" -hide_banner -encoders 2>&1 | Out-String
+if ($LASTEXITCODE -or $enc -notmatch " mjpeg ") { throw "bundled ffmpeg.exe does not run: $enc" }
 Compress-Archive -Path "$Out\*" -DestinationPath $Zip -Force
 Write-Host "OK $Zip"
 Write-Host "Next (release): scripts/release-sign.sh --version X.Y.Z --asset windows-x86_64=$Zip   (docs/UPDATER.md)"

@@ -130,20 +130,32 @@ exported in the `.pck`. After building, sign and publish the manifest with
 
 Saves/settings: `~/.local/share/godot/app_userdata/NOVA Swift (Godot)/`.
 
-## Optional runtime dependency: ffmpeg (original movies)
+## Bundled movie decoder: mini ffmpeg (original movies)
 
-The original's bar race clips (and plug-in movies) are QuickTime `.mov`; Godot can only play Ogg
-Theora, so the game converts them on first use with `ffmpeg` into `user://movies/` (see
-`docs/GODOT_LAYER.md`, "Original movies"). ffmpeg is **not bundled** and **not required**: without it
-the movies are skipped, as with the original's "QuickTime Movies" preference off, and everything else
-(including race betting's result) works. Install it to get the clips:
+The original's bar race clips (and plug-in movies) are QuickTime `.mov` (the race clips are MPEG-4
+Part 2); Godot can only play Ogg Theora, so the game converts them on first use into `user://movies/`
+(JPEG frame sequence + WAV; see `docs/GODOT_LAYER.md`, "Original movies"). The packages **bundle** a
+tiny decode-only ffmpeg (~3.3–3.7 MB) beside the executable, so nothing has to be installed:
 
-- Linux / Steam Deck: `sudo pacman -S ffmpeg` (SteamOS: unlock the read-only rootfs first with
-  `sudo steamos-readonly disable`, and note SteamOS updates may remove it), or a static build placed on
-  `PATH` (e.g. `~/.local/bin/ffmpeg`; the game also checks `/usr/local/bin` and `/usr/bin`).
-- Windows: put `ffmpeg.exe` on `PATH`. macOS: `brew install ffmpeg` (found in `/opt/homebrew/bin`).
-- If the ffmpeg lacks the `libtheora` encoder the game falls back to a JPEG frame sequence cache, so
-  any ffmpeg works.
+    scripts/build-mini-ffmpeg.sh [macos|linux|windows]   # -> godot/bin/ffmpeg/<platform>/ (git-ignored)
+
+- Pinned FFmpeg 7.1.1 source (sha256-checked), `--disable-everything` plus only the mov/avi demuxers,
+  legacy QuickTime video/audio decoders (mpeg4, cinepak, svq1/3, qtrle, rpza, smc, h264/hevc, IMA4,
+  MACE, QDM2, PCM, MP3, AAC, ALAC…), scale/fps filters, and the mjpeg/pcm/image2/wav outputs. No
+  Theora encoder, so `Movies.gd` always uses its frame-sequence path.
+- LGPL-2.1 (no `--enable-gpl`, no external libs); shipped as a separate program with
+  `FFMPEG-LICENSE.txt` naming the exact source.
+- linux/windows are built in the `swift:6.3-jammy` amd64 container (glibc 2.35 floor, deps = libc/libm;
+  Windows via mingw-w64, deps = system DLLs only). macOS builds natively. ~7 min each under Rosetta.
+- Every packaging script builds it if missing, bundles it, and fails if it can't (no silent
+  movie-less package): `package-macos.sh`, `package-linux.sh` / `package-linux-docker.sh`, and
+  `package-windows.ps1`, which runs the cross-build through **Docker Desktop** (Linux containers) the
+  first time. No Docker on that PC: copy `godot/bin/ffmpeg/windows/` from a machine that built it.
+  Each package also checks that the bundled binary actually runs.
+- `.gitattributes` pins `*.sh` to LF so a Windows clone can still run the scripts in the container.
+- Lookup order in `Movies.gd`: beside the executable → `res://bin/ffmpeg/<platform>/` (editor runs) →
+  `PATH`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`. With none found, movies are skipped
+  exactly as with the original's "QuickTime Movies" preference off.
 
 ## Status / caveats
 

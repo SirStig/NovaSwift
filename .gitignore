@@ -58,3 +58,6 @@ scripts/branding/
 .swiftpm-cache/
 packaging/out/
 *.tpz
+
+# scripts/build-mini-ffmpeg.sh source/object cache
+.ffmpeg-build/

@@ -7,12 +7,27 @@ import Foundation
 public struct PluginRequirement: Codable, Equatable, Hashable, Sendable {
     public let id: String            // stable plug-in id (folder / file name)
     public let name: String          // display name, for the mismatch UI
-    public let contentHash: String   // hash of the plug-in's bytes (version identity)
+    /// For a gameplay plug-in: a hash of its gameplay resources only (`PluginGameplay` in NovaSwiftKit);
+    /// for a cosmetic one, the whole-file hash.
+    public let contentHash: String
+    /// Cosmetic plug-in: only changes artwork / sound / UI text, so it never has to match between players.
+    /// Excluded from the compatibility gate, the signature and `mismatch`. Mixed content counts as gameplay.
+    public let cosmetic: Bool
 
-    public init(id: String, name: String, contentHash: String) {
+    public init(id: String, name: String, contentHash: String, cosmetic: Bool = false) {
         self.id = id
         self.name = name
         self.contentHash = contentHash
+        self.cosmetic = cosmetic
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, name, contentHash, cosmetic }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        contentHash = try c.decode(String.self, forKey: .contentHash)
+        cosmetic = try c.decodeIfPresent(Bool.self, forKey: .cosmetic) ?? false
     }
 }
 
@@ -35,6 +50,12 @@ public struct PluginManifest: Codable, Equatable, Sendable {
 
     public var isEmpty: Bool { plugins.isEmpty }
     public var count: Int { plugins.count }
+    /// The plug-ins that must match between players (everything not cosmetic).
+    public var gameplay: [PluginRequirement] { plugins.filter { !$0.cosmetic } }
+    /// Cosmetic (art / sound / UI text only) plug-ins: optional, never gate a join.
+    public var cosmetic: [PluginRequirement] { plugins.filter(\.cosmetic) }
+    /// This manifest with the cosmetic plug-ins removed: what goes on the wire and into the gate.
+    public var gameplayOnly: PluginManifest { PluginManifest(gameplay) }
 
     /// A short, deterministic, cross-device-stable fingerprint of the whole set
     /// (id + content hash of each plug-in). Used for the cheap "compatible?" hint
@@ -53,28 +74,28 @@ public struct PluginManifest: Codable, Equatable, Sendable {
             for byte in s.utf8 { h = (h ^ UInt64(byte)) &* 0x0000_0100_0000_01b3 }
             h = (h ^ 0x1f) &* 0x0000_0100_0000_01b3   // field separator
         }
-        for p in plugins { mix(p.id); mix(p.contentHash) }   // plugins is sorted
+        for p in gameplay { mix(p.id); mix(p.contentHash) }   // sorted; cosmetic plug-ins don't count
         return h
     }
 
     /// Exact-match compatibility: same enabled plug-ins, same versions.
-    public func isCompatible(with other: PluginManifest) -> Bool { plugins == other.plugins }
+    public func isCompatible(with other: PluginManifest) -> Bool { gameplay == other.gameplay }
 
     /// What's wrong with *this* (the joiner's) manifest relative to `host` — the
     /// three actions the joiner must take to become compatible.
     public func mismatch(against host: PluginManifest) -> PluginMismatch {
-        let mineByID = Dictionary(plugins.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        let hostIDs = Set(host.plugins.map(\.id))
+        let mineByID = Dictionary(gameplay.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let hostIDs = Set(host.gameplay.map(\.id))
         var missing: [PluginRequirement] = []       // host has it, joiner lacks → install + enable
         var wrongVersion: [PluginRequirement] = []   // both have the id, different content
-        for hp in host.plugins {
+        for hp in host.gameplay {
             if let mine = mineByID[hp.id] {
                 if mine.contentHash != hp.contentHash { wrongVersion.append(hp) }
             } else {
                 missing.append(hp)
             }
         }
-        let extra = plugins.filter { !hostIDs.contains($0.id) }   // joiner has it, host doesn't → disable
+        let extra = gameplay.filter { !hostIDs.contains($0.id) }   // joiner has it, host doesn't → disable
         return PluginMismatch(missing: missing, extra: extra, wrongVersion: wrongVersion)
     }
 }

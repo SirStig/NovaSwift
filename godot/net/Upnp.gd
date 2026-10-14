@@ -3,7 +3,7 @@
 # Asks the home router (an Internet Gateway Device) to forward UDP <port> (game) and <port + 1> (status queries)
 # to this machine, using Godot's UPNP class. Discovery blocks for up to ~2 s, so it runs on a Thread; call poll()
 # every frame. Many routers have UPnP off, and carrier-grade NAT (some ISPs, mobile hotspots) can't be forwarded
-# at all: then `message` says so and the manual steps in docs/MULTIPLAYER.md apply. Mappings are removed on
+# at all: then `message` says so and the manual steps in the hosting guide (Multiplayer > Host Game > Hosting guide) apply. Mappings are removed on
 # release() (and carry a lease of 1 h as a safety net if the game crashes).
 #
 # Loaded with preload() (no class_name), like Controls.gd.
@@ -53,7 +53,7 @@ func _work(port: int, description: String) -> void:
 	var u: UPNP = UPNP.new()
 	var disc: int = u.discover(2000, 2, "InternetGatewayDevice")
 	if disc != UPNP.UPNP_RESULT_SUCCESS or u.get_gateway() == null or not u.get_gateway().is_valid_gateway():
-		message = "No UPnP router answered (UPnP may be off on your router). Forward UDP %d manually; see docs/MULTIPLAYER.md." % port
+		message = "No UPnP router answered (UPnP may be off on your router). Forward UDP %d manually (Multiplayer > Host Game > Hosting guide)." % port
 		return
 	_upnp = u
 	var failed: bool = false
@@ -63,7 +63,7 @@ func _work(port: int, description: String) -> void:
 			_mapped.append(p)
 		elif p == port:
 			failed = true
-			message = "Your router refused to forward UDP %d (UPnP error %d). Forward it manually; see docs/MULTIPLAYER.md." % [p, r]
+			message = "Your router refused to forward UDP %d (UPnP error %d). Forward it manually (Multiplayer > Host Game > Hosting guide)." % [p, r]
 	if failed:
 		return
 	external_ip = u.query_external_address()

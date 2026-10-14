@@ -82,7 +82,9 @@ final class GameplayGapsTests: XCTestCase {
         XCTAssertEqual(out.result?.fine, 3000)
         XCTAssertEqual(p.credits, 17_000)
         XCTAssertEqual(out.result?.smugglingPenalty, 5, "illegal junk costs SmugPenalty standing")
-        XCTAssertTrue(out.messages.contains { $0.contains("fined you 3000cr") })
+        // The status line uses the original STR# 2002 #375-380 wording (ContrabandScan.scanLines);
+        // this fixture carries no STR# 2002, so only the outcome is checked here.
+        XCTAssertFalse(out.messages.contains { $0.contains("fined you") }, "no invented sentence")
     }
 
     func testScanLegalJunkAndPoorPlayerNeverGoNegative() {
@@ -103,7 +105,7 @@ final class GameplayGapsTests: XCTestCase {
         let out = ContrabandScan.scanPlayer(state: &p, game: scanGame(scanFine: 0), scannerGovt: 128)
         XCTAssertEqual(out.result?.warningOnly, true)
         XCTAssertEqual(p.credits, 5000)
-        XCTAssertTrue(out.messages.contains { $0.contains("let off with a warning") })
+        XCTAssertFalse(out.messages.contains { $0.contains("let off with a warning") }, "no invented sentence")
     }
 
     // MARK: Escort hire

@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Controls &amp; controllers · NOVA Swift guides</title>
+  <meta name="description" content="Keyboard, gamepad, touch and Apple TV controls for NOVA Swift, plus action wheels, the controller cursor and remapping." />
+  <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
+  <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
+  <meta property="og:title" content="Controls &amp; controllers · NOVA Swift" />
+  <meta property="og:image" content="https://sirstig.github.io/NovaSwift/assets/launch-banner.png?v=brand2" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&amp;family=Saira+Semi+Condensed:wght@500;600;700&amp;display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=21" />
+</head>
+<body data-page="guides">
+  <div class="space-bg" aria-hidden="true"></div>
+  <canvas id="stars" aria-hidden="true"></canvas>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <!-- nav:start -->
+  <nav class="nav" aria-label="Main">
+    <div class="nav-inner">
+      <a class="brand" href="index.html" aria-label="NOVA Swift home">
+        <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+        <b>NOVA<i>·</i>SWIFT</b>
+      </a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="nav-links">
+        <span class="bars" aria-hidden="true"></span><span class="sr">Menu</span>
+      </button>
+      <div class="nav-links" id="nav-links">
+        <a href="index.html#features" data-nav="index">Game</a>
+        <a href="download.html" data-nav="download">Download</a>
+        <a href="guides.html" data-nav="guides">Guides</a>
+        <a href="multiplayer.html" data-nav="multiplayer">Multiplayer</a>
+        <a href="servers.html" data-nav="servers">Servers</a>
+        <a href="plugins.html" data-nav="plugins">Plug-ins</a>
+        <a href="editor.html" data-nav="editor">Editor</a>
+        <a href="progress.html" data-nav="progress">Progress</a>
+      </div>
+      <div class="nav-cta">
+        <a class="btn btn-ghost sm icon-only" href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener" aria-label="Source code on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.7 1.2 3.4.9.1-.7.4-1.2.7-1.5-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.6 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
+        </a>
+        <a class="btn btn-primary sm" href="download.html">Play free</a>
+      </div>
+    </div>
+  </nav>
+  <!-- nav:end -->
+
+  <main id="main">
+    <header class="page-hero" style="--hero-img:url(assets/screenshots/gameplay-settings.webp)">
+      <div class="wrap">
+        <div class="crumbs"><a href="guides.html">Guides</a> / Controls &amp; controllers</div>
+        <h1>Controls &amp; controllers</h1>
+        <p class="lead">Keyboard, gamepad, touch and Apple TV. Keyboard defaults match the original EV Nova, and almost everything can be remapped.</p>
+      </div>
+    </header>
+
+    <div class="wrap doc">
+      <!-- guidenav:start -->
+      <nav class="doc-nav" aria-label="Guides">
+        <h4>Start here</h4>
+        <a href="guide-getting-started.html">Getting started</a>
+        <a href="guide-controls.html">Controls &amp; controllers</a>
+        <a href="guide-steam-deck.html">Steam Deck &amp; Linux</a>
+        <a href="faq.html">FAQ &amp; troubleshooting</a>
+        <h4>Multiplayer</h4>
+        <a href="guide-multiplayer.html">Join &amp; host games</a>
+        <a href="dedicated-server.html">Dedicated server</a>
+        <a href="servers.html">Server list</a>
+        <h4>Plug-ins</h4>
+        <a href="guide-plugins.html">Installing plug-ins</a>
+        <a href="guide-making-plugins.html">Making a plug-in</a>
+        <a href="editor.html">The plug-in editor</a>
+      </nav>
+      <!-- guidenav:end -->
+
+      <article class="prose">
+        <div class="toc"><b>On this page</b><ol>
+          <li><a href="#keyboard">Keyboard</a></li>
+          <li><a href="#gamepad">Gamepad</a></li>
+          <li><a href="#wheels">Action wheels</a></li>
+          <li><a href="#cursor">The controller cursor in menus</a></li>
+          <li><a href="#touch">Touch controls (iPhone and iPad)</a></li>
+          <li><a href="#tv">Apple TV</a></li>
+          <li><a href="#remap">Remapping</a></li>
+          <li><a href="#speed">Caps Lock speed</a></li>
+          <li><a href="#chat">Chat in multiplayer</a></li>
+        </ol></div>
+
+        <p>Keyboard, mouse, touch and controllers all work at the same time on the platforms that have them. On Apple TV a controller is required.</p>
+
+        <h2 id="keyboard">Keyboard</h2>
+        <p>By default NOVA Swift uses the original game's key table, the same way the original's Key Settings does. An alternative <em>modern key layout</em> is available as an Enhancement (Settings, Enhancements, <em>Modern key layout</em>). It is off by default.</p>
+
+        <h3>Flight, original layout (default)</h3>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Action</th><th>Keyboard</th><th>Gamepad</th></tr></thead>
+          <tbody>
+            <tr><td>Turn left / right</td><td><kbd>←</kbd> <kbd>→</kbd></td><td>Left stick</td></tr>
+            <tr><td>Thrust</td><td><kbd>↑</kbd></td><td>Left stick up, or RT</td></tr>
+            <tr><td>Reverse / brake</td><td><kbd>↓</kbd></td><td>Left stick down, or LT</td></tr>
+            <tr><td>Aim (ship turns to face the stick)</td><td>None. Optional mouse aiming is in Settings.</td><td>Right stick</td></tr>
+            <tr><td>Afterburner</td><td><kbd>Z</kbd></td><td>L3 (press left stick)</td></tr>
+            <tr><td>Fire primary</td><td><kbd>Space</kbd></td><td>A</td></tr>
+            <tr><td>Fire secondary</td><td><kbd>Control</kbd> (<kbd>Return</kbd> on iPhone and iPad keyboards)</td><td>B</td></tr>
+            <tr><td>Next / previous secondary weapon</td><td><kbd>W</kbd> / <kbd>Alt</kbd>+<kbd>W</kbd></td><td>RB / LB (tap)</td></tr>
+            <tr><td>Clear secondary weapon</td><td><kbd>S</kbd></td><td>Action wheel</td></tr>
+            <tr><td>Next / previous ship target</td><td><kbd>`</kbd> or <kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>`</kbd></td><td>X (nearest target)</td></tr>
+            <tr><td>Next escort</td><td><kbd>Alt</kbd>+<kbd>`</kbd></td><td>Action wheel</td></tr>
+            <tr><td>Target nearest hostile</td><td><kbd>R</kbd></td><td>Y</td></tr>
+            <tr><td>Target nearest ship</td><td><kbd>Alt</kbd>+<kbd>R</kbd></td><td>Action wheel</td></tr>
+            <tr><td>Clear travel selection</td><td><kbd>N</kbd></td><td>R3 (press right stick)</td></tr>
+            <tr><td>Clear ship target</td><td><kbd>Alt</kbd>+<kbd>N</kbd></td><td>Action wheel</td></tr>
+            <tr><td>Select nav stellar 1 to 4</td><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd></td><td>Action wheel</td></tr>
+            <tr><td>Hail target / hail stellar</td><td><kbd>Y</kbd> / <kbd>Alt</kbd>+<kbd>Y</kbd></td><td>D-pad left (target); stellar via wheel</td></tr>
+            <tr><td>Land</td><td><kbd>L</kbd></td><td>D-pad down</td></tr>
+            <tr><td>Board target</td><td><kbd>B</kbd></td><td>D-pad right</td></tr>
+            <tr><td>Hyperjump</td><td><kbd>J</kbd></td><td>D-pad up</td></tr>
+            <tr><td>Arm hyperspace route</td><td><kbd>H</kbd></td><td>Action wheel</td></tr>
+            <tr><td>Next / previous hyperspace link</td><td><kbd>\</kbd> / <kbd>Shift</kbd>+<kbd>\</kbd></td><td>Action wheel</td></tr>
+            <tr><td>Route mini map zoom out / in</td><td><kbd>-</kbd> / <kbd>=</kbd></td><td>Action wheel</td></tr>
+            <tr><td>Galaxy map</td><td><kbd>M</kbd></td><td>Back or View (tap)</td></tr>
+            <tr><td>Dismiss status message</td><td><kbd>Return</kbd> (Mac and desktop)</td><td>Action wheel</td></tr>
+            <tr><td>Player Info / Mission Info</td><td><kbd>P</kbd> / <kbd>I</kbd></td><td>Action wheel, or the pause menu</td></tr>
+            <tr><td>Toggle cloak</td><td><kbd>U</kbd></td><td>Action wheel</td></tr>
+            <tr><td>Eject (escape pod)</td><td><kbd>Alt</kbd>+<kbd>X</kbd></td><td>Action wheel</td></tr>
+            <tr><td>Self-destruct (hold for five seconds)</td><td><kbd>Alt</kbd>+<kbd>-</kbd></td><td>Action wheel (latches; any pad button aborts)</td></tr>
+            <tr><td>Game menu / pause menu</td><td><kbd>Esc</kbd></td><td>Menu or Start</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Escort commands</h3>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Action</th><th>Keyboard</th><th>Gamepad</th></tr></thead>
+          <tbody>
+            <tr><td>Open the Escort Commands panel</td><td><kbd>E</kbd></td><td>Action wheel</td></tr>
+            <tr><td>Attack / defend / hold position</td><td><kbd>F</kbd> / <kbd>D</kbd> / <kbd>V</kbd></td><td>Action wheel</td></tr>
+            <tr><td>Formation</td><td><kbd>C</kbd></td><td>Action wheel</td></tr>
+            <tr><td>Return to hangar</td><td><kbd>Alt</kbd>+<kbd>C</kbd></td><td>Action wheel</td></tr>
+            <tr><td>Pick escort group 1 to 5</td><td><kbd>1</kbd> to <kbd>5</kbd> while the panel is up</td><td>Escort Groups wheel (Linux and Steam Deck)</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Modern key layout (optional Enhancement)</h3>
+        <p>This earlier NOVA Swift layout changes only these keys. Everything else stays as above.</p>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Action</th><th>Original layout</th><th>Modern layout</th></tr></thead>
+          <tbody>
+            <tr><td>Afterburner</td><td><kbd>Z</kbd></td><td><kbd>Shift</kbd></td></tr>
+            <tr><td>Fire secondary</td><td><kbd>Control</kbd></td><td><kbd>Return</kbd></td></tr>
+            <tr><td>Next target</td><td><kbd>`</kbd> or <kbd>Tab</kbd></td><td><kbd>Tab</kbd></td></tr>
+            <tr><td>Target nearest ship</td><td><kbd>Alt</kbd>+<kbd>R</kbd></td><td><kbd>R</kbd></td></tr>
+            <tr><td>Target nearest hostile</td><td><kbd>R</kbd></td><td><kbd>T</kbd></td></tr>
+            <tr><td>Clear target</td><td><kbd>N</kbd></td><td><kbd>U</kbd></td></tr>
+            <tr><td>Toggle cloak</td><td><kbd>U</kbd></td><td><kbd>C</kbd></td></tr>
+            <tr><td>Recall fighters</td><td>Through escort orders</td><td><kbd>G</kbd></td></tr>
+            <tr><td>Pause</td><td><kbd>Esc</kbd> opens the menu</td><td><kbd>P</kbd> or <kbd>Esc</kbd></td></tr>
+          </tbody>
+        </table></div>
+        <p>In the modern layout a few of the original's extra keys are unbound, such as Player Info and Mission Info (use the menus instead), and Alt-chord targeting extras.</p>
+
+        <h3>Extras that differ by app</h3>
+        <ul>
+          <li>The Apple app also has an Autopilot key (<kbd>A</kbd>), camera view (<kbd>O</kbd>) and camera zoom (<kbd>[</kbd> and <kbd>]</kbd>). Camera and autopilot are off the original's table, so they are listed in the Controls editor.</li>
+          <li>The Linux and Steam Deck build does not have these extra keys.</li>
+        </ul>
+
+        <h3>While docked</h3>
+        <p>On the Linux and Steam Deck build the docked screens use these shortcuts. The Apple app uses mouse, touch or the controller cursor on those screens.</p>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Action</th><th>Keyboard</th><th>Gamepad</th></tr></thead>
+          <tbody>
+            <tr><td>Move between rows and buttons</td><td>Arrows</td><td>D-pad or left stick</td></tr>
+            <tr><td>Buy / press the selected item</td><td><kbd>Enter</kbd></td><td>A</td></tr>
+            <tr><td>Sell</td><td><kbd>S</kbd></td><td>X</td></tr>
+            <tr><td>Buy quantity prompt</td><td><kbd>Q</kbd></td><td>Y</td></tr>
+            <tr><td>Sell quantity prompt</td><td><kbd>E</kbd></td><td>RB</td></tr>
+            <tr><td>Ship info (in the shipyard)</td><td><kbd>I</kbd></td><td>Y</td></tr>
+            <tr><td>Accept mission (Mission BBS)</td><td><kbd>A</kbd></td><td>X</td></tr>
+            <tr><td>Back out / launch</td><td><kbd>L</kbd> launches</td><td>B</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Galaxy map</h3>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Action</th><th>Keyboard</th><th>Gamepad (Linux and Steam Deck)</th></tr></thead>
+          <tbody>
+            <tr><td>Move the cursor to a system</td><td>Mouse</td><td>Left stick (snaps to nearby systems)</td></tr>
+            <tr><td>Pan</td><td>Arrows</td><td>Right stick</td></tr>
+            <tr><td>Zoom</td><td><kbd>=</kbd> / <kbd>-</kbd></td><td>RB / LB</td></tr>
+            <tr><td>Plot a course</td><td><kbd>Enter</kbd></td><td>A</td></tr>
+            <tr><td>Add a hop</td><td><kbd>E</kbd> (or Shift-click)</td><td>Y</td></tr>
+            <tr><td>Toggle automatic route plotting</td><td><kbd>T</kbd></td><td>X</td></tr>
+            <tr><td>Recenter</td><td><kbd>C</kbd></td><td>R3</td></tr>
+            <tr><td>Find a system</td><td><kbd>F</kbd></td><td>L3</td></tr>
+            <tr><td>Close the map</td><td><kbd>Esc</kbd></td><td>B or Back</td></tr>
+          </tbody>
+        </table></div>
+        <div class="callout"><p>Automatic route plotting is an Enhancement and is off by default.</p></div>
+
+        <h2 id="gamepad">Gamepad</h2>
+        <p>Any controller your system recognises should work: Xbox, PlayStation, Switch Pro and most 8BitDo or Bluetooth pads. On Apple platforms that means pads supported by Apple's GameController framework. On Linux and Steam Deck it means pads Godot's SDL layer recognises. Third-party pads have not had dedicated hardware testing.</p>
+        <ul>
+          <li><strong>Left stick:</strong> steers and thrusts. This is fixed, not rebindable.</li>
+          <li><strong>Right stick:</strong> absolute aim. Push it and the ship turns to face that direction.</li>
+          <li><strong>Triggers:</strong> throttle (RT thrust, LT reverse).</li>
+          <li><strong>A / B:</strong> fire primary / secondary.</li>
+          <li><strong>D-pad:</strong> jump, land, hail target and board target by default.</li>
+        </ul>
+        <p>The Linux and Steam Deck layout is built to match the Apple app's defaults, so your muscle memory carries across. The full list is in the keyboard tables above. If you cannot tell a button, the Controls screen shows your controller's own names. A DualSense, for example, shows Cross instead of A.</p>
+        <p>While a menu, map or dialog is open, the stick and buttons control a cursor instead. A button still held when you close a dialog is ignored until released, so closing a window never fires a weapon. On a DualSense the triggers get light adaptive resistance while you fly and a free pull in menus.</p>
+
+        <h2 id="wheels">Action wheels</h2>
+        <p>There are more actions than buttons, so a controller can open radial <strong>action wheels</strong>:</p>
+        <ol class="steps">
+          <li><h3>Hold a wheel button</h3><p>Hold LB, RB or the map button (Options, Back or View).</p></li>
+          <li><h3>Flick the right stick</h3><p>Push it toward a slot. Slot one is at the top, then they run clockwise.</p></li>
+          <li><h3>Release</h3><p>The highlighted action runs. Press B to cancel instead.</p></li>
+        </ol>
+        <p>A quick tap does the button's normal job: LB and RB step the secondary weapon, and the map button opens the galaxy map. Pad buttons held down for flying, such as fire and afterburner, cannot become wheel triggers.</p>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Wheel</th><th>Hold</th><th>Contents</th></tr></thead>
+          <tbody>
+            <tr><td>Combat &amp; Fleet</td><td>LB</td><td>Cloak, escort orders (aggressive, defensive, evasive, hold, formation, return to hangar), recall fighters, open Escorts, clear secondary, eject, self-destruct</td></tr>
+            <tr><td>Targeting &amp; Nav</td><td>RB</td><td>Target nearest, cycle target backward, cycle escorts, clear ship target, nav 1 to 4, hail planet, hyperspace destination and cycle destination, autopilot</td></tr>
+            <tr><td>Info &amp; View</td><td>Options (Back or View on Godot)</td><td>Player Info, Mission Info, Ship Info, dismiss message, change camera view, zoom, route map zoom, pause</td></tr>
+          </tbody>
+        </table></div>
+        <p>The game pauses while a wheel is open. You can turn that off in Settings, Controls (<em>Pause while an action wheel is open</em>). The Linux and Steam Deck build has the same wheels, with slightly different contents, and its Controls Editor has an <strong>Action Wheels</strong> tab.</p>
+        <p>Wheels are customizable on both builds: choose each wheel's trigger button and slots (4 to 12 per wheel), reorder them, or reset to defaults. With the default buttons and wheels, every action is reachable from the controller. If your custom setup leaves one out, the editor warns you.</p>
+        <p>Self-destruct needs a held key in the original. From a wheel it cannot be held, so it latches on, and pressing any pad button cancels it.</p>
+
+        <h2 id="cursor">The controller cursor in menus</h2>
+        <p>Every menu, dialog, sheet and alert can be driven with a controller. A cursor appears and works like this:</p>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Input</th><th>In menus and dialogs</th></tr></thead>
+          <tbody>
+            <tr><td>Left stick</td><td>Move the cursor. It slows over a button.</td></tr>
+            <tr><td>D-pad</td><td>Snap to the next button in that direction. Hold to repeat.</td></tr>
+            <tr><td>Right stick</td><td>Scroll lists and grids, and pan the star map</td></tr>
+            <tr><td>A</td><td>Press what the cursor is over. On a slider, hold to drag.</td></tr>
+            <tr><td>B</td><td>Back or cancel (what <kbd>Esc</kbd> does)</td></tr>
+            <tr><td>Menu</td><td>The dialog's default button (what <kbd>Return</kbd> does)</td></tr>
+            <tr><td>Triggers</td><td>Zoom the star map</td></tr>
+          </tbody>
+        </table></div>
+        <p>Text fields open an on-screen pad keyboard. The cursor stays on whatever is on top, so a dialog never lets you click something hidden behind it. Cursor speed has its own setting (Controller cursor speed), and the cursor can be turned off on the Linux and Steam Deck build.</p>
+
+        <h2 id="touch">Touch controls (iPhone and iPad)</h2>
+        <p>The default scheme is <strong>On-screen Buttons</strong>: a turn zone for your left thumb, and thrust and fire buttons for your right. Secondary weapon, target and afterburner buttons sit alongside. A button labelled <em>Actions</em> opens the full action grid for everything else, and the ☰ button opens the menu.</p>
+        <p>Pick a different scheme in Settings, Controls:</p>
+        <ul>
+          <li><strong>On-screen Buttons:</strong> the default.</li>
+          <li><strong>Tap / Drag to Fly:</strong> point the ship toward where you touch. Turn buttons hide while this is on.</li>
+          <li><strong>Tilt to Turn:</strong> tilt the device to steer. There is a tilt sensitivity setting.</li>
+        </ul>
+        <p>Every touch control can be rearranged in the Controls editor's <strong>Touch</strong> tab: drag to move (it snaps to a grid and the screen edges), resize, change what a button does, hide it, or use a preset. Pinch zooms the galaxy map. Other gestures, such as pinch to zoom in flight, are not built.</p>
+        <p>A keyboard, mouse or controller works on iPad and iPhone too, alongside touch.</p>
+
+        <h2 id="tv">Apple TV</h2>
+        <p>A game controller is required on Apple TV. The Siri Remote cannot fly a ship and the interface is cursor-driven. If no controller is connected, the app shows a "controller required" screen and carries on as soon as you pair one, with no restart.</p>
+        <p>Once paired, everything on this page about gamepads and the cursor applies. The interface is a larger "10-foot" layout, with no touch gestures. The text keyboard is the system one on tvOS. Different Apple TV generations and third-party controllers have had limited testing.</p>
+
+        <h2 id="remap">Remapping</h2>
+        <p>Open Settings, then Controls, to reach the Controls editor. It has a visual keyboard and controller, and on iOS and iPadOS a Touch tab too.</p>
+        <ul>
+          <li><strong>Device first:</strong> click a key or button on the picture, then choose what it does.</li>
+          <li><strong>Action first:</strong> pick an action in the list, then press the key or button you want. Esc cancels, and a pad capture times out after six seconds.</li>
+          <li>Rows with a conflict show in red. Reset to defaults is at the bottom.</li>
+          <li>The sticks are fixed. Everything else, including the d-pad and the action wheel triggers, is rebindable.</li>
+          <li>Some keys cannot be captured, because the original reserved them: <kbd>1</kbd> to <kbd>4</kbd> (nav and escort groups), <kbd>Caps Lock</kbd> and <kbd>F1</kbd> to <kbd>F5</kbd> on Apple.</li>
+        </ul>
+        <p>If you want the original's own Key Settings window, it is behind a button in the original Preferences window (Settings, Interface, <em>Original Preferences Window…</em>).</p>
+
+        <h2 id="speed">Caps Lock speed</h2>
+        <p>As in the original game, turning <kbd>Caps Lock</kbd> on in flight doubles the game speed. Jumps take the same real time and beams hit as often, as in the original's own 2x mode. If you set a different <em>Game speed</em> in Settings, Caps Lock doubles whatever you picked. "Authentic" is the default 1x. In a co-op session the host's speed applies and Caps Lock is ignored.</p>
+
+        <h2 id="chat">Chat in multiplayer</h2>
+        <ul>
+          <li><strong>Linux and Steam Deck:</strong> press <kbd>T</kbd> in flight to open chat (<kbd>/</kbd> with the modern key layout). <kbd>Enter</kbd> sends and <kbd>Esc</kbd> closes it. On a gamepad, use Menu, Multiplayer, Chat.</li>
+          <li><strong>Apple devices:</strong> use the chat button in the multiplayer cluster on the flight screen.</li>
+        </ul>
+        <p>See the <a href="guide-multiplayer.html">Multiplayer guide</a> for hosting and joining.</p>
+
+        <nav class="next-prev" aria-label="More guides">
+          <a href="guide-getting-started.html"><small>Previous</small><b>Getting started</b></a>
+          <a class="next" href="guide-steam-deck.html"><small>Next</small><b>Steam Deck &amp; Linux</b></a>
+        </nav>
+      </article>
+    </div>
+  </main>
+
+  <!-- footer:start -->
+  <footer class="footer">
+    <div class="wrap">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="index.html">
+            <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+            <b>NOVA<i>·</i>SWIFT</b>
+          </a>
+          <p>EV Nova, rebuilt from the ground up. Free and open source. Bring your own copy of the game.</p>
+        </div>
+        <div>
+          <h4>Play</h4>
+          <a href="download.html">Download</a>
+          <a href="guide-getting-started.html">Getting started</a>
+          <a href="guide-controls.html">Controls</a>
+          <a href="guide-steam-deck.html">Steam Deck</a>
+          <a href="faq.html">FAQ</a>
+        </div>
+        <div>
+          <h4>Multiplayer</h4>
+          <a href="multiplayer.html">How it works</a>
+          <a href="servers.html">Server list</a>
+          <a href="dedicated-server.html">Dedicated server</a>
+          <a href="guide-multiplayer.html">Join &amp; host guide</a>
+        </div>
+        <div>
+          <h4>Create</h4>
+          <a href="plugins.html">Community plug-ins</a>
+          <a href="editor.html">Plug-in editor</a>
+          <a href="guide-making-plugins.html">Make a plug-in</a>
+          <a href="progress.html">Fidelity progress</a>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <a href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">Report a bug</a>
+          <a href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Releases</a>
+          <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/CHARTER.md" target="_blank" rel="noopener">Charter</a>
+        </div>
+      </div>
+      <p class="legal">
+        EV Nova and its data are copyrighted by their owners and are not distributed here. You supply your own copy.
+        Screenshots show EV Nova's game content running in NOVA Swift. The NOVA Swift banner, logo and icon are original.
+        NOVA Swift's code is open source. It is a fan preservation project, not affiliated with or endorsed by Ambrosia Software or ATMOS.
+      </p>
+    </div>
+  </footer>
+  <!-- footer:end -->
+
+  <script src="starfield.js?v=2"></script>
+  <script src="js/site.js?v=1"></script>
+</body>
+</html>

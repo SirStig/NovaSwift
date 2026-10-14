@@ -365,6 +365,7 @@ class NovaWorld: Node2D {
         if let r = NetBridge.parseRules(rulesJson, base: base) { rules = r } else { errs.append("net_begin: rules_json is not valid JSON; using defaults") }
         let nb = NetBridge(localPeerID: localPeerId, displayName: displayName, isHost: isHost,
                            rules: rules, manifest: NetBridge.currentManifest())
+        installTradeHooks(on: nb)
         errs.forEach { nb.note($0) }
         // Already flying: announce now rather than on the next step.
         if let w = world, let sys = currentSystemID { nb.prepare(world: w, systemID: sys, shipType: pilot.shipType) }
@@ -440,6 +441,133 @@ class NovaWorld: Node2D {
         guard let nb = netBridge, nb.isHost, !nb.closed else { return }
         nb.session.kick(String(peerId), ban: ban)
     }
+
+    // MARK: Multiplayer trade (the shared TradeCoordinator; holdings rules are PilotEconomy's)
+
+    /// Hold contents right now: docked = the pilot's, in flight = the live ship's.
+    private func tradeCargo() -> [Int: Int] {
+        dockedSpobID == nil ? (world?.player.cargo ?? pilot.cargo) : pilot.cargo
+    }
+
+    /// What the pilot may give away: everything held except cargo a mission is carrying.
+    private func tradeableCargo() -> [Int: Int] {
+        var c = tradeCargo()
+        if let game { for (id, t) in PilotEconomy.missionCargo(pilot, game: game) { c[id] = max(0, (c[id] ?? 0) - t) } }
+        return c.filter { $0.value > 0 }
+    }
+
+    private func installTradeHooks(on nb: NetBridge) {
+        nb.trade.offerCheck = { [weak self] o in
+            guard let self else { return "Not in a game." }
+            return TradeRules.covers(o, credits: self.pilot.credits, cargo: self.tradeableCargo(), outfits: self.pilot.outfits)
+                ? nil : "You don't have everything in that offer."
+        }
+        nb.trade.swapCheck = { [weak self] give, receive in
+            guard let self, let galaxy = self.galaxy else { return "Not in a game." }
+            guard TradeRules.covers(give, credits: self.pilot.credits, cargo: self.tradeableCargo(), outfits: self.pilot.outfits)
+            else { return "You no longer hold everything you offered." }
+            let incoming = receive.cargo.values.reduce(0, +)
+            let outgoing = give.cargo.values.reduce(0, +)
+            var p = self.pilot
+            p.cargo = self.tradeCargo()
+            if incoming > 0, PilotEconomy.cargoUsed(p) - outgoing + incoming > PilotEconomy.cargoCapacity(p, galaxy: galaxy) {
+                return "Not enough room in your hold for their cargo."
+            }
+            return nil
+        }
+        nb.trade.commit = { [weak self] give, receive in self?.applyTrade(give: give, receive: receive) }
+    }
+
+    /// Apply a committed swap to THIS player's own save with the shared rules, then keep the live
+    /// ship's hold in step and clamp outfits to their limits. Outfits in flight take effect on the
+    /// next landing/launch (the loadout is rebuilt from `pilot.outfits` there, as with any purchase).
+    private func applyTrade(give: TradeOffer, receive: TradeOffer) {
+        if dockedSpobID == nil, let w = world { pilot.cargo = w.player.cargo }
+        var credits = pilot.credits, cargo = pilot.cargo, outfits = pilot.outfits
+        TradeRules.apply(give: give, receive: receive, credits: &credits, cargo: &cargo, outfits: &outfits)
+        pilot.credits = credits; pilot.cargo = cargo; pilot.outfits = outfits
+        if let galaxy { PilotEconomy.clampOwnedOutfitsToLimits(&pilot, galaxy: galaxy) }
+        if dockedSpobID == nil { world?.player.cargo = pilot.cargo }
+        post("Trade complete.")
+        _ = autosave(.event)
+    }
+
+    private func tradeItemName(cargo id: Int) -> String {
+        guard let game else { return "\(id)" }
+        return Commodity.standard(cargoID: id).map { game.commodityName($0) } ?? game.junk(id)?.name ?? "Cargo \(id)"
+    }
+
+    private func tradeItemName(outfit id: Int) -> String {
+        game?.outfit(id)?.outfitterDisplayName ?? "Outfit \(id)"
+    }
+
+    /// Add display names to an offer object (`cargo[].name`, `outfits[].name`).
+    private func namedOffer(_ o: Any?) -> [String: Any] {
+        var d = (o as? [String: Any]) ?? [:]
+        d["cargo"] = ((d["cargo"] as? [[String: Any]]) ?? []).map { r -> [String: Any] in
+            var r = r; r["name"] = tradeItemName(cargo: (r["id"] as? Int) ?? -1); return r }
+        d["outfits"] = ((d["outfits"] as? [[String: Any]]) ?? []).map { r -> [String: Any] in
+            var r = r; r["name"] = tradeItemName(outfit: (r["id"] as? Int) ?? -1); return r }
+        return d
+    }
+
+    /// Invite `peerId` to trade (they must be in the session and `allow_trade` on). "" = sent, else the reason.
+    @Callable(autoSnakeCase: true)
+    func netTradeInvite(peerId: Int) -> String {
+        guard let nb = netBridge, !nb.closed else { return "Not in a game." }
+        return nb.trade.invite(String(peerId)) ?? ""
+    }
+
+    /// Answer the pending invite (`peerId` must match it).
+    @Callable(autoSnakeCase: true)
+    func netTradeRespond(peerId: Int, accept: Bool) {
+        guard let nb = netBridge, nb.trade.incoming?.id == String(peerId) else { return }
+        nb.trade.respond(accept: accept)
+    }
+
+    /// Set our side of the trade: `{credits, cargo:[{id,tons}], outfits:[{id,count}]}`. "" = ok, else the reason.
+    @Callable(autoSnakeCase: true)
+    func netTradeOffer(offerJson: String) -> String {
+        guard let nb = netBridge, !nb.closed else { return "Not in a game." }
+        guard let o = NetBridge.parseOffer(offerJson) else { return "Bad offer." }
+        return nb.trade.setOffer(o) ?? ""
+    }
+
+    /// Toggle our confirmation; both confirmed commits. "" = ok, else the reason.
+    @Callable(autoSnakeCase: true)
+    func netTradeAccept(accepted: Bool) -> String {
+        guard let nb = netBridge, !nb.closed else { return "Not in a game." }
+        return nb.trade.setAccepted(accepted) ?? ""
+    }
+
+    /// Cancel the open trade (and decline a pending invite).
+    @Callable(autoSnakeCase: true)
+    func netTradeCancel() { netBridge?.trade.cancel() }
+
+    /// See `NetBridge.tradeStateObject`; offers carry item names.
+    @Callable(autoSnakeCase: true)
+    func netTradeState() -> String {
+        guard let nb = netBridge else { return NetBridge.json(["open": false, "allowed": false, "invite": NSNull()] as [String: Any]) }
+        var o = nb.tradeStateObject()
+        o["my_offer"] = namedOffer(o["my_offer"])
+        o["their_offer"] = namedOffer(o["their_offer"])
+        return NetBridge.json(o)
+    }
+
+    /// What this pilot can put on the table: `{credits, cargo:[{id,name,tons}], outfits:[{id,name,count}]}`.
+    @Callable(autoSnakeCase: true)
+    func netTradeInventory() -> String {
+        let cargo = tradeableCargo().sorted { $0.key < $1.key }
+            .map { ["id": $0.key, "name": tradeItemName(cargo: $0.key), "tons": $0.value] as [String: Any] }
+        let outfits = pilot.outfits.filter { $0.value > 0 }.sorted { $0.key < $1.key }
+            .map { ["id": $0.key, "name": tradeItemName(outfit: $0.key), "count": $0.value] as [String: Any] }
+        return NetBridge.json(["credits": pilot.credits, "cargo": cargo, "outfits": outfits] as [String: Any])
+    }
+
+    /// The enabled plug-in set for the multiplayer plug-in gate:
+    /// `{plugins:[{id,name,contentHash,tc}], tc, addons:[id], sig, count}` in load order.
+    @Callable(autoSnakeCase: true)
+    func netPluginInfo() -> String { NetBridge.json(NetBridge.pluginInfo()) }
 
     /// This node's enabled plug-ins: `{plugins:[{id,name,contentHash}],signature,count}`.
     @Callable(autoSnakeCase: true)

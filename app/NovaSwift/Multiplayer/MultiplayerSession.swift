@@ -4,6 +4,7 @@ import NovaSwiftKit
 import NovaSwiftNet
 import NovaSwiftEngine
 import NovaSwiftSync
+import NovaSwiftENet
 #if canImport(GameKit)
 import GameKit
 #endif
@@ -49,9 +50,9 @@ final class MultiplayerSession: ObservableObject {
     // MARK: - Trade
 
     /// The live trade with another player, or nil. Drives the trade window overlay.
-    @Published var trade: TradeState?
+    @Published private(set) var trade: TradeState?
     /// A pending trade invite from another player awaiting our yes/no.
-    @Published var incomingTradeInvite: TradeInvite?
+    @Published private(set) var incomingTradeInvite: TradeInvite?
     /// The app applies a committed trade to the pilot (remove `give`, add `receive`)
     /// and saves. Set by `AppModel`.
     var onTradeCommitted: ((_ give: TradeOffer, _ receive: TradeOffer) -> Void)?
@@ -86,6 +87,30 @@ final class MultiplayerSession: ObservableObject {
 
     private var net: NetSession?
     private var transport: Transport?
+
+    // MARK: - Cross-play (ENet) state
+
+    /// Why the last ENet join/host attempt (or an established ENet session) ended badly. The hub shows it.
+    struct ENetFailure: Equatable {
+        /// REJECT code ("version", "proto", "password", "full", "plugins", "banned", "bad_request") or
+        /// "timeout" / "disconnected" / "bind".
+        var code: String
+        var message: String
+        /// For code "plugins": the server's manifest (REJECT detail), to build the "what do I need" diff.
+        var serverManifestJSON: String?
+    }
+    @Published var enetFailure: ENetFailure?
+    /// "Connecting to host:port…" while an ENet join is in flight.
+    @Published private(set) var connectingTo: String?
+    /// Host-side one-liners ("Bob couldn't join: plug-ins differ"), shown in the roster.
+    @Published var hostNotice: String?
+    /// Fired after a live session ends, however it ends (the app restores borrowed plug-ins here).
+    var onSessionEnded: (() -> Void)?
+
+    private var enetClient: ENetTransport?
+    private var enetHost: ENetHostTransport?
+    private var enetAnnouncer: LANBeaconService?
+    private var pendingActivation: (name: String, systemID: Int, shipTypeID: Int?)?
 
     #if canImport(GameKit)
     /// The live Game Center match when this session is online, nil when it's local.
@@ -252,6 +277,7 @@ final class MultiplayerSession: ObservableObject {
         wire(session)
         self.transport = transport
         net = session
+        configureTrade()
         let drv = SystemSyncDriver(session: session, localSystemID: systemID)
         drv.onNotAuthority = { [weak self] in self?.bitsInitialized = false }
         drv.onAuthorityPostStep = { [weak self] net, peers in self?.propagateEarnedBits(net: net, to: peers) }
@@ -266,7 +292,15 @@ final class MultiplayerSession: ObservableObject {
 
     /// Leave the session and clear all mirrored state.
     func stop() {
+        let wasLive = isActive
+        enetClient?.onEvent = nil; enetHost?.onEvent = nil    // no callbacks (or re-entry) while we tear down
+        enetClient?.stopPumping()
+        enetHost?.stopPumping()
+        enetAnnouncer?.stopAnnouncing()
         transport?.disconnect()
+        enetClient?.disconnect()      // no-op when already closed
+        enetClient = nil; enetHost = nil; enetAnnouncer = nil
+        connectingTo = nil; pendingActivation = nil
         net = nil
         transport = nil
         driver?.reset()
@@ -277,11 +311,133 @@ final class MultiplayerSession: ObservableObject {
         isHost = false
         joinedHostID = nil
         lobbyName = ""
+        tradeCoord.reset()
         trade = nil
         incomingTradeInvite = nil
         chatLog = []
         presence = [:]
         unreadCount = 0
+        if wasLive { onSessionEnded?() }
+    }
+
+    // MARK: - Cross-play: join / host over ENet
+
+    /// **Join** a Godot player, a dedicated server or another Apple device by `host:port` over ENet. Asynchronous:
+    /// watch `connectingTo` / `isActive` / `enetFailure`. Event callbacks run on the main queue.
+    func joinENet(address: CrossPlayAddress, password: String, displayName: String, systemID: Int,
+                  shipTypeID: Int?, label: String) {
+        stop()
+        pluginMismatch = nil
+        enetFailure = nil
+        wasKicked = false
+        let manifest = pluginManifestProvider?() ?? .empty
+        let t = ENetTransport(config: .init(host: address.host, port: address.port, displayName: displayName,
+                                            password: password, gameVersion: CrossPlayProtocol.appVersion,
+                                            manifestJSON: ENetTransport.manifestJSON(manifest)))
+        enetClient = t
+        lobbyName = label.isEmpty ? address.formatted : label
+        isHost = false
+        joinedHostID = String(ENetTransport.Wire.serverID)
+        pendingActivation = (displayName, systemID, shipTypeID)
+        t.onEvent = { [weak self, weak t] event in
+            MainActor.assumeIsolated { if let self, let t { self.handleENet(event, from: t) } }
+        }
+        do {
+            try t.connect()
+        } catch {
+            enetClient = nil
+            enetFailure = ENetFailure(code: "bad_request", message: "Couldn't start connecting to \(address.formatted).", serverManifestJSON: nil)
+            return
+        }
+        connectingTo = address.formatted
+        t.startPumping(interval: 1.0 / 60.0, queue: .main)
+    }
+
+    private func handleENet(_ event: ENetTransport.Event, from t: ENetTransport) {
+        guard t === enetClient else { return }
+        switch event {
+        case .connected(let serverName, _, _, _, _):
+            guard let p = pendingActivation else { return }
+            pendingActivation = nil
+            connectingTo = nil
+            if !serverName.isEmpty { lobbyName = serverName }
+            // Joiners adopt the host's rules over the wire (NetSession); seed safe.
+            activate(transport: t, displayName: p.name, systemID: p.systemID, shipTypeID: p.shipTypeID,
+                     rules: .safe, broadcastRules: false)
+        case .rejected(let code, let message):
+            let manifest = t.rejectServerManifest
+            endENetClient()
+            enetFailure = ENetFailure(code: code, message: message, serverManifestJSON: manifest)
+        case .kicked:
+            stop()
+            wasKicked = true
+        case .timedOut(let message):
+            endENetClient()
+            enetFailure = ENetFailure(code: "timeout", message: message, serverManifestJSON: nil)
+        case .disconnected(let reason):
+            guard t.state == .closed else { return }
+            let wasLive = isActive
+            endENetClient()
+            if wasLive { enetFailure = ENetFailure(code: "disconnected", message: reason, serverManifestJSON: nil) }
+        case .chat:
+            break     // the in-session chat rides NetSession; this is the transport's fallback only
+        }
+    }
+
+    /// Tear down a client that failed or closed (keeps `enetFailure`).
+    private func endENetClient() {
+        let failure = enetFailure
+        stop()
+        enetFailure = failure
+    }
+
+    /// **Host** a game other devices join by `ip:port` over ENet: Godot players, dedicated-server style, other
+    /// Apple devices. Throws when the port can't be bound. `announcer` broadcasts it on the LAN.
+    func hostENet(lobbyName: String, displayName: String, systemID: Int, shipTypeID: Int?, rules: SessionRules,
+                  port: Int, password: String, maxPlayers: Int, announcer: LANBeaconService?,
+                  requirements: PluginRequirements) throws {
+        stop()
+        pluginMismatch = nil
+        enetFailure = nil
+        hostNotice = nil
+        let name = lobbyName.isEmpty ? "\(displayName)'s Game" : lobbyName
+        let manifest = pluginManifestProvider?() ?? .empty
+        let cfg = ENetHostTransport.Config(
+            port: port, maxPlayers: maxPlayers, serverName: name, hostName: displayName, password: password,
+            gameVersion: CrossPlayProtocol.appVersion, manifestJSON: ENetTransport.manifestJSON(manifest),
+            rulesJSON: CrossPlayProtocol.rulesJSON(rules), rulesName: CrossPlayProtocol.presetName(rules),
+            requirements: requirements)
+        let h = ENetHostTransport(config: cfg)
+        try h.start()
+        h.onEvent = { [weak self] event in
+            MainActor.assumeIsolated { self?.handleENetHost(event) }
+        }
+        self.lobbyName = name
+        isHost = true
+        joinedHostID = nil
+        enetHost = h
+        activate(transport: h, displayName: displayName, systemID: systemID, shipTypeID: shipTypeID,
+                 rules: rules, broadcastRules: true)
+        h.startPumping(interval: 1.0 / 60.0, queue: .main)
+        if let announcer {
+            enetAnnouncer = announcer
+            let fallback = ServerBeacon(name: name, players: 1, max: maxPlayers, port: port)
+            _ = announcer.startAnnouncing(gamePort: port, provider: { [weak h] in h?.beacon() ?? fallback })
+        }
+    }
+
+    private func handleENetHost(_ event: ENetHostTransport.Event) {
+        switch event {
+        case .refused(let code, _, _) where code == "plugins":
+            hostNotice = "A player couldn't join: their gameplay plug-ins don't match yours."
+        case .refused(let code, _, _) where code == "password":
+            hostNotice = "A player was refused: wrong password."
+        case .versionNote(_, let name, let theirs, _):
+            hostNotice = "\(name) runs NovaSwift \(theirs) (you run \(CrossPlayProtocol.appVersion)). Same protocol, so they can play."
+        case .peerJoined, .peerLeft:
+            syncPresence()
+        default: break
+        }
     }
 
     // MARK: - Moderation (host) + roster
@@ -302,6 +458,7 @@ final class MultiplayerSession: ObservableObject {
     func kick(_ playerID: String) {
         guard isHost else { return }
         net?.kick(playerID)
+        if let id = Int(playerID) { enetHost?.kick(id) }
         syncPresence()
     }
 
@@ -309,6 +466,7 @@ final class MultiplayerSession: ObservableObject {
     func ban(_ playerID: String) {
         guard isHost else { return }
         net?.ban(playerID)
+        if let id = Int(playerID) { enetHost?.kick(id, reason: "Banned by the host.", ban: true) }
         syncPresence()
     }
 
@@ -317,104 +475,83 @@ final class MultiplayerSession: ObservableObject {
         guard isHost else { return }
         rules = newRules
         net?.broadcastRules(newRules)
+        enetHost?.updateRules(json: CrossPlayProtocol.rulesJSON(newRules), name: CrossPlayProtocol.presetName(newRules))
     }
 
     // MARK: - Trade API (used by the UI)
 
+    // The state machine is `NovaSwiftNet.TradeCoordinator` (shared with the Godot bridge, so Apple <-> Godot trades
+    // speak the same signals and apply the same rules); this class only mirrors it into `trade` / `incomingTradeInvite`.
+
+    /// The pilot's holdings, for validating offers and swaps. Set by `AppModel`.
+    var tradeHoldings: (() -> (credits: Int, cargo: [Int: Int], outfits: [Int: Int]))?
+    /// A refusal / failure reason to show ("You don't have that much cargo.").
+    @Published var tradeNotice: String?
+    private let tradeCoord = TradeCoordinator()
+    private var tradeMyName = "Captain"
+
+    private func configureTrade() {
+        tradeCoord.send = { [weak self] signal, peer in self?.net?.sendTrade(signal, to: peer) }
+        tradeCoord.allowTrade = { [weak self] in self?.rules.allowTrade ?? false }
+        tradeCoord.localName = { [weak self] in self?.tradeMyName ?? "Captain" }
+        tradeCoord.partnerName = { [weak self] in self?.presence[$0]?.name }
+        tradeCoord.isPresent = { [weak self] in self?.presence[$0] != nil }
+        tradeCoord.offerCheck = { [weak self] offer in
+            guard let h = self?.tradeHoldings?() else { return nil }
+            return TradeRules.covers(offer, credits: h.credits, cargo: h.cargo, outfits: h.outfits) ? nil : "You don't have all of that to give."
+        }
+        tradeCoord.swapCheck = { [weak self] give, _ in
+            guard let h = self?.tradeHoldings?() else { return nil }
+            return TradeRules.covers(give, credits: h.credits, cargo: h.cargo, outfits: h.outfits) ? nil : "You no longer have everything you offered."
+        }
+        tradeCoord.commit = { [weak self] give, receive in self?.onTradeCommitted?(give, receive) }
+        tradeCoord.onEvent = { [weak self] event in
+            guard let self else { return }
+            if case .failed(let why) = event { self.tradeNotice = why }
+            self.refreshTrade()
+        }
+        tradeCoord.reset()
+        refreshTrade()
+    }
+
+    private func refreshTrade() {
+        if let l = tradeCoord.live {
+            trade = TradeState(partnerID: l.partnerID, partnerName: l.partnerName, myOffer: l.myOffer,
+                               theirOffer: l.theirOffer, myAccepted: l.myAccepted, theirAccepted: l.theirAccepted,
+                               partnerJoined: l.partnerJoined)
+        } else { trade = nil }
+        incomingTradeInvite = tradeCoord.incoming.map { TradeInvite(id: $0.id, name: $0.name) }
+    }
+
     /// Whether we can start a trade with `playerID` right now.
     func canTrade(with playerID: String) -> Bool {
-        rules.allowTrade && trade == nil && playerID != localPlayerID && presence[playerID] != nil
+        playerID != localPlayerID && tradeCoord.canTrade(with: playerID)
     }
 
     /// Invite another player to trade. Opens our (waiting) trade window.
     func inviteTrade(with playerID: String, myName: String) {
         guard canTrade(with: playerID) else { return }
-        let name = presence[playerID]?.name ?? "Player"
-        trade = TradeState(partnerID: playerID, partnerName: name, partnerJoined: false)
-        net?.sendTrade(.invite(fromName: myName), to: playerID)
+        tradeMyName = myName
+        tradeNotice = tradeCoord.invite(playerID)
     }
 
-    /// Accept an incoming trade invite — opens the window and acks the inviter.
-    func acceptTradeInvite() {
-        guard let invite = incomingTradeInvite else { return }
-        trade = TradeState(partnerID: invite.id, partnerName: invite.name, partnerJoined: true)
-        net?.sendTrade(.offer(TradeOffer()), to: invite.id)   // ack + initial (empty) offer
-        incomingTradeInvite = nil
-    }
+    func acceptTradeInvite() { tradeCoord.respond(accept: true) }
+    func declineTradeInvite() { tradeCoord.respond(accept: false) }
 
-    /// Decline an incoming trade invite.
-    func declineTradeInvite() {
-        guard let invite = incomingTradeInvite else { return }
-        net?.sendTrade(.decline, to: invite.id)
-        incomingTradeInvite = nil
-    }
-
-    /// Replace our current offer (called live as the player edits it). Any change
-    /// resets both sides' acceptance — the deal changed, so it must be re-confirmed.
-    func updateMyOffer(_ offer: TradeOffer) {
-        guard var t = trade else { return }
-        t.myOffer = offer
-        t.myAccepted = false
-        t.theirAccepted = false
-        trade = t
-        net?.sendTrade(.offer(offer), to: t.partnerID)
-    }
+    /// Replace our current offer (called live as the player edits it). Any change resets both acceptances.
+    func updateMyOffer(_ offer: TradeOffer) { tradeNotice = tradeCoord.setOffer(offer) }
 
     /// Toggle our acceptance; when both sides accept, the trade commits.
-    func setTradeAccepted(_ accepted: Bool) {
-        guard var t = trade else { return }
-        t.myAccepted = accepted
-        trade = t
-        net?.sendTrade(.accept(accepted), to: t.partnerID)
-        commitTradeIfReady()
-    }
+    func setTradeAccepted(_ accepted: Bool) { tradeNotice = tradeCoord.setAccepted(accepted) }
 
-    /// Cancel the live trade and tell the partner.
-    func cancelTrade() {
-        guard let t = trade else { return }
-        net?.sendTrade(.cancel, to: t.partnerID)
-        trade = nil
-    }
+    func cancelTrade() { tradeCoord.cancel() }
 
-    private func commitTradeIfReady() {
-        guard let t = trade, t.myAccepted, t.theirAccepted else { return }
-        onTradeCommitted?(t.myOffer, t.theirOffer)
-        trade = nil
-    }
-
-    private func handleTrade(_ signal: TradeSignal, from peer: String) {
-        switch signal {
-        case .invite(let fromName):
-            // Only when trading is allowed and we're free; else politely decline.
-            if rules.allowTrade, trade == nil, incomingTradeInvite == nil {
-                incomingTradeInvite = TradeInvite(id: peer, name: fromName)
-            } else {
-                net?.sendTrade(.decline, to: peer)
-            }
-        case .decline:
-            if trade?.partnerID == peer { trade = nil }
-        case .offer(let offer):
-            guard var t = trade, t.partnerID == peer else { return }
-            t.theirOffer = offer
-            t.partnerJoined = true
-            t.myAccepted = false        // the deal changed — re-confirm
-            t.theirAccepted = false
-            trade = t
-        case .accept(let accepted):
-            guard var t = trade, t.partnerID == peer else { return }
-            t.theirAccepted = accepted
-            trade = t
-            commitTradeIfReady()
-        case .cancel:
-            if trade?.partnerID == peer { trade = nil }
-            if incomingTradeInvite?.id == peer { incomingTradeInvite = nil }   // inviter withdrew
-        }
-    }
+    private func handleTrade(_ signal: TradeSignal, from peer: String) { tradeCoord.handle(signal, from: peer) }
 
     /// Drop a live trade / invite if the other party has left the session.
     private func pruneTradeIfPartnerGone() {
-        if let t = trade, presence[t.partnerID] == nil { trade = nil }
-        if let inv = incomingTradeInvite, presence[inv.id] == nil { incomingTradeInvite = nil }
+        if let t = tradeCoord.live, presence[t.partnerID] == nil { tradeCoord.peerLeft(t.partnerID) }
+        if let inv = tradeCoord.incoming, presence[inv.id] == nil { tradeCoord.peerLeft(inv.id) }
     }
 
     // MARK: - Presence / chat API (used by the app)

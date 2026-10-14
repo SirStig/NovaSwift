@@ -38,6 +38,15 @@ func _init() -> void:
 	_check("forced-missing: async audio is a no-op", not Movies.audio_pending(src))
 	Movies.ffmpeg_override = ""
 
+	# The bundled decode-only build (scripts/build-mini-ffmpeg.sh) wins over a PATH ffmpeg.
+	var plat: String = {"macOS": "macos", "Linux": "linux", "Windows": "windows"}.get(OS.get_name(), "")
+	var bundled: String = ProjectSettings.globalize_path("res://bin/ffmpeg").path_join(plat).path_join(
+		"ffmpeg.exe" if plat == "windows" else "ffmpeg")
+	if FileAccess.file_exists(bundled):
+		_check("prefers the bundled ffmpeg", Movies.find_ffmpeg() == bundled, Movies.find_ffmpeg())
+	else:
+		print("  note no bundled ffmpeg (scripts/build-mini-ffmpeg.sh) - PATH lookup used")
+
 	if not Movies.available():
 		print("  note ffmpeg not installed - conversion checks skipped")
 	else:

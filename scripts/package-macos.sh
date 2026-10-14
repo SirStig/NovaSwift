@@ -28,6 +28,14 @@ ditto -x -k "$OUT/NovaSwift.zip" "$OUT/app"
 APP="$(ls -d "$OUT"/app/*.app)"
 # Godot embeds dylibs in Contents/Frameworks and signs the bundle ad hoc itself (entitlements from the
 # preset). Do NOT re-sign with a custom entitlement set: that hung the app at startup.
+# Bundled decode-only ffmpeg for the original movies (scripts/build-mini-ffmpeg.sh macos), beside the
+# executable where Movies.gd looks first. Adding it breaks the bundle seal, so re-seal ad hoc while
+# PRESERVING Godot's entitlements/flags (a custom entitlement set is what hung the app before).
+[ -x godot/bin/ffmpeg/macos/ffmpeg ] || scripts/build-mini-ffmpeg.sh macos
+cp godot/bin/ffmpeg/macos/ffmpeg "$APP/Contents/MacOS/ffmpeg"
+cp godot/bin/ffmpeg/macos/LICENSE.txt "$APP/Contents/Resources/FFMPEG-LICENSE.txt"
+codesign --force --sign - "$APP/Contents/MacOS/ffmpeg"
+codesign --force --sign - --preserve-metadata=entitlements,flags,runtime "$APP"
 codesign --verify --deep --strict "$APP"
 for l in libNovaSwiftGodot libSwiftGodot; do [ -f "$APP/Contents/Frameworks/$l.dylib" ] || { echo "error: $l.dylib not embedded" >&2; exit 1; }; done
 

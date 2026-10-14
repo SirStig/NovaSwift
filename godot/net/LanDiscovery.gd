@@ -185,7 +185,7 @@ func _drain(sock: PacketPeerUDP, take_beacons: bool) -> void:
 		if Proto.is_query(pkt):
 			if _provider.is_valid():
 				sock.set_dest_address(ip, port)
-				sock.put_packet(Proto.encode_beacon(_info()))
+				sock.put_packet(Proto.encode_beacon(_info(), true))
 		elif take_beacons:
 			_note_beacon(ip, pkt)
 

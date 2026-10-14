@@ -21,6 +21,10 @@ const Transport = preload("res://net/NetTransport.gd")
 const Lan = preload("res://net/LanDiscovery.gd")
 const NetPrefs = preload("res://net/NetPrefs.gd")
 const Upnp = preload("res://net/Upnp.gd")
+const NetCrypto = preload("res://net/NetCrypto.gd")
+const NetPlugins = preload("res://net/NetPlugins.gd")
+const TradeDialog = preload("res://screens/multiplayer/TradeDialog.gd")
+const Alert = preload("res://ui/novaswift/NovaAlert.gd")
 const Overlay = preload("res://screens/multiplayer/NetOverlay.gd")
 
 signal session_changed
@@ -69,6 +73,16 @@ func is_hosting() -> bool:
 	return is_active() and transport.mode == "server"
 
 
+## True while a connected multiplayer session with other pilots in it wants the local sim stepped even though a
+## menu has paused the game (see Main._net_background_step). Never for single-player or a lone host.
+func wants_background_sim() -> bool:
+	if not is_connected_to_session() or transport == null or not transport.bridge_active or nova == null:
+		return false
+	if nova.has_method("is_landed") and bool(nova.is_landed()):
+		return false
+	return players.size() > 1
+
+
 func has_bridge_api() -> bool:
 	return nova != null and nova.has_method("net_begin")
 
@@ -85,8 +99,8 @@ func status_text() -> String:
 		"handshaking": return "Joining %s..." % transport.address
 		"connected":
 			if transport.mode == "server":
-				return "Hosting \"%s\" on port %d - %d/%d players" % [transport.server_name, transport.port, transport.ready_count() + 1, transport.max_players]
-			return "Connected to \"%s\" (%s)" % [transport.server_name, transport.address]
+				return "Hosting \"%s\" on port %d - %d/%d players%s" % [transport.server_name, transport.port, transport.ready_count() + 1, transport.max_players, " (encrypted)" if transport.encrypted else ""]
+			return "Connected to \"%s\" (%s)%s" % [transport.server_name, transport.address, " (encrypted)" if transport.encrypted else ""]
 	return "Not in a game"
 
 
@@ -102,7 +116,8 @@ func host_game(opts: Dictionary) -> int:
 	var disp: String = Proto.clean_name(str(opts.get("display_name", NetPrefs.display_name())))
 	var err: int = t.host(nova, {"port": int(opts.get("port", Proto.DEFAULT_PORT)), "max_players": int(opts.get("max", 4)),
 		"name": str(opts.get("name", "")) if str(opts.get("name", "")) != "" else disp + "'s game",
-		"display_name": disp, "password": str(opts.get("password", "")), "rules_json": JSON.stringify(rules), "has_local_player": true})
+		"display_name": disp, "password": str(opts.get("password", "")), "rules_json": JSON.stringify(rules), "has_local_player": true,
+		"dtls": bool(opts.get("encrypt", false))})
 	if err != OK:
 		transport = null
 		return err
@@ -129,21 +144,27 @@ var _host_rules_name: String = "safe"
 func _beacon() -> Dictionary:
 	if transport == null or transport.mode != "server":
 		return {}
-	return {"name": transport.server_name, "players": transport.ready_count() + 1, "max": transport.max_players, "ver": Proto.game_version(),
+	var b: Dictionary = {"name": transport.server_name, "players": transport.ready_count() + 1, "max": transport.max_players, "ver": Proto.game_version(),
 		"pw": transport.password != "", "port": transport.port, "rules": _host_rules_name, "dedicated": false}
+	b["plugin_wire"] = NetPlugins.plugin_wire(NetPlugins.local_info(nova), true)
+	if transport.encrypted:
+		b["dtls"] = true
+		b["fp"] = str(transport.dtls_creds.get("fp", ""))
+		b["cert"] = str(transport.dtls_creds.get("pem", ""))
+	return b
 
 
-func join_game(host: String, port: int, pw: String = "", display_name: String = "") -> int:
+func join_game(host: String, port: int, pw: String = "", display_name: String = "", opts: Dictionary = {}) -> int:
 	_reset_session()
 	var t: RefCounted = Transport.new()
 	t.event.connect(_on_transport_event)
 	transport = t
 	var disp: String = Proto.clean_name(display_name if display_name != "" else NetPrefs.display_name())
-	var err: int = t.join(nova, host, port, disp, pw)
+	var err: int = t.join(nova, host, port, disp, pw, opts)
 	if err != OK:
 		transport = null
 		return err
-	_pending_join = {"host": host, "port": port, "pw": pw}
+	_pending_join = {"host": host, "port": port, "pw": pw, "name": display_name}
 	session_changed.emit()
 	return OK
 
@@ -203,6 +224,10 @@ func _session_started() -> void:
 	if overlay == null:
 		overlay = Overlay.new()
 		overlay.chat_submitted.connect(send_chat)
+		overlay.trade_requested.connect(func(pid: int) -> void:
+			var why: String = trade_invite(pid)
+			if why != "":
+				_toast(why, "error"))
 		add_child(overlay)
 	_events_in = 0.0
 	_state_in = 0.0
@@ -210,6 +235,7 @@ func _session_started() -> void:
 
 
 func _after_close() -> void:
+	_close_trade_dialog()
 	if upnp != null:
 		upnp.release()
 		upnp = null
@@ -233,11 +259,26 @@ func _on_transport_event(ev: Dictionary) -> void:
 				NetPrefs.add_recent(str(_pending_join["host"]), int(_pending_join["port"]))
 			_session_started()
 			_system_line("Connected to %s." % str(ev.get("server_name", "the server")))
+			if bool(ev.get("version_differs", false)):
+				_system_line("Note: the server runs NovaSwift %s, you run %s. That is fine as long as the network protocol matches." % [str(ev.get("server_version", "?")), Proto.game_version()])
 			if not bool(ev.get("bridge", false)):
 				_system_line("This build's engine bridge has no multiplayer support yet: chat only.")
 		"hosting":
 			if not bool(ev.get("bridge", false)):
 				_system_line("Hosting without simulation sync (engine bridge has no multiplayer support yet): chat only.")
+		"refused":
+			# Host side: someone could not join. Say why, so a plug-in mismatch is not a silent failure.
+			var who: String = str(ev.get("name", "A player"))
+			if str(ev.get("code", "")) == "plugins":
+				_toast("%s can't join: their plug-ins differ from yours." % who, "warning")
+				_system_line("%s was refused: their enabled plug-ins don't match this game's. They get a list of what to install or disable." % who)
+			else:
+				_system_line("%s was refused (%s)." % [who, str(ev.get("message", ev.get("code", "")))])
+		"key_pinned":
+			if bool(ev.get("first", true)):
+				_system_line("Encrypted server: its key was remembered (fingerprint %s)." % NetCrypto.short_fp(str(ev.get("fp", ""))))
+			else:
+				_system_line("Encrypted server: the new key was accepted.")
 		"peer_joined":
 			_toast("%s joined" % str(ev["name"]), "good")
 			_system_line("%s joined." % str(ev["name"]))
@@ -305,18 +346,84 @@ func _on_bridge_event(e: Dictionary) -> void:
 			_toast("The host changed the session rules.")
 			_system_line("Session rules changed.")
 		"trade":
-			if str(e.get("kind", "")) in ["invite", "offer", "request", ""]:
-				if overlay != null:
-					overlay.show_trade_offer(str(e.get("name", e.get("from_name", "A player"))))
+			_on_trade_event(e)
 		"kicked":
 			_toast("You were kicked from the game.", "error")
 		"version_mismatch":
 			_set_error("Game version mismatch: " + str(e.get("message", "update NovaSwift to match the host.")), "version", e)
 			_toast(last_error, "error")
 		"plugin_mismatch":
-			_set_error(_plugin_mismatch_text(e), "plugins", e)
-			_toast("Plug-ins don't match the host's.", "error")
+			if bool(e.get("as_host", false)):
+				_toast("%s's plug-ins don't match yours; they were removed." % str(e.get("name", "A player")), "warning")
+				_system_line("%s was removed: %s" % [str(e.get("name", "A player")), _plugin_mismatch_text(e).replace("Your plug-ins don't match. ", "to match, they must ")])
+			else:
+				_set_error(_plugin_mismatch_text(e), "plugins", e)
+				_toast("Plug-ins don't match the host's.", "error")
 	ui_event.emit({"type": "bridge_" + kind, "event": e})
+
+
+# --- trading ------------------------------------------------------------------------------------------------
+
+var trade_dialog: CanvasLayer = null
+
+
+## Ask `peer` to trade. Returns "" when sent, else why not (trading off, not in the session, already trading).
+func trade_invite(peer: int) -> String:
+	if nova == null or not nova.has_method("net_trade_invite"):
+		return "This build's engine bridge has no trading support."
+	return str(nova.net_trade_invite(peer))
+
+
+func _ensure_trade_dialog() -> void:
+	if trade_dialog != null and is_instance_valid(trade_dialog):
+		return
+	trade_dialog = TradeDialog.new()
+	add_child(trade_dialog)
+	trade_dialog.setup(nova)
+	trade_dialog.closed.connect(_close_trade_dialog)
+
+
+func _close_trade_dialog() -> void:
+	if trade_dialog != null and is_instance_valid(trade_dialog):
+		trade_dialog.queue_free()
+	trade_dialog = null
+
+
+func _on_trade_event(e: Dictionary) -> void:
+	var kind: String = str(e.get("kind", ""))
+	match kind:
+		"invite":
+			var who: String = str(e.get("name", "A player"))
+			var pid: int = int(e.get("id", -1))
+			_toast("%s wants to trade." % who)
+			Alert.show(self, {"title": "Trade request", "message": "%s wants to trade credits, cargo or outfits with you." % who,
+				"buttons": [{"title": "Decline", "role": "cancel", "cb": func() -> void: nova.net_trade_respond(pid, false)},
+					{"title": "Accept", "cb": func() -> void: nova.net_trade_respond(pid, true)}]})
+		"opened":
+			_ensure_trade_dialog()
+		"changed":
+			if trade_dialog != null and is_instance_valid(trade_dialog):
+				trade_dialog.refresh()
+		"decline":
+			_toast("%s declined the trade." % _player_name(int(e.get("id", -1))), "warning")
+			_close_trade_dialog()
+		"cancel":
+			_toast("The trade was cancelled.", "warning")
+			_close_trade_dialog()
+		"failed":
+			_toast("Trade cancelled: %s" % str(e.get("reason", "")), "error")
+			_close_trade_dialog()
+		"committed":
+			_toast("Trade complete.", "good")
+			_system_line("Trade complete.")
+			_close_trade_dialog()
+
+
+func _player_name(id: int) -> String:
+	for p in players:
+		if int((p as Dictionary).get("id", -1)) == id:
+			return str((p as Dictionary).get("name", "The player"))
+	return "The player"
 
 
 static func _plugin_mismatch_text(e: Dictionary) -> String:
@@ -334,7 +441,46 @@ static func _plugin_mismatch_text(e: Dictionary) -> String:
 
 # --- per frame ---------------------------------------------------------------------------------------------------
 
+## A session swapped the player's plug-ins (PluginGate); put their own set back once nothing is in the way.
+func request_plugin_restore() -> void:
+	_restore_in = 0.0
+
+
+var _restore_in: float = 3.0
+var _restoring: bool = false
+
+
+func _maybe_restore_plugins(delta: float) -> void:
+	if _restoring or is_active():
+		return
+	_restore_in -= delta
+	if _restore_in > 0.0:
+		return
+	_restore_in = 2.0
+	var snap: Dictionary = NetPrefs.plugin_restore()
+	if snap.is_empty() or not ClassDB.class_exists("NovaPlugins"):
+		return
+	var shell: Node = NetPlugins.find_shell(self)
+	if shell == null or not NetPlugins.at_main_menu(shell):
+		return   # flying or no menu yet: try again when the player is back on the main menu
+	_restoring = true
+	var pl: Object = ClassDB.instantiate("NovaPlugins")
+	pl.attach(nova)
+	pl.rescan()
+	pl.set_manual_order(bool(snap.get("manual", false)))
+	for id in (snap.get("enabled", {}) as Dictionary):
+		pl.set_enabled(str(id), bool((snap["enabled"] as Dictionary)[id]))
+	var base: String = str((JSON.parse_string(str(pl.state())) as Dictionary).get("base", ""))
+	var ok: bool = base != "" and await shell.load_data_async(base, "Restoring your plug-ins")
+	pl.rescan()
+	NetPlugins.invalidate()
+	NetPrefs.clear_plugin_restore()
+	_restoring = false
+	_toast("Your own plug-ins are back." if ok else "Couldn't reload your plug-ins; check the Plug-ins screen.", "info" if ok else "warning")
+
+
 func _process(delta: float) -> void:
+	_maybe_restore_plugins(delta)
 	if lan != null and (_lan_listening or lan.is_announcing() or not lan.pings.is_empty()):
 		lan.poll(delta)
 	if upnp != null:

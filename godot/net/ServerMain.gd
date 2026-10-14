@@ -2,7 +2,7 @@
 #
 #   godot --headless --path godot -- --server [--port N] [--name "..."] [--password X] [--max-players N]
 #                                     [--rules safe|full] [--config server.cfg] [--data DIR] [--no-lan]
-#                                     [--no-stdin] [--log FILE]
+#                                     [--no-stdin] [--log FILE] [--dtls]
 #   (packaged:  ./NovaSwift --headless -- --server ...      scripts/run-dedicated-server.sh wraps both)
 #
 # Boot.gd hands over here before it ever builds Main (no menus, no flight scene, no audio). This node:
@@ -22,8 +22,9 @@
 #      Commands are optional (stdin closed or --no-stdin simply disables them);
 #   6. logs everything to user://logs/server.log (and Godot's own log), with timestamps.
 #
-# The password is compared as a SHA-256 hash and the game bytes are not encrypted: fine for friends and LANs,
-# do not reuse a password that matters.
+# The password is compared as a SHA-256 hash and by default the game bytes are not encrypted (fine for friends and
+# LANs). --dtls (or dtls=true in server.cfg) turns on DTLS with a self-signed certificate generated on first run
+# (user://net_dtls.key / .crt); Godot clients pin it on first join. A DTLS-only server cannot be joined by plain clients.
 #
 # Loaded at runtime by Boot.gd (never preload'ed there).
 extends Node
@@ -34,6 +35,7 @@ const Lan = preload("res://net/LanDiscovery.gd")
 const Prefs = preload("res://Prefs.gd")
 const Directory = preload("res://net/ServerDirectory.gd")
 const Upnp = preload("res://net/Upnp.gd")
+const NetPlugins = preload("res://net/NetPlugins.gd")
 
 const STATUS_EVERY := 60.0
 
@@ -61,7 +63,7 @@ var _rules: Dictionary = {}
 static func parse_args(args: PackedStringArray, cfg_override: String = "") -> Dictionary:
 	var o: Dictionary = {"port": Proto.DEFAULT_PORT, "name": "NovaSwift Server", "password": "", "max_players": 8,
 		"rules": "safe", "lan": true, "stdin": true, "data": "", "log": "", "config": "", "custom_rules": {},
-		"public": false, "upnp": false, "region": "global", "owner": "", "contact": "", "description": "", "address": "", "website": ""}
+		"public": false, "upnp": false, "dtls": false, "region": "global", "owner": "", "contact": "", "description": "", "address": "", "website": ""}
 	var cli: Dictionary = {}
 	var value_opts: Dictionary = {"--port": "port", "--name": "name", "--password": "password", "--max-players": "max_players",
 		"--rules": "rules", "--config": "config", "--data": "data", "--log": "log", "--region": "region", "--owner": "owner",
@@ -94,6 +96,8 @@ static func parse_args(args: PackedStringArray, cfg_override: String = "") -> Di
 			cli["public"] = true
 		elif a == "--upnp":
 			cli["upnp"] = true
+		elif a == "--dtls":
+			cli["dtls"] = true
 		i += 1
 	var cfg_path: String = cfg_override if cfg_override != "" else str(cli.get("config", ""))
 	if cfg_path == "":
@@ -120,7 +124,7 @@ static func _apply_cfg(o: Dictionary, path: String) -> void:
 	if c.load(path) != OK:
 		o["config_error"] = "Couldn't read config file %s" % path
 		return
-	for k in ["port", "name", "password", "max_players", "rules", "lan", "stdin", "data", "log", "upnp", "region", "owner", "contact", "description", "address", "website"]:
+	for k in ["port", "name", "password", "max_players", "rules", "lan", "stdin", "data", "log", "upnp", "dtls", "region", "owner", "contact", "description", "address", "website"]:
 		if c.has_section_key("server", k):
 			o[k] = c.get_value("server", k)
 	if c.has_section("rules"):
@@ -159,11 +163,14 @@ func start() -> void:
 	transport.event.connect(_on_event)
 	var err: int = transport.host(nova, {"port": int(opts["port"]), "max_players": int(opts["max_players"]),
 		"name": str(opts["name"]), "display_name": "[Server]", "password": str(opts["password"]),
-		"rules_json": JSON.stringify(_rules), "has_local_player": false})
+		"rules_json": JSON.stringify(_rules), "has_local_player": false, "dtls": bool(opts.get("dtls", false))})
 	if err != OK:
 		_log("FATAL: could not start the server on UDP port %d (%s)." % [int(opts["port"]), error_string(err)])
 		_exit(3)
 		return
+	if bool(transport.encrypted):
+		_log("Encryption (DTLS) is ON. Server key fingerprint (SHA-256): %s" % str(transport.dtls_creds.get("fp", "")))
+		_log("Plain clients (including the Apple app's current ENet client) cannot join an encrypted server; players see the key on first join and are warned if it ever changes.")
 	if not bool(transport.bridge_active):
 		_log("WARNING: the engine bridge did not start a net session (old bridge, or no pilot-less host support); running as a plain relay.")
 	lan = Lan.new()
@@ -201,7 +208,8 @@ func _print_public_entry(detected_ip: String) -> void:
 		var m: Variant = JSON.parse_string(str(nova.net_ready_manifest()))
 		if m is Dictionary and (m as Dictionary).get("plugins") is Array:
 			plugins = (m as Dictionary)["plugins"]
-	var entry: Dictionary = Directory.build_entry(opts, host, plugins, Time.get_date_string_from_system())
+	var li: Dictionary = NetPlugins.local_info(nova, true) if nova != null else {}
+	var entry: Dictionary = Directory.build_entry(opts, host, plugins, Time.get_date_string_from_system(), str(li.get("tc", "")), li.get("addons", []) if li.get("addons", []) is Array else [])
 	_log("")
 	_log("=== Public server entry ===")
 	_log("Paste this into the \"servers\" array of servers/servers.json in https://github.com/SirStig/NovaSwift-Plugins and open a pull request:")
@@ -251,8 +259,15 @@ func _make_world() -> Object:
 
 
 func _beacon() -> Dictionary:
-	return {"name": str(opts["name"]), "players": transport.ready_count() if transport != null else 0, "max": int(opts["max_players"]),
+	var b: Dictionary = {"name": str(opts["name"]), "players": transport.ready_count() if transport != null else 0, "max": int(opts["max_players"]),
 		"ver": Proto.game_version(), "pw": str(opts["password"]) != "", "port": int(opts["port"]), "rules": _rules_name, "dedicated": true}
+	if nova != null:
+		b["plugin_wire"] = NetPlugins.plugin_wire(NetPlugins.local_info(nova), true)
+	if transport != null and transport.encrypted:
+		b["dtls"] = true
+		b["fp"] = str(transport.dtls_creds.get("fp", ""))
+		b["cert"] = str(transport.dtls_creds.get("pem", ""))
+	return b
 
 
 func _process(delta: float) -> void:

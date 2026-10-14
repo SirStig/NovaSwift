@@ -169,7 +169,7 @@ static func parse(text: String) -> Dictionary:
 		out.append({"id": str(d.get("id", key)), "name": Proto.clean_name(str(d.get("name", host)), host), "host": host, "port": port,
 			"region": str(d.get("region", "global")), "description": str(d.get("description", "")).substr(0, 300),
 			"owner": str(owner.get("name", "")), "contact": str(owner.get("contact", "")), "rules": str(d.get("rules", "")),
-			"plugins": plugins, "max": int(d.get("maxPlayers", 0)), "added": str(d.get("added", "")),
+			"plugins": plugins, "tc": str(d.get("totalConversion", "")), "max": int(d.get("maxPlayers", 0)), "added": str(d.get("added", "")),
 			"website": site if site.begins_with("https://") else ""})
 	return {"ok": true, "error": "", "entries": out}
 
@@ -187,7 +187,14 @@ static func row_for(entry: Dictionary, live: Dictionary, checking: bool) -> Dict
 	row["ver"] = str(info.get("ver", "")) if ok else ""
 	row["pw"] = bool(info.get("pw", false)) if ok else false
 	row["dedicated"] = bool(info.get("dedicated", false)) if ok else false
-	row["compatible"] = ok and str(info.get("ver", "")) == Proto.game_version()
+	row["compatible"] = ok and int(info.get("proto", Proto.PROTO)) == Proto.PROTO
+	row["dtls"] = ok and bool(info.get("dtls", false))
+	if ok:   # what the server says it runs now beats the (possibly stale) directory entry
+		row["sig"] = str(info.get("sig", ""))
+		var live_plugins: Variant = info.get("plugins", [])
+		if live_plugins is Array and not (live_plugins as Array).is_empty():
+			row["plugins"] = live_plugins
+			row["tc"] = str(info.get("tc", ""))
 	return row
 
 
@@ -224,7 +231,7 @@ static func sort_rows(rows: Array) -> Array:
 
 
 ## The servers.json entry a dedicated server prints for --public. `plugins` = net_ready_manifest()["plugins"].
-static func build_entry(opts: Dictionary, host: String, plugins: Array, today: String) -> Dictionary:
+static func build_entry(opts: Dictionary, host: String, plugins: Array, today: String, tc: String = "", addons: Array = []) -> Dictionary:
 	var nm: String = str(opts.get("name", "NovaSwift Server"))
 	var slug: String = ""
 	for i in nm.to_lower().length():
@@ -246,4 +253,9 @@ static func build_entry(opts: Dictionary, host: String, plugins: Array, today: S
 		"rules": str(opts.get("rules", "safe")), "plugins": plist, "maxPlayers": int(opts.get("max_players", 8)), "added": today}
 	if str(opts.get("website", "")).begins_with("https://"):
 		e["website"] = str(opts["website"])
+	# Load order is the order of "plugins". The total conversion and its add-ons are extra, optional fields.
+	if tc != "":
+		e["totalConversion"] = tc
+	if not addons.is_empty():
+		e["tcAddons"] = addons
 	return e

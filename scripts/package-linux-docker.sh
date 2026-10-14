@@ -65,6 +65,8 @@ PREP='command -v patchelf >/dev/null && command -v objdump >/dev/null || (apt-ge
 # but keep godot/bin tidy): only .so files are produced here.
 echo "→ [1/3] build bridge + collect runtime libs (container)"
 run "$PREP && scripts/package-linux.sh --libs-only"
+# Bundled movie decoder (cached in godot/bin/ffmpeg/linux; delete it to rebuild).
+[ -x godot/bin/ffmpeg/linux/ffmpeg ] || run "scripts/build-mini-ffmpeg.sh linux"
 
 if [ "$HOST_EXPORT" -eq 1 ]; then
   echo "→ [2/3] export Linux preset (host Godot)"

@@ -23,6 +23,8 @@ final class NetBridge {
     /// The guest's host: Godot's multiplayer server peer id.
     static let serverPeerID = 1
 
+    /// Trade state machine (invite -> offers -> dual accept -> commit); NovaWorld installs the save hooks.
+    let trade = TradeCoordinator()
     private(set) var closed = false
     private(set) var localManifest: PluginManifest
     private var events: [[String: Any]] = []
@@ -42,6 +44,7 @@ final class NetBridge {
         localManifest = manifest
         session.providesRules = isHost
         session.localPluginManifest = manifest
+        wireTrade()
         wire()
     }
 
@@ -66,7 +69,7 @@ final class NetBridge {
             self?.push(["type": "kicked"])
             self?.close()
         }
-        session.onTrade = { [weak self] signal, peer in self?.handleTrade(signal, from: peer) }
+        session.onTrade = { [weak self] signal, peer in self?.trade.handle(signal, from: peer) }
         session.onPluginManifest = { [weak self] m, peer in self?.handleManifest(m, from: peer) }
         session.onDecodeFailure = { [weak self] peer in
             guard let self, self.reportedMismatch.insert("v" + peer).inserted else { return }
@@ -75,20 +78,79 @@ final class NetBridge {
         }
     }
 
-    private func handleTrade(_ signal: TradeSignal, from peer: String) {
-        switch signal {
-        case .invite(let name):
-            // No trade UI in the Godot frontend yet: surface it and decline politely.
-            push(["type": "trade", "kind": "invite", "id": Self.id(peer), "name": name])
-            session.sendTrade(.decline, to: peer)
-        case .decline: push(["type": "trade", "kind": "decline", "id": Self.id(peer)])
-        case .cancel: push(["type": "trade", "kind": "cancel", "id": Self.id(peer)])
-        case .accept(let a): push(["type": "trade", "kind": "accept", "id": Self.id(peer), "accepted": a])
-        case .offer(let o):
-            push(["type": "trade", "kind": "offer", "id": Self.id(peer), "credits": o.credits,
-                  "cargo": o.cargo.map { ["id": $0.key, "tons": $0.value] },
-                  "outfits": o.outfits.map { ["id": $0.key, "count": $0.value] }])
+    private func wireTrade() {
+        trade.allowTrade = { [weak self] in self?.session.sessionRules.allowTrade ?? false }
+        trade.localName = { [weak self] in self?.displayName ?? "Captain" }
+        trade.partnerName = { [weak self] id in self?.session.presence[id]?.name }
+        trade.isPresent = { [weak self] id in
+            guard let self else { return false }
+            return id != self.session.localPlayerID && self.session.presence[id] != nil
         }
+        trade.send = { [weak self] signal, peer in self?.session.sendTrade(signal, to: peer) }
+        trade.onEvent = { [weak self] ev in self?.tradeEvent(ev) }
+    }
+
+    private static func offerObject(_ o: TradeOffer) -> [String: Any] {
+        ["credits": o.credits,
+         "cargo": o.cargo.sorted { $0.key < $1.key }.map { ["id": $0.key, "tons": $0.value] },
+         "outfits": o.outfits.sorted { $0.key < $1.key }.map { ["id": $0.key, "count": $0.value] }]
+    }
+
+    /// Parse `{credits, cargo:[{id,tons}]|{id:tons}, outfits:[{id,count}]|{id:n}}`; nil = unparseable.
+    static func parseOffer(_ json: String) -> TradeOffer? {
+        guard let d = json.data(using: .utf8),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return nil }
+        func table(_ v: Any?, _ key: String) -> [Int: Int] {
+            var out: [Int: Int] = [:]
+            if let arr = v as? [[String: Any]] {
+                for r in arr {
+                    if let id = (r["id"] as? Int) ?? (r["id"] as? Double).map(Int.init),
+                       let n = (r[key] as? Int) ?? (r[key] as? Double).map(Int.init) { out[id, default: 0] += n }
+                }
+            } else if let dict = v as? [String: Any] {
+                for (k, val) in dict {
+                    if let id = Int(k), let n = (val as? Int) ?? (val as? Double).map(Int.init) { out[id] = n }
+                }
+            }
+            return out
+        }
+        let credits = (o["credits"] as? Int) ?? (o["credits"] as? Double).map(Int.init) ?? 0
+        return TradeRules.sanitized(TradeOffer(credits: credits, cargo: table(o["cargo"], "tons"),
+                                               outfits: table(o["outfits"], "count")))
+    }
+
+    private func tradeEvent(_ ev: TradeCoordinator.Event) {
+        switch ev {
+        case .invited(let inv): push(["type": "trade", "kind": "invite", "id": Self.id(inv.id), "name": inv.name])
+        case .opened(let id, let name): push(["type": "trade", "kind": "opened", "id": Self.id(id), "name": name])
+        case .changed: push(["type": "trade", "kind": "changed"])
+        case .declined(let id): push(["type": "trade", "kind": "decline", "id": Self.id(id)])
+        case .cancelled(let id): push(["type": "trade", "kind": "cancel", "id": Self.id(id)])
+        case .committed(let give, let receive):
+            push(["type": "trade", "kind": "committed", "give": Self.offerObject(give), "receive": Self.offerObject(receive)])
+        case .failed(let why): push(["type": "trade", "kind": "failed", "reason": why])
+        }
+    }
+
+    /// `{open, partner_id, partner_name, joined, my_offer, their_offer, my_accepted, their_accepted,
+    ///   invite:{id,name}|null, allowed}`.
+    func tradeStateObject() -> [String: Any] {
+        var o: [String: Any] = ["open": false, "allowed": session.sessionRules.allowTrade,
+                                "my_offer": Self.offerObject(TradeOffer()), "their_offer": Self.offerObject(TradeOffer()),
+                                "my_accepted": false, "their_accepted": false, "joined": false,
+                                "partner_id": -1, "partner_name": ""]
+        if let t = trade.live {
+            o["open"] = true
+            o["partner_id"] = Self.id(t.partnerID)
+            o["partner_name"] = t.partnerName
+            o["joined"] = t.partnerJoined
+            o["my_offer"] = Self.offerObject(t.myOffer)
+            o["their_offer"] = Self.offerObject(t.theirOffer)
+            o["my_accepted"] = t.myAccepted
+            o["their_accepted"] = t.theirAccepted
+        }
+        o["invite"] = trade.incoming.map { ["id": Self.id($0.id), "name": $0.name] as [String: Any] } ?? NSNull()
+        return o
     }
 
     /// Same policy as the Apple app: the host drops a joiner whose plug-ins differ; a
@@ -121,6 +183,7 @@ final class NetBridge {
         }
         for (pid, p) in knownPresence where now[pid] == nil && pid != session.localPlayerID {
             push(["type": "player_left", "id": Self.id(pid), "name": p.name])
+            trade.peerLeft(pid)
         }
         knownPresence = now
     }
@@ -130,6 +193,7 @@ final class NetBridge {
     func close() {
         guard !closed else { return }
         closed = true
+        trade.reset()
         driver.reset()
         transport.disconnect()
     }
@@ -235,25 +299,64 @@ final class NetBridge {
 
     // MARK: Plug-in manifest
 
-    private static var hashCache: [String: String] = [:]
+    private static var analysisCache: [String: PluginGameplay.Result] = [:]
+    private static var cosmeticOverrides: Set<String> = []
+    private static var overridesAt = Date.distantPast
 
-    /// The enabled plug-ins as a `PluginManifest` (content hashes cached per file stamp).
+    /// Every enabled plug-in as a `PluginManifest`: the hash covers GAMEPLAY resources only and art / sound / text
+    /// plug-ins carry `cosmetic = true`, which the shared manifest keeps out of the gate (`PluginGameplay`).
     static func currentManifest() -> PluginManifest {
+        applyCatalogOverrides()
         let fm = FileManager.default
-        let reqs = PluginRuntime.shared.plugins.filter(\.isEnabled).map { b -> PluginRequirement in
+        var reqs: [PluginRequirement] = []
+        for b in PluginRuntime.shared.plugins where b.isEnabled {
             var stamp = b.id
             for u in b.allFileURLs.sorted(by: { $0.path < $1.path }) {
                 let a = try? fm.attributesOfItem(atPath: u.path)
                 stamp += "|\(u.path):\((a?[.size] as? Int) ?? 0):\((a?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)"
             }
-            let h = hashCache[stamp] ?? { let v = GameLibrary.contentHash(of: b); hashCache[stamp] = v; return v }()
-            return PluginRequirement(id: b.id, name: b.name, contentHash: h)
+            let r = analysisCache[stamp] ?? { let v = PluginGameplay.analyze(b); analysisCache[stamp] = v; return v }()
+            reqs.append(PluginRequirement(id: b.id, name: b.name, contentHash: r.hash,
+                                          cosmetic: r.cosmetic || cosmeticOverrides.contains(b.id)))
         }
         return PluginManifest(reqs)
     }
 
+    /// Catalog entries tagged `cosmetic` / `client-only` are cosmetic whatever their content.
+    private static func applyCatalogOverrides() {
+        guard Date().timeIntervalSince(overridesAt) > 30 else { return }
+        overridesAt = Date()
+        let entries = (PluginRuntime.shared.catalogJSON()["entries"] as? [[String: Any]]) ?? []
+        var o: Set<String> = []
+        for e in entries {
+            let tags = ((e["tags"] as? [String]) ?? []).map { $0.lowercased() }
+            if tags.contains("cosmetic") || tags.contains("client-only") { o.insert((e["id"] as? String) ?? "") }
+        }
+        cosmeticOverrides = o
+    }
+
+    /// Everything a player needs to see about a plug-in set: enabled plug-ins in load order with content hashes,
+    /// which one is the total conversion, and that conversion's enabled add-ons.
+    /// `{plugins:[{id,name,contentHash,tc}], tc:"id"|"", addons:[id], sig, count}`.
+    static func pluginInfo() -> [String: Any] {
+        let m = currentManifest()
+        let enabled = PluginRuntime.shared.plugins.filter(\.isEnabled)
+        let tcFlags = Dictionary(uniqueKeysWithValues: enabled.map { ($0.id, $0.isTotalConversion) })
+        let tcInfo = PluginRuntime.shared.tcInfo()
+        let addons = ((tcInfo["list"] as? [[String: Any]]) ?? []).filter { ($0["enabled"] as? Bool) == true }
+            .compactMap { $0["id"] as? String }
+        let cosmetic = m.cosmetic.map { ["id": $0.id, "name": $0.name] as [String: Any] }
+        return ["plugins": m.gameplay.map { ["id": $0.id, "name": $0.name, "contentHash": $0.contentHash,
+                                              "tc": tcFlags[$0.id] ?? false] as [String: Any] },
+                "cosmetic": cosmetic,
+                "tc": (tcInfo["tc"] as? String) ?? "", "addons": addons, "sig": m.signature, "count": m.gameplay.count]
+    }
+
     static func manifestJSON(_ m: PluginManifest) -> String {
-        json(["plugins": m.plugins.map { ["id": $0.id, "name": $0.name, "contentHash": $0.contentHash] },
-              "signature": m.signature, "count": m.count])
+        // The gate compares this JSON between peers, so it lists GAMEPLAY plug-ins only; cosmetic ones ride along
+        // under "cosmetic" (informational, never compared).
+        json(["plugins": m.gameplay.map { ["id": $0.id, "name": $0.name, "contentHash": $0.contentHash] },
+              "cosmetic": m.cosmetic.map { ["id": $0.id, "name": $0.name] },
+              "signature": m.signature, "count": m.gameplay.count])
     }
 }

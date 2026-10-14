@@ -7,17 +7,18 @@
 # server rows as kit cards (status tile, name + badges, address, players, ping pill, Join / star), empty states
 # with art + an action, a grouped Host form with rules preset cards, and a footer hint bar when a pad is attached.
 #
-# Tabs:  Session (only while in a game: status, players with Kick/Ban for the host, rules, chat, Leave)
-#        Host Game   name · port · max players · rules (Safe / Full stakes / Custom toggles) · password · LAN visible
-#        Join        address (host or host:port, [ipv6]:port) · password · recent servers · Save to favourites
-#        Public      the community server directory (servers/servers.json in the NovaSwift-Plugins repo), live-pinged
-#        LAN         games and servers found on the local network (UDP beacons)
-#        Saved       favourites with live ping and player counts (UDP status query), Join / Remove
+# Tabs:  Browse   (default) ONE list of every server you can reach: Saved (pinned on top, filled star), LAN games and the
+#                 public directory, merged by address, each row tagged with its sources. Search + chips (All / Saved / LAN /
+#                 Public, Compatible only, Has players, No password, region). Quick Connect (header button, X on a pad) is
+#                 a small dialog: address, password, "Save this server".
+#        Host     name - port - max players - rules (Safe / Full stakes / Custom toggles) - password - LAN visible - Encrypt;
+#                 a pointer to the standalone Dedicated Server for always-on hosting
+#        Session  (only while in a game: status, players with Trade / Kick / Ban, rules, chat, Leave)
 # Errors (refused, wrong password, full, version / plug-in mismatch, timeout, kicked) show in a banner on top;
 # a connect in flight shows a progress banner with Cancel.
 #
-# Controls: B / Esc = close, LB / RB = previous / next tab, Y = refresh (Public / LAN / Saved), X = the page's main
-# action (Start hosting / Join). The live lists rebuild only when their content changes and put focus back on the
+# Controls: B / Esc = close, LB / RB = previous / next tab, Y = refresh (Browse), X = the page's main
+# action (Quick Connect / Start hosting). The live lists rebuild only when their content changes and put focus back on the
 # same Join button, so a pad is never thrown off a row by the one-second refresh.
 #
 # Reach it with MultiplayerHub.new() + add_child + setup(nova); it emits `closed`. Main menu, Classic main menu
@@ -31,15 +32,15 @@ const NC = preload("res://ui/novaswift/NovaControls.gd")
 const Alert = preload("res://ui/novaswift/NovaAlert.gd")
 const SVG = preload("res://ui/novaswift/NovaSVG.gd")
 const Proto = preload("res://net/NetProto.gd")
+const NetPlugins = preload("res://net/NetPlugins.gd")
 const NetPrefs = preload("res://net/NetPrefs.gd")
 const Directory = preload("res://net/ServerDirectory.gd")
 const PluginsScreen = preload("res://screens/Plugins.gd")
 
 signal closed
 
-const TABS := ["Session", "Host Game", "Join", "Public", "LAN", "Saved"]
-const TAB_ICONS := {"Session": "person.2.fill", "Host Game": "plus.circle", "Join": "arrow.right.circle",
-	"Public": "globe", "LAN": "wifi", "Saved": "star.fill"}
+const TABS := ["Session", "Browse", "Host"]
+const TAB_ICONS := {"Session": "person.2.fill", "Browse": "magnifyingglass", "Host": "plus.circle"}
 const MAX_W := 940.0
 const INK := Color(0.06, 0.05, 0.03)   # text on an amber fill
 
@@ -56,7 +57,7 @@ const GLYPHS := {
 }
 static var _glyphs_ready: bool = false
 
-var tab: String = "Host Game"
+var tab: String = "Browse"
 var first_control: Control = null
 
 var _nova: Object = null
@@ -76,16 +77,16 @@ var _gutters: Array = []
 var _dyns: Dictionary = {}       # name -> VBoxContainer rebuilt by _refresh_dynamic
 var _dyn_sigs: Dictionary = {}   # name -> content signature of what is on screen
 var _form: Dictionary = {}
-var _join_addr: String = ""
 var _join_pw: String = ""
-var _add: Dictionary = {"name": "", "addr": "", "pw": ""}
+## Browse filters: source (All | Saved | LAN | Public), search text, the three toggles and a region ("" = any).
+var _br: Dictionary = {"search": "", "source": "All", "compat": false, "players": false, "nopw": false, "region": ""}
+var _quick_btn: Button = null
 var _name_edit: LineEdit
 var _chat_edit: LineEdit
 var _chat_scroll: ScrollContainer = null
 var _refresh: Timer
 var _last_query: float = -100.0
 var _dir: Node = null
-var _pub_filters: Dictionary = {"compatible": false, "has_players": false, "region": ""}
 var _pub_query_at: float = -100.0
 var _pub_last: Dictionary = {}   # "host:port" -> last answered live record, so rows don't flicker between pings
 var _pub_status: Label = null
@@ -106,7 +107,7 @@ func setup(nova: Object, start_tab: String = "") -> void:
 	_form = NetPrefs.host_form()
 	if str(_form.get("name", "")) == "":
 		_form["name"] = NetPrefs.display_name() + "'s game"
-	tab = start_tab if TABS.has(start_tab) else ("Session" if _svc != null and _svc.is_active() else "Host Game")
+	tab = start_tab if TABS.has(start_tab) else ("Session" if _svc != null and _svc.is_active() else "Browse")
 	_build_frame()
 	_render()
 	_refresh = Timer.new()
@@ -175,27 +176,18 @@ func _set_tab(t: String) -> void:
 		_scroll.scroll_vertical = 0
 
 
-## Y: re-query the current list. Returns true when the tab has something to refresh.
+## Y: re-query the server list. Returns true when the tab has something to refresh.
 func _refresh_action() -> bool:
-	if _svc == null:
+	if _svc == null or tab != "Browse":
 		return false
-	match tab:
-		"Public":
-			_directory().refresh(true)
-			_query_public(true)
-			_refresh_dynamic()
-			return true
-		"Saved":
-			_query_saved(true)
-			_refresh_dynamic()
-			return true
-		"LAN":
-			_refresh_dynamic()
-			return true
-	return false
+	_directory().refresh(true)
+	_query_public(true)
+	_query_saved(true)
+	_refresh_dynamic()
+	return true
 
 
-## X: the page's main action. Returns true when it did something.
+## X: the page's main action (Browse: Quick Connect; Host: Start hosting). Returns true when it did something.
 func _main_action() -> bool:
 	if _svc == null or _svc.is_active():
 		return false
@@ -203,11 +195,11 @@ func _main_action() -> bool:
 	if fo is LineEdit:
 		return false
 	match tab:
-		"Host Game":
+		"Host":
 			_start_host()
 			return true
-		"Join":
-			_join_from_fields()
+		"Browse":
+			_quick_connect()
 			return true
 	return false
 
@@ -449,10 +441,12 @@ func _build_frame() -> void:
 	var titles := _vbox(head, 0)
 	titles.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_t(titles, "Multiplayer", 24, "bold")
-	_t(titles, "Fly together over LAN, by address, or on a dedicated server", 12, "regular", T.SECONDARY)
+	_t(titles, "Find a game, connect by address, or host your own", 12, "regular", T.SECONDARY)
 	NC.hspacer(head)
 	_status_box = _hbox(head, 8)
 	_status_box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_quick_btn = _btn(head, "Quick Connect", _quick_connect, "bordered", "arrow.right.circle", "quick")
+	_quick_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var done: Button = _btn(head, "Done", _close, "primary")
 	done.custom_minimum_size.x = 76
 	first_control = done
@@ -500,7 +494,7 @@ func _update_hint_bar() -> void:
 	_hint_bar.get_parent().visible = shown
 	if not shown:
 		return
-	var items: Array = [["LB RB", "Tabs"], ["Y", "Refresh"], ["X", "Host / Join"], ["B", "Back"]]
+	var items: Array = [["LB RB", "Tabs"], ["Y", "Refresh"], ["X", "Quick connect / Host"], ["B", "Back"]]
 	for it in items:
 		var h := _hbox(_hint_bar, 6)
 		var chip := PanelContainer.new()
@@ -601,7 +595,7 @@ func _render() -> void:
 		keep = _focus_key(fo)
 	var list: Array = _tab_list()
 	if not list.has(tab):
-		tab = "Host Game"
+		tab = "Browse"
 	var key: String = ",".join(PackedStringArray(list))
 	if key != _tab_key or _tab_wrap == null:
 		_tab_key = key
@@ -621,11 +615,8 @@ func _render() -> void:
 		return
 	match tab:
 		"Session": _page_session()
-		"Host Game": _page_host()
-		"Join": _page_join()
-		"Public": _page_public()
-		"LAN": _page_lan()
-		"Saved": _page_saved()
+		"Browse": _page_browse()
+		"Host": _page_host()
 	_refresh_dynamic()
 	var restore := func() -> void:
 		if not is_inside_tree():
@@ -648,6 +639,8 @@ func _first_page_focus() -> Control:
 
 
 func _update_header() -> void:
+	if _quick_btn != null:
+		_quick_btn.visible = _svc != null and not _svc.is_active()
 	_clear(_status_box)
 	if _svc == null or not _svc.is_active():
 		return
@@ -693,6 +686,16 @@ func _render_banner() -> void:
 		var hint: String = _error_hint(_svc.last_error_code)
 		if hint != "":
 			_t(col2, hint, 12, "regular", T.SECONDARY, true)
+		if _svc.last_error_code == "key_changed":
+			var kd: Dictionary = _svc.last_error_detail
+			var trust: Button = _btn(h2, "Trust new key and join", func() -> void:
+				var j: Dictionary = _svc._pending_join
+				_svc.last_error = ""
+				_svc.last_error_code = ""
+				_svc.join_game(str(kd.get("host", j.get("host", ""))), int(kd.get("port", j.get("port", Proto.DEFAULT_PORT))),
+					str(j.get("pw", "")), str(j.get("name", "")), {"accept_new_key": true})
+				_render_banner(), "destructive", "", "banner:trust")
+			trust.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 		var dis: Button = _btn(h2, "Dismiss", func() -> void:
 			_svc.last_error = ""
 			_svc.last_error_code = ""
@@ -712,11 +715,13 @@ static func _error_title(code: String) -> String:
 		"kicked": return "Removed from the game"
 		"disconnected": return "Disconnected"
 		"bad_request": return "Refused"
+		"key_changed": return "Server key changed"
 	return "Multiplayer problem"
 
 
 static func _error_hint(code: String) -> String:
 	match code:
+		"key_changed": return "If you didn't expect this, don't continue and ask the server's owner whether they regenerated the key."
 		"timeout": return "Check the address, that the server is running, and that its UDP port (default 53735) is allowed through the firewall / forwarded on the router."
 		"plugins": return "Change plug-ins from the main menu's Plug-ins screen so your enabled set matches the host's, then rejoin."
 		"version": return "Everyone must run the same NovaSwift version."
@@ -725,6 +730,9 @@ static func _error_hint(code: String) -> String:
 
 
 func _on_net_event(ev: Dictionary) -> void:
+	if str(ev.get("type", "")) == "rejected" and str(ev.get("code", "")) == "plugins" and (ev.get("detail", {}) as Dictionary).has("server_manifest"):
+		_open_plugin_gate(ev)
+		return
 	match str(ev.get("type", "")):
 		"connected":
 			tab = "Session"
@@ -732,8 +740,20 @@ func _on_net_event(ev: Dictionary) -> void:
 		"rejected", "timeout", "error", "kicked", "disconnected":
 			_render()
 		_:
-			if tab == "Session" or tab == "LAN" or tab == "Saved" or tab == "Public":
+			if tab == "Session" or tab == "Browse":
 				_refresh_dynamic()
+
+
+## The join was refused over GAMEPLAY plug-ins: offer to install / enable them (cosmetic plug-ins never get here).
+func _open_plugin_gate(ev: Dictionary) -> void:
+	_svc.last_error = ""
+	_svc.last_error_code = ""
+	_render_banner()
+	var gate: Node = (load("res://screens/multiplayer/PluginGate.gd") as GDScript).new()
+	gate.run(self, _nova, _svc, ev.get("detail", {}) as Dictionary, _svc._pending_join, _join_meta)
+
+
+var _join_meta: Dictionary = {}
 
 
 func _on_session_changed() -> void:
@@ -742,10 +762,9 @@ func _on_session_changed() -> void:
 
 
 func _tick() -> void:
-	if tab == "LAN" or tab == "Saved" or tab == "Session" or tab == "Public":
-		if tab == "Saved":
+	if tab == "Browse" or tab == "Session":
+		if tab == "Browse":
 			_query_saved(false)
-		elif tab == "Public":
 			_query_public(false)
 		_refresh_dynamic()
 
@@ -885,6 +904,9 @@ func _page_host() -> void:
 		"UPnP asks your router to forward the port automatically; if that fails, forward UDP %d yourself." % int(_form["port"]))
 	NC.toggle(vg, "Visible on the local network (LAN)", bool(_form["lan"]), func(v: bool) -> void: _form["lan"] = v)
 	NC.toggle(vg, "Open the port on my router (UPnP)", bool(_form.get("upnp", false)), func(v: bool) -> void: _form["upnp"] = v)
+	var eg: NC.Group = NC.section(_page, "Security", "lock.fill",
+		"Encrypts traffic with DTLS (a self-signed key made on first use; players pin it when they first join). Plain clients, such as the Apple app's current direct-connect, can't join an encrypted game.")
+	NC.toggle(eg, "Encrypt connection", bool(_form.get("encrypt", false)), func(v: bool) -> void: _form["encrypt"] = v)
 
 	NC.spacer(_page, 10)
 	_section_title(_page, "Rules", "shield.lefthalf.filled")
@@ -920,13 +942,16 @@ func _page_host() -> void:
 	start.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	if not _svc.has_bridge_api():
 		_note(_page, "Note: this build's engine bridge has no multiplayer support yet, so a hosted game can chat but not share a star system.")
-	_note(_page, "Dedicated servers: see docs/MULTIPLAYER.md.")
+	var gh := _hbox(null, 8)
+	_note(gh, "Running a server on a PC that's always on? Dedicated servers and public listing are covered in the hosting guide.")
+	_btn(gh, "Hosting guide", func() -> void: OS.shell_open(Proto.HOSTING_URL), "bordered", "arrow.up.right.square", "guide")
+	_page.add_child(gh)
 
 
 func _start_host() -> void:
 	var port: int = clampi(int(_form["port"]), 1, 65535)
 	var opts: Dictionary = {"name": str(_form["name"]), "max": int(_form["max"]), "port": port, "password": str(_form.get("password", "")),
-		"lan": bool(_form["lan"]), "upnp": bool(_form.get("upnp", false)), "rules": _rules_from_form(), "display_name": _my_name()}
+		"lan": bool(_form["lan"]), "upnp": bool(_form.get("upnp", false)), "encrypt": bool(_form.get("encrypt", false)), "rules": _rules_from_form(), "display_name": _my_name()}
 	NetPrefs.save_host_form(_form)
 	_svc.last_error = ""
 	var err: int = _svc.host_game(opts)
@@ -940,71 +965,6 @@ func _start_host() -> void:
 
 
 # --- Join ----------------------------------------------------------------------------------------------------------------
-
-func _page_join() -> void:
-	if _svc.is_active():
-		_empty(_page, "person.2.fill", T.GREEN, "You're already in a game", "Leave it from the Session tab to join another.",
-			[{"text": "Open Session", "kind": "primary", "glyph": "person.2.fill", "cb": func() -> void: _set_tab("Session")}])
-		return
-	var g: NC.Group = NC.section(_page, "Join by address", "arrow.right.circle",
-		"A friend's IP or a server name, optionally with :port (default %d). IPv6: [::1]:%d." % [Proto.DEFAULT_PORT, Proto.DEFAULT_PORT])
-	_name_row(g)
-	var ae: LineEdit = _field(g, "Address", _join_addr, "192.168.1.20 or play.example.com:53735", func(t: String) -> void: _join_addr = t)
-	ae.text_submitted.connect(func(_t2: String) -> void: _join_from_fields())
-	_field(g, "Password", _join_pw, "If the server has one", func(t: String) -> void: _join_pw = t, true)
-	var hb := _hbox(null, 8)
-	_btn(hb, "Join", _join_from_fields, "primary", "arrow.right.circle", "join")
-	_btn(hb, "Save to favourites", _save_from_fields, "bordered", "star", "save")
-	g.add_row(hb, 50.0)
-
-	NC.spacer(_page, 10)
-	var rec: Array = NetPrefs.recent()
-	_section_title(_page, "Recent servers", "clock", "" if rec.is_empty() else "%d" % rec.size())
-	if rec.is_empty():
-		_empty(_page, "clock", T.SECONDARY, "No recent servers", "Servers you join will appear here so you can hop back in with one press.", [])
-		return
-	for item in rec:
-		var r: Dictionary = item
-		var h := str(r.get("host", ""))
-		var p := int(r.get("port", Proto.DEFAULT_PORT))
-		var card: PanelContainer = NC.card(_page, 12, 10, true)
-		var row := _hbox(card, 12)
-		_icon_tile(row, 34, T.SECONDARY, "clock", 0.14)
-		var lbl: Label = _t(row, Proto.format_address(h, p), 15, "medium")
-		lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		lbl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		_btn(row, "Use", func() -> void:
-			_join_addr = Proto.format_address(h, p)
-			_render(), "bordered", "", "use:%s:%d" % [h, p])
-		_btn(row, "Join", func() -> void: _begin_join(h, p, _join_pw), "primary", "", "rjoin:%s:%d" % [h, p])
-	var cb := _hbox(null, 0)
-	_btn(cb, "Clear recent", func() -> void:
-		NetPrefs.clear_recent()
-		_render(), "bordered", "trash", "clear")
-	_page.add_child(cb)
-
-
-func _join_from_fields() -> void:
-	var a: Dictionary = Proto.parse_address(_join_addr)
-	if not bool(a["ok"]):
-		_svc.last_error = str(a["error"])
-		_svc.last_error_code = "bad_request"
-		_render_banner()
-		return
-	_begin_join(str(a["host"]), int(a["port"]), _join_pw)
-
-
-func _save_from_fields() -> void:
-	var a: Dictionary = Proto.parse_address(_join_addr)
-	if not bool(a["ok"]):
-		_svc.last_error = str(a["error"])
-		_svc.last_error_code = "bad_request"
-		_render_banner()
-		return
-	NetPrefs.save_server(Proto.format_address(str(a["host"]), int(a["port"])), str(a["host"]), int(a["port"]), _join_pw)
-	tab = "Saved"
-	_render()
-
 
 func _begin_join(host: String, port: int, pw: String) -> void:
 	var nm: String = _my_name() if _name_edit != null else NetPrefs.display_name()
@@ -1026,7 +986,8 @@ func _server_card(parent: Control, d: Dictionary) -> void:
 	var host: String = str(d["host"])
 	var port: int = int(d["port"])
 	var state: String = str(d.get("state", "online"))
-	var kind: String = str(d.get("kind", "lan"))
+	var srcs: Array = d.get("sources", [])
+	var kind: String = "saved" if srcs.has("Saved") else ("public" if srcs.has("Public") else "lan")
 	var mismatch: bool = bool(d.get("mismatch", false))
 	var tint: Color = T.SECONDARY
 	var glyph: String = "wifi"
@@ -1053,6 +1014,8 @@ func _server_card(parent: Control, d: Dictionary) -> void:
 	nl.clip_text = true
 	nl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	nl.custom_minimum_size.x = 60
+	for src in (d.get("sources", []) as Array):
+		_badge(line, str(src), SOURCE_TINT.get(str(src), T.SECONDARY))
 	if bool(d.get("dedicated", false)):
 		_badge(line, "Dedicated", T.TEAL, "server.rack")
 	if state == "checking":
@@ -1061,14 +1024,19 @@ func _server_card(parent: Control, d: Dictionary) -> void:
 		_badge(line, "Offline", T.RED)
 	if bool(d.get("pw", false)):
 		_badge(line, "Password", T.ORANGE, "lock.fill")
+	if bool(d.get("dtls", false)):
+		_badge(line, "Encrypted", T.TEAL, "lock.shield.fill")
 	if str(d.get("region", "")) != "":
 		_badge(line, str(d["region"]), T.SECONDARY, "globe")
 	if str(d.get("rules", "")) != "":
 		_badge(line, str(d["rules"]).capitalize(), T.INDIGO.lightened(0.35), "shield.fill")
 	if mismatch:
-		_badge(line, "v%s needed" % str(d.get("ver", "?")), T.RED, "exclamationmark.triangle.fill")
+		_badge(line, "Incompatible protocol", T.RED, "exclamationmark.triangle.fill")
 	elif state == "online" and str(d.get("ver", "")) != "":
-		_badge(line, "Compatible", T.GREEN, "checkmark.circle.fill")
+		if str(d.get("ver", "")) != Proto.game_version():
+			_badge(line, "Different version (v%s)" % str(d.get("ver", "?")), T.SECONDARY, "info.circle")
+		else:
+			_badge(line, "Compatible", T.GREEN, "checkmark.circle.fill")
 	var info := _flow(col, 14, 2)
 	_t(info, Proto.format_address(host, port), 13, "regular", T.SECONDARY)
 	if int(d.get("players", -1)) >= 0:
@@ -1082,13 +1050,7 @@ func _server_card(parent: Control, d: Dictionary) -> void:
 		var dl: Label = _t(col, str(d["description"]), 12, "regular", T.SECONDARY, true)
 		dl.max_lines_visible = 2
 		dl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	var plugs: Array = d.get("plugins", [])
-	if not plugs.is_empty():
-		var pf := _flow(col, 6, 4)
-		_svg(pf, "puzzlepiece.extension.fill", 12, T.SECONDARY)
-		_t(pf, "Requires:", 12, "regular", T.SECONDARY)
-		for pn in plugs:
-			_badge(pf, str(pn), T.SECONDARY)
+	_plugin_requirements(col, line, d)
 
 	var right := _hbox(row, 8)
 	right.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -1096,23 +1058,63 @@ func _server_card(parent: Control, d: Dictionary) -> void:
 		_ping_pill(right, int(d.get("ping", -1)))
 	var needs_pw: bool = bool(d.get("pw", false))
 	var saved_pw: String = str(d.get("saved_pw", ""))
-	var join_btn: Button = _btn(right, "Join", func() -> void: _join_row(host, port, needs_pw, saved_pw), "primary", "", "join:%s:%d" % [host, port])
+	var join_btn: Button = _btn(right, "Join", func() -> void:
+		_join_meta = {"website": str(d.get("website", "")), "contact": str(d.get("contact", ""))}
+		_join_row(host, port, needs_pw, saved_pw), "primary", "", "join:%s:%d" % [host, port])
 	join_btn.custom_minimum_size.x = 68
 	join_btn.disabled = mismatch or not bool(d.get("joinable", true))
-	if kind == "saved":
-		_icon_btn(right, "trash", "Remove from Saved", func() -> void:
+	var is_saved: bool = NetPrefs.is_saved(host, port)
+	var nm: String = str(d["name"])
+	var star: Button = _icon_btn(right, "star.fill" if is_saved else "star", "Remove from Saved" if is_saved else "Save to favourites", func() -> void:
+		if is_saved:
 			NetPrefs.remove_saved(host, port)
-			_refresh_dynamic(), "rm:%s:%d" % [host, port], T.RED)
-	elif NetPrefs.is_saved(host, port):
-		var st: TextureRect = _svg(right, "star.fill", 18, T.AMBER)
-		st.tooltip_text = "In your Saved servers"
-		st.mouse_filter = Control.MOUSE_FILTER_PASS
-	else:
-		var nm: String = str(d["name"])
-		_icon_btn(right, "star", "Save to favourites", func() -> void:
+		else:
 			NetPrefs.save_server(nm, host, port)
 			_svc.lan.query(host, port)
-			_refresh_dynamic(), "star:%s:%d" % [host, port])
+		_refresh_dynamic(), "star:%s:%d" % [host, port], T.AMBER if is_saved else T.WHITE)
+	star.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+
+
+func _plugin_requirements(col: Control, line: Control, d: Dictionary) -> void:
+	var local: Dictionary = NetPlugins.local_info(_nova)
+	var plugs: Array = d.get("plugins", []) if d.get("plugins", []) is Array else []
+	var dict_rows: Array = []
+	for p in plugs:
+		if p is Dictionary:
+			dict_rows.append(p)
+		else:
+			dict_rows.append({"id": str(p), "name": str(p)})
+	if dict_rows.is_empty():
+		var sig: String = str(d.get("sig", ""))
+		if sig != "" and str(local.get("sig", "")) != "" and str(d.get("state", "online")) == "online":
+			if sig == str(local["sig"]):
+				_badge(line, "Plug-ins match", T.GREEN, "checkmark.circle.fill")
+			else:
+				_badge(line, "Plug-ins differ", T.ORANGE, "puzzlepiece.extension.fill")
+		return
+	var cmp: Dictionary = NetPlugins.compare(dict_rows, str(d.get("tc", "")), local)
+	if str(d.get("state", "online")) == "online" or true:
+		if bool(cmp["ok"]):
+			_badge(line, "Plug-ins match", T.GREEN, "checkmark.circle.fill")
+		else:
+			_badge(line, "Plug-ins differ", T.ORANGE, "puzzlepiece.extension.fill")
+	var pf := _flow(col, 6, 4)
+	_svg(pf, "puzzlepiece.extension.fill", 12, T.SECONDARY)
+	_t(pf, "Requires:", 12, "regular", T.SECONDARY)
+	for r in (cmp["rows"] as Array):
+		var rr: Dictionary = r
+		match str(rr["state"]):
+			"ok": _badge(pf, str(rr["name"]), T.GREEN, "checkmark.circle.fill")
+			"wrong": _badge(pf, "%s (other version)" % str(rr["name"]), T.ORANGE, "exclamationmark.triangle.fill")
+			_: _badge(pf, "%s (missing)" % str(rr["name"]), T.RED, "xmark.circle.fill")
+	if bool(cmp["tc_mismatch"]) and str(cmp["tc_server"]) != "":
+		_badge(pf, "Total conversion: %s" % str(cmp["tc_server"]), T.ORANGE, "exclamationmark.triangle.fill")
+	var extra: Array = cmp["extra"]
+	if not extra.is_empty():
+		var names: PackedStringArray = PackedStringArray()
+		for x in extra:
+			names.append(str((x as Dictionary)["name"]))
+		_t(col, "You also have: %s (switched off for this game when you join)" % ", ".join(names), 12, "regular", T.SECONDARY, true)
 
 
 func _join_row(host: String, port: int, needs_pw: bool, saved_pw: String) -> void:
@@ -1127,42 +1129,6 @@ func _join_row(host: String, port: int, needs_pw: bool, saved_pw: String) -> voi
 
 # --- LAN ---------------------------------------------------------------------------------------------------------------
 
-func _page_lan() -> void:
-	var h := _section_title(_page, "Games on this network", "wifi")
-	NC.hspacer(h)
-	_t(h, "Listening", 12, "regular", T.SECONDARY)
-	var spin: ProgressBar = NC.progress(h, 0.0, 70.0)
-	var tw: Tween = spin.create_tween().set_loops()
-	tw.tween_property(spin, "value", 1.0, 1.4)
-	tw.tween_property(spin, "value", 0.0, 0.0)
-	_btn(h, "Rescan", func() -> void:
-		_refresh_action(), "bordered", "arrow.clockwise", "rescan")
-	if not _svc.start_lan_browser():
-		_empty(_page, "wifi.slash", T.RED, "Can't listen for LAN games",
-			_svc.lan.last_error if _svc.lan.last_error != "" else "Listening for LAN games isn't possible on this machine. Use Join with the host's IP address instead.",
-			[{"text": "Join by address", "kind": "primary", "glyph": "arrow.right.circle", "cb": func() -> void: _set_tab("Join")}])
-		return
-	_make_dyn("main", 10)
-	_note(_page, "Hosts and dedicated servers announce themselves every two seconds. Not listed? Use Join with the host's IP address.", 12)
-
-
-func _dyn_lan(into: Control) -> void:
-	var list: Array = _svc.lan.lan_list()
-	if list.is_empty():
-		_empty(into, "wifi", T.AMBER, "No LAN games found",
-			"Ask a friend to Host a Game with \"Visible on the local network\" on, or host one yourself.",
-			[{"text": "Host a game", "kind": "primary", "glyph": "plus.circle", "cb": func() -> void: _set_tab("Host Game")},
-				{"text": "Join by address", "kind": "bordered", "glyph": "arrow.right.circle", "cb": func() -> void: _set_tab("Join")}])
-		return
-	for item in list:
-		var s: Dictionary = item
-		var ver: String = str(s.get("ver", ""))
-		_server_card(into, {"name": str(s["name"]), "host": str(s["ip"]), "port": int(s["port"]), "kind": "lan", "state": "online",
-			"pw": bool(s.get("pw", false)), "dedicated": bool(s.get("dedicated", false)), "rules": str(s.get("rules", "")), "ver": ver,
-			"mismatch": ver != "" and ver != Proto.game_version(), "players": int(s["players"]) if s.has("players") else -1,
-			"max": int(s.get("max", 0)), "ping": -1})
-
-
 # --- Public --------------------------------------------------------------------------------------------------------------
 
 func _directory() -> Node:
@@ -1174,8 +1140,7 @@ func _directory() -> Node:
 
 
 func _on_directory_updated() -> void:
-	if tab == "Public" and is_inside_tree():
-		_pub_status_label_update()
+	if tab == "Browse" and is_inside_tree():
 		_query_public(true)
 		_refresh_dynamic()
 
@@ -1192,54 +1157,6 @@ func _pub_status_text() -> String:
 	return "%d listed.%s" % [d.entries.size(), age]
 
 
-func _pub_status_label_update() -> void:
-	if _pub_status != null and is_instance_valid(_pub_status):
-		_pub_status.text = _pub_status_text()
-
-
-func _page_public() -> void:
-	var d: Node = _directory()
-	var h := _section_title(_page, "Public servers", "globe")
-	NC.hspacer(h)
-	_pub_status = _t(h, _pub_status_text(), 12, "regular", T.SECONDARY)
-	# filter row
-	var fcard: PanelContainer = NC.card(_page, 12, 10, true)
-	var fh := _flow(fcard, 8, 8)
-	fh.alignment = FlowContainer.ALIGNMENT_BEGIN
-	_btn(fh, "Refresh", func() -> void:
-		d.refresh(true)
-		_query_public(true), "bordered", "arrow.clockwise", "refresh")
-	var c1: Button = NC.chip(fh, "Compatible only", bool(_pub_filters["compatible"]), func() -> void:
-		_pub_filters["compatible"] = not bool(_pub_filters["compatible"])
-		_render())
-	c1.set_meta("fkey", "chip:compat")
-	var c2: Button = NC.chip(fh, "Has players", bool(_pub_filters["has_players"]), func() -> void:
-		_pub_filters["has_players"] = not bool(_pub_filters["has_players"])
-		_render())
-	c2.set_meta("fkey", "chip:players")
-	var regions: Array = [""] + Directory.REGIONS
-	var labels: Array = ["Any region"]
-	for r in Directory.REGIONS:
-		labels.append(str(r))
-	fh.add_child(NC.option_chip(labels, regions.find(str(_pub_filters["region"])), func(i: int) -> void:
-		_pub_filters["region"] = regions[i]
-		_refresh_dynamic()))
-	_make_dyn("main", 10)
-	_note(_page, "A community list kept in a GitHub repo, not run by us. Online status, players, version and ping come from a live query to each server's game port + 1 (53736 for the default port).", 12)
-	NC.spacer(_page, 8)
-	var own: PanelContainer = NC.card(_page, 14, 14, true)
-	var oh := _hbox(own, 14)
-	_icon_tile(oh, 44, T.INDIGO.lightened(0.3), "server.rack", 0.16)
-	var oc := _vbox(oh, 2)
-	oc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	oc.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_t(oc, "Run your own", 16, "semibold")
-	_t(oc, "Start a dedicated server with --public to get a ready-to-paste entry, then open a pull request. See docs/MULTIPLAYER.md, \"Host a public server in 5 minutes\".", 12, "regular", T.SECONDARY, true)
-	_btn(oh, "How to list a server", func() -> void: OS.shell_open(Directory.PR_URL), "bordered", "arrow.up.right.square", "howto")
-	d.refresh(false)
-	_query_public(true)
-
-
 func _query_public(force: bool) -> void:
 	var now: float = Time.get_ticks_msec() / 1000.0
 	if not force and now - _pub_query_at < 8.0:
@@ -1254,80 +1171,7 @@ func _query_public(force: bool) -> void:
 		_svc.lan.query(str(e["host"]), int(e["port"]))
 
 
-func _dyn_public(into: Control) -> void:
-	var now: float = Time.get_ticks_msec() / 1000.0
-	var checking: bool = now - _pub_query_at < 3.5
-	var rows: Array = []
-	for item in _directory().entries:
-		var e: Dictionary = item
-		var key: String = "%s:%d" % [str(e["host"]), int(e["port"])]
-		var live: Dictionary = _svc.lan.pings.get(key, {})
-		if bool(live.get("ok", false)):
-			_pub_last[key] = live
-		elif _pub_last.has(key) and checking:
-			live = _pub_last[key]
-		rows.append(Directory.row_for(e, live, checking))
-	rows = Directory.sort_rows(Directory.filter_rows(rows, _pub_filters))
-	if rows.is_empty():
-		if _directory().entries.is_empty():
-			if str(_directory().status) == "loading":
-				_empty(into, "globe", T.AMBER, "Loading the directory", "Fetching the community server list...", [])
-			else:
-				_empty(into, "globe", T.AMBER, "No public servers listed yet",
-					"Be the first: run a dedicated server with --public and open a pull request (see below).",
-					[{"text": "Refresh", "kind": "primary", "glyph": "arrow.clockwise", "cb": func() -> void:
-						_directory().refresh(true)
-						_query_public(true)}])
-		else:
-			_empty(into, "magnifyingglass", T.AMBER, "No servers match these filters", "Loosen a filter to see more of the list.",
-				[{"text": "Clear filters", "kind": "primary", "glyph": "xmark", "cb": func() -> void:
-					_pub_filters = {"compatible": false, "has_players": false, "region": ""}
-					_render()}])
-		return
-	for r in rows:
-		var row: Dictionary = r
-		var state: String = str(row["state"])
-		var plugs: Array = []
-		for p in row["plugins"]:
-			plugs.append(str((p as Dictionary).get("name", "")))
-		_server_card(into, {"name": str(row["name"]), "host": str(row["host"]), "port": int(row["port"]), "kind": "public", "state": state,
-			"pw": bool(row["pw"]), "dedicated": bool(row.get("dedicated", false)), "rules": str(row["rules"]), "region": str(row["region"]),
-			"ver": str(row["ver"]), "mismatch": state == "online" and not bool(row["compatible"]),
-			"players": int(row["players"]) if state == "online" else -1, "max": int(row["live_max"]) if state == "online" else int(row["max"]),
-			"ping": int(row["ping"]), "description": str(row["description"]), "plugins": plugs})
-
-
 # --- Saved ---------------------------------------------------------------------------------------------------------------
-
-func _page_saved() -> void:
-	var h := _section_title(_page, "Saved servers", "star.fill")
-	NC.hspacer(h)
-	_btn(h, "Refresh pings", func() -> void:
-		_refresh_action(), "bordered", "arrow.clockwise", "refresh")
-	_make_dyn("main", 10)
-	_note(_page, "Ping and player counts come from a UDP status query to the game port + 1 (53736 for the default port); a server can be joinable and still show no ping.", 12)
-	var ag: NC.Group = NC.section(_page, "Add a server", "plus.circle")
-	_field(ag, "Name", str(_add["name"]), "My dedicated server", func(t: String) -> void: _add["name"] = t)
-	var ae: LineEdit = _field(ag, "Address", str(_add["addr"]), "play.example.com:53735", func(t: String) -> void: _add["addr"] = t)
-	ae.text_submitted.connect(func(_t2: String) -> void: _add_server())
-	_field(ag, "Password", str(_add["pw"]), "Optional", func(t: String) -> void: _add["pw"] = t, true)
-	var hb := _hbox(null, 8)
-	_btn(hb, "Add", _add_server, "primary", "plus", "add")
-	ag.add_row(hb, 50.0)
-	_query_saved(true)
-
-
-func _add_server() -> void:
-	var a: Dictionary = Proto.parse_address(str(_add["addr"]))
-	if not bool(a["ok"]):
-		_svc.last_error = str(a["error"])
-		_svc.last_error_code = "bad_request"
-		_render_banner()
-		return
-	NetPrefs.save_server(str(_add["name"]) if str(_add["name"]) != "" else str(a["host"]), str(a["host"]), int(a["port"]), str(_add["pw"]))
-	_add = {"name": "", "addr": "", "pw": ""}
-	_render()
-
 
 func _query_saved(force: bool) -> void:
 	var now: float = Time.get_ticks_msec() / 1000.0
@@ -1339,28 +1183,273 @@ func _query_saved(force: bool) -> void:
 		_svc.lan.query(str(e["host"]), int(e["port"]))
 
 
-func _dyn_saved(into: Control) -> void:
-	var list: Array = NetPrefs.saved()
-	if list.is_empty():
-		_empty(into, "star", T.AMBER, "No saved servers yet",
-			"Tap the star on a LAN or public game, use Save to favourites under Join, or add one by address below.",
-			[{"text": "Browse LAN", "kind": "bordered", "glyph": "wifi", "cb": func() -> void: _set_tab("LAN")},
-				{"text": "Browse public", "kind": "bordered", "glyph": "globe", "cb": func() -> void: _set_tab("Public")}])
-		return
-	for item in list:
+# --- Browse --------------------------------------------------------------------------------------------------------------
+
+const SOURCE_TINT := {"Saved": Color(1.0, 0.78, 0.30), "LAN": Color(0.35, 0.85, 0.75), "Public": Color(0.55, 0.65, 1.0)}
+
+
+func _page_browse() -> void:
+	var d: Node = _directory()
+	var h := _section_title(_page, "Servers", "magnifyingglass")
+	NC.hspacer(h)
+	_pub_status = _t(h, _pub_status_text(), 12, "regular", T.SECONDARY)
+	_btn(h, "Refresh", func() -> void: _refresh_action(), "bordered", "arrow.clockwise", "refresh")
+	# search + chips
+	var fcard: PanelContainer = NC.card(_page, 12, 10, true)
+	var fv := _vbox(fcard, 8)
+	var se: LineEdit = NC.search_field(fv, "Search name, address or description", str(_br["search"]), func(t: String) -> void:
+		_br["search"] = t
+		_refresh_dynamic())
+	se.set_meta("fkey", "browse:search")
+	var fh := _flow(fv, 8, 8)
+	fh.alignment = FlowContainer.ALIGNMENT_BEGIN
+	for src in ["All", "Saved", "LAN", "Public"]:
+		var sname: String = str(src)
+		var c: Button = NC.chip(fh, sname, str(_br["source"]) == sname, func() -> void:
+			_br["source"] = sname
+			_render())
+		c.set_meta("fkey", "src:" + sname)
+	for item in [["compat", "Compatible only"], ["players", "Has players"], ["nopw", "No password"]]:
+		var key: String = str(item[0])
+		var c2: Button = NC.chip(fh, str(item[1]), bool(_br[key]), func() -> void:
+			_br[key] = not bool(_br[key])
+			_render())
+		c2.set_meta("fkey", "chip:" + key)
+	var regions: Array = [""] + Directory.REGIONS
+	var labels: Array = ["Any region"]
+	for r in Directory.REGIONS:
+		labels.append(str(r))
+	fh.add_child(NC.option_chip(labels, maxi(0, regions.find(str(_br["region"]))), func(i: int) -> void:
+		_br["region"] = regions[i]
+		_refresh_dynamic()))
+	_svc.start_lan_browser()
+	_make_dyn("main", 10)
+	_note(_page, "Saved servers, games on your network and the community list are merged by address. Players, ping and plug-ins come from a live status query to each server's game port + 1 (53736 for the default port).", 12)
+	NC.spacer(_page, 6)
+	_dedicated_card(_page)
+	d.refresh(false)
+	_query_public(true)
+	_query_saved(true)
+
+
+## "Run your own": the standalone Dedicated Server for always-on hosting, and how to list it.
+func _dedicated_card(parent: Control) -> void:
+	var own: PanelContainer = NC.card(parent, 14, 14, true)
+	var oh := _hbox(own, 14)
+	_icon_tile(oh, 44, T.INDIGO.lightened(0.3), "server.rack", 0.16)
+	var oc := _vbox(oh, 2)
+	oc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	oc.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_t(oc, "Run a server that's always on", 16, "semibold")
+	_t(oc, "The standalone NovaSwift Dedicated Server (a separate download, coming soon) runs without a window on any always-on PC. Until then the game itself can run headless with --server. The hosting guide covers both, port forwarding and listing your server here.", 12, "regular", T.SECONDARY, true)
+	_btn(oh, "Hosting guide", func() -> void: OS.shell_open(Proto.HOSTING_URL), "bordered", "arrow.up.right.square", "guide")
+	_btn(oh, "List a server", func() -> void: OS.shell_open(Directory.PR_URL), "bordered", "arrow.up.right.square", "howto")
+
+
+func _saved_rows() -> Array:
+	var out: Array = []
+	for item in NetPrefs.saved():
 		var e: Dictionary = item
 		var host: String = str(e["host"])
 		var port: int = int(e["port"])
 		var pr: Dictionary = _svc.lan.pings.get("%s:%d" % [host, port], {})
 		var info: Dictionary = pr.get("info", {}) if pr.get("info", {}) is Dictionary else {}
 		var ok: bool = bool(pr.get("ok", false))
-		var ping: int = int(pr.get("rtt_ms", -1)) if ok else -1
-		var ver: String = str(info.get("ver", ""))
-		_server_card(into, {"name": str(e.get("name", host)), "host": host, "port": port, "kind": "saved",
+		out.append({"sources": ["Saved"], "name": str(e.get("name", host)), "host": host, "port": port,
 			"state": "online" if ok else "checking", "pw": bool(info.get("pw", str(e.get("pw", "")) != "")),
-			"dedicated": bool(info.get("dedicated", false)), "rules": str(info.get("rules", "")), "ver": ver,
-			"mismatch": ver != "" and ver != Proto.game_version(), "players": int(info["players"]) if info.has("players") else -1,
-			"max": int(info.get("max", 0)), "ping": ping, "saved_pw": str(e.get("pw", ""))})
+			"dedicated": bool(info.get("dedicated", false)), "rules": str(info.get("rules", "")), "ver": str(info.get("ver", "")),
+			"mismatch": int(info.get("proto", Proto.PROTO)) != Proto.PROTO, "players": int(info["players"]) if info.has("players") else -1,
+			"max": int(info.get("max", 0)), "ping": int(pr.get("rtt_ms", -1)) if ok else -1, "saved_pw": str(e.get("pw", "")),
+			"sig": str(info.get("sig", "")), "tc": str(info.get("tc", "")), "plugins": info.get("plugins", []), "dtls": bool(info.get("dtls", false))})
+	return out
+
+
+func _lan_rows() -> Array:
+	var out: Array = []
+	for item in _svc.lan.lan_list():
+		var s: Dictionary = item
+		out.append({"sources": ["LAN"], "name": str(s["name"]), "host": str(s["ip"]), "port": int(s["port"]), "state": "online",
+			"pw": bool(s.get("pw", false)), "dedicated": bool(s.get("dedicated", false)), "rules": str(s.get("rules", "")), "ver": str(s.get("ver", "")),
+			"mismatch": int(s.get("proto", Proto.PROTO)) != Proto.PROTO, "players": int(s["players"]) if s.has("players") else -1,
+			"max": int(s.get("max", 0)), "ping": -1, "sig": str(s.get("sig", "")), "tc": str(s.get("tc", "")), "dtls": bool(s.get("dtls", false))})
+	return out
+
+
+func _public_rows() -> Array:
+	var now: float = Time.get_ticks_msec() / 1000.0
+	var checking: bool = now - _pub_query_at < 3.5
+	var out: Array = []
+	for item in _directory().entries:
+		var e: Dictionary = item
+		var key: String = "%s:%d" % [str(e["host"]), int(e["port"])]
+		var live: Dictionary = _svc.lan.pings.get(key, {})
+		if bool(live.get("ok", false)):
+			_pub_last[key] = live
+		elif _pub_last.has(key) and checking:
+			live = _pub_last[key]
+		var row: Dictionary = Directory.row_for(e, live, checking)
+		var state: String = str(row["state"])
+		out.append({"sources": ["Public"], "tc": str(row.get("tc", "")), "sig": str(row.get("sig", "")), "dtls": bool(row.get("dtls", false)),
+			"contact": str(row.get("contact", "")), "website": str(row.get("website", "")), "name": str(row["name"]), "host": str(row["host"]),
+			"port": int(row["port"]), "state": state, "pw": bool(row["pw"]), "dedicated": bool(row.get("dedicated", false)),
+			"rules": str(row["rules"]), "region": str(row["region"]), "ver": str(row["ver"]),
+			"mismatch": state == "online" and not bool(row["compatible"]),
+			"players": int(row["players"]) if state == "online" else -1, "max": int(row["live_max"]) if state == "online" else int(row["max"]),
+			"ping": int(row["ping"]), "description": str(row["description"]), "plugins": row["plugins"]})
+	return out
+
+
+static func _empty_val(v: Variant) -> bool:
+	return v == null or (v is String and (v as String) == "") or (v is Array and (v as Array).is_empty()) or (v is int and (v as int) == -1)
+
+
+## Fold row `r` into `m` (same host:port): union the sources, fill what `m` lacks, OR the flags, prefer a live state.
+static func _merge_row(m: Dictionary, r: Dictionary) -> void:
+	for src in (r["sources"] as Array):
+		if not (m["sources"] as Array).has(src):
+			(m["sources"] as Array).append(src)
+	for k in r:
+		if k == "sources":
+			continue
+		if k in ["pw", "dedicated", "mismatch", "dtls"]:
+			m[k] = bool(m.get(k, false)) or bool(r[k])
+		elif k == "state":
+			if str(r[k]) == "online" or (str(r[k]) == "checking" and str(m.get(k, "")) == "offline"):
+				m[k] = r[k]
+		elif k == "name":
+			continue   # the first row's name wins (Saved, then LAN, then the directory)
+		elif not m.has(k) or _empty_val(m[k]):
+			m[k] = r[k]
+
+
+func _browse_rows() -> Array:
+	var merged: Dictionary = {}
+	var order: Array = []
+	for rows in [_saved_rows(), _lan_rows(), _public_rows()]:
+		for item in rows:
+			var r: Dictionary = item
+			var key: String = "%s:%d" % [str(r["host"]).to_lower(), int(r["port"])]
+			if merged.has(key):
+				_merge_row(merged[key], r)
+			else:
+				merged[key] = r
+				order.append(key)
+	var out: Array = []
+	for k in order:
+		out.append(merged[k])
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var sa: bool = (a["sources"] as Array).has("Saved")
+		var sb: bool = (b["sources"] as Array).has("Saved")
+		if sa != sb:
+			return sa
+		var oa: int = 0 if str(a.get("state", "")) == "online" else (1 if str(a.get("state", "")) == "checking" else 2)
+		var ob: int = 0 if str(b.get("state", "")) == "online" else (1 if str(b.get("state", "")) == "checking" else 2)
+		if oa != ob:
+			return oa < ob
+		var pa: int = int(a.get("ping", -1))
+		var pb: int = int(b.get("ping", -1))
+		if pa >= 0 and pb >= 0 and pa != pb:
+			return pa < pb
+		return str(a["name"]).naturalnocasecmp_to(str(b["name"])) < 0)
+	return out
+
+
+func _browse_pass(r: Dictionary) -> bool:
+	var src: String = str(_br["source"])
+	if src != "All" and not (r["sources"] as Array).has(src):
+		return false
+	if bool(_br["compat"]) and (bool(r.get("mismatch", false)) or str(r.get("state", "")) == "offline"):
+		return false
+	if bool(_br["players"]) and int(r.get("players", -1)) < 1:
+		return false
+	if bool(_br["nopw"]) and bool(r.get("pw", false)):
+		return false
+	if str(_br["region"]) != "" and str(r.get("region", "")) != str(_br["region"]):
+		return false
+	var q: String = str(_br["search"]).strip_edges().to_lower()
+	if q != "":
+		var hay: String = ("%s %s:%d %s" % [str(r["name"]), str(r["host"]), int(r["port"]), str(r.get("description", ""))]).to_lower()
+		if not hay.contains(q):
+			return false
+	return true
+
+
+func _dyn_browse(into: Control) -> void:
+	var all_rows: Array = _browse_rows()
+	var rows: Array = all_rows.filter(_browse_pass)
+	if rows.is_empty():
+		if all_rows.is_empty():
+			var loading: bool = str(_directory().status) == "loading"
+			_empty(into, "globe", T.AMBER, "Loading the server list" if loading else "No servers found",
+				"Fetching the community list..." if loading else "Nothing saved, nothing on your network and nothing listed yet. Connect to a friend's address, or host a game yourself.",
+				[] if loading else [{"text": "Quick Connect", "kind": "primary", "glyph": "arrow.right.circle", "cb": func() -> void: _quick_connect()},
+					{"text": "Host a game", "kind": "bordered", "glyph": "plus.circle", "cb": func() -> void: _set_tab("Host")}])
+		else:
+			_empty(into, "magnifyingglass", T.AMBER, "No servers match", "Loosen the search or a filter to see more.",
+				[{"text": "Clear filters", "kind": "primary", "glyph": "xmark", "cb": func() -> void:
+					_br = {"search": "", "source": "All", "compat": false, "players": false, "nopw": false, "region": ""}
+					_render()},
+				{"text": "Quick Connect", "kind": "bordered", "glyph": "arrow.right.circle", "cb": func() -> void: _quick_connect()}])
+		return
+	for r in rows:
+		_server_card(into, r)
+
+
+# --- Quick Connect -------------------------------------------------------------------------------------------------------
+
+## A small kit dialog: address (host or host:port), optional password, "Save this server" (+ a name), recent addresses as chips.
+func _quick_connect() -> void:
+	if _svc == null or _svc.is_active() or _has_alert():
+		return
+	var st: Dictionary = {"addr": "", "pw": "", "save": false, "name": ""}
+	var layer := CanvasLayer.new()
+	layer.layer = 200
+	layer.name = "NovaAlert"   # the hub's alert test (B / LB / RB stand down) treats it like any alert
+	add_child(layer)
+	var Chrome: GDScript = load("res://ui/novaswift/NovaChrome.gd") as GDScript
+	var go: Callable = func() -> void:
+		var a: Dictionary = Proto.parse_address(str(st["addr"]))
+		if not bool(a["ok"]):
+			_svc.last_error = str(a["error"])
+			_svc.last_error_code = "bad_request"
+			_render_banner()
+			return
+		if bool(st["save"]):
+			NetPrefs.save_server(str(st["name"]) if str(st["name"]) != "" else Proto.format_address(str(a["host"]), int(a["port"])), str(a["host"]), int(a["port"]), str(st["pw"]))
+		layer.queue_free()
+		_join_meta = {}
+		_begin_join(str(a["host"]), int(a["port"]), str(st["pw"]))
+	var dlg: Dictionary = Chrome.dialog(layer, {"title": "Quick Connect", "width": 460.0, "buttons": [
+		{"text": "Cancel", "cancel": true, "cb": func() -> void: layer.queue_free()},
+		{"text": "Connect", "default": true, "cb": go}]})
+	var body: VBoxContainer = dlg.body
+	var ae: LineEdit = NC.text_field("192.168.1.20 or play.example.com:53735", "")
+	ae.text_changed.connect(func(t: String) -> void: st["addr"] = t)
+	ae.text_submitted.connect(func(_t2: String) -> void: go.call())
+	NC.label(body, "Address", "caption", "semibold", T.SECONDARY)
+	body.add_child(ae)
+	var pe: LineEdit = NC.text_field("Password (if the server has one)", "")
+	pe.secret = true
+	pe.text_changed.connect(func(t: String) -> void: st["pw"] = t)
+	body.add_child(pe)
+	var rec: Array = NetPrefs.recent()
+	if not rec.is_empty():
+		NC.label(body, "Recent", "caption", "semibold", T.SECONDARY)
+		var fl := _flow(body, 6, 6)
+		for item in rec.slice(0, 5):
+			var h: String = str((item as Dictionary).get("host", ""))
+			var pt: int = int((item as Dictionary).get("port", Proto.DEFAULT_PORT))
+			NC.chip(fl, Proto.format_address(h, pt), false, func() -> void:
+				ae.text = Proto.format_address(h, pt)
+				st["addr"] = ae.text)
+	var name_edit: LineEdit = NC.text_field("Name (optional)", "")
+	name_edit.visible = false
+	name_edit.text_changed.connect(func(t: String) -> void: st["name"] = t)
+	NC.toggle(body, "Save this server", false, func(v: bool) -> void:
+		st["save"] = v
+		name_edit.visible = v)
+	body.add_child(name_edit)
+	ae.grab_focus.call_deferred()
 
 
 # --- Session ---------------------------------------------------------------------------------------------------------------
@@ -1387,7 +1476,7 @@ func _page_session() -> void:
 		_ping_pill(chips, int(_svc.transport.rtt_ms))
 	var leave: Button = _btn(ch, "Stop hosting" if hosting else "Leave game", func() -> void:
 		_svc.leave()
-		tab = "Host Game"
+		tab = "Browse"
 		_render(), "destructive", "door.exit", "leave")
 	leave.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	if hosting:
@@ -1514,6 +1603,14 @@ func _dyn_players(into: Control) -> void:
 			_t(col, "System %d" % int(p["system_id"]), 12, "regular", T.SECONDARY)
 		if int(p.get("rtt", -1)) >= 0 and not mine:
 			_ping_pill(h, int(p["rtt"]))
+		if not mine and bool(((_svc.net_info.get("rules", {}) as Dictionary) if _svc.net_info.get("rules", {}) is Dictionary else {}).get("allow_trade", true)) \
+				and not (id == 1 and _svc.transport != null and not _svc.transport.has_local_player):
+			_btn(h, "Trade", func() -> void:
+				var why: String = _svc.trade_invite(id)
+				if why != "":
+					_svc.last_error = why
+					_svc.last_error_code = "bad_request"
+					_render_banner(), "bordered", "arrow.left.arrow.right", "trade:%d" % id)
 		if _svc.is_hosting() and not mine and id != 1:
 			_btn(h, "Kick", func() -> void: _svc.kick(id, false), "bordered", "", "kick:%d" % id)
 			_btn(h, "Ban", func() -> void: _svc.kick(id, true), "destructive", "", "ban:%d" % id)
@@ -1591,9 +1688,7 @@ func _refresh_dynamic() -> void:
 		match str(k):
 			"main":
 				match tab:
-					"Public": _dyn_public(fresh)
-					"LAN": _dyn_lan(fresh)
-					"Saved": _dyn_saved(fresh)
+					"Browse": _dyn_browse(fresh)
 			"players": _dyn_players(fresh)
 			"chat": _dyn_chat(fresh)
 		var sig := PackedStringArray()

@@ -1,13 +1,14 @@
 # NOVA Swift — original-game movies (QuickTime .mov) for the Godot frontend.
 #
-# Godot can't decode QuickTime, so each clip is transcoded ONCE with an external
-# ffmpeg into a cache under user://movies/ and played from there:
+# Godot can't decode QuickTime, so each clip is transcoded ONCE with ffmpeg — the bundled
+# decode-only build (scripts/build-mini-ffmpeg.sh, no Theora) or else one on PATH — into a
+# cache under user://movies/ and played from there:
 #   * "ogv"    — Ogg Theora (VideoStreamTheora), used when ffmpeg has the libtheora
 #                encoder (most Linux / Windows builds do);
 #   * "frames" — a JPEG frame sequence + movie.json (+ optional audio.wav), used when
 #                ffmpeg lacks libtheora (Homebrew's ffmpeg, for one). ui/MoviePlayer.gd
 #                plays either kind identically.
-# ffmpeg is an OPTIONAL runtime dependency. Without it (or if conversion fails) every
+# ffmpeg stays OPTIONAL at runtime. Without it (or if conversion fails) every
 # call here returns an empty result and callers skip the movie exactly as the original
 # does with its "QuickTime Movies" preference off (Ui_PlayMovieFileModal 0x0049db00
 # returns at once) — nothing blocks and nothing is reported as an error.
@@ -38,7 +39,12 @@ static func find_ffmpeg() -> String:
 		return _ffmpeg_cached
 	_ffmpeg_probed = true
 	var names: PackedStringArray = ["ffmpeg.exe", "ffmpeg"] if OS.get_name() == "Windows" else ["ffmpeg"]
-	var dirs: PackedStringArray = []
+	# The bundled decode-only build (scripts/build-mini-ffmpeg.sh) wins: beside the exported
+	# executable, then the dev-tree copy under res://bin/ffmpeg/<platform>/ (editor runs).
+	var dirs: PackedStringArray = [OS.get_executable_path().get_base_dir()]
+	var plat: String = {"macOS": "macos", "Linux": "linux", "Windows": "windows"}.get(OS.get_name(), "")
+	if plat != "":
+		dirs.append(ProjectSettings.globalize_path("res://bin/ffmpeg").path_join(plat))
 	for d in OS.get_environment("PATH").split(";" if OS.get_name() == "Windows" else ":", false):
 		dirs.append(d)
 	for d in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]:

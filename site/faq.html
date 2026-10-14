@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FAQ · NOVA Swift</title>
+  <meta name="description" content="Answers about NOVA Swift: where to get EV Nova, platforms, multiplayer, plug-ins, fidelity to the original, and reporting bugs." />
+  <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
+  <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
+  <meta property="og:title" content="NOVA Swift FAQ" />
+  <meta property="og:image" content="https://sirstig.github.io/NovaSwift/assets/launch-banner.png?v=brand2" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=21" />
+</head>
+<body data-page="guides">
+  <div class="space-bg" aria-hidden="true"></div>
+  <canvas id="stars" aria-hidden="true"></canvas>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <!-- nav:start -->
+  <nav class="nav" aria-label="Main">
+    <div class="nav-inner">
+      <a class="brand" href="index.html" aria-label="NOVA Swift home">
+        <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+        <b>NOVA<i>·</i>SWIFT</b>
+      </a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="nav-links">
+        <span class="bars" aria-hidden="true"></span><span class="sr">Menu</span>
+      </button>
+      <div class="nav-links" id="nav-links">
+        <a href="index.html#features" data-nav="index">Game</a>
+        <a href="download.html" data-nav="download">Download</a>
+        <a href="guides.html" data-nav="guides">Guides</a>
+        <a href="multiplayer.html" data-nav="multiplayer">Multiplayer</a>
+        <a href="servers.html" data-nav="servers">Servers</a>
+        <a href="plugins.html" data-nav="plugins">Plug-ins</a>
+        <a href="editor.html" data-nav="editor">Editor</a>
+        <a href="progress.html" data-nav="progress">Progress</a>
+      </div>
+      <div class="nav-cta">
+        <a class="btn btn-ghost sm icon-only" href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener" aria-label="Source code on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.7 1.2 3.4.9.1-.7.4-1.2.7-1.5-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.6 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
+        </a>
+        <a class="btn btn-primary sm" href="download.html">Play free</a>
+      </div>
+    </div>
+  </nav>
+  <!-- nav:end -->
+
+  <main id="main">
+    <header class="page-hero" style="--hero-img:url(assets/screenshots/galaxy-map.webp)">
+      <div class="wrap">
+        <div class="crumbs"><a href="guides.html">Guides</a> / FAQ</div>
+        <h1>Questions and answers.</h1>
+        <p class="lead">The things people ask most. Something missing? <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">Ask on GitHub</a>.</p>
+      </div>
+    </header>
+
+    <div class="wrap doc">
+      <!-- guidenav:start -->
+      <nav class="doc-nav" aria-label="Guides">
+        <h4>Start here</h4>
+        <a href="guide-getting-started.html">Getting started</a>
+        <a href="guide-controls.html">Controls &amp; controllers</a>
+        <a href="guide-steam-deck.html">Steam Deck &amp; Linux</a>
+        <a href="faq.html">FAQ &amp; troubleshooting</a>
+        <h4>Multiplayer</h4>
+        <a href="guide-multiplayer.html">Join &amp; host games</a>
+        <a href="dedicated-server.html">Dedicated server</a>
+        <a href="servers.html">Server list</a>
+        <h4>Plug-ins</h4>
+        <a href="guide-plugins.html">Installing plug-ins</a>
+        <a href="guide-making-plugins.html">Making a plug-in</a>
+        <a href="editor.html">The plug-in editor</a>
+      </nav>
+      <!-- guidenav:end -->
+
+      <article class="prose faq">
+        <h2 id="about">About NOVA Swift</h2>
+        <details open><summary>What is NOVA Swift?</summary><div>
+          <p>A new engine for EV Nova, the 2002 space trading and combat game by Ambrosia Software. It was written from a reverse-engineered reading of the original executable, so it plays like the original. It is not an emulator or a wrapper, and it's free and open source.</p></div></details>
+        <details><summary>Is it the same game?</summary><div>
+          <p>That's the goal. Every portable function of the original was compared and matched, and original behaviour is the default. Anything that changes the rules is an Enhancement you turn on yourself. If something plays differently, it's a bug: <a href="https://github.com/SirStig/NovaSwift/issues/new/choose" target="_blank" rel="noopener">report it</a>.</p></div></details>
+        <details><summary>Is it affiliated with Ambrosia or ATMOS?</summary><div>
+          <p>No. It's a fan preservation project and isn't endorsed by either.</p></div></details>
+
+        <h2 id="data">Game data</h2>
+        <details open><summary>Why do I need my own copy of EV Nova?</summary><div>
+          <p>EV Nova's ships, graphics, sounds and story belong to their owners. NOVA Swift ships none of it and never will. It reads a copy you have, the way OpenMW and OpenRA work.</p></div></details>
+        <details><summary>Where can I get EV Nova?</summary><div>
+          <p>EV Nova isn't sold anywhere today. The community keeps the original releases available; the easiest source for the data is the Windows build's zip from <a href="https://andrews05.github.io/evstuff/" target="_blank" rel="noopener">andrews05's EV archive</a>. Unzip it and point the setup wizard at the folder. More options are in <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/GET_THE_DATA.md" target="_blank" rel="noopener">GET_THE_DATA.md</a>.</p></div></details>
+        <details><summary>Can I use my old pilots?</summary><div>
+          <p>Yes. Windows pilot files import straight into the game; classic Mac pilots are in testing. See <a href="guide-getting-started.html">Getting started</a>.</p></div></details>
+
+        <h2 id="platforms">Platforms</h2>
+        <details><summary>Which platforms are supported?</summary><div>
+          <p>macOS, iPhone, iPad and Apple TV through TestFlight. Linux and Steam Deck as a beta download. Windows is next. See <a href="download.html">Download</a>.</p></div></details>
+        <details><summary>Does it work on Steam Deck?</summary><div>
+          <p>The Linux build runs on the Deck, with full controller support. Add it to Steam as a non-Steam game for Game Mode. It's a new beta, so please report anything odd. See the <a href="guide-steam-deck.html">Steam Deck guide</a>.</p></div></details>
+        <details><summary>Do I need a controller on Apple TV?</summary><div>
+          <p>Yes. The Siri Remote can't fly a ship, so Apple TV needs an extended game controller (Xbox, PlayStation or MFi). Everything else on Apple devices works with touch, mouse, keyboard or a controller.</p></div></details>
+        <details><summary>Is it on Steam or the App Store?</summary><div>
+          <p>Not at the moment. Apple builds go out through TestFlight and desktop builds through GitHub Releases.</p></div></details>
+
+        <h2 id="multiplayer">Multiplayer</h2>
+        <details><summary>Do I lose my single-player game if I play online?</summary><div>
+          <p>No. Multiplayer is an overlay: you keep playing your own save, and only the systems you share with other pilots sync. Story progress you earn together is added to your save, never removed.</p></div></details>
+        <details><summary>Can Apple and Linux players play together?</summary><div>
+          <p>Not yet. Cross-play is being wired up now. See <a href="multiplayer.html#crossplay">cross-play status</a>.</p></div></details>
+        <details><summary>Do I have to pay for a server?</summary><div>
+          <p>No. Apple players use Game Center, which Apple runs. Desktop players can host from the game, use a free community server, or run the free <a href="dedicated-server.html">dedicated server</a> on any spare machine.</p></div></details>
+        <details><summary>Can I play with plug-ins online?</summary><div>
+          <p>Yes. Everyone needs the same gameplay plug-ins; art and sound plug-ins are optional. The game tells you what's missing, and catalog plug-ins install in one step. See the <a href="guide-multiplayer.html">multiplayer guide</a>.</p></div></details>
+
+        <h2 id="plugins">Plug-ins</h2>
+        <details><summary>Do old EV Nova plug-ins work?</summary><div>
+          <p>They're meant to. NOVA Swift reads the original formats, including old Mac <code>.sit</code> and <code>.hqx</code> archives. If one misbehaves, report it with the plug-in's name.</p></div></details>
+        <details><summary>Will my plug-in work in the original EV Nova?</summary><div>
+          <p>Plug-ins saved from the editor as <code>.rez</code> or classic files load in the original. HD art is an extra layer that the original ignores.</p></div></details>
+
+        <h2 id="trouble">Troubleshooting</h2>
+        <details><summary>How do I report a bug?</summary><div>
+          <p>Open Settings, Support, Report a Bug (on Linux and Steam Deck: Settings, Data &amp; Advanced, Report a Bug). It builds a diagnostics bundle (your pilot, a log and a self-test) to attach to a <a href="https://github.com/SirStig/NovaSwift/issues/new/choose" target="_blank" rel="noopener">GitHub issue</a>. That's far more useful than a screenshot.</p></div></details>
+        <details><summary>The setup wizard can't find my data</summary><div>
+          <p>Point it at the folder that holds the game's data files: the unzipped Windows folder with its <code>.rez</code> files, or a Mac <code>Nova Files</code> folder. See <a href="guide-getting-started.html#data">Adding your data</a>.</p></div></details>
+        <details><summary>The original movies don't play on Linux</summary><div>
+          <p>Install <code>ffmpeg</code> from your distribution's package manager. The movies are optional.</p></div></details>
+        <details><summary>How do I update?</summary><div>
+          <p>TestFlight updates the Apple app. The desktop build checks GitHub for updates in Settings, Data &amp; Advanced.</p></div></details>
+      </article>
+    </div>
+  </main>
+
+  <!-- footer:start -->
+  <footer class="footer">
+    <div class="wrap">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="index.html">
+            <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+            <b>NOVA<i>·</i>SWIFT</b>
+          </a>
+          <p>EV Nova, rebuilt from the ground up. Free and open source. Bring your own copy of the game.</p>
+        </div>
+        <div>
+          <h4>Play</h4>
+          <a href="download.html">Download</a>
+          <a href="guide-getting-started.html">Getting started</a>
+          <a href="guide-controls.html">Controls</a>
+          <a href="guide-steam-deck.html">Steam Deck</a>
+          <a href="faq.html">FAQ</a>
+        </div>
+        <div>
+          <h4>Multiplayer</h4>
+          <a href="multiplayer.html">How it works</a>
+          <a href="servers.html">Server list</a>
+          <a href="dedicated-server.html">Dedicated server</a>
+          <a href="guide-multiplayer.html">Join &amp; host guide</a>
+        </div>
+        <div>
+          <h4>Create</h4>
+          <a href="plugins.html">Community plug-ins</a>
+          <a href="editor.html">Plug-in editor</a>
+          <a href="guide-making-plugins.html">Make a plug-in</a>
+          <a href="progress.html">Fidelity progress</a>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <a href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">Report a bug</a>
+          <a href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Releases</a>
+          <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/CHARTER.md" target="_blank" rel="noopener">Charter</a>
+        </div>
+      </div>
+      <p class="legal">
+        EV Nova and its data are copyrighted by their owners and are not distributed here. You supply your own copy.
+        Screenshots show EV Nova's game content running in NOVA Swift. The NOVA Swift banner, logo and icon are original.
+        NOVA Swift's code is open source. It is a fan preservation project, not affiliated with or endorsed by Ambrosia Software or ATMOS.
+      </p>
+    </div>
+  </footer>
+  <!-- footer:end -->
+
+  <script src="starfield.js?v=2"></script>
+  <script src="js/site.js?v=1"></script>
+</body>
+</html>

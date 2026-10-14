@@ -7,12 +7,16 @@
 # Loaded with preload() (no class_name), like Controls.gd.
 extends RefCounted
 
-## Bumped when the handshake or the packet framing below changes incompatibly.
+## The network PROTOCOL version (mirrors Swift `CrossPlayProtocol.wireProtocol`): bumped only when the handshake, the
+## packet framing or the NetSession wire format changes incompatibly. Different app versions with the same PROTO
+## connect fine; the game version is informational (a "different version" note), not a gate.
 const PROTO := 1
 const DEFAULT_PORT := 53735
 ## UDP port LAN beacons are broadcast to / listened on (and the query port of a default-port server).
 const LAN_PORT := 53736
 const MAX_NAME := 24
+## The online hosting guide (the players' "how do I host" link; there is no site page for it yet).
+const HOSTING_URL := "https://github.com/SirStig/NovaSwift/blob/main/docs/MULTIPLAYER.md#host-a-public-server-in-5-minutes"
 
 # Packet kinds (first byte). Control kinds carry a UTF-8 JSON body; DATA carries [int32 peer id][bridge bytes].
 const K_HELLO := 0x01      # client -> server: {proto, version, name, pw, manifest}
@@ -144,6 +148,14 @@ static func manifest_signature(json_text: String) -> String:
 	if t == "":
 		return ""
 	var v: Variant = JSON.parse_string(t)
+	if v is Dictionary and (v as Dictionary).get("plugins") is Array:
+		# Only the GAMEPLAY plug-ins' id + content hash decide compatibility (cosmetic ones ride along, never compared).
+		var rows: Array = []
+		for p in ((v as Dictionary)["plugins"] as Array):
+			if p is Dictionary:
+				rows.append(str((p as Dictionary).get("id", "")) + "=" + str((p as Dictionary).get("contentHash", "")))
+		rows.sort()
+		return "|".join(PackedStringArray(rows))
 	if v is Dictionary:
 		return JSON.stringify(v, "", true)
 	if v is Array:
@@ -186,7 +198,7 @@ static func unpack_data(pkt: PackedByteArray) -> Dictionary:
 # --- LAN beacon --------------------------------------------------------------------------------------
 
 ## {name, players, max, ver, pw, port, rules, dedicated} -> "NSB1" + JSON.
-static func encode_beacon(info: Dictionary) -> PackedByteArray:
+static func encode_beacon(info: Dictionary, with_cert: bool = false) -> PackedByteArray:
 	var d: Dictionary = {
 		"name": clean_name(str(info.get("name", "NovaSwift")), "NovaSwift"),
 		"players": int(info.get("players", 0)),
@@ -196,7 +208,23 @@ static func encode_beacon(info: Dictionary) -> PackedByteArray:
 		"port": int(info.get("port", DEFAULT_PORT)),
 		"rules": str(info.get("rules", "")),
 		"dedicated": bool(info.get("dedicated", false)),
+		"proto": PROTO,
 	}
+	if bool(info.get("dtls", false)):
+		d["dtls"] = true
+		d["fp"] = str(info.get("fp", ""))
+		if with_cert:   # only in unicast status replies (a certificate is too big for the LAN broadcast)
+			d["cert"] = str(info.get("cert", ""))
+	# Plug-in requirements (net/NetPlugins.gd plugin_wire): signature + count + total conversion always, the list
+	# only in unicast status replies (with_cert), where the size limit is looser than a LAN broadcast's.
+	var pw: Variant = info.get("plugin_wire")
+	if pw is Dictionary:
+		d["sig"] = str((pw as Dictionary).get("sig", ""))
+		d["pcount"] = int((pw as Dictionary).get("count", 0))
+		d["tc"] = str((pw as Dictionary).get("tc", ""))
+		if with_cert:
+			d["plugins"] = (pw as Dictionary).get("plugins", [])
+			d["addons"] = (pw as Dictionary).get("addons", [])
 	var b: PackedByteArray = BEACON_MAGIC.to_utf8_buffer()
 	b.append_array(JSON.stringify(d).to_utf8_buffer())
 	return b
@@ -204,7 +232,7 @@ static func encode_beacon(info: Dictionary) -> PackedByteArray:
 
 ## Back to the info dictionary, or {} when it is not a beacon / is malformed.
 static func decode_beacon(pkt: PackedByteArray) -> Dictionary:
-	if pkt.size() < 6 or pkt.size() > 2048:
+	if pkt.size() < 6 or pkt.size() > 6144:
 		return {}
 	if pkt.slice(0, 4).get_string_from_ascii() != BEACON_MAGIC:
 		return {}
@@ -217,7 +245,11 @@ static func decode_beacon(pkt: PackedByteArray) -> Dictionary:
 		return {}
 	return {"name": clean_name(str(d.get("name", "")), "Server"), "players": maxi(0, int(d.get("players", 0))),
 		"max": maxi(0, int(d.get("max", 0))), "ver": str(d.get("ver", "")), "pw": bool(d.get("pw", false)),
-		"port": port, "rules": str(d.get("rules", "")), "dedicated": bool(d.get("dedicated", false))}
+		"port": port, "rules": str(d.get("rules", "")), "dedicated": bool(d.get("dedicated", false)),
+		"proto": int(d.get("proto", PROTO)),
+		"dtls": bool(d.get("dtls", false)), "fp": str(d.get("fp", "")), "cert": str(d.get("cert", "")),
+		"sig": str(d.get("sig", "")), "pcount": int(d.get("pcount", -1)) if d.has("pcount") else -1, "tc": str(d.get("tc", "")),
+		"plugins": d.get("plugins", []) if d.get("plugins", []) is Array else [], "addons": d.get("addons", []) if d.get("addons", []) is Array else []}
 
 
 static func is_query(pkt: PackedByteArray) -> bool:

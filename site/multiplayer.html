@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Multiplayer · NOVA Swift</title>
+  <meta name="description" content="Play EV Nova with friends: everyone keeps their own galaxy and pilot, and shared star systems sync completely. Game Center and local Wi-Fi on Apple, LAN, direct IP and dedicated servers on Linux, Steam Deck and Windows." />
+  <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
+  <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
+  <meta property="og:title" content="NOVA Swift multiplayer" />
+  <meta property="og:image" content="https://sirstig.github.io/NovaSwift/assets/launch-banner.png?v=brand2" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=21" />
+</head>
+<body data-page="multiplayer">
+  <div class="space-bg" aria-hidden="true"></div>
+  <canvas id="stars" aria-hidden="true"></canvas>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <!-- nav:start -->
+  <nav class="nav" aria-label="Main">
+    <div class="nav-inner">
+      <a class="brand" href="index.html" aria-label="NOVA Swift home">
+        <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+        <b>NOVA<i>·</i>SWIFT</b>
+      </a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="nav-links">
+        <span class="bars" aria-hidden="true"></span><span class="sr">Menu</span>
+      </button>
+      <div class="nav-links" id="nav-links">
+        <a href="index.html#features" data-nav="index">Game</a>
+        <a href="download.html" data-nav="download">Download</a>
+        <a href="guides.html" data-nav="guides">Guides</a>
+        <a href="multiplayer.html" data-nav="multiplayer">Multiplayer</a>
+        <a href="servers.html" data-nav="servers">Servers</a>
+        <a href="plugins.html" data-nav="plugins">Plug-ins</a>
+        <a href="editor.html" data-nav="editor">Editor</a>
+        <a href="progress.html" data-nav="progress">Progress</a>
+      </div>
+      <div class="nav-cta">
+        <a class="btn btn-ghost sm icon-only" href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener" aria-label="Source code on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.7 1.2 3.4.9.1-.7.4-1.2.7-1.5-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.6 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
+        </a>
+        <a class="btn btn-primary sm" href="download.html">Play free</a>
+      </div>
+    </div>
+  </nav>
+  <!-- nav:end -->
+
+  <main id="main">
+    <header class="page-hero" style="--hero-img:url(assets/screenshots/host-lobby.webp)">
+      <div class="wrap">
+        <span class="eyebrow">Multiplayer <span class="badge warn">Beta</span></span>
+        <h1>Fly the same stars as your friends.</h1>
+        <p class="lead">Everyone keeps their own galaxy, pilot and story. Jump into the same system as a friend and you're playing together: escort them, fight beside them, or settle a score.</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="guide-multiplayer.html">Join &amp; host guide</a>
+          <a class="btn btn-ghost" href="servers.html">Browse servers</a>
+          <a class="btn btn-ghost" href="dedicated-server.html">Run a server</a>
+        </div>
+      </div>
+    </header>
+
+    <section class="section">
+      <div class="wrap">
+        <div class="head">
+          <span class="eyebrow">How it works</span>
+          <h2>An overlay on your own game.</h2>
+          <p>Multiplayer never replaces your save. You play your own galaxy exactly as in single player, and the people you're connected to appear on your map.</p>
+        </div>
+        <div class="cards">
+          <div class="card">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.500 3 14.500 0 18M12 3c-3 3.500-3 14.500 0 18"/></svg></div>
+            <h3>Apart: your own game</h3>
+            <p>In different systems you each play on your own. Only a tiny "who's where" message travels, so friends show up on the galaxy map.</p>
+          </div>
+          <div class="card">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="12" r="5"/><circle cx="15" cy="12" r="5"/></svg></div>
+            <h3>Together: one shared system</h3>
+            <p>In the same system, everything syncs: ships, shots, AI, events. One of you runs that system and the others follow; if they leave, someone else takes over seamlessly.</p>
+          </div>
+          <div class="card">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v18M5 8l7-5 7 5M5 16l7 5 7-5"/></svg></div>
+            <h3>Your story stays yours</h3>
+            <p>Shipyards, outfitters, rank and pay use your own save. Story progress you earn together is added to yours, never taken away.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt">
+      <div class="wrap split">
+        <div class="split-copy">
+          <span class="eyebrow">House rules</span>
+          <h2>The host sets the stakes.</h2>
+          <p><b>Safe</b> is sparring: PvP damage and death aren't real, so nobody loses a ship to a friend. <b>Full stakes</b> makes everything count. Or pick custom rules one by one.</p>
+          <ul class="rules" aria-label="Rules the host can set">
+            <li>PvP on or off</li>
+            <li>Real damage</li>
+            <li>Friendly fire</li>
+            <li>Permadeath</li>
+            <li>Player trading</li>
+          </ul>
+        </div>
+        <figure class="shot">
+          <img src="assets/screenshots/host-lobby.webp" width="1800" height="1130" loading="lazy"
+               alt="The Host Lobby with a Co-op or Full Stakes switch and options for PvP, real damage, friendly fire, permadeath and trading." />
+        </figure>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="wrap">
+        <div class="head">
+          <span class="eyebrow">Ways to connect</span>
+          <h2>Pick how you play.</h2>
+        </div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Connection</th><th>Apple app</th><th>Linux · Steam Deck · Windows</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><b>Internet with friends</b></td><td><span class="badge ok">Game Center</span></td><td><span class="badge ok">Direct address</span></td><td>Game Center needs no setup. On desktop, the host forwards one UDP port, or everyone uses Tailscale.</td></tr>
+              <tr><td><b>Same network</b></td><td><span class="badge ok">Local Wi-Fi</span></td><td><span class="badge ok">LAN browser</span></td><td>Games on your network appear on their own.</td></tr>
+              <tr><td><b>Public lobbies</b></td><td><span class="badge ok">Lobby list</span></td><td><span class="badge ok">Server browser</span></td><td>Apple lists open Game Center lobbies through iCloud. Desktop lists community servers.</td></tr>
+              <tr><td><b>Dedicated servers</b></td><td><span class="badge warn">In progress</span></td><td><span class="badge ok">Yes</span></td><td>Always-on servers run by players. <a href="dedicated-server.html">Run your own</a>.</td></tr>
+              <tr><td><b>Cross-play</b></td><td colspan="2"><span class="badge warn">In progress</span></td><td>Apple and desktop players on the same servers. See below.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt">
+      <div class="wrap">
+        <div class="two-col">
+          <div>
+            <span class="eyebrow">Apple</span>
+            <h3>Game Center, Wi-Fi and the lobby list</h3>
+            <p>On Mac, iPhone, iPad and Apple TV, invite friends through Game Center or play over local Wi-Fi with nothing to set up. Hosts can choose to list their lobby publicly; other players see it in the lobby list and knock to join, and the host lets them in.</p>
+            <p>Apple runs the matchmaking and relays, so there's no server for anyone to pay for.</p>
+          </div>
+          <div>
+            <span class="eyebrow">Desktop</span>
+            <h3>Browse, Quick Connect, Host</h3>
+            <p>The multiplayer screen on Linux, Steam Deck and Windows puts your saved servers at the top of the browser, above games on your network and public servers, each with live ping and player counts. Quick Connect joins any address and can save it. Host opens your own game to friends.</p>
+            <p>It all works with a mouse, a keyboard or a gamepad.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="plugins">
+      <div class="wrap split">
+        <div class="split-copy">
+          <span class="eyebrow">Plug-ins online</span>
+          <h2>Bring your mods.</h2>
+          <p>Servers can run plug-ins, even total conversions. When you join, the game compares <b>gameplay</b> plug-ins (ships, weapons, missions, systems) and tells you exactly what to install, update or turn off. Art, sound and interface plug-ins are yours to keep or skip; they don't affect anyone else.</p>
+          <p>If the server uses plug-ins from the community catalog, you can install them and join in one step, and your own plug-in setup comes back when you leave.</p>
+        </div>
+        <div class="callout tip">
+          <p><b>Version-friendly.</b> Joining checks the network protocol version, not the exact app version, so small updates don't lock you out of your friends' games.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt" id="crossplay">
+      <div class="wrap">
+        <div class="head">
+          <span class="eyebrow">Cross-play</span>
+          <h2>Apple and desktop, together. Nearly.</h2>
+          <p>Desktop builds use a different network transport than Game Center, so today Apple players and desktop players can't meet. The bridge is under way: the Apple app is getting the same connection layer as the desktop builds, so it can browse the public server list, join dedicated servers and desktop hosts by address, and later host them too.</p>
+        </div>
+        <div class="cards">
+          <div class="card"><span class="badge ok">Done</span><h3 style="margin-top:10px">Shared protocol</h3><p>The connection layer is implemented in the shared Swift code and tested against a real desktop dedicated server.</p></div>
+          <div class="card"><span class="badge warn">In progress</span><h3 style="margin-top:10px">Apple server browser</h3><p>Public, LAN and saved servers and Quick Connect in the Apple app, next to Game Center.</p></div>
+          <div class="card"><span class="badge">Next</span><h3 style="margin-top:10px">Apple hosting for everyone</h3><p>Letting a Mac or iPad host a game desktop players can join.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="wrap">
+        <div class="cards">
+          <a class="card" href="guide-multiplayer.html"><h3>Join &amp; host guide</h3><p>Step by step for every platform, plus fixes for connection errors.</p><span class="more">Read the guide</span></a>
+          <a class="card" href="servers.html"><h3>Server list</h3><p>Public community servers with live status, region and rules.</p><span class="more">Browse servers</span></a>
+          <a class="card" href="dedicated-server.html"><h3>Dedicated server</h3><p>Run a server at home or on a VPS, and get it listed.</p><span class="more">Host a server</span></a>
+        </div>
+        <div class="callout warn" style="margin-top:var(--s4)">
+          <p><b>Beta.</b> Multiplayer is new and hasn't had much play on real networks yet. If something desyncs or won't connect, <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">tell us</a> with the diagnostics bundle from Report a Bug in Settings.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- footer:start -->
+  <footer class="footer">
+    <div class="wrap">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="index.html">
+            <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+            <b>NOVA<i>·</i>SWIFT</b>
+          </a>
+          <p>EV Nova, rebuilt from the ground up. Free and open source. Bring your own copy of the game.</p>
+        </div>
+        <div>
+          <h4>Play</h4>
+          <a href="download.html">Download</a>
+          <a href="guide-getting-started.html">Getting started</a>
+          <a href="guide-controls.html">Controls</a>
+          <a href="guide-steam-deck.html">Steam Deck</a>
+          <a href="faq.html">FAQ</a>
+        </div>
+        <div>
+          <h4>Multiplayer</h4>
+          <a href="multiplayer.html">How it works</a>
+          <a href="servers.html">Server list</a>
+          <a href="dedicated-server.html">Dedicated server</a>
+          <a href="guide-multiplayer.html">Join &amp; host guide</a>
+        </div>
+        <div>
+          <h4>Create</h4>
+          <a href="plugins.html">Community plug-ins</a>
+          <a href="editor.html">Plug-in editor</a>
+          <a href="guide-making-plugins.html">Make a plug-in</a>
+          <a href="progress.html">Fidelity progress</a>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <a href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">Report a bug</a>
+          <a href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Releases</a>
+          <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/CHARTER.md" target="_blank" rel="noopener">Charter</a>
+        </div>
+      </div>
+      <p class="legal">
+        EV Nova and its data are copyrighted by their owners and are not distributed here. You supply your own copy.
+        Screenshots show EV Nova's game content running in NOVA Swift. The NOVA Swift banner, logo and icon are original.
+        NOVA Swift's code is open source. It is a fan preservation project, not affiliated with or endorsed by Ambrosia Software or ATMOS.
+      </p>
+    </div>
+  </footer>
+  <!-- footer:end -->
+
+  <script src="starfield.js?v=2"></script>
+  <script src="js/site.js?v=1"></script>
+</body>
+</html>

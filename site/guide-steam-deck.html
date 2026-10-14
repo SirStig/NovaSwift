@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Steam Deck &amp; Linux · NOVA Swift guides</title>
+  <meta name="description" content="Install the NOVA Swift beta on Linux and Steam Deck, add it to Game Mode, import your EV Nova data and fix common problems." />
+  <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand3" />
+  <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand3" />
+  <meta property="og:title" content="Steam Deck &amp; Linux · NOVA Swift" />
+  <meta property="og:image" content="https://sirstig.github.io/NovaSwift/assets/launch-banner.png?v=brand2" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&amp;family=Saira+Semi+Condensed:wght@500;600;700&amp;display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=21" />
+</head>
+<body data-page="guides">
+  <div class="space-bg" aria-hidden="true"></div>
+  <canvas id="stars" aria-hidden="true"></canvas>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <!-- nav:start -->
+  <nav class="nav" aria-label="Main">
+    <div class="nav-inner">
+      <a class="brand" href="index.html" aria-label="NOVA Swift home">
+        <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+        <b>NOVA<i>·</i>SWIFT</b>
+      </a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="nav-links">
+        <span class="bars" aria-hidden="true"></span><span class="sr">Menu</span>
+      </button>
+      <div class="nav-links" id="nav-links">
+        <a href="index.html#features" data-nav="index">Game</a>
+        <a href="download.html" data-nav="download">Download</a>
+        <a href="guides.html" data-nav="guides">Guides</a>
+        <a href="multiplayer.html" data-nav="multiplayer">Multiplayer</a>
+        <a href="servers.html" data-nav="servers">Servers</a>
+        <a href="plugins.html" data-nav="plugins">Plug-ins</a>
+        <a href="editor.html" data-nav="editor">Editor</a>
+        <a href="progress.html" data-nav="progress">Progress</a>
+      </div>
+      <div class="nav-cta">
+        <a class="btn btn-ghost sm icon-only" href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener" aria-label="Source code on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.7 1.2 3.4.9.1-.7.4-1.2.7-1.5-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.6 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
+        </a>
+        <a class="btn btn-primary sm" href="download.html">Play free</a>
+      </div>
+    </div>
+  </nav>
+  <!-- nav:end -->
+
+  <main id="main">
+    <header class="page-hero" style="--hero-img:url(assets/screenshots/galaxy-map.webp)">
+      <div class="wrap">
+        <div class="crumbs"><a href="guides.html">Guides</a> / Steam Deck &amp; Linux</div>
+        <h1>Steam Deck &amp; Linux</h1>
+        <p class="lead">The Godot build of NOVA Swift runs on Linux x86_64 and the Steam Deck. It is an experimental beta, and this page is upfront about what has and has not been tested.</p>
+      </div>
+    </header>
+
+    <div class="wrap doc">
+      <!-- guidenav:start -->
+      <nav class="doc-nav" aria-label="Guides">
+        <h4>Start here</h4>
+        <a href="guide-getting-started.html">Getting started</a>
+        <a href="guide-controls.html">Controls &amp; controllers</a>
+        <a href="guide-steam-deck.html">Steam Deck &amp; Linux</a>
+        <a href="faq.html">FAQ &amp; troubleshooting</a>
+        <h4>Multiplayer</h4>
+        <a href="guide-multiplayer.html">Join &amp; host games</a>
+        <a href="dedicated-server.html">Dedicated server</a>
+        <a href="servers.html">Server list</a>
+        <h4>Plug-ins</h4>
+        <a href="guide-plugins.html">Installing plug-ins</a>
+        <a href="guide-making-plugins.html">Making a plug-in</a>
+        <a href="editor.html">The plug-in editor</a>
+      </nav>
+      <!-- guidenav:end -->
+
+      <article class="prose">
+        <div class="toc"><b>On this page</b><ol>
+          <li><a href="#status">Beta status</a></li>
+          <li><a href="#install">Install</a></li>
+          <li><a href="#game-mode">Add it to Game Mode</a></li>
+          <li><a href="#controller">Controller layout</a></li>
+          <li><a href="#data">Import your EV Nova data</a></li>
+          <li><a href="#movies">Original movies (optional ffmpeg)</a></li>
+          <li><a href="#updates">Updates</a></li>
+          <li><a href="#files">File locations</a></li>
+          <li><a href="#limits">Known limits</a></li>
+          <li><a href="#troubleshooting">Troubleshooting</a></li>
+        </ol></div>
+
+        <h2 id="status">Beta status</h2>
+        <div class="callout warn"><p><b>Not yet run on real Steam Deck hardware.</b> The Linux package was built in a clean Ubuntu 22.04 container and checked headless: it loads, and it reads game data. It has not been run on an actual Steam Deck or with a GPU, so flight visuals, performance and the Game Mode setup below are untested on real hardware. Please report what you find.</p></div>
+        <p>Players supply their own EV Nova data. Nothing ships in the download. The Windows version is not released yet.</p>
+
+        <h2 id="install">Install</h2>
+        <p>The current build is the <code>v0.7.0-beta.1</code> pre-release. On a Steam Deck, do these steps in Desktop Mode.</p>
+        <ol class="steps">
+          <li><h3>Download</h3><p>Open the <a href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">GitHub Releases page</a> and download <code>NovaSwift-linux-x86_64.tar.gz</code>. Use the Releases page rather than "latest", which skips pre-releases.</p></li>
+          <li><h3>Extract</h3><p>Extract it somewhere writable, for example <code>~/Games/NovaSwift</code>. Keep the install folder writable if you want in-game updates to work.</p>
+<pre class="code"><code><span class="c"># example</span>
+<span class="k">mkdir</span> -p ~/Games
+<span class="k">tar</span> -xzf ~/Downloads/NovaSwift-linux-x86_64.tar.gz -C ~/Games</code></pre></li>
+          <li><h3>Run</h3><p>Open the extracted <code>NovaSwift</code> folder and run <code>NovaSwift.sh</code>. The first screen is the Data Setup wizard. See <a href="#data">Import your EV Nova data</a>.</p></li>
+        </ol>
+        <p>The package includes the game, its libraries and the Swift runtime. It was built on Ubuntu 22.04 and needs no newer than glibc 2.35, which SteamOS 3 and current distributions exceed. There is a menu-entry file, <code>novaswift.desktop</code>, in the package sources. Copying it to <code>~/.local/share/applications/</code> (after pointing its <code>Exec</code> and <code>Icon</code> lines at absolute paths) is optional and untested on a Deck.</p>
+
+        <h2 id="game-mode">Add it to Game Mode</h2>
+        <ol class="steps">
+          <li><h3>Add a non-Steam game</h3><p>In Desktop Mode, open Steam, choose Games, then <em>Add a Non-Steam Game to My Library</em>, then <em>Browse</em>, and select <code>NovaSwift.sh</code> (or <code>NovaSwift.x86_64</code>). No Steam API or <code>steam_appid.txt</code> is needed. NOVA Swift also runs fine outside Steam.</p></li>
+          <li><h3>Pick the Gamepad template</h3><p>Open the shortcut's Controller settings and choose the <strong>Gamepad</strong> template, so Steam Input presents a plain Xbox-style pad. Avoid the Keyboard + Mouse templates. You do not need to map the trackpads.</p></li>
+          <li><h3>Switch to Game Mode</h3><p>Return to Game Mode and launch NOVA Swift from your library. Run it fullscreen in Settings, Graphics.</p></li>
+        </ol>
+        <p>The Deck's 1280x800 screen is used fully, not letterboxed. The game's base size is 1280x720 and it stretches to fill the extra height.</p>
+
+        <h2 id="controller">Controller layout</h2>
+        <p>NOVA Swift reads the Deck as a standard gamepad through Steam Input. Defaults:</p>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>Action</th><th>Deck control</th></tr></thead>
+          <tbody>
+            <tr><td>Turn and thrust</td><td>Left stick</td></tr>
+            <tr><td>Aim (ship faces the stick)</td><td>Right stick</td></tr>
+            <tr><td>Thrust / reverse</td><td>RT / LT</td></tr>
+            <tr><td>Fire primary / secondary</td><td>A / B</td></tr>
+            <tr><td>Afterburner</td><td>L3 (press left stick)</td></tr>
+            <tr><td>Target nearest / nearest hostile</td><td>X / Y</td></tr>
+            <tr><td>Clear target</td><td>R3 (press right stick)</td></tr>
+            <tr><td>Previous / next secondary</td><td>LB / RB (tap)</td></tr>
+            <tr><td>Jump / land / hail / board</td><td>D-pad up / down / left / right</td></tr>
+            <tr><td>Galaxy map</td><td>View (tap)</td></tr>
+            <tr><td>Pause menu</td><td>Menu</td></tr>
+            <tr><td>Action wheels</td><td>Hold LB, RB or View, flick the right stick, release</td></tr>
+          </tbody>
+        </table></div>
+        <p>The Deck's own button names for View and Menu map to Back and Start in the game. Menus use the controller cursor, and text entry opens an on-screen pad keyboard. Everything is rebindable in Settings, Controls. The <a href="guide-controls.html">Controls &amp; controllers</a> guide has the full tables, action wheels and the cursor.</p>
+
+        <h2 id="data">Import your EV Nova data</h2>
+        <p>The game has no demo mode. Until your data is imported, the Data Setup wizard is the only thing it shows, apart from Settings and Quit. See <a href="guide-getting-started.html#data">Getting started</a> for where to find the data and what the wizard accepts. On a Deck:</p>
+        <ol class="steps">
+          <li><h3>Get the files onto the Deck</h3><p>In Desktop Mode, put the Windows <code>.zip</code> or the game folder on the Deck. A USB stick or SD card appears under <code>/run/media/...</code>, and a browser download lands in <code>~/Downloads</code>. The zip does not need unzipping.</p></li>
+          <li><h3>Browse to it</h3><p>Back in NOVA Swift (Game Mode is fine), choose <em>Browse…</em> in the wizard. The built-in file browser has shortcuts for Home, Downloads and the SD card, and it is fully controller driven: <kbd>A</kbd> opens, <kbd>B</kbd> goes up, <kbd>Y</kbd> uses the current folder and <kbd>X</kbd> cancels. Installs the game spots by itself are listed on the page.</p></li>
+          <li><h3>Let it copy</h3><p>The wizard validates the data and copies it into NOVA Swift's own folder. Your originals are never changed, and it keeps your previous data until the new copy passes.</p></li>
+        </ol>
+        <p>To change the data later: Settings, Data &amp; Advanced, <em>Re-import / Change Game Data…</em>.</p>
+
+        <h2 id="movies">Original movies (optional ffmpeg)</h2>
+        <p>EV Nova's movies, such as the race clips, are QuickTime files, which the game engine cannot play directly. NOVA Swift converts them once, using <code>ffmpeg</code>. If ffmpeg is not found, movies are simply skipped and everything else still works, as with the original's QuickTime Movies preference turned off.</p>
+        <p>If your movies do not play, install ffmpeg:</p>
+<pre class="code"><code><span class="c"># SteamOS: unlock the read-only system first (updates may remove ffmpeg again)</span>
+<span class="k">sudo</span> steamos-readonly disable
+<span class="k">sudo</span> pacman -S ffmpeg</code></pre>
+        <p>A static ffmpeg binary placed on your <code>PATH</code> also works, for example <code>~/.local/bin/ffmpeg</code>. The game also looks in <code>/usr/local/bin</code> and <code>/usr/bin</code>. On other distributions, use your package manager. Any ffmpeg is fine.</p>
+
+        <h2 id="updates">Updates</h2>
+        <p>The game checks GitHub for a newer release when the main menu opens, at most once a day, and never downloads anything until you choose <em>Update Now</em>. The other choices are <em>Skip This Version</em> and <em>Later</em>. Updates are cryptographically signed, and anything that does not verify is refused.</p>
+        <ul>
+          <li>Settings, Data &amp; Advanced, <em>Updates</em> has <em>Check for updates</em> (on by default) and <em>Experimental updates</em> (off by default). Experimental builds can be unstable or break saves.</li>
+          <li>If the install folder is read-only, or the game was installed through a system that manages itself (Flatpak, AppImage, Snap), the prompt offers <em>Open Download Page</em> instead.</li>
+          <li>If an update fails, the previous version is restored automatically and the next start tells you why.</li>
+          <li>Your pilots, settings and game data live outside the install folder, so updates never touch them.</li>
+        </ul>
+        <div class="callout warn"><p>The updater is built but has not yet been tested end to end with a real published release. If it misbehaves, download the new tarball from Releases and extract it over the old folder.</p></div>
+
+        <h2 id="files">File locations</h2>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th>What</th><th>Where</th></tr></thead>
+          <tbody>
+            <tr><td>Imported EV Nova data</td><td><code>~/.local/share/NovaSwift/data</code></td></tr>
+            <tr><td>Pilots (<code>.evpilot</code> and backups)</td><td><code>~/Documents/NovaSwift/Pilots</code> by default. Changeable in Settings, Data &amp; Advanced, Saved Games.</td></tr>
+            <tr><td>Settings and other app data</td><td><code>~/.local/share/godot/app_userdata/NOVA Swift (Godot)/</code></td></tr>
+            <tr><td>Install folder</td><td>Wherever you extracted it, for example <code>~/Games/NovaSwift</code></td></tr>
+          </tbody>
+        </table></div>
+
+        <h2 id="limits">Known limits</h2>
+        <ul>
+          <li>Not tested on a real Steam Deck or with a real GPU yet. This is the biggest unknown.</li>
+          <li>The Game Mode shortcut and the <code>.desktop</code> menu entry are untested on a Deck.</li>
+          <li>The in-game updater has not been tested end to end.</li>
+          <li>Windows is not released yet.</li>
+          <li>HD art packs and live 3D ship models are Apple-only. Plug-ins still work.</li>
+          <li>The Godot build is still catching up with the Apple app in places. See the status page for details.</li>
+          <li>Multiplayer is available over LAN, by IP address and on dedicated servers. See the <a href="guide-multiplayer.html">Multiplayer guide</a>.</li>
+          <li>There is also a <code>NovaSwift-macos-arm64.zip</code> from the same Releases page. It is a test build and is not notarised, so right-click the app and choose Open the first time. On a Mac, use the native TestFlight app instead.</li>
+        </ul>
+
+        <h2 id="troubleshooting">Troubleshooting</h2>
+        <h3>The game does not start</h3>
+        <p>Make sure you extracted the whole archive and are running <code>NovaSwift.sh</code> from inside the extracted folder, and that the file is allowed to run. Run it from a terminal to see any error message.</p>
+        <h3>I only see the Data Setup screen</h3>
+        <p>That is expected until your data is imported. Run through the wizard. If it reports a problem, check that you picked the game folder, <code>Nova Files</code> folder, <code>.rez</code>/<code>.ndat</code> files or the Windows zip, and that the disk has free space.</p>
+        <h3>I cannot find my files in the browser</h3>
+        <p>Use the shortcuts at the top of the browser for Home, Downloads and the SD card. Removable media shows up under <code>/run/media/...</code>.</p>
+        <h3>The controller does nothing in Game Mode</h3>
+        <p>Check that the shortcut's controller layout is the <strong>Gamepad</strong> template and not a keyboard-and-mouse one.</p>
+        <h3>No movies</h3>
+        <p>Install ffmpeg as described <a href="#movies">above</a>. Movies are optional.</p>
+        <h3>Something looks wrong or crashes</h3>
+        <p>In the game, go to Settings, Data &amp; Advanced, <em>Report a Bug…</em> to build a diagnostics bundle, then open a <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">GitHub issue</a> and attach it. Since nobody has tested a real Deck yet, include your Deck model, SteamOS version and whether you were in Desktop Mode or Game Mode.</p>
+
+        <nav class="next-prev" aria-label="More guides">
+          <a href="guide-controls.html"><small>Previous</small><b>Controls &amp; controllers</b></a>
+          <a class="next" href="guide-multiplayer.html"><small>Next</small><b>Multiplayer</b></a>
+        </nav>
+      </article>
+    </div>
+  </main>
+
+  <!-- footer:start -->
+  <footer class="footer">
+    <div class="wrap">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="index.html">
+            <img src="assets/app-icon-96.png?v=brand3" alt="" width="30" height="30" />
+            <b>NOVA<i>·</i>SWIFT</b>
+          </a>
+          <p>EV Nova, rebuilt from the ground up. Free and open source. Bring your own copy of the game.</p>
+        </div>
+        <div>
+          <h4>Play</h4>
+          <a href="download.html">Download</a>
+          <a href="guide-getting-started.html">Getting started</a>
+          <a href="guide-controls.html">Controls</a>
+          <a href="guide-steam-deck.html">Steam Deck</a>
+          <a href="faq.html">FAQ</a>
+        </div>
+        <div>
+          <h4>Multiplayer</h4>
+          <a href="multiplayer.html">How it works</a>
+          <a href="servers.html">Server list</a>
+          <a href="dedicated-server.html">Dedicated server</a>
+          <a href="guide-multiplayer.html">Join &amp; host guide</a>
+        </div>
+        <div>
+          <h4>Create</h4>
+          <a href="plugins.html">Community plug-ins</a>
+          <a href="editor.html">Plug-in editor</a>
+          <a href="guide-making-plugins.html">Make a plug-in</a>
+          <a href="progress.html">Fidelity progress</a>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <a href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">Report a bug</a>
+          <a href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Releases</a>
+          <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/CHARTER.md" target="_blank" rel="noopener">Charter</a>
+        </div>
+      </div>
+      <p class="legal">
+        EV Nova and its data are copyrighted by their owners and are not distributed here. You supply your own copy.
+        Screenshots show EV Nova's game content running in NOVA Swift. The NOVA Swift banner, logo and icon are original.
+        NOVA Swift's code is open source. It is a fan preservation project, not affiliated with or endorsed by Ambrosia Software or ATMOS.
+      </p>
+    </div>
+  </footer>
+  <!-- footer:end -->
+
+  <script src="starfield.js?v=2"></script>
+  <script src="js/site.js?v=1"></script>
+</body>
+</html>
