@@ -23,6 +23,8 @@ const Hub = preload("res://screens/multiplayer/MultiplayerHub.gd")
 
 signal chat_submitted(text: String)
 signal trade_requested(peer_id: int)
+signal block_requested(peer_id: int)
+signal report_requested(peer_id: int, reason: String)
 signal chat_opened
 signal chat_closed
 
@@ -49,6 +51,8 @@ var _lines: Array = []    # {node, age}
 var _toast_nodes: Array = []   # {node, age}
 var _unread: int = 0
 var _local_name: String = ""
+## True when this game is the host (the roster has no one to report to).
+var local_is_host: bool = false
 
 
 func _init() -> void:
@@ -102,7 +106,7 @@ func _ready() -> void:
 	ev.add_child(row)
 	_entry = NC.text_field("Message...", "")
 	_entry.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_entry.max_length = 240
+	_entry.max_length = 200
 	_entry.text_submitted.connect(_on_submit)
 	_entry.gui_input.connect(_on_entry_input)
 	row.add_child(_entry)
@@ -287,6 +291,23 @@ func _unhandled_input(e: InputEvent) -> void:
 		close_chat()
 
 
+## A small menu of report reasons under the Report button.
+func _report_menu(id: int, anchor: Control) -> void:
+	var m := PopupMenu.new()
+	m.add_item("Abuse / harassment", 0)
+	m.add_item("Cheating", 1)
+	m.add_item("Spam", 2)
+	m.add_item("Invalid / broken data", 3)
+	var reasons: Array = ["abuse", "cheat", "spam", "invalid"]
+	m.id_pressed.connect(func(i: int) -> void:
+		report_requested.emit(id, str(reasons[clampi(i, 0, 3)]))
+		m.queue_free())
+	m.popup_hide.connect(func() -> void: m.queue_free.call_deferred())
+	add_child(m)
+	var r: Rect2 = anchor.get_global_rect()
+	m.popup(Rect2i(Vector2i(int(r.position.x), int(r.end.y)), Vector2i(0, 0)))
+
+
 static func _tint(nm: String) -> Color:
 	var pal: Array = [T.AMBER, T.TEAL, T.GREEN, Color(0.62, 0.55, 1.0), Color(1.0, 0.5, 0.6), T.ORANGE]
 	return pal[absi(nm.hash()) % pal.size()]
@@ -345,5 +366,16 @@ func set_players(players: Array, local_id: int) -> void:
 			tb.custom_minimum_size.y = 26
 			tb.focus_mode = Control.FOCUS_NONE
 			h.add_child(tb)
+			var bb: Button = NC.button("Block", "bordered", func() -> void: block_requested.emit(id))
+			bb.custom_minimum_size.y = 26
+			bb.focus_mode = Control.FOCUS_NONE
+			bb.tooltip_text = "Hide this player's chat"
+			h.add_child(bb)
+			if id != 1 or not local_is_host:
+				var rb: Button = NC.button("Report", "bordered")
+				rb.pressed.connect(func() -> void: _report_menu(id, rb))
+				rb.custom_minimum_size.y = 26
+				rb.focus_mode = Control.FOCUS_NONE
+				h.add_child(rb)
 		h.custom_minimum_size.x = 280
 		_players_box.add_child(h)

@@ -7,12 +7,14 @@ public enum PluginInstallError: Error, LocalizedError {
     case prebundledCannotBeDeleted
     case checksumMismatch
     case macArchive(String)
+    case unsafeArchive(String)
 
     public var errorDescription: String? {
         switch self {
         case .unsupportedArchive: return "Couldn't open this file as a plug-in. Supported: .zip, StuffIt (.sit/.hqx/.sea/.bin) and loose .rez/.ndat files."
         case .prebundledCannotBeDeleted: return "Prebundled plug-ins can be disabled but not deleted."
         case .macArchive(let why): return why
+        case .unsafeArchive(let why): return "This archive was refused: \(why)"
         case .checksumMismatch: return "The download doesn't match the checksum in the catalog, so it was discarded."
         }
     }
@@ -64,6 +66,7 @@ public enum PluginInstaller {
 
         do {
             if isZip(zipURL) {
+                try validateZip(at: zipURL)
                 try fm.unzipItem(at: zipURL, to: destDir)
             } else if let nm = originalName ?? Optional(zipURL.lastPathComponent),
                       !GameLibrary.resourceExtensions.contains((nm as NSString).pathExtension.lowercased()),
@@ -95,6 +98,30 @@ public enum PluginInstaller {
             writeInfo(InstalledPluginInfo(id: id, version: version, sha256: sha256), in: destRoot)
         }
         return destDir
+    }
+
+    /// Limits for one plug-in archive (generous for real total conversions, small enough to stop a zip bomb).
+    public static let maxZipEntries = 10_000
+    public static let maxZipUncompressed: UInt64 = 3 * 1024 * 1024 * 1024
+
+    /// Refuse an archive that tries to leave its folder (`../x`, absolute paths, symlinks), holds too many files, or
+    /// would unpack to an absurd size. Run before extraction; the extractor also checks containment.
+    public static func validateZip(at url: URL) throws {
+        guard let archive = Archive(url: url, accessMode: .read) else { throw PluginInstallError.unsupportedArchive }
+        var count = 0
+        var total: UInt64 = 0
+        for entry in archive {
+            count += 1
+            total &+= entry.uncompressedSize
+            let parts = entry.path.split(whereSeparator: { $0 == "/" || $0 == "\\" })
+            if entry.path.hasPrefix("/") || entry.path.hasPrefix("\\") || parts.contains("..") || entry.path.contains("\0")
+                || (entry.path.count >= 2 && entry.path.dropFirst().first == ":") {
+                throw PluginInstallError.unsafeArchive("it contains a path that leaves the plug-in folder (\(entry.path.prefix(60))).")
+            }
+            if entry.type == .symlink { throw PluginInstallError.unsafeArchive("it contains a symbolic link.") }
+            if count > maxZipEntries { throw PluginInstallError.unsafeArchive("it contains too many files.") }
+            if total > maxZipUncompressed { throw PluginInstallError.unsafeArchive("it would unpack to more than \(maxZipUncompressed >> 30) GB.") }
+        }
     }
 
     static func isZip(_ url: URL) -> Bool {

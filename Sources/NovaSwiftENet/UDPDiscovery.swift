@@ -156,11 +156,22 @@ public enum ServerStatusQuery {
         guard let fd = UDP.makeSocket(bindPort: nil, broadcast: false, shared: false) else { return nil }
         defer { close(fd) }
         let t0 = DispatchTime.now().uptimeNanoseconds
-        UDP.send(fd, ServerBeacon.queryPacket, to: UDP.sockaddr(ip, port: queryPort))
+        let dest = UDP.sockaddr(ip, port: queryPort)
+        // The padded request (a server never answers it with more bytes than it received). Servers older than this
+        // build only know the bare 4-byte query, so if nothing came back after a third of the timeout we try that too.
+        UDP.send(fd, ServerBeacon.queryPacket, to: dest)
         let deadline = Date().addingTimeInterval(timeout)
+        let legacyAt = Date().addingTimeInterval(max(0.6, timeout / 3))
+        var sentLegacy = false
         while true {
             let left = deadline.timeIntervalSinceNow
-            guard left > 0, UDP.waitReadable(fd, seconds: left) else { return nil }
+            guard left > 0 else { return nil }
+            let wait = sentLegacy ? left : min(left, max(0, legacyAt.timeIntervalSinceNow))
+            if !UDP.waitReadable(fd, seconds: wait) {
+                if !sentLegacy, Date() >= legacyAt { UDP.send(fd, ServerBeacon.legacyQueryPacket, to: dest); sentLegacy = true; continue }
+                if sentLegacy || Date() >= deadline { return nil }
+                continue
+            }
             while let (data, from) = UDP.receive(fd) {
                 guard from.sin_addr.s_addr == ip.s_addr, let b = ServerBeacon.decode(data) else { continue }
                 let ms = Int((DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000)
@@ -181,7 +192,13 @@ public final class ServerStatusProber {
 
     public init(concurrency: Int = 12, callbackQueue: DispatchQueue = .main) {
         queue.maxConcurrentOperationCount = concurrency
+        #if os(Linux)
+        // An elevated QoS makes libdispatch raise worker-thread priority, which unprivileged services are refused
+        // ("Failed to set thread priority ... errno=13" in the log). Default QoS needs no privilege.
+        queue.qualityOfService = .default
+        #else
         queue.qualityOfService = .userInitiated
+        #endif
         self.callbackQueue = callbackQueue
     }
 
@@ -248,6 +265,8 @@ public final class LANBeaconService {
     private var broadcastTargets: [in_addr] = []
     private var localIPs = Set<String>()
     private var announceDue = Date.distantPast
+    /// Rate limits and size rules for `NSQ1` status queries (see `QueryGuard`).
+    public let queryGuard = QueryGuard()
 
     /// `listenPort` is overridable so tests can run on a private port instead of the real 53736.
     public init(listenPort: Int = CrossPlayProtocol.lanPort, queue: DispatchQueue = DispatchQueue(label: "novaswift.lan")) {
@@ -359,9 +378,16 @@ public final class LANBeaconService {
 
     private func drain(_ fd: Int32, takeBeacons: Bool) {
         while let (data, from) = UDP.receive(fd) {
-            if ServerBeacon.isQuery(data) {
-                if let provider {
-                    UDP.send(fd, provider().encode(), to: from)
+            if QueryGuard.classify(data) != .invalid {
+                // Anti-amplification: padded requests only (plus a trickle of legacy ones), a per-address budget, and a
+                // reply never larger than the request. Everything else is dropped without an answer.
+                guard let provider else { continue }
+                switch queryGuard.decide(data, from: UDP.string(from.sin_addr)) {
+                case .drop: continue
+                case .upgradeNotice: UDP.send(fd, QueryGuard.upgradeNotice, to: from)
+                case .reply(let maxBytes):
+                    let pkt = provider().encode(maxBytes: maxBytes)
+                    if !pkt.isEmpty, pkt.count <= maxBytes { UDP.send(fd, pkt, to: from) }
                 }
             } else if takeBeacons, let b = ServerBeacon.decode(data) {
                 let ip = UDP.string(from.sin_addr)

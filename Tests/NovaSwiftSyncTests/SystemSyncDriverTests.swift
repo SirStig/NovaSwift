@@ -116,3 +116,70 @@ final class SystemSyncDriverTests: XCTestCase {
         XCTAssertEqual(nodes[1].world.remotePlayerShips.count, 1)
     }
 }
+
+/// Receiver-side validation (docs/SECURITY.md): a malicious peer can't wreck another player's world.
+final class SyncValidationTests: XCTestCase {
+    typealias Node = SystemSyncDriverTests.Node
+
+    private func snapshot(ships: [ShipNetState]) -> WorldSnapshot { WorldSnapshot(tick: 1, ackInputSeq: 0, ships: ships) }
+    private func ship(_ id: Int, player: String? = nil, x: Double = 0, shield: Double = 50, armor: Double = 50, type: Int = -1) -> ShipNetState {
+        ShipNetState(id: id, playerID: player, shipTypeID: type, name: "s\(id)", x: x, y: 0, vx: 0, vy: 0, angle: 0, shield: shield, armor: armor, control: player == nil ? .ai : .remote)
+    }
+
+    func testSnapshotFromANonAuthorityIsIgnoredAndReported() {
+        let me = Node(2, system: 7, x: 0)
+        me.session.updateLocalPresence(name: "P2", systemID: 7)
+        me.transport.peerConnected(id: 1, name: "a"); me.transport.peerConnected(id: 3, name: "b")
+        // Presence for both others in my system; 1 is the authority.
+        for (id, name) in [(1, "a"), (3, "b")] {
+            me.transport.receive(from: id, data: [UInt8](try! NetCodec.encode(.presence(PlayerPresence(playerID: String(id), name: name, currentSystemID: 7)))))
+        }
+        XCTAssertEqual(me.driver.currentAuthorityID, "1")
+        var reports: [(String, String)] = []
+        me.driver.onInvalidMessage = { reports.append(($0, $1)) }
+        me.driver.receiveSnapshot(snapshot(ships: [ship(9, x: 5)]), from: "3")
+        XCTAssertEqual(reports.first?.0, "3")
+        me.driver.syncPreStep(world: me.world)
+        XCTAssertEqual(me.world.npcs.count, 0, "the forged snapshot spawned nothing")
+        // The real authority's snapshot is accepted even after the forgery.
+        me.driver.receiveSnapshot(snapshot(ships: [ship(9, x: 5)]), from: "1")
+        me.driver.syncPreStep(world: me.world)
+        XCTAssertEqual(me.world.npcs.count, 1)
+    }
+
+    func testInputOnlyFromCoLocatedPlayersToTheAuthority() {
+        let auth = Node(1, system: 7, x: 0)
+        auth.transport.peerConnected(id: 2, name: "b"); auth.transport.peerConnected(id: 9, name: "far")
+        auth.transport.receive(from: 2, data: [UInt8](try! NetCodec.encode(.presence(PlayerPresence(playerID: "2", name: "b", currentSystemID: 7)))))
+        auth.transport.receive(from: 9, data: [UInt8](try! NetCodec.encode(.presence(PlayerPresence(playerID: "9", name: "far", currentSystemID: 99)))))
+        var reports: [String] = []
+        auth.driver.onInvalidMessage = { p, _ in reports.append(p) }
+        var intent = NetIntent(); intent.desiredHeading = .nan
+        auth.driver.receiveInput(InputFrame(tick: 1, seq: 1, intent: NetIntent()), from: "9")
+        auth.driver.receiveInput(InputFrame(tick: 1, seq: 1, intent: intent), from: "2")
+        XCTAssertEqual(reports, ["9", "2"])
+    }
+
+    func testImpossibleShipsAndOwnHealthAreClamped() {
+        let w = World(player: Ship(name: "me", stats: ShipStats(maxSpeed: 100, acceleration: 50, turnRate: 1)))
+        w.player.maxShield = 100; w.player.maxArmor = 100; w.player.shield = 80; w.player.armor = 80
+        let c = SystemSyncCoordinator(localPlayerID: "2")
+        let snap = snapshot(ships: [
+            ship(1, player: "2", shield: 1e9, armor: 1e9),                 // heal past the maximum: clamped to max
+            ship(2, x: .nan), ship(3, x: 1e12), ship(4, type: 424242),
+            ship(5, x: 100),
+        ])
+        c.apply(snap, to: w, authorityPeer: "1", shipTypeKnown: { $0 == 128 })
+        XCTAssertLessThanOrEqual(w.player.shield, 100); XCTAssertLessThanOrEqual(w.player.armor, 100)
+        XCTAssertEqual(w.npcs.count, 1, "only the plausible ship with a known hull was mirrored")
+        XCTAssertGreaterThanOrEqual(c.rejectedEntries, 3)
+        // When death isn't real, no snapshot can kill the player.
+        c.deathReal = false
+        c.apply(snapshot(ships: [ship(1, player: "2", shield: 0, armor: 0)]), to: w, authorityPeer: "1")
+        XCTAssertGreaterThanOrEqual(w.player.armor, 1)
+        // A "correction" across the galaxy is ignored.
+        let before = w.player.position
+        c.apply(snapshot(ships: [ship(1, player: "2", x: 900_000)]), to: w, authorityPeer: "1")
+        XCTAssertEqual(w.player.position.x, before.x, accuracy: 1)
+    }
+}

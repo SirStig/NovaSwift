@@ -39,7 +39,7 @@ public struct ServerConfig: Equatable {
     // [admin]
     public var adminPort = defaultAdminPort
     /// "0.0.0.0" (everyone who can reach the port) or "127.0.0.1" (this computer only).
-    public var adminBind = "0.0.0.0"
+    public var adminBind = "127.0.0.1"
     public var adminPasswordHash = ""
     /// The first-run wizard has been completed (or skipped).
     public var setupDone = false
@@ -63,6 +63,23 @@ public struct ServerConfig: Equatable {
 
     // [bans]  ip -> note
     public var bans: [String: String] = [:]
+
+    // [moderation]
+    /// Players can start a vote to remove someone with /votekick.
+    public var voteKick = true
+    /// Share of online players (rounded up, at least 2 votes) that removes the target.
+    public var voteKickPercent = 51
+    /// Only addresses in `allowlist` may join.
+    public var allowlistMode = false
+    public var allowlist: [String: String] = [:]
+    /// Words replaced by *** in chat (comma separated in the file). Empty = no filter.
+    public var wordFilter: [String] = []
+    /// Muted players: "ip:1.2.3.4" or "name:alice" -> note. Muted players can still play but nobody sees their chat.
+    public var mutes: [String: String] = [:]
+    /// Most connections one address may hold (0 = unlimited). Raise it behind a NAT / Docker userland proxy.
+    public var maxConnectionsPerIP = 8
+    /// Tell everyone when someone joins or leaves.
+    public var announceJoins = true
 
     public init() {}
 
@@ -129,7 +146,10 @@ public struct ServerConfig: Equatable {
         if !(1024...65535).contains(c.adminPort) { c.adminPort = Self.defaultAdminPort }
         if !["safe", "full", "custom"].contains(c.rulesPreset) { c.rulesPreset = "safe" }
         c.gameSpeed = min(4.0, max(0.25, c.gameSpeed))
-        if !["0.0.0.0", "127.0.0.1"].contains(c.adminBind) { c.adminBind = "0.0.0.0" }
+        if !["0.0.0.0", "127.0.0.1"].contains(c.adminBind) { c.adminBind = "127.0.0.1" }
+        c.voteKickPercent = min(100, max(10, c.voteKickPercent))
+        c.maxConnectionsPerIP = min(64, max(0, c.maxConnectionsPerIP))
+        c.wordFilter = c.wordFilter.map { $0.lowercased().trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.prefix(200).map { String($0.prefix(40)) }
         if !Self.regions.contains(c.region) { c.region = "global" }
         var seen = Set<String>()
         c.enabledPlugins = c.enabledPlugins.filter { !$0.isEmpty && seen.insert($0).inserted }
@@ -198,10 +218,19 @@ public struct ServerConfig: Equatable {
             case "public.owner": c.ownerName = value
             case "public.contact": c.ownerContact = value
             case "public.website": c.website = value
+            case "moderation.vote_kick": if let b = bool(value, k) { c.voteKick = b }
+            case "moderation.vote_kick_percent": if let i = int(value, k) { c.voteKickPercent = i }
+            case "moderation.allowlist_mode": if let b = bool(value, k) { c.allowlistMode = b }
+            case "moderation.word_filter": c.wordFilter = value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            case "moderation.max_connections_per_ip": if let i = int(value, k) { c.maxConnectionsPerIP = i }
+            case "moderation.announce_joins": if let b = bool(value, k) { c.announceJoins = b }
             case "updates.check": if let b = bool(value, k) { c.checkForUpdates = b }
             case "updates.auto_update": if let b = bool(value, k) { c.autoUpdate = b }
             default:
-                if section == "bans" { c.bans[key] = value } else { warnings.append("\(k): unknown setting (ignored)") }
+                if section == "bans" { c.bans[key] = value }
+                else if section == "allowlist" { c.allowlist[key] = value }
+                else if section == "mutes" { c.mutes[key] = value }
+                else { warnings.append("\(k): unknown setting (ignored)") }
             }
         }
         return (c, warnings)
@@ -279,10 +308,27 @@ public struct ServerConfig: Equatable {
         # Download and install new server versions by itself (restart needed). Off by default.
         auto_update = \(b(autoUpdate))
 
+        [moderation]
+        # /votekick <player> in chat: needs this share of the online players (at least 2 votes).
+        vote_kick = \(b(voteKick))
+        vote_kick_percent = \(voteKickPercent)
+        # true = only the addresses under [allowlist] may join (invite-only).
+        allowlist_mode = \(b(allowlistMode))
+        # Words replaced by *** in chat, comma separated. Empty = no filter.
+        word_filter = \(wordFilter.joined(separator: ", "))
+        # Connections one address may hold at once (0 = unlimited). Raise it behind NAT or a Docker proxy.
+        max_connections_per_ip = \(maxConnectionsPerIP)
+        # Announce joins and leaves in chat.
+        announce_joins = \(b(announceJoins))
+
         [bans]
         # Banned IP addresses, one per line:  1.2.3.4 = reason
         """
         for (ip, note) in bans.sorted(by: { $0.key < $1.key }) { s += "\n\(ip) = \(note)" }
+        s += "\n\n[allowlist]\n# Addresses allowed in when allowlist_mode is on:  1.2.3.4 = who"
+        for (ip, note) in allowlist.sorted(by: { $0.key < $1.key }) { s += "\n\(ip) = \(note)" }
+        s += "\n\n[mutes]\n# Muted players:  ip:1.2.3.4 = note   or   name:alice = note"
+        for (k, note) in mutes.sorted(by: { $0.key < $1.key }) { s += "\n\(k) = \(note)" }
         return s + "\n"
     }
 }
@@ -290,7 +336,7 @@ public struct ServerConfig: Equatable {
 // MARK: - Admin password hashing
 
 public enum AdminPassword {
-    static let rounds = 20_000
+    static let rounds = 100_000
 
     /// "sha256i$<rounds>$<salt hex>$<hash hex>": salted, iterated SHA-256 (no external KDF dependency).
     public static func hash(_ password: String, salt: [UInt8]? = nil) -> String {
@@ -304,6 +350,21 @@ public enum AdminPassword {
               let salt = unhex(parts[2]), let want = unhex(parts[3]) else { return false }
         let got = derive(password, salt: salt, rounds: n)
         return constantTimeEqual(got, want)
+    }
+
+    static let commonPasswords: Set<String> = ["password", "password1", "123456789", "1234567890", "qwertyuiop", "letmein123", "iloveyou123",
+                                               "admin12345", "novaswift", "novaswiftserver", "changeme123", "welcome123"]
+
+    /// nil when `p` is acceptable as a new admin password: at least 12 characters, not a well-known one, not the old one,
+    /// not one character repeated, and either three kinds of characters (lower, upper, digit, symbol) or 20+ characters.
+    public static func strengthProblem(_ p: String, current: String = "") -> String? {
+        if p.count < 12 { return "Pick a password with at least 12 characters." }
+        if p == current { return "The new password must be different from the current one." }
+        if commonPasswords.contains(p.lowercased()) || Set(p).count < 5 { return "That password is too easy to guess." }
+        let kinds = [p.contains { $0.isLowercase }, p.contains { $0.isUppercase }, p.contains { $0.isNumber },
+                     p.contains { !$0.isLetter && !$0.isNumber }].filter { $0 }.count
+        if kinds < 3 && p.count < 20 { return "Mix at least three of: lower-case, upper-case, digits and symbols - or use 20 or more characters." }
+        return nil
     }
 
     /// A readable random password (no look-alike characters), e.g. "kqxt-9w4m-ph7z".

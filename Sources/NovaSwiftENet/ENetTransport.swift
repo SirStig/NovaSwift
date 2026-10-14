@@ -36,7 +36,7 @@ public final class ENetTransport: Transport, TransportDelegate {
         // First byte of every packet.
         static let kHello: UInt8 = 0x01, kWelcome: UInt8 = 0x02, kReject: UInt8 = 0x03, kPeerJoin: UInt8 = 0x04
         static let kPeerLeft: UInt8 = 0x05, kKick: UInt8 = 0x06, kPing: UInt8 = 0x07, kPong: UInt8 = 0x08
-        static let kChat: UInt8 = 0x09, kData: UInt8 = 0x10
+        static let kChat: UInt8 = 0x09, kReport: UInt8 = 0x0A, kData: UInt8 = 0x10
         // ENet channels as Godot's ENetMultiplayerPeer maps them (SYSCH_RELIABLE=0, SYSCH_UNRELIABLE=1, user ch1 = 2).
         static let chReliable: UInt8 = 0
         static let chUnreliable: UInt8 = 2
@@ -81,6 +81,8 @@ public final class ENetTransport: Transport, TransportDelegate {
     /// The id the server will use for us (we choose it; ENet carries it as the connect data).
     public let localID: Int
     public var localPeerID: PeerID { inner.localPeerID }
+    /// The relay server / host is always peer 1.
+    public var hostPeerID: PeerID? { String(Wire.serverID) }
     public private(set) var state: State = .idle
     public private(set) var serverName = ""
     public private(set) var rttMilliseconds = -1
@@ -106,6 +108,8 @@ public final class ENetTransport: Transport, TransportDelegate {
     private var lastRx = 0.0
     private var nextPing = 0.0
     private var closedReason = ""
+    /// Most other players one session can announce to us (a server allows 64).
+    static let maxPeers = 256
     private var pumpQueue: DispatchQueue?
     private var pumpTimer: DispatchSourceTimer?
     private static let initOnce: Void = { _ = enet_initialize() }()
@@ -236,6 +240,7 @@ public final class ENetTransport: Transport, TransportDelegate {
                 finish(.closed); emit(.timedOut("The server stopped responding."))
                 return
             }
+            flushReports()
             flushOutgoing()
         }
         enet_host_flush(host)
@@ -250,18 +255,20 @@ public final class ENetTransport: Transport, TransportDelegate {
         case Wire.kWelcome: welcome(Self.json(pkt))
         case Wire.kReject:
             let b = Self.json(pkt)
-            closedReason = (b["message"] as? String) ?? "The server refused the connection."
+            closedReason = String(CrossPlayProtocol.cleanChat((b["message"] as? String) ?? "").prefix(300)).nonEmpty ?? "The server refused the connection."
             let code = (b["code"] as? String) ?? "refused"
             rejectServerManifest = (b["detail"] as? [String: Any])?["server_manifest"] as? String
             finish(.closed); emit(.rejected(code: code, message: closedReason))
         case Wire.kPeerJoin:
             guard state == .connected else { return }
             let b = Self.json(pkt)
-            if let id = Self.int(b["id"]) { inner.peerConnected(id: id, name: (b["name"] as? String) ?? "") }
+            if let id = Self.int(b["id"]), id >= 2, id != localID, inner.connectedPeers.count < Self.maxPeers {
+                inner.peerConnected(id: id, name: CrossPlayProtocol.cleanPlayerName((b["name"] as? String) ?? "", fallback: "Pilot \(id)"))
+            }
         case Wire.kPeerLeft:
-            if let id = Self.int(Self.json(pkt)["id"]) { inner.peerDisconnected(id: id) }
+            if let id = Self.int(Self.json(pkt)["id"]), id >= 2 { inner.peerDisconnected(id: id) }
         case Wire.kKick:
-            let why = (Self.json(pkt)["reason"] as? String) ?? "Disconnected by the host."
+            let why = String(CrossPlayProtocol.cleanChat((Self.json(pkt)["reason"] as? String) ?? "").prefix(200)).nonEmpty ?? "Disconnected by the host."
             inner.disconnect(); finish(.closed); emit(.kicked(reason: why))
         case Wire.kPong:
             let sent = (Self.json(pkt)["t"] as? Double) ?? clock
@@ -269,10 +276,14 @@ public final class ENetTransport: Transport, TransportDelegate {
             rttMilliseconds = rttMilliseconds < 0 ? ms : Int((Double(rttMilliseconds) * 0.7 + Double(ms) * 0.3).rounded())
         case Wire.kChat:
             let b = Self.json(pkt)
-            emit(.chat(id: Self.int(b["id"]) ?? 0, name: (b["name"] as? String) ?? "?", text: (b["text"] as? String) ?? ""))
+            let text = CrossPlayProtocol.cleanChat((b["text"] as? String) ?? "")
+            guard !text.isEmpty else { return }
+            emit(.chat(id: Self.int(b["id"]) ?? 0, name: CrossPlayProtocol.cleanName((b["name"] as? String) ?? "", fallback: "?"), text: text))
         case Wire.kData:
             guard state == .connected, pkt.count >= 5 else { return }
             let id = Int(Int32(bitPattern: UInt32(pkt[1]) | UInt32(pkt[2]) << 8 | UInt32(pkt[3]) << 16 | UInt32(pkt[4]) << 24))
+            // Only bytes from someone the server told us about (or the server itself): a forged sender id is ignored.
+            guard id == Wire.serverID || inner.connectedPeers.contains(String(id)) else { return }
             inner.receive(from: id, data: Array(pkt[5...]))
         default: break
         }
@@ -281,17 +292,36 @@ public final class ENetTransport: Transport, TransportDelegate {
     private func welcome(_ w: [String: Any]) {
         guard state == .handshaking, !w.isEmpty else { return }
         state = .connected
-        serverName = (w["server_name"] as? String) ?? "Server"
-        let hostName = (w["host_name"] as? String) ?? serverName
-        let others = (w["peers"] as? [[String: Any]]) ?? []
-        emit(.connected(serverName: serverName, hostName: hostName, rulesJSON: (w["rules"] as? String) ?? "",
+        serverName = CrossPlayProtocol.cleanName((w["server_name"] as? String) ?? "", fallback: "Server", maxLength: CrossPlayProtocol.maxServerNameLength)
+        let hostName = CrossPlayProtocol.cleanName((w["host_name"] as? String) ?? "", fallback: serverName)
+        let others = Array((((w["peers"] as? [Any]) ?? []).compactMap { $0 as? [String: Any] }).prefix(Self.maxPeers))
+        emit(.connected(serverName: serverName, hostName: hostName, rulesJSON: String(((w["rules"] as? String) ?? "").prefix(4096)),
                         hasHostPlayer: (w["has_local_player"] as? Bool) ?? true, maxPlayers: Self.int(w["max"]) ?? 0))
         // The server (peer 1) is always a participant; a dedicated server just has no pilot.
         inner.peerConnected(id: Wire.serverID, name: hostName)
         for o in others {
             guard let id = Self.int(o["id"]), id != Wire.serverID else { continue }
-            inner.peerConnected(id: id, name: (o["name"] as? String) ?? "")
+            guard id >= 2, id != localID, inner.connectedPeers.count < Self.maxPeers else { continue }
+            inner.peerConnected(id: id, name: CrossPlayProtocol.cleanPlayerName((o["name"] as? String) ?? "", fallback: "Pilot \(id)"))
         }
+    }
+
+    /// Tell the server about a misbehaving player (`target` = their id, 0 = unknown). `reason`: invalid, abuse, cheat, spam.
+    /// Rate limited server-side.
+    public func sendReport(target: Int, reason: String, detail: String = "") {
+        // Safe from any thread: queued here, sent by the pumping thread in `service()`. At most a few are kept.
+        reportLock.lock()
+        if pendingReports.count < 8 { pendingReports.append(["id": target, "reason": String(reason.prefix(16)), "detail": String(detail.prefix(120))]) }
+        reportLock.unlock()
+    }
+    private let reportLock = NSLock()
+    private var pendingReports: [[String: Any]] = []
+    private var lastReportAt = -100.0
+
+    private func flushReports() {
+        guard state == .connected, clock - lastReportAt >= 1 else { return }
+        reportLock.lock(); let next = pendingReports.isEmpty ? nil : pendingReports.removeFirst(); reportLock.unlock()
+        if let next { lastReportAt = clock; sendControl(Wire.kReport, next, reliable: true) }
     }
 
     private func sendHello() {
@@ -375,4 +405,8 @@ public final class ENetTransport: Transport, TransportDelegate {
         if let d = v as? Double { return Int(d) }
         return nil
     }
+}
+
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
 }

@@ -132,7 +132,11 @@ func _channels() -> void:
 	_ok(by_tag["v1.3.0"] == "experimental", "GitHub pre-release flag marks experimental")
 	_ok(by_tag["v1.4.0-experimental.1"] == "experimental" and by_tag["v1.5.0-rc.1"] == "experimental", "semver suffix marks experimental")
 	_ok(by_tag["v1.2.0"] == "stable", "plain release is stable")
-	_ok(UpdateChecker.candidates(list, "1.0.0", false).size() == 1, "experimental off: only the stable release is a candidate")
+	# Experimental off: GitHub-flagged pre-releases are skipped; suffix-only ones stay candidates and their signed
+	# manifest channel decides (so a stable-signed full release tagged v0.7.0-beta.2 reaches everyone).
+	var off: Array = UpdateChecker.candidates(list, "1.0.0", false)
+	var off_tags: Array = off.map(func(r): return str(r["tag"]))
+	_ok(off.size() == 3 and not off_tags.has("v1.3.0"), "experimental off: flagged pre-release skipped, suffix-only kept for the signed check")
 	var all_c: Array = UpdateChecker.candidates(list, "1.0.0", true)
 	_ok(all_c.size() == 4 and str(all_c[0]["version"]) == "1.5.0-rc.1" and str(all_c[3]["version"]) == "1.2.0", "experimental on: all candidates, newest first")
 	_ok(str(UpdateChecker.newest_stable(list)["version"]) == "1.2.0", "newest_stable ignores experimental releases")

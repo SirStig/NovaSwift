@@ -78,6 +78,8 @@ public final class ServerApp {
     public let server: GameServer
     public let admin: AdminService
     public let updates: UpdateChecker
+    public let audit: AuditLog
+    private let publicIPLookup = DispatchGroup()
     public private(set) var http: HTTPServer?
     /// Set only when this run generated the admin password (first start or `--reset-admin-password`).
     public private(set) var generatedPassword: String?
@@ -101,10 +103,14 @@ public final class ServerApp {
             generatedPassword = pw
         }
         plugins = PluginManager(paths: p, log: log)
-        server = GameServer(store: store, log: log, plugins: plugins)
+        audit = AuditLog(file: p.logsDir.appendingPathComponent("audit.log"))
+        server = GameServer(store: store, log: log, plugins: plugins, audit: audit)
         updates = UpdateChecker(log: log)
         admin = AdminService(server: server, updates: updates)
     }
+
+    /// Where the admin panel actually listens this run (the saved setting unless overridden by the environment).
+    public private(set) var effectiveAdminBind = "127.0.0.1"
 
     public var adminURL: String { "http://localhost:\(store.config.adminPort)" }
 
@@ -116,7 +122,12 @@ public final class ServerApp {
         for pr in problems { log.warn("server.cfg: \(pr)") }
 
         // The admin panel first: if the game port is busy you still need the panel to fix it.
-        let h = HTTPServer(bind: cfg.adminBind, port: cfg.adminPort) { [admin] req in admin.handle(req) }
+        // NOVASWIFT_ADMIN_BIND overrides the saved address for this run only (a container must listen on 0.0.0.0 inside
+        // while Docker publishes the port on the host's 127.0.0.1 only).
+        var bind = cfg.adminBind
+        if let e = ProcessInfo.processInfo.environment["NOVASWIFT_ADMIN_BIND"], ["0.0.0.0", "127.0.0.1"].contains(e) { bind = e }
+        effectiveAdminBind = bind
+        let h = HTTPServer(bind: bind, port: cfg.adminPort) { [admin] req in admin.handle(req) }
         h.uploadPaths = ["/api/plugins/upload"]
         h.tempDirectory = store.paths.cacheDir
         do { try h.start() } catch HTTPServer.StartError.inUse(let p) {
@@ -130,10 +141,15 @@ public final class ServerApp {
             log.error(e.message)
             log.error("The admin panel is still running at \(adminURL) - open Settings to change the port.")
         }
-        if cfg.adminBind != "127.0.0.1" {
+        if bind != "127.0.0.1" && !PlatformTools.isContainer {
             log.warn("The admin panel is reachable from other computers over plain HTTP (no encryption). Use a long password, don't open port \(cfg.adminPort) in your firewall unless you must, or set the admin address to 127.0.0.1 and use an SSH tunnel.")
         }
-        DispatchQueue.global().async { [admin] in admin.setPublicIP(NetworkTools.publicIP()) }   // for the dashboard address
+        // Look up the public address in the background (short timeouts) for the dashboard and the start-up banner.
+        publicIPLookup.enter()
+        DispatchQueue.global().async { [admin, publicIPLookup] in
+            admin.setPublicIP(NetworkTools.publicIP(timeout: 2))
+            publicIPLookup.leave()
+        }
         if cfg.upnp { DispatchQueue.global().async { [admin] in admin.tryUPnPNow() } }
         startUpdateChecks()
     }
@@ -150,7 +166,7 @@ public final class ServerApp {
     }
 
     private func startUpdateChecks() {
-        let t = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        let t = DispatchSource.makeTimerSource(queue: DispatchQueue.global())   // default QoS: libdispatch never needs to change thread priority (EACCES log noise under systemd)
         t.schedule(deadline: .now() + 20, repeating: 12 * 3600)
         t.setEventHandler { [weak self] in
             guard let self, self.store.config.checkForUpdates else { return }
@@ -169,19 +185,33 @@ public final class ServerApp {
 
     public func bannerText() -> String {
         let cfg = store.config
-        let (host, _) = admin.bestAddress()
+        return Self.banner(cfg: cfg, join: admin.joinAddresses(), adminURL: adminURL, adminLocalOnly: effectiveAdminBind == "127.0.0.1",
+                           dataFolder: store.paths.root.path, password: generatedPassword, setupCode: admin.setupCode)
+    }
+
+    /// The start-up banner. `join` is what players type: the public address when it is known, else a placeholder with the
+    /// LAN address labelled as such (a private address is useless to players on the internet).
+    static func banner(cfg: ServerConfig, join: (public: String?, lan: String?), adminURL: String, adminLocalOnly: Bool,
+                       dataFolder: String, password: String?, setupCode: String?) -> String {
+        let joinLine: String
+        if let pub = join.public {
+            joinLine = CrossPlayAddress(host: pub, port: cfg.port).formatted
+        } else {
+            joinLine = "your public IP\(cfg.port == CrossPlayProtocol.defaultPort ? "" : ":\(cfg.port)")"
+                + (join.lan.map { "   (LAN: \(CrossPlayAddress(host: $0, port: cfg.port).formatted))" } ?? "")
+        }
         var s = """
 
         ============================================================
           NovaSwift Dedicated Server \(ServerVersion.current)
         ============================================================
           Server name  : \(cfg.name)
-          Players join : \(CrossPlayAddress(host: host, port: cfg.port).formatted)   (UDP \(cfg.port), \(cfg.maxPlayers) slots)
-          Admin panel  : \(adminURL)\(cfg.adminBind == "127.0.0.1" ? "   (this computer only)" : "")
-          Data folder  : \(store.paths.root.path)
+          Players join : \(joinLine)   (UDP \(cfg.port), \(cfg.maxPlayers) slots)
+          Admin panel  : \(adminURL)\(adminLocalOnly ? "   (this computer only)" : "")
+          Data folder  : \(dataFolder)
 
         """
-        if let pw = generatedPassword {
+        if let pw = password {
             s += """
               ADMIN PASSWORD (shown only this once - write it down):
 
@@ -191,7 +221,7 @@ public final class ServerApp {
 
             """
         }
-        if let code = admin.setupCode {
+        if let code = setupCode {
             s += "  First-time setup: \(adminURL)/?setup=\(code)\n"
         }
         s += "  Type 'help' for console commands, Ctrl-C to stop.\n============================================================\n"
@@ -204,6 +234,7 @@ public final class ServerApp {
             FileHandle.standardError.write(Data("\n\((error as? ServerError)?.message ?? error.localizedDescription)\n".utf8))
             exit(1)
         }
+        _ = publicIPLookup.wait(timeout: .now() + 3)   // the banner shows the public address when the lookup is quick
         print(bannerText())
         if !options.noBrowser, let code = admin.setupCode ?? (options.forceOpenBrowser ? "" : nil), PlatformTools.hasDesktop {
             PlatformTools.openBrowser(code.isEmpty ? adminURL : "\(adminURL)/?setup=\(code)")
@@ -248,6 +279,7 @@ public final class ServerApp {
 }
 
 extension AdminService {
+
     /// Remember the public IP (looked up in the background at start).
     public func setPublicIP(_ ip: String?) { setCachedPublicIP(ip) }
 }
@@ -271,6 +303,11 @@ public enum ConsoleCommands {
             unban <ip>              lift a ban
             say <text>              announce to everyone in chat
             rules [safe|full]       show the rules, or switch preset
+            mute <id|name>          hide a player's chat from everyone
+            unmute <name|ip>        lift a mute
+            allow <ip> / disallow <ip>   invite-only list (used when allowlist_mode is on)
+            tempbans                addresses blocked for a while after abuse
+            audit                   recent admin actions
             plugins                 required and optional plug-ins
             quit                    stop the server
             """
@@ -304,6 +341,22 @@ public enum ConsoleCommands {
             }
             let r = app.store.config.sessionRules
             return "Preset: \(CrossPlayProtocol.presetName(r)). PvP \(r.allowPvP ? "on" : "off"), real damage \(r.pvpDamageReal ? "on" : "off"), permadeath \(r.deathReal ? "on" : "off"), friendly fire \(r.friendlyFire ? "on" : "off"), trading \(r.allowTrade ? "on" : "off"), speed \(r.gameSpeedMultiplier)x. Change with: rules safe|full"
+        case "mute":
+            guard let p = server.mute(rest) else { return "No player matches \"\(rest)\". Use 'players' to see ids." }
+            return "Muted \(p.name)."
+        case "unmute":
+            return server.unmute(rest) ? "Unmuted \(rest)." : "Nobody is muted as \"\(rest)\"."
+        case "allow":
+            guard NetworkTools.octets(rest.trimmingCharacters(in: .whitespaces)) != nil else { return "Usage: allow <ip address>" }
+            server.allow(ip: rest.trimmingCharacters(in: .whitespaces)); return "Allowed \(rest)."
+        case "disallow":
+            server.disallow(ip: rest.trimmingCharacters(in: .whitespaces)); return "Removed \(rest) from the allowlist."
+        case "tempbans":
+            let t = server.tempBans
+            return t.isEmpty ? "No addresses are blocked right now." : t.sorted { $0.key < $1.key }.map { "\($0.key)\t\(Int($0.value)) s left" }.joined(separator: "\n")
+        case "audit":
+            let e = app.audit.entries(limit: 20)
+            return e.isEmpty ? "Nothing recorded yet." : e.map { "\($0.actor) \($0.action) \($0.detail)" }.joined(separator: "\n")
         case "plugins":
             let m = server.manifest
             var out = "Required: " + (m.requirements.plugins.isEmpty ? "none (stock game)" : m.requirements.plugins.map(\.name).joined(separator: ", "))

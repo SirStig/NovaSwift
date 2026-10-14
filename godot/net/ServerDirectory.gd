@@ -139,6 +139,8 @@ func _save_cache(body: String) -> void:
 ## servers.json text -> {ok, error, entries:[{id,name,host,port,region,description,owner,contact,rules,plugins,max,added,website}]}.
 ## Entries that fail basic checks are skipped; a wrong top-level shape fails the whole file.
 static func parse(text: String) -> Dictionary:
+	if text.length() > 2000000:
+		return {"ok": false, "error": "server list too large", "entries": []}
 	var js: JSON = JSON.new()
 	var v: Variant = js.data if js.parse(text) == OK else null
 	if not (v is Dictionary) or not ((v as Dictionary).get("servers") is Array):
@@ -149,8 +151,8 @@ static func parse(text: String) -> Dictionary:
 		if not (item is Dictionary) or out.size() >= MAX_ENTRIES:
 			continue
 		var d: Dictionary = item
-		var host: String = str(d.get("host", "")).strip_edges()
-		var port: int = int(d.get("port", Proto.DEFAULT_PORT))
+		var host: String = Proto.str_field(d.get("host", ""), 255).strip_edges()
+		var port: int = Proto.num_int(d.get("port", Proto.DEFAULT_PORT), -1, 1000000, Proto.DEFAULT_PORT)
 		if host == "" or host.contains(" ") or port < 1 or port > 65535:
 			continue
 		var key: String = "%s:%d" % [host.to_lower(), port]
@@ -158,18 +160,20 @@ static func parse(text: String) -> Dictionary:
 			continue
 		seen[key] = true
 		var owner: Dictionary = d.get("owner", {}) if d.get("owner", {}) is Dictionary else {}
-		var site: String = str(d.get("website", ""))
+		var site: String = Proto.str_field(d.get("website", ""), 200)
 		var plugins: Array = []
 		var raw_plugins: Variant = d.get("plugins", [])
 		if raw_plugins is Array:
 			for p in (raw_plugins as Array):
+				if plugins.size() >= Proto.MAX_LIST:
+					break
 				if p is Dictionary:
-					plugins.append({"id": str((p as Dictionary).get("id", "")), "name": str((p as Dictionary).get("name", (p as Dictionary).get("id", ""))),
-						"contentHash": str((p as Dictionary).get("contentHash", ""))})
-		out.append({"id": str(d.get("id", key)), "name": Proto.clean_name(str(d.get("name", host)), host, Proto.MAX_SERVER_NAME), "host": host, "port": port,
-			"region": str(d.get("region", "global")), "description": str(d.get("description", "")).substr(0, 300),
-			"owner": str(owner.get("name", "")), "contact": str(owner.get("contact", "")), "rules": str(d.get("rules", "")),
-			"plugins": plugins, "tc": str(d.get("totalConversion", "")), "max": int(d.get("maxPlayers", 0)), "added": str(d.get("added", "")),
+					plugins.append({"id": Proto.str_field((p as Dictionary).get("id", ""), 64), "name": Proto.str_field((p as Dictionary).get("name", (p as Dictionary).get("id", "")), 64),
+						"contentHash": Proto.str_field((p as Dictionary).get("contentHash", ""), 128)})
+		out.append({"id": Proto.str_field(d.get("id", key), 64), "name": Proto.clean_name(Proto.str_field(d.get("name", host), Proto.MAX_SERVER_NAME), host, Proto.MAX_SERVER_NAME), "host": host, "port": port,
+			"region": Proto.str_field(d.get("region", "global"), 24), "description": Proto.str_field(d.get("description", ""), 300),
+			"owner": Proto.str_field(owner.get("name", ""), 60), "contact": Proto.str_field(owner.get("contact", ""), 120), "rules": Proto.str_field(d.get("rules", ""), 16),
+			"plugins": plugins, "tc": Proto.str_field(d.get("totalConversion", ""), 64), "max": Proto.num_int(d.get("maxPlayers", 0), 0, 4096), "added": Proto.str_field(d.get("added", ""), 16),
 			"website": site if site.begins_with("https://") else ""})
 	return {"ok": true, "error": "", "entries": out}
 

@@ -46,6 +46,11 @@ public final class ENetHostTransport: Transport, TransportDelegate {
         /// A dedicated server: no pilot of its own. It takes no player slot, is not listed in anyone's roster
         /// (WELCOME `has_local_player` false, `host_name` "[Server]") and its beacon says `dedicated`.
         public var dedicated: Bool = false
+        /// Most simultaneous connections from one IP address (0 = unlimited). Behind Docker's userland proxy or a NAT
+        /// every player can share an address: raise it there.
+        public var maxConnectionsPerIP: Int = NetLimits.defaultMaxConnectionsPerIP
+        /// Seconds an address stays blocked after repeated abuse (flooding, bad handshakes, password guessing).
+        public var tempBanSeconds: Double = NetLimits.tempBanSeconds
         public init(port: Int = CrossPlayProtocol.defaultPort, maxPlayers: Int = 8, serverName: String, hostName: String,
                     password: String = "", gameVersion: String = CrossPlayProtocol.appVersion, manifestJSON: String = "",
                     rulesJSON: String = "{}", rulesName: String = "custom", requirements: PluginRequirements? = nil, loopbackOnly: Bool = false,
@@ -67,6 +72,11 @@ public final class ENetHostTransport: Transport, TransportDelegate {
         case chat(id: Int, name: String, text: String)
         /// A joiner runs another app release (same protocol): informational.
         case versionNote(id: Int, name: String, theirs: String, ours: String)
+        /// A connection was dropped for abusing the server (`reason` is plain language); `banned` = its address is now
+        /// blocked for a while.
+        case abuse(id: Int, name: String, ip: String, reason: String, banned: Bool)
+        /// A player reported someone (`target` 0 = the reporter's client noticed invalid data and names the sender).
+        case report(reporter: Int, target: Int, reason: String, detail: String)
     }
 
     public enum HostError: Error, Equatable { case alreadyStarted, cannotBind(Int) }
@@ -86,7 +96,22 @@ public final class ENetHostTransport: Transport, TransportDelegate {
         var lastRx: Double
         var rtt = -1
         var ip = ""
-        init(peer: UnsafeMutablePointer<ENetPeer>, now: Double) { self.peer = peer; t0 = now; lastRx = now }
+        var packets: TokenBucket
+        var bytes: TokenBucket
+        var chat: TokenBucket
+        var reports: TokenBucket
+        var violations = 0
+        var violationsSince: Double
+        var lastChat = ""
+        var repeatedChat = 0
+        var lastChatAt = 0.0
+        init(peer: UnsafeMutablePointer<ENetPeer>, now: Double) {
+            self.peer = peer; t0 = now; lastRx = now; violationsSince = now
+            packets = TokenBucket(burst: NetLimits.packetBurst, perSecond: NetLimits.packetsPerSecond, now: now)
+            bytes = TokenBucket(burst: NetLimits.byteBurst, perSecond: NetLimits.bytesPerSecond, now: now)
+            chat = TokenBucket(burst: NetLimits.chatBurst, perSecond: NetLimits.chatPerSecond, now: now)
+            reports = TokenBucket(burst: 3, perSecond: 0.2, now: now)
+        }
     }
 
     // MARK: State
@@ -94,6 +119,7 @@ public final class ENetHostTransport: Transport, TransportDelegate {
     public private(set) var config: Config
     public let inner = ExternalTransport(localPeerID: ENetTransport.Wire.serverID)
     public var localPeerID: PeerID { inner.localPeerID }
+    public var hostPeerID: PeerID? { String(ENetTransport.Wire.serverID) }
     public var connectedPeers: [PeerID] { inner.connectedPeers }
     public weak var delegate: TransportDelegate?
     public var onEvent: ((Event) -> Void)?
@@ -105,6 +131,20 @@ public final class ENetHostTransport: Transport, TransportDelegate {
     private let beaconLock = NSLock()
     private var beaconPlayers = 1
     private var beaconConfig: Config
+    /// Moderation hooks (the dedicated server sets these; all run on the pumping thread).
+    /// Inspect/rewrite a client's relayed game bytes before they reach anyone: return nil to drop them.
+    public var relayFilter: ((_ from: Int, _ payload: [UInt8]) -> [UInt8]?)?
+    /// Vet a chat line (already cleaned and capped): return the text to broadcast, nil to drop it.
+    public var chatFilter: ((_ from: Int, _ name: String, _ ip: String, _ text: String) -> String?)?
+    /// Extra join rules (allowlist, ...): return a (code, message) refusal or nil to let the player in.
+    public var joinGate: ((_ ip: String, _ name: String) -> (code: String, message: String)?)?
+    /// A chat line starting with "/" : handled here instead of being broadcast.
+    public var onCommand: ((_ from: Int, _ name: String, _ ip: String, _ text: String) -> Void)?
+    /// Addresses blocked for a while after abuse: ip -> seconds left. Read-only for UIs.
+    public var tempBans: [String: Double] { tempBanUntil.filter { $0.value > clock }.mapValues { $0 - clock } }
+    private var tempBanUntil: [String: Double] = [:]
+    private var abuseKicks: [String: [Double]] = [:]
+    private var handshakeFailures: [String: [Double]] = [:]
 
     private var host: UnsafeMutablePointer<ENetHost>?
     private var conns: [Int: Conn] = [:]
@@ -122,6 +162,7 @@ public final class ENetHostTransport: Transport, TransportDelegate {
         _ = Self.initOnce
         self.config = config
         self.beaconConfig = config
+        self.beaconPlayers = config.dedicated ? 0 : 1   // a dedicated server counts real players only
         inner.delegate = self
     }
 
@@ -160,8 +201,15 @@ public final class ENetHostTransport: Transport, TransportDelegate {
         addr.port = UInt16(clamping: config.port)
         // +2 slack so a refused (full / wrong version) joiner can still be told why before it is dropped.
         guard let h = enet_host_create(&addr, max(1, config.maxPlayers) + 2, 0, 0, 0) else { throw HostError.cannotBind(config.port) }
+        // Hard limits inside ENet itself: one reassembled packet at most `NetLimits.maxPacket`, a bounded receive backlog
+        // per peer, and a per-address cap on established peers.
+        h.pointee.maximumPacketSize = NetLimits.maxPacket
+        h.pointee.maximumWaitingData = 2 * 1024 * 1024
+        if config.maxConnectionsPerIP > 0, !config.loopbackOnly { h.pointee.duplicatePeers = config.maxConnectionsPerIP }
         host = h
         isRunning = true
+        beaconLock.lock(); beaconPlayers = config.dedicated ? 0 : 1; beaconLock.unlock()
+        tempBanUntil.removeAll(); abuseKicks.removeAll(); handshakeFailures.removeAll()
         clock = 0
         sentTotal = 0; receivedTotal = 0
         lastService = ProcessInfo.processInfo.systemUptime
@@ -264,11 +312,17 @@ public final class ENetHostTransport: Transport, TransportDelegate {
                     enet_peer_reset(p)        // Godot does the same: ids below 2 or already in use are refused
                     break
                 }
-                p.pointee.data = UnsafeMutableRawPointer(bitPattern: id)
-                let c = Conn(peer: p, now: clock)
                 var buf = [CChar](repeating: 0, count: 64)
                 enet_address_get_host_ip(&p.pointee.address, &buf, 64)
-                c.ip = String(cString: buf)
+                let ip = String(cString: buf)
+                if let until = tempBanUntil[ip], until > clock { enet_peer_reset(p); break }
+                let limit = config.maxConnectionsPerIP
+                if limit > 0, ip != "127.0.0.1", conns.values.filter({ $0.ip == ip }).count >= limit {
+                    enet_peer_reset(p); break      // one address can't hold every slot
+                }
+                p.pointee.data = UnsafeMutableRawPointer(bitPattern: id)
+                let c = Conn(peer: p, now: clock)
+                c.ip = ip
                 conns[id] = c
             case ENET_EVENT_TYPE_RECEIVE:
                 if let pkt = event.packet {
@@ -323,47 +377,68 @@ public final class ENetHostTransport: Transport, TransportDelegate {
         static let hello = ENetTransport.Wire.kHello, welcome = ENetTransport.Wire.kWelcome, reject = ENetTransport.Wire.kReject
         static let peerJoin = ENetTransport.Wire.kPeerJoin, peerLeft = ENetTransport.Wire.kPeerLeft, kick = ENetTransport.Wire.kKick
         static let ping = ENetTransport.Wire.kPing, pong = ENetTransport.Wire.kPong, chat = ENetTransport.Wire.kChat
-        static let data = ENetTransport.Wire.kData
+        static let data = ENetTransport.Wire.kData, report = ENetTransport.Wire.kReport
     }
 
     private func handle(from id: Int, reliable: Bool, _ pkt: [UInt8]) {
         guard let c = conns[id], closing[id] == nil, let kind = pkt.first else { return }
         c.lastRx = clock
+        // Size cap per kind, then the per-connection packet and byte budgets. Anything over is dropped, and a
+        // connection that keeps going is kicked (and, if it keeps coming back, its address is blocked for a while).
+        let cap: Int
+        switch kind {
+        case Kind.hello: cap = NetLimits.maxHello
+        case Kind.data: cap = NetLimits.maxData
+        case Kind.ping, Kind.chat, Kind.report: cap = NetLimits.maxSmallControl
+        default: return                       // unknown kinds are ignored
+        }
+        if pkt.count > cap { return violation(id, c, weight: 10, "sent an oversized packet") }
+        guard c.packets.take(now: clock), c.bytes.take(Double(pkt.count), now: clock) else {
+            return violation(id, c, weight: 1, "sent too much data too fast")
+        }
+        if !c.ready, kind != Kind.hello, kind != Kind.ping { return violation(id, c, weight: 2, "sent game data before joining") }
         switch kind {
         case Kind.hello: hello(id, c, Self.json(pkt))
         case Kind.data: relay(id, c, reliable: reliable, pkt)
         case Kind.ping:
-            c.rtt = Self.int(Self.json(pkt)["rtt"]) ?? -1
-            sendControl(id, Kind.pong, ["t": Self.json(pkt)["t"] ?? 0.0], reliable: false)
+            let j = Self.json(pkt)
+            c.rtt = max(-1, min(60_000, Self.int(j["rtt"]) ?? -1))
+            sendControl(id, Kind.pong, ["t": (j["t"] as? Double) ?? 0.0], reliable: false)
         case Kind.chat: chat(id, c, Self.json(pkt))
+        case Kind.report: report(id, c, Self.json(pkt))
         default: break
         }
     }
 
     private func hello(_ id: Int, _ c: Conn, _ h: [String: Any]) {
         if c.ready { return }
-        if h.isEmpty { return reject(id, "bad_request", "Bad handshake.") }
+        if h.isEmpty { noteHandshakeFailure(c); return reject(id, "bad_request", "Bad handshake.") }
         let proto = Self.int(h["proto"]) ?? 0
         if proto != CrossPlayProtocol.version {
             return reject(id, "proto", "This server speaks a different multiplayer protocol (server \(CrossPlayProtocol.version), you \(proto)). Update NovaSwift.")
         }
         // A different app release with the same protocol is fine: note it and carry on.
-        let ver = (h["version"] as? String) ?? ""
+        let ver = String(CrossPlayProtocol.cleanName((h["version"] as? String) ?? "", fallback: "", maxLength: 32))
         let differentVersion = !ver.isEmpty && ver != config.gameVersion
-        let theirPW = (h["pw"] as? String) ?? ""
+        let theirPW = String(((h["pw"] as? String) ?? "").prefix(128))
         if !config.password.isEmpty, ENetTransport.hashPassword(config.password) != theirPW {
+            // Online password guessing: a few wrong tries are normal typos, a stream of them blocks the address.
+            noteHandshakeFailure(c)
             return reject(id, "password", theirPW.isEmpty ? "This server needs a password." : "Wrong password.")
         }
         if !c.ip.isEmpty, banned.contains(c.ip) { return reject(id, "banned", "You are banned from this server.") }
+        if let refusal = joinGate?(c.ip, CrossPlayProtocol.cleanPlayerName((h["name"] as? String) ?? "", fallback: "Pilot")) {
+            return reject(id, refusal.code, refusal.message)
+        }
         if clients.count >= clientCapacity {
             return reject(id, "full", "The server is full (\(playerCount)/\(config.maxPlayers)).")
         }
-        let theirs = (h["manifest"] as? String) ?? ""
+        let theirs = (h["manifest"] as? String).flatMap { $0.utf8.count <= NetLimits.maxHello ? $0 : nil } ?? ""
         if !config.manifestJSON.isEmpty, !theirs.isEmpty, !Self.sameManifest(config.manifestJSON, theirs) {
             return reject(id, "plugins", "Your enabled plug-ins don't match the server's. Match its plug-in list, then rejoin.",
                           detail: ["server_manifest": config.manifestJSON, "client_manifest": theirs])
         }
-        let name = uniqueName(CrossPlayProtocol.cleanName((h["name"] as? String) ?? "", fallback: "Pilot \(id)"), excluding: id)
+        let name = uniqueName(CrossPlayProtocol.cleanPlayerName((h["name"] as? String) ?? "", fallback: "Pilot \(id)"), excluding: id)
         c.name = name; c.ready = true
         publishPlayerCount()
         var list: [[String: Any]] = config.dedicated ? [] : [["id": ENetTransport.Wire.serverID, "name": config.hostName]]
@@ -380,11 +455,15 @@ public final class ENetHostTransport: Transport, TransportDelegate {
     }
 
     private func uniqueName(_ want: String, excluding id: Int) -> String {
-        var taken: Set<String> = config.dedicated ? [] : [config.hostName.lowercased()]
-        for (oid, o) in conns where oid != id && o.ready { taken.insert(o.name.lowercased()) }
+        func key(_ s: String) -> String { s.lowercased().filter { !$0.isWhitespace } }
+        var taken: Set<String> = config.dedicated ? [] : [key(config.hostName)]
+        for (oid, o) in conns where oid != id && o.ready { taken.insert(key(o.name)) }
         var name = want
         var n = 2
-        while taken.contains(name.lowercased()) { name = "\(want) (\(n))"; n += 1 }
+        while taken.contains(key(name)) {
+            let suffix = " (\(n))"
+            name = String(want.prefix(CrossPlayProtocol.maxNameLength - suffix.count)) + suffix; n += 1
+        }
         return name
     }
 
@@ -398,7 +477,11 @@ public final class ENetHostTransport: Transport, TransportDelegate {
     private func relay(_ id: Int, _ c: Conn, reliable: Bool, _ pkt: [UInt8]) {
         guard c.ready, pkt.count >= 5 else { return }
         let target = Int(Int32(bitPattern: UInt32(pkt[1]) | UInt32(pkt[2]) << 8 | UInt32(pkt[3]) << 16 | UInt32(pkt[4]) << 24))
-        let payload = Array(pkt[5...])
+        var payload = Array(pkt[5...])
+        if let f = relayFilter {
+            guard let out = f(id, payload) else { return }
+            payload = out
+        }
         if target == -1 || target == ENetTransport.Wire.serverID { inner.receive(from: id, data: payload) }
         if target == -1 {
             let out = Self.dataPacket(peer: id, payload: payload)
@@ -410,11 +493,81 @@ public final class ENetHostTransport: Transport, TransportDelegate {
 
     private func chat(_ id: Int, _ c: Conn, _ b: [String: Any]) {
         guard c.ready else { return }
-        let text = String(((b["text"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(240))
+        var text = CrossPlayProtocol.cleanChat((b["text"] as? String) ?? "")
         guard !text.isEmpty else { return }
+        if !allowChat(c) { return violation(id, c, weight: 5, "is spamming chat") }
+        if text.hasPrefix("/"), let onCommand { onCommand(id, c.name, c.ip, text); return }
+        if let f = chatFilter { guard let t = f(id, c.name, c.ip, text) else { return }; text = t }
         for (oid, o) in conns where o.ready { sendControl(oid, Kind.chat, ["id": id, "name": c.name, "text": text]) }
         emit(.chat(id: id, name: c.name, text: text))
     }
+
+    /// Spend a chat token (burst 4, 2/s) and refuse a line repeated three times in 10 seconds.
+    private func allowChat(_ c: Conn, text: String = "") -> Bool {
+        guard c.chat.take(now: clock) else { return false }
+        return true
+    }
+
+    private func report(_ id: Int, _ c: Conn, _ b: [String: Any]) {
+        guard c.ready else { return }
+        guard c.reports.take(now: clock) else { return violation(id, c, weight: 3, "is sending too many reports") }
+        let target = max(0, min(Int(Int32.max), Self.int(b["id"]) ?? 0))
+        let reason = String(CrossPlayProtocol.cleanName((b["reason"] as? String) ?? "", fallback: "abuse", maxLength: 16)).lowercased()
+        let detail = CrossPlayProtocol.cleanChat((b["detail"] as? String) ?? "")
+        emit(.report(reporter: id, target: target, reason: reason, detail: String(detail.prefix(120))))
+    }
+
+    // MARK: Abuse handling
+
+    /// A connection broke a limit. Weighted strikes accumulate in a 30 s window; past `NetLimits.violationsToKick` it is
+    /// kicked, and an address kicked `abuseKicksToTempBan` times in 10 minutes is blocked for `tempBanSeconds`.
+    private func violation(_ id: Int, _ c: Conn, weight: Int, _ what: String) {
+        if clock - c.violationsSince > 30 { c.violations = 0; c.violationsSince = clock }
+        c.violations += weight
+        if Self.debug { print("ENETDBG violation \(id) \(what) -> \(c.violations)") }
+        if c.violations >= NetLimits.violationsToKick { abuseKick(id, c, what) }
+    }
+
+    private func abuseKick(_ id: Int, _ c: Conn, _ what: String) {
+        var banned = false
+        if !c.ip.isEmpty, c.ip != "127.0.0.1" {
+            var list = (abuseKicks[c.ip] ?? []).filter { clock - $0 < 600 }
+            list.append(clock)
+            abuseKicks[c.ip] = list
+            if list.count >= NetLimits.abuseKicksToTempBan { tempBanUntil[c.ip] = clock + config.tempBanSeconds; banned = true }
+            if abuseKicks.count > 4096 { abuseKicks = abuseKicks.filter { ($0.value.last ?? 0) > clock - 600 } }
+        }
+        emit(.abuse(id: id, name: c.name, ip: c.ip, reason: what, banned: banned))
+        sendControl(id, Kind.kick, ["reason": "Disconnected: the connection \(what)."])
+        forget(id, reason: "abuse")
+        closing[id] = clock + 0.3
+    }
+
+    private func noteHandshakeFailure(_ c: Conn) {
+        guard !c.ip.isEmpty, c.ip != "127.0.0.1" else { return }
+        var list = (handshakeFailures[c.ip] ?? []).filter { clock - $0 < 60 }
+        list.append(clock)
+        handshakeFailures[c.ip] = list
+        if list.count >= 10 {
+            tempBanUntil[c.ip] = clock + config.tempBanSeconds
+            handshakeFailures[c.ip] = nil
+            emit(.abuse(id: 0, name: "", ip: c.ip, reason: "failed the handshake or password too many times", banned: true))
+        }
+        if handshakeFailures.count > 4096 { handshakeFailures = handshakeFailures.filter { ($0.value.last ?? 0) > clock - 60 } }
+    }
+
+    /// Kick a connection for abuse found above this layer (e.g. the session saw repeated invalid messages).
+    public func reportAbuse(_ id: Int, _ what: String) {
+        if let c = conns[id], c.ready { abuseKick(id, c, what) }
+    }
+
+    /// Send a server chat line to one player.
+    public func sendServerChat(_ text: String, to id: Int) {
+        sendControl(id, Kind.chat, ["id": ENetTransport.Wire.serverID, "name": "[Server]", "text": text])
+    }
+
+    /// Lift a temporary block (admin action).
+    public func clearTempBan(_ ip: String) { tempBanUntil[ip] = nil; abuseKicks[ip] = nil; handshakeFailures[ip] = nil }
 
     private func forget(_ id: Int, reason: String) {
         guard let c = conns[id], c.ready else { return }
@@ -487,7 +640,7 @@ public final class ENetHostTransport: Transport, TransportDelegate {
     public static func sameManifest(_ a: String, _ b: String) -> Bool {
         func parse(_ s: String) -> [String: String]? {
             guard let o = (try? JSONSerialization.jsonObject(with: Data(s.utf8))) as? [String: Any],
-                  let plugins = o["plugins"] as? [[String: Any]] else { return nil }
+                  let plugins = o["plugins"] as? [[String: Any]], plugins.count <= NetLimits.maxManifestEntries else { return nil }
             var d: [String: String] = [:]
             for p in plugins where (p["cosmetic"] as? Bool) != true {
                 d[(p["id"] as? String) ?? ""] = (p["contentHash"] as? String) ?? (p["hash"] as? String) ?? ""

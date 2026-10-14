@@ -14,6 +14,8 @@ public enum PluginDownloadError: Error, LocalizedError {
     case noLocalFile
     case notAFile
     case noURL
+    case tooLarge(Int64)
+    case insecureURL
 
     public var errorDescription: String? {
         switch self {
@@ -22,6 +24,8 @@ public enum PluginDownloadError: Error, LocalizedError {
         case .noLocalFile: return "Download finished but no file was produced."
         case .notAFile: return "The link returned a web page instead of the plug-in file."
         case .noURL: return "This catalog entry has no download link."
+        case .tooLarge(let cap): return "The download is bigger than the \(cap / 1_000_000) MB limit, so it was stopped."
+        case .insecureURL: return "Plug-ins are only downloaded over HTTPS."
         }
     }
 }
@@ -41,9 +45,11 @@ public enum PluginDownloader {
     /// up on failure. `onProgress` may be called from a background queue.
     public static func download(
         from url: URL,
+        maxBytes: Int64? = nil,
         onProgress: @escaping @Sendable (Double?) -> Void = { _ in }
     ) async throws -> URL {
         let delegate = DownloadDelegate(onProgress: onProgress)
+        delegate.maxBytes = maxBytes
         let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
 
@@ -56,12 +62,18 @@ public enum PluginDownloader {
     private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
         let onProgress: @Sendable (Double?) -> Void
         var continuation: CheckedContinuation<URL, Error>?
+        var maxBytes: Int64?
 
         init(onProgress: @escaping @Sendable (Double?) -> Void) { self.onProgress = onProgress }
 
         func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
                          didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
                          totalBytesExpectedToWrite: Int64) {
+            if let maxBytes, totalBytesWritten > maxBytes || totalBytesExpectedToWrite > maxBytes {
+                downloadTask.cancel()
+                if let c = continuation { continuation = nil; c.resume(throwing: PluginDownloadError.tooLarge(maxBytes)) }
+                return
+            }
             onProgress(totalBytesExpectedToWrite > 0
                 ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite) : nil)
         }
@@ -118,13 +130,19 @@ public enum PluginDownloader {
     /// Downloads the first working URL of `urls`, and checks `sha256` if given.
     public static func download(
         from urls: [URL], sha256: String?,
+        httpsOnly: Bool = false, maxBytes: Int64? = nil,
         onProgress: @escaping @Sendable (Double?) -> Void = { _ in }
     ) async throws -> (file: URL, name: String) {
         guard !urls.isEmpty else { throw PluginDownloadError.noURL }
         var lastError: Error = PluginDownloadError.noURL
         for url in urls {
             do {
-                let file = try await download(from: url, onProgress: onProgress)
+                if httpsOnly, url.scheme?.lowercased() != "https" { throw PluginDownloadError.insecureURL }
+                let file = try await download(from: url, maxBytes: maxBytes, onProgress: onProgress)
+                if let maxBytes, let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int64) ?? nil, size > maxBytes {
+                    try? FileManager.default.removeItem(at: file)
+                    throw PluginDownloadError.tooLarge(maxBytes)
+                }
                 if let sha256, try sha256Hex(of: file).lowercased() != sha256.lowercased() {
                     try? FileManager.default.removeItem(at: file)
                     throw PluginInstallError.checksumMismatch

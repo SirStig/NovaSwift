@@ -147,7 +147,10 @@ func _run_check(manual: bool) -> void:
 
 ## Is the running build experimental? (a pre-release version, or installed from an experimental manifest)
 static func running_experimental() -> bool:
-	return Semver.is_prerelease(UpdateConfig.current_version()) or str(Prefs.get_value("updates", "installed_channel")) == "experimental"
+	var ch: String = str(Prefs.get_value("updates", "installed_channel"))
+	if ch != "":
+		return ch == "experimental"   # the signed channel the running build was installed from wins
+	return Semver.is_prerelease(UpdateConfig.current_version())
 
 
 ## Download + verify the release's signed manifest and set rel["channel"] from it (the signed label wins over the

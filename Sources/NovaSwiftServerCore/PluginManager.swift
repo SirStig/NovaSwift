@@ -34,6 +34,8 @@ public final class PluginManager {
         public var fetchedAt: Date?
     }
 
+    /// Largest plug-in download the server accepts (the biggest total conversions are a few hundred MB).
+    public static let maxDownloadBytes: Int64 = 800 * 1_000_000
     public let pluginsDir: URL
     private let cacheDir: URL
     private let log: ServerLog
@@ -67,7 +69,7 @@ public final class PluginManager {
         let provider = PluginCatalogProvider(
             remoteURL: catalogURL, cacheFile: cacheDir.appendingPathComponent("catalog.json"),
             bundled: PluginCatalogDocument(plugins: []), fetch: catalogFetch)
-        Task {
+        Task(priority: .utility) {   // not the main thread's high priority: libdispatch would try to raise worker priority (EACCES log noise)
             let r = await provider.load()
             self.storeCatalog(r)
             if let e = r.remoteError { self.log.warn("Plug-in catalog: \(e)") }
@@ -111,7 +113,7 @@ public final class PluginManager {
         }
         if let j = job(id), j.state == .queued || j.state == .downloading || j.state == .installing { return }
         setJob(id, .queued, "Waiting...")
-        Task {
+        Task(priority: .utility) {   // not the main thread's high priority: libdispatch would try to raise worker priority (EACCES log noise)
             var ok = true
             for dep in entry.dependencies where !self.isInstalled(dep) {
                 if self.catalogEntry(dep) != nil { ok = await self.installNow(dep) && ok }
@@ -128,13 +130,26 @@ public final class PluginManager {
             setJob(id, .failed, "\(entry.name) has no download link in the catalog, so it can't be installed automatically. Add the file by hand instead.")
             return false
         }
+        // The server downloads only over HTTPS, stops at a size cap, checks the catalog checksum when there is one, and
+        // never runs anything it downloads: plug-ins are data files (.rez / .ndat) that are only ever read.
+        let secure = entry.downloadURLs.filter { $0.scheme?.lowercased() == "https" }
+        guard !secure.isEmpty else {
+            setJob(id, .failed, "\(entry.name) is only offered over plain HTTP, which the server refuses. Add the file by hand instead.")
+            return false
+        }
+        if let size = entry.sizeBytes, size > Self.maxDownloadBytes {
+            setJob(id, .failed, "\(entry.name) is bigger than the \(Self.maxDownloadBytes / 1_000_000) MB limit.")
+            return false
+        }
+        if entry.sha256 == nil { log.warn("Plug-in \(entry.name) has no checksum in the catalog; its download can't be verified.") }
         setJob(id, .downloading, progress: nil, "Downloading \(entry.name)...")
         log.info("Downloading plug-in \(entry.name) from \(entry.downloadHost)...")
         do {
             let (file, name): (URL, String)
-            if let archiveFetch { (file, name) = try await archiveFetch(entry.downloadURLs, entry.sha256) }
+            if let archiveFetch { (file, name) = try await archiveFetch(secure, entry.sha256) }
             else {
-                (file, name) = try await PluginDownloader.download(from: entry.downloadURLs, sha256: entry.sha256) { [weak self] p in
+                (file, name) = try await PluginDownloader.download(from: secure, sha256: entry.sha256, httpsOnly: true,
+                                                                   maxBytes: Self.maxDownloadBytes) { [weak self] p in
                     self?.setJob(id, .downloading, progress: p, "Downloading \(entry.name)...")
                 }
             }

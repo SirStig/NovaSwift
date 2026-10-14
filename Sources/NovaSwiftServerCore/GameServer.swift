@@ -31,11 +31,13 @@ public final class GameServer {
         public var peakPlayers = 0
         public var totalJoins = 0
         public var refusals = 0
+        public var abuseKicks = 0
     }
 
     public let store: ConfigStore
     public let log: ServerLog
     public let plugins: PluginManager
+    public let audit: AuditLog
     public private(set) var state: RunState = .stopped
     public private(set) var startedAt: Date?
     public private(set) var manifest: PluginManager.Manifest
@@ -46,6 +48,10 @@ public final class GameServer {
     private var session: NetSession?
     private let lan = LANBeaconService()
     private var joinTimes: [Int: Date] = [:]
+    private let moderation = ModerationCenter()
+    private let inspector = RelayInspector()
+    private var names: [Int: String] = [:]
+    private var ips: [Int: String] = [:]
     private var stats = Stats()
     private var statsTimer: DispatchSourceTimer?
     private var lastSample = (Date(), UInt64(0), UInt64(0))
@@ -57,8 +63,8 @@ public final class GameServer {
 
     public var config: ServerConfig { store.config }
 
-    public init(store: ConfigStore, log: ServerLog, plugins: PluginManager) {
-        self.store = store; self.log = log; self.plugins = plugins
+    public init(store: ConfigStore, log: ServerLog, plugins: PluginManager, audit: AuditLog = AuditLog()) {
+        self.store = store; self.log = log; self.plugins = plugins; self.audit = audit
         manifest = plugins.manifest(enabled: store.config.enabledPlugins)
     }
 
@@ -76,6 +82,8 @@ public final class GameServer {
         let h = ENetHostTransport(config: hostConfig(cfg))
         h.bannedIPs = Set(cfg.bans.keys)
         h.onEvent = { [weak self] e in self?.handle(e) }
+        wireModeration(h)
+        applyModeration(cfg)
         do { try h.start() } catch ENetHostTransport.HostError.cannotBind(let p) {
             let e = ServerError.portInUse(p)
             state = .failed(e.message)
@@ -83,6 +91,12 @@ public final class GameServer {
         }
         let s = NetSession(transport: h, rules: cfg.sessionRules)
         s.providesRules = true
+        // Messages the relay delivers to the server's own session that break the rules count against the sender.
+        s.onMisbehavior = { [weak self, weak h] peer, why, strikes in
+            guard strikes >= 25, let id = Int(peer) else { return }
+            h?.reportAbuse(id, "kept sending invalid messages (\(why))")
+            self?.log.warn("Kicked #\(id): kept sending invalid messages (\(why)).")
+        }
         s.localPluginManifest = manifest.all.gameplayOnly
         s.broadcastRules(cfg.sessionRules)
         host = h; session = s
@@ -107,7 +121,7 @@ public final class GameServer {
             lan.stopAnnouncing()
             host?.disconnect()
             host = nil; session = nil
-            joinTimes.removeAll()
+            joinTimes.removeAll(); names.removeAll(); ips.removeAll()
             if state == .running { state = .stopped }
             startedAt = nil
         }
@@ -120,12 +134,80 @@ public final class GameServer {
     }
 
     private func hostConfig(_ cfg: ServerConfig) -> ENetHostTransport.Config {
-        ENetHostTransport.Config(
+        var c = ENetHostTransport.Config(
             port: cfg.port, maxPlayers: cfg.maxPlayers, serverName: cfg.name, hostName: "[Server]",
             password: cfg.password, gameVersion: CrossPlayProtocol.appVersion,
             manifestJSON: ENetTransport.manifestJSON(manifest.all),
             rulesJSON: CrossPlayProtocol.rulesJSON(cfg.sessionRules), rulesName: CrossPlayProtocol.presetName(cfg.sessionRules),
             requirements: manifest.requirements, loopbackOnly: false, dedicated: true)
+        c.maxConnectionsPerIP = cfg.maxConnectionsPerIP
+        return c
+    }
+
+    // MARK: Moderation wiring
+
+    private func applyModeration(_ cfg: ServerConfig) {
+        moderation.config = ModerationCenter.Config(voteKick: cfg.voteKick, voteKickPercent: cfg.voteKickPercent,
+                                                    wordFilter: cfg.wordFilter, mutes: cfg.mutes)
+    }
+
+    private func wireModeration(_ h: ENetHostTransport) {
+        let now: () -> Double = { ProcessInfo.processInfo.systemUptime }
+        inspector.context = { [weak self] id in
+            guard let self, let n = self.names[id] else { return nil }
+            return RelayInspector.Context(name: n, ip: self.ips[id] ?? "")
+        }
+        inspector.chat = { [weak self] id, ctx, text in self?.vetChat(id: id, name: ctx.name, ip: ctx.ip, text: text, now: now()) }
+        inspector.command = { [weak self] id, ctx, text in self?.runCommand(id: id, name: ctx.name, text: text, now: now()) }
+        inspector.violation = { [weak h, weak self] id, what in
+            // Forged identities and host-only messages are never legitimate: count them hard.
+            self?.violationCounts[id, default: 0] += 1
+            if (self?.violationCounts[id] ?? 0) >= 10 { h?.reportAbuse(id, what); self?.violationCounts[id] = 0 }
+        }
+        h.relayFilter = { [weak self] id, payload in self?.inspector.inspect(from: id, payload: payload) }
+        h.chatFilter = { [weak self] id, name, ip, text in self?.vetChat(id: id, name: name, ip: ip, text: text, now: now()) }
+        h.onCommand = { [weak self] id, name, _, text in self?.runCommand(id: id, name: name, text: text, now: now()) }
+        h.joinGate = { [weak self] ip, name in
+            guard let self else { return nil }
+            let cfg = self.store.config
+            if cfg.allowlistMode, cfg.allowlist[ip] == nil {
+                return ("allowlist", "This server is invite-only. Ask the admin to allow your address (\(ip)).")
+            }
+            return nil
+        }
+    }
+
+    private var violationCounts: [Int: Int] = [:]
+
+    private func vetChat(id: Int, name: String, ip: String, text: String, now: Double) -> String? {
+        if moderation.isMuted(id: id, name: name, ip: ip) { return nil }   // muted players can talk to the void
+        return moderation.vet(id: id, text: text, now: now)
+    }
+
+    private func runCommand(id: Int, name: String, text: String, now: Double) {
+        let roster = (host?.clients ?? []).map { (id: $0.id, name: $0.name) }
+        switch moderation.command(text, from: id, players: roster, now: now) {
+        case .nothing: break
+        case .reply(let line): sendChat(line, to: String(id))
+        case .kick(let target, let reason):
+            let who = names[target] ?? "#\(target)"
+            log.info("Vote-kick passed against \(who) (started by \(name)).")
+            audit.record(actor: "vote", "votekick", "\(who) removed")
+            session?.kick(String(target), ban: false)
+            host?.kick(target, reason: reason, ban: false)
+            announce("\(who) was removed by a vote.", except: nil)
+        case .report(let target, _, let detail, let reply):
+            let who = names[target] ?? "#\(target)"
+            log.warn("\(name) reported \(who)\(detail.isEmpty ? "" : ": " + detail)")
+            sendChat(reply, to: String(id))
+            if moderation.noteReport(target: target, reporter: id, now: now) >= 3 {
+                host?.reportAbuse(target, "was reported by other players")
+            }
+        }
+    }
+
+    private func announce(_ text: String, except: Int?) {
+        for c in host?.clients ?? [] where c.id != except { sendChat(text, to: String(c.id)) }
     }
 
     // MARK: Live settings
@@ -167,6 +249,8 @@ public final class GameServer {
                 $0.requirements = manifest.requirements
             }
             host.bannedIPs = Set(new.bans.keys)
+            host.reconfigure { $0.maxConnectionsPerIP = new.maxConnectionsPerIP }
+            applyModeration(new)
             session.localPluginManifest = manifest.all.gameplayOnly
             if session.sessionRules != rules { session.broadcastRules(rules); report.applied.append("Rules updated for everyone online.") }
             lan.broadcastBeacons = new.lanAnnounce
@@ -196,6 +280,8 @@ public final class GameServer {
         case .hosting: break
         case .peerJoined(let id, let name):
             joinTimes[id] = Date()
+            names[id] = name
+            ips[id] = host?.clients.first { $0.id == id }?.ip ?? ""
             statsLock.lock()
             stats.totalJoins += 1
             stats.peakPlayers = max(stats.peakPlayers, host?.clients.count ?? 0)
@@ -203,9 +289,12 @@ public final class GameServer {
             let ip = host?.clients.first { $0.id == id }?.ip ?? "?"
             log.info("\(name) joined (id \(id), \(ip)). Players: \(host?.clients.count ?? 0)/\(store.config.maxPlayers).")
             sendMOTD(to: id)
+            if store.config.announceJoins { announce("\(name) joined.", except: id) }
             onRosterChange?()
         case .peerLeft(let id, let name, let reason):
-            joinTimes[id] = nil
+            joinTimes[id] = nil; names[id] = nil; ips[id] = nil; violationCounts[id] = nil
+            moderation.forget(id: id)
+            if store.config.announceJoins { announce("\(name) left.", except: id) }
             log.info("\(name) left (\(reason)). Players: \(host?.clients.count ?? 0)/\(store.config.maxPlayers).")
             onRosterChange?()
         case .refused(let code, let message, let ip):
@@ -215,6 +304,22 @@ public final class GameServer {
             if recentRefusals.count > 20 { recentRefusals.removeFirst() }
         case .chat(_, let name, let text):
             log.info("<\(name)> \(text)")
+        case .abuse(_, let name, let ip, let reason, let banned):
+            statsLock.lock(); stats.abuseKicks += 1; statsLock.unlock()
+            log.warn("\(name.isEmpty ? "A connection" : name) (\(ip)) \(reason)\(banned ? " - address blocked for a while" : "").")
+            audit.record(actor: "server", banned ? "tempban" : "abuse-kick", "\(ip) \(reason)")
+        case .report(let reporter, let target, let reason, let detail):
+            let who = reporter == 0 ? "?" : (names[reporter] ?? "#\(reporter)")
+            if target == 0 {
+                log.warn("\(who) reports invalid data from another peer (\(reason)): \(detail)")
+            } else {
+                let t = names[target] ?? "#\(target)"
+                log.warn("\(who) reported \(t) (\(reason))\(detail.isEmpty ? "" : ": " + detail)")
+                let now = ProcessInfo.processInfo.systemUptime
+                var kick = moderation.noteReport(target: target, reporter: reporter, now: now) >= 3
+                if reason == "invalid", moderation.noteInvalidReport(target: target) { kick = true }
+                if kick { host?.reportAbuse(target, "was reported by other players") }
+            }
         case .versionNote(_, let name, let theirs, let ours):
             log.info("\(name) runs NovaSwift \(theirs) (server \(ours)); same protocol, playing anyway.")
         }
@@ -300,7 +405,7 @@ public final class GameServer {
     }
 
     @discardableResult
-    public func kick(_ id: Int, reason: String = "Removed by the server admin.", ban: Bool = false) -> Bool {
+    public func kick(_ id: Int, reason: String = "Removed by the server admin.", ban: Bool = false, actor: String = "console") -> Bool {
         let player = players().first { $0.id == id }
         guard let player else { return false }
         if ban && !player.ip.isEmpty {
@@ -311,21 +416,78 @@ public final class GameServer {
             return host?.kick(id, reason: reason, ban: ban) ?? false
         }
         log.info("\(ban ? "Banned" : "Kicked") \(player.name) (\(player.ip)).")
+        audit.record(actor: actor, ban ? "ban" : "kick", "\(player.name) (\(player.ip)) \(reason)")
         return ok
     }
 
-    public func ban(ip: String, note: String) {
+    public func ban(ip: String, note: String, actor: String = "console") {
         guard NetworkTools.octets(ip) != nil else { return }
+        audit.record(actor: actor, "ban-ip", "\(ip) \(note)")
         try? store.update { $0.bans[ip] = note.isEmpty ? "banned \(Self.dateOnly(Date()))" : note }
         queue.sync { host?.bannedIPs = Set(store.config.bans.keys) }
         for p in players() where p.ip == ip { kick(p.id, reason: "Banned by the server admin.", ban: false) }
         log.info("Banned \(ip).")
     }
 
-    public func unban(ip: String) {
+    public func unban(ip: String, actor: String = "console") {
+        audit.record(actor: actor, "unban-ip", ip)
         try? store.update { $0.bans[ip] = nil }
         queue.sync { host?.bannedIPs = Set(store.config.bans.keys) }
         log.info("Unbanned \(ip).")
+    }
+
+    // MARK: Mutes, allowlist, temporary blocks
+
+    /// Mute a connected player (by id or name): their chat is dropped for everyone, and it persists by address and name.
+    @discardableResult
+    public func mute(_ key: String, note: String = "", actor: String = "console") -> Player? {
+        guard let p = findPlayer(key) else { return nil }
+        let stamp = note.isEmpty ? "muted \(Self.dateOnly(Date())) - \(p.name)" : note
+        try? store.update { c in
+            if !p.ip.isEmpty { c.mutes["ip:\(p.ip)"] = stamp }
+            c.mutes["name:\(p.name.lowercased())"] = stamp
+        }
+        queue.sync { applyModeration(store.config) }
+        audit.record(actor: actor, "mute", "\(p.name) (\(p.ip))")
+        log.info("Muted \(p.name).")
+        sendChat("You have been muted by the server admin.", to: String(p.id))
+        return p
+    }
+
+    /// Lift a mute by player name, address, or the raw "ip:..." / "name:..." key.
+    @discardableResult
+    public func unmute(_ key: String, actor: String = "console") -> Bool {
+        let k = key.trimmingCharacters(in: .whitespaces)
+        let lower = k.lowercased()
+        var hit = false
+        // A connected player's name also lifts the address entry that was added with it.
+        let extra: [String] = findPlayer(k).map { ["ip:\($0.ip)".lowercased(), "name:\($0.name.lowercased())"] } ?? []
+        try? store.update { c in
+            for existing in c.mutes.keys where extra.contains(existing.lowercased()) || existing.lowercased() == lower || existing.lowercased() == "ip:" + lower || existing.lowercased() == "name:" + lower {
+                c.mutes[existing] = nil; hit = true
+            }
+        }
+        queue.sync { applyModeration(store.config) }
+        if hit { audit.record(actor: actor, "unmute", k); log.info("Unmuted \(k).") }
+        return hit
+    }
+
+    public func allow(ip: String, note: String = "", actor: String = "console") {
+        guard NetworkTools.octets(ip) != nil else { return }
+        try? store.update { $0.allowlist[ip] = note.isEmpty ? "added \(Self.dateOnly(Date()))" : note }
+        audit.record(actor: actor, "allow", ip)
+    }
+
+    public func disallow(ip: String, actor: String = "console") {
+        try? store.update { $0.allowlist[ip] = nil }
+        audit.record(actor: actor, "disallow", ip)
+    }
+
+    /// Addresses blocked for a while after abuse, with seconds left.
+    public var tempBans: [String: Double] { queue.sync { host?.tempBans ?? [:] } }
+    public func clearTempBan(_ ip: String, actor: String = "console") {
+        queue.sync { host?.clearTempBan(ip) }
+        audit.record(actor: actor, "clear-tempban", ip)
     }
 
     /// Server-wide announcement shown in everyone's chat as "[Server]".

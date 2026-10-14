@@ -163,3 +163,43 @@ static func set_plugin_restore(d: Dictionary) -> void:
 
 static func clear_plugin_restore() -> void:
 	set_plugin_restore({})
+
+
+# --- blocked players (local mute by NAME; chat from them is hidden) ---------------------------------------------
+
+const MAX_BLOCKED := 64
+
+
+## Blocked names, lower-cased, oldest first.
+static func blocked() -> Array:
+	var out: Array = []
+	for n in _get_array("blocked"):
+		if (n is String) and (n as String) != "" and out.size() < MAX_BLOCKED:
+			out.append((n as String).to_lower())
+	return out
+
+
+static func is_blocked(nm: String) -> bool:
+	return nm != "" and blocked().has(nm.to_lower())
+
+
+## Add a name (the oldest entry drops when 64 are stored). Returns the list.
+static func block(nm: String) -> Array:
+	var key: String = Proto.clean_name(nm, "", Proto.MAX_NAME).to_lower()
+	var list: Array = blocked()
+	if key == "" or list.has(key):
+		return list
+	list.append(key)
+	while list.size() > MAX_BLOCKED:
+		list.pop_front()
+	Prefs.set_value(SECTION, "blocked", list)
+	Prefs.save()
+	return list
+
+
+static func unblock(nm: String) -> Array:
+	var list: Array = blocked()
+	list.erase(nm.to_lower())
+	Prefs.set_value(SECTION, "blocked", list)
+	Prefs.save()
+	return list

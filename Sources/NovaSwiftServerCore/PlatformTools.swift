@@ -2,6 +2,12 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
+import NovaSwiftPluginStore
+#if canImport(CryptoKit)
+import CryptoKit
+#else
+import Crypto
+#endif
 
 /// Small OS helpers: run a program, open the browser, start-with-the-computer, self-update.
 public enum PlatformTools {
@@ -39,6 +45,8 @@ public enum PlatformTools {
         let env = ProcessInfo.processInfo.environment
         return env["INVOCATION_ID"] != nil || env["NOVASWIFT_SUPERVISED"] == "1" || FileManager.default.fileExists(atPath: "/.dockerenv")
     }
+
+    public static var isContainer: Bool { FileManager.default.fileExists(atPath: "/.dockerenv") || ProcessInfo.processInfo.environment["container"] != nil }
 
     public static var hasDesktop: Bool {
         #if os(macOS) || os(Windows)
@@ -208,6 +216,9 @@ public final class UpdateChecker {
         public var available: Bool
         public var pageURL: String
         public var assetURL: String?
+        /// The signed manifest and its signature (release assets). Without both, an update can't be installed from here.
+        public var manifestURL: String? = nil
+        public var signatureURL: String? = nil
         public var notes: String
         public var checkedAt: Date?
         public var error: String?
@@ -253,7 +264,13 @@ public final class UpdateChecker {
         next.pageURL = (best.release["html_url"] as? String) ?? ServerVersion.releasesPage.absoluteString
         next.notes = String(((best.release["body"] as? String) ?? "").prefix(1500))
         let assets = (best.release["assets"] as? [[String: Any]]) ?? []
-        next.assetURL = assets.first { ($0["name"] as? String) == PlatformTools.releaseAssetName }?["browser_download_url"] as? String
+        func asset(_ name: String) -> String? {
+            let url = assets.first { ($0["name"] as? String) == name }?["browser_download_url"] as? String
+            return url.flatMap { ServerUpdateTrust.isTrustedAssetURL($0) ? $0 : nil }
+        }
+        next.assetURL = asset(PlatformTools.releaseAssetName)
+        next.manifestURL = asset(ServerUpdateTrust.manifestAsset)
+        next.signatureURL = asset(ServerUpdateTrust.signatureAsset)
         set(next)
         if next.available { log.info("A new server version is available: \(best.version) (you have \(ServerVersion.current)).") }
         return next
@@ -261,13 +278,49 @@ public final class UpdateChecker {
 
     private func set(_ i: Info) { lock.lock(); info = i; lock.unlock() }
 
-    /// Download the release for this platform and replace the program file. The new version runs after a restart.
+    /// Blocking download into memory with a hard size cap.
+    static func download(_ url: URL, maxBytes: Int64) -> Data? {
+        let sem = DispatchSemaphore(value: 0)
+        var result: Data?
+        Task(priority: .utility) {   // not the main thread's high priority: libdispatch would try to raise worker priority (EACCES log noise)
+            if let f = try? await PluginDownloader.download(from: url, maxBytes: maxBytes) {
+                result = try? Data(contentsOf: f); try? FileManager.default.removeItem(at: f)
+            }
+            sem.signal()
+        }
+        _ = sem.wait(timeout: .now() + 300)
+        return result
+    }
+
+    /// Download the release for this platform and replace the program file - but only after the signed manifest checks out
+    /// (see `ServerUpdateTrust`). The new version runs after a restart.
     public func apply() -> (ok: Bool, message: String) {
         let i = current
-        guard i.available, let asset = i.assetURL, let url = URL(string: asset), url.scheme == "https" else {
+        guard i.available, let asset = i.assetURL, let url = URL(string: asset), ServerUpdateTrust.isTrustedAssetURL(asset) else {
             return (false, "There's no update file for this system in the latest release. Download it from the releases page.")
         }
-        guard let data = NetworkTools.httpGet(url, timeout: 120) else { return (false, "The download failed. Try again, or download it from the releases page.") }
+        guard let mURL = i.manifestURL.flatMap({ URL(string: $0) }), let sURL = i.signatureURL.flatMap({ URL(string: $0) }) else {
+            return (false, "This release is not signed (it has no \(ServerUpdateTrust.manifestAsset) / .sig), so the server refuses to install it by itself. Download it by hand and check it came from the official releases page.")
+        }
+        guard let manifestData = NetworkTools.httpGet(mURL, timeout: 20), manifestData.count <= ServerUpdateTrust.maxManifestBytes,
+              let sigData = NetworkTools.httpGet(sURL, timeout: 20) else {
+            return (false, "Couldn't download the update's signature files. Try again later.")
+        }
+        guard ServerUpdateTrust.verify(manifest: manifestData, signature: sigData) else {
+            log.error("Update refused: the signature on \(ServerUpdateTrust.manifestAsset) is not valid.")
+            return (false, "Update refused: its signature is not valid. Nothing was installed.")
+        }
+        let platformKey = "\(PlatformTools.platformName)-\(PlatformTools.archName)"
+        guard let m = ServerUpdateTrust.parse(manifestData), Self.isNewer(m.version, than: ServerVersion.current),
+              m.version == i.latest, let want = m.platforms[platformKey], want.asset == PlatformTools.releaseAssetName,
+              url.lastPathComponent == want.asset, want.size <= ServerUpdateTrust.maxArchiveBytes else {
+            return (false, "Update refused: the signed manifest doesn't describe this release for this system.")
+        }
+        guard let data = Self.download(url, maxBytes: want.size) else { return (false, "The download failed. Try again, or download it from the releases page.") }
+        guard Int64(data.count) == want.size, SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined() == want.sha256 else {
+            log.error("Update refused: the download doesn't match the signed size/checksum.")
+            return (false, "Update refused: the download doesn't match the signed checksum. Nothing was installed.")
+        }
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("novaswift-update-\(UUID().uuidString)")
         let archive = tmp.appendingPathComponent(PlatformTools.releaseAssetName)
         let stage = tmp.appendingPathComponent("stage", isDirectory: true)
@@ -286,7 +339,9 @@ public final class UpdateChecker {
         if let en = FileManager.default.enumerator(at: stage, includingPropertiesForKeys: nil) {
             for case let u as URL in en where u.lastPathComponent == binaryName { found = u; break }
         }
-        guard let newBinary = found else { return (false, "The update didn't contain the server program.") }
+        guard let newBinary = found, (try? FileManager.default.destinationOfSymbolicLink(atPath: newBinary.path)) == nil else {
+            return (false, "The update didn't contain the server program.")
+        }
         let exe = PlatformTools.executableURL
         let staged = exe.appendingPathExtension("new")
         do {

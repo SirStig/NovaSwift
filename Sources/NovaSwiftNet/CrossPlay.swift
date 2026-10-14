@@ -14,7 +14,7 @@ public enum CrossPlayProtocol {
     /// The app's release string (`godot/project.godot` `config/version`). Informational: sent in HELLO and
     /// beacons so the UI can say "different version", never gates a join. A unit test keeps it equal to the Godot
     /// project's so a release bumps both.
-    public static let appVersion = "0.7.0-beta.1"
+    public static let appVersion = "0.7.0-beta.2"
     /// Alias of `version` (older name).
     public static let wireProtocol = version
     public static let defaultPort = 53735
@@ -33,14 +33,87 @@ public enum CrossPlayProtocol {
         port == defaultPort ? lanPort : port + 1
     }
 
-    /// Trim, strip control characters, cap the length. Never empty (`NetProto.clean_name`).
+    /// Trim, strip control / zero-width / bidi characters, collapse whitespace, cap the length. Never empty
+    /// (`NetProto.clean_name`).
     public static func cleanName(_ raw: String, fallback: String = "Pilot", maxLength: Int = maxNameLength) -> String {
-        let filtered = String(String.UnicodeScalarView(raw.unicodeScalars.filter { $0.value >= 32 && $0.value != 127 }))
-        var out = filtered.trimmingCharacters(in: .whitespacesAndNewlines)
+        var out = collapseSpaces(stripInvisible(raw)).trimmingCharacters(in: .whitespacesAndNewlines)
         if out.count > maxLength {
             out = String(out.prefix(maxLength)).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return out.isEmpty ? fallback : out
+    }
+
+    /// A player-chosen display name: `cleanName` plus no square brackets (BBCode) and no names that look like the
+    /// server or staff (`isReservedName`), which fall back to `fallback`.
+    public static func cleanPlayerName(_ raw: String, fallback: String = "Pilot") -> String {
+        let noBrackets = String(String.UnicodeScalarView(raw.unicodeScalars.filter { $0 != "[" && $0 != "]" }))
+        let n = cleanName(noBrackets, fallback: fallback)
+        return isReservedName(n) ? fallback : n
+    }
+
+    /// Chat text from the wire: no control / invisible characters (newlines become spaces), collapsed, trimmed, at most
+    /// `maxChatLength` characters. Empty string when nothing is left.
+    public static func cleanChat(_ raw: String) -> String {
+        let spaced = String(String.UnicodeScalarView(raw.unicodeScalars.map { ($0 == "\n" || $0 == "\r" || $0 == "\t") ? " " : $0 }))
+        let t = collapseSpaces(stripInvisible(spaced)).trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.count > maxChatLength ? String(t.prefix(maxChatLength)) : t
+    }
+
+    public static let maxChatLength = 200
+
+    /// Names players may not take: the server's own voices and staff titles, including look-alikes ("S3rver",
+    /// "Adm1n", "A d m i n", "[Server]").
+    public static let reservedNames: Set<String> = [
+        "server", "admin", "administrator", "moderator", "mod", "host", "system", "console", "novaswift",
+        "staff", "gm", "operator", "sysop", "owner",
+    ]
+
+    public static func isReservedName(_ name: String) -> Bool {
+        // Two readings of the ambiguous characters: 1 / ! / | as "l" (S3rver, Adm1n -> "admln") and as "i" ("admin").
+        for ambiguous in ["l", "i"] {
+            var norm = ""
+            for u in name.lowercased().unicodeScalars {
+                switch u {
+                case "0": norm.append("o")
+                case "1", "!", "|": norm.append(ambiguous)
+                case "3": norm.append("e")
+                case "4", "@": norm.append("a")
+                case "5", "$": norm.append("s")
+                case "7": norm.append("t")
+                case "8": norm.append("b")
+                default: if CharacterSet.alphanumerics.contains(u) { norm.unicodeScalars.append(u) }
+                }
+            }
+            if reservedNames.contains(norm) { return true }
+            if norm.hasPrefix("server") && norm.dropFirst(6).allSatisfy({ $0.isNumber }) { return true }
+            if norm.hasPrefix("admin") && norm.dropFirst(5).allSatisfy({ $0.isNumber }) { return true }
+        }
+        return false
+    }
+
+    /// Scalars that are invisible, reorder text, or are controls: removed from every string that comes off the wire.
+    public static func isInvisibleScalar(_ u: Unicode.Scalar) -> Bool {
+        let v = u.value
+        if v < 32 || v == 127 || (0x80...0x9F).contains(v) { return true }
+        switch v {
+        case 0x00AD, 0x034F, 0x061C, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x180B...0x180E, 0x200B...0x200F, 0x202A...0x202E,
+             0x2060...0x206F, 0x3164, 0xFE00...0xFE0F, 0xFEFF, 0xFFA0, 0xFFF9...0xFFFB, 0xE0000...0xE007F:
+            return true
+        default: return false
+        }
+    }
+
+    static func stripInvisible(_ s: String) -> String {
+        String(String.UnicodeScalarView(s.unicodeScalars.filter { !isInvisibleScalar($0) || $0 == "\n" || $0 == "\r" || $0 == "\t" }))
+            .replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\t", with: " ")
+    }
+
+    static func collapseSpaces(_ s: String) -> String {
+        var out = ""; var lastSpace = false
+        for ch in s {
+            if ch.isWhitespace { if !lastSpace { out.append(" ") }; lastSpace = true } else { out.append(ch); lastSpace = false }
+        }
+        return out
     }
 
     /// `SessionRules` in the Godot bridge's lenient snake_case JSON (WELCOME `rules`, `net_begin` rules).
@@ -133,6 +206,8 @@ public struct CrossPlayAddress: Equatable, Hashable, Codable, Sendable {
 /// truncated to its first 16 hex characters (`hashesMatch`).
 public struct PluginRequirements: Equatable, Codable, Sendable {
     public static let wireHashLength = 16
+    /// Most plug-ins / add-ons read from one beacon, directory entry or manifest.
+    public static let maxEntries = 64
     public var plugins: [PluginRequirement]
     /// Id of the enabled total conversion, if any.
     public var totalConversion: String?
@@ -168,13 +243,15 @@ public struct PluginRequirements: Equatable, Codable, Sendable {
     /// Lenient parse of the fields above (also accepts `contentHash`, as directory entries and handshake
     /// manifests spell it). nil when there is nothing.
     static func parse(_ o: [String: Any]) -> PluginRequirements? {
-        let tc = (o["tc"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        guard let list = o["plugins"] as? [[String: Any]] else { return tc == nil ? nil : PluginRequirements(totalConversion: tc, addOns: (o["addons"] as? [String]) ?? []) }
-        let plugins = list.map {
-            PluginRequirement(id: ($0["id"] as? String) ?? "", name: ($0["name"] as? String) ?? ($0["id"] as? String) ?? "",
-                              contentHash: ($0["hash"] as? String) ?? ($0["contentHash"] as? String) ?? "")
+        func cap(_ v: Any?, _ n: Int) -> String { CrossPlayProtocol.cleanName((v as? String) ?? "", fallback: "", maxLength: n) }
+        let tc = cap(o["tc"], 64).isEmpty ? nil : cap(o["tc"], 64)
+        let addOns = ((o["addons"] as? [Any]) ?? []).prefix(maxEntries).compactMap { ($0 as? String).map { cap($0, 64) } }
+        guard let list = o["plugins"] as? [[String: Any]] else { return tc == nil ? nil : PluginRequirements(totalConversion: tc, addOns: Array(addOns)) }
+        let plugins = list.prefix(maxEntries).map {
+            PluginRequirement(id: cap($0["id"], 64), name: cap($0["name"], 64).isEmpty ? cap($0["id"], 64) : cap($0["name"], 64),
+                              contentHash: String((($0["hash"] as? String) ?? ($0["contentHash"] as? String) ?? "").prefix(80)))
         }
-        return PluginRequirements(plugins: plugins, totalConversion: tc, addOns: (o["addons"] as? [String]) ?? [])
+        return PluginRequirements(plugins: plugins, totalConversion: tc, addOns: Array(addOns))
     }
 }
 
@@ -263,11 +340,12 @@ public struct ServerBeacon: Equatable, Sendable {
     public var isDifferentAppVersion: Bool { !ver.isEmpty && ver != CrossPlayProtocol.appVersion }
 
     /// `full: false` is the LAN broadcast form (signature + count only); the unicast `NSQ1` reply is `full`.
-    public func encode(full: Bool = true) -> Data {
+    public func encode(full: Bool = true, truncated: Bool = false) -> Data {
         var d: [String: Any] = [
             "name": CrossPlayProtocol.cleanName(name, fallback: "NovaSwift", maxLength: CrossPlayProtocol.maxServerNameLength), "players": players, "max": max, "ver": ver,
             "pw": pw, "port": port, "rules": rules, "dedicated": dedicated, "proto": CrossPlayProtocol.version,
         ]
+        if truncated { d["truncated"] = true }
         if let requirements { d.merge(requirements.fields(full: full)) { a, _ in a } }
         var out = Data(CrossPlayProtocol.beaconMagic.utf8)
         out.append((try? JSONSerialization.data(withJSONObject: d, options: [.sortedKeys])) ?? Data("{}".utf8))
@@ -280,24 +358,46 @@ public struct ServerBeacon: Equatable, Sendable {
         let bytes = [UInt8](packet)
         guard String(decoding: bytes[0..<4], as: UTF8.self) == CrossPlayProtocol.beaconMagic,
               let obj = (try? JSONSerialization.jsonObject(with: Data(bytes[4...]))) as? [String: Any] else { return nil }
-        func int(_ v: Any?) -> Int { (v as? NSNumber)?.intValue ?? 0 }
+        func int(_ v: Any?) -> Int { Swift.max(-1, Swift.min(1_000_000, (v as? NSNumber)?.intValue ?? 0)) }
+        func str(_ v: Any?, _ n: Int) -> String { String(CrossPlayProtocol.cleanName((v as? String) ?? "", fallback: "", maxLength: n)) }
         let port = int(obj["port"])
         guard (1...65535).contains(port) else { return nil }
         var b = ServerBeacon(
             name: CrossPlayProtocol.cleanName((obj["name"] as? String) ?? "", fallback: "Server", maxLength: CrossPlayProtocol.maxServerNameLength),
             players: Swift.max(0, int(obj["players"])), max: Swift.max(0, int(obj["max"])),
-            ver: (obj["ver"] as? String) ?? "", pw: (obj["pw"] as? Bool) ?? false, port: port,
-            rules: (obj["rules"] as? String) ?? "", dedicated: (obj["dedicated"] as? Bool) ?? false,
+            ver: str(obj["ver"], 32), pw: (obj["pw"] as? Bool) ?? false, port: port,
+            rules: str(obj["rules"], 16), dedicated: (obj["dedicated"] as? Bool) ?? false,
             requirements: PluginRequirements.parse(obj), encrypted: (obj["dtls"] as? Bool) ?? false,
             proto: (obj["proto"] as? NSNumber)?.intValue)
-        b.pluginSignature = (obj["sig"] as? String) ?? ""
+        b.pluginSignature = str(obj["sig"], 64)
         b.pluginCount = (obj["pcount"] as? NSNumber)?.intValue ?? b.requirements?.plugins.count
         return b
     }
 
-    public static var queryPacket: Data { Data(CrossPlayProtocol.queryMagic.utf8) }
-    public static func isQuery(_ packet: Data) -> Bool { packet == queryPacket }
+    /// The status query this build sends: `NSQ1` + version byte 2 + 3 random bytes, zero-padded to
+    /// `QueryGuard.requestSize` (1200) bytes. The padding is the anti-amplification rule: a server never answers with more
+    /// bytes than it received, so a spoofed query can't be turned into a bigger reflected reply.
+    public static var queryPacket: Data {
+        var d = Data(CrossPlayProtocol.queryMagic.utf8)
+        d.append(QueryGuard.queryVersion)
+        for _ in 0..<3 { d.append(UInt8.random(in: 0...255)) }
+        d.append(Data(count: QueryGuard.requestSize - d.count))
+        return d
+    }
+    /// The pre-hardening 4-byte query. Still answered (compact reply, tightly rate limited) for old clients.
+    public static var legacyQueryPacket: Data { Data(CrossPlayProtocol.queryMagic.utf8) }
+    public static func isQuery(_ packet: Data) -> Bool { QueryGuard.classify(packet) != .invalid }
+
+    /// `encode`, but never longer than `maxBytes`: the full reply when it fits, else the compact form (no plug-in list)
+    /// with `"truncated":true` so the reader knows the list was left out.
+    public func encode(maxBytes: Int) -> Data {
+        let full = encode(full: true)
+        if full.count <= maxBytes { return full }
+        let compact = encode(full: false, truncated: true)
+        return compact.count <= maxBytes ? compact : Data()
+    }
 }
+
 
 // MARK: - Public directory (servers.json)
 

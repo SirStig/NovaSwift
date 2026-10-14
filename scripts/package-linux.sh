@@ -149,5 +149,11 @@ fi
 [ "$bad" -eq 0 ] || exit 1
 
 mkdir -p "$(dirname "$ARCHIVE")"
-tar -C godot/export -czf "$ARCHIVE" --transform 's,^linux,NovaSwift,' linux
+# No macOS metadata in the archive: COPYFILE_DISABLE drops ._* files; --no-xattrs/--no-mac-metadata (bsdtar) drop the
+# extended attributes (com.apple.provenance...) that GNU tar warns about on the player's machine.
+export COPYFILE_DISABLE=1
+TAR_FLAGS=()
+tar --no-xattrs -cf /dev/null /dev/null 2>/dev/null && TAR_FLAGS+=(--no-xattrs)
+tar --no-mac-metadata -cf /dev/null /dev/null 2>/dev/null && TAR_FLAGS+=(--no-mac-metadata)
+tar "${TAR_FLAGS[@]}" -C godot/export -czf "$ARCHIVE" --transform 's,^linux,NovaSwift,' linux
 echo "✓ $ARCHIVE ($(du -h "$ARCHIVE" | cut -f1))"

@@ -11,6 +11,8 @@
 # Loaded with preload() (no class_name), like Controls.gd.
 extends RefCounted
 
+const Proto = preload("res://net/NetProto.gd")
+
 const HASH_LEN := 16
 const MAX_WIRE_PLUGINS := 40
 
@@ -96,10 +98,21 @@ static func compare(required: Array, server_tc: String, local: Dictionary) -> Di
 
 ## Server's plug-in list from a handshake manifest JSON ({plugins:[{id,name,contentHash}]}).
 static func required_from_manifest(manifest_json: String) -> Array:
-	var v: Variant = JSON.parse_string(manifest_json)
+	if manifest_json.length() > 65536:
+		return []
+	var v: Variant = Proto.parse_json(manifest_json)
+	var out: Array = []
 	if v is Dictionary and (v as Dictionary).get("plugins") is Array:
-		return (v as Dictionary)["plugins"]
-	return []
+		for p in ((v as Dictionary)["plugins"] as Array):
+			if out.size() >= 64:
+				break
+			if p is Dictionary:
+				var d: Dictionary = (p as Dictionary).duplicate()
+				d["id"] = Proto.str_field(d.get("id", ""), 96)
+				d["name"] = Proto.str_field(d.get("name", d["id"]), 64)
+				d["contentHash"] = Proto.str_field(d.get("contentHash", ""), 128)
+				out.append(d)
+	return out
 
 
 # --- the player's own set, restored after a session --------------------------------------------------------

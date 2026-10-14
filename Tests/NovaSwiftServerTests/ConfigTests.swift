@@ -64,7 +64,7 @@ final class ConfigTests: XCTestCase {
         c.maxPlayers = 500; c.port = 80; c.gameSpeed = 99; c.rulesPreset = "weird"; c.region = "mars"; c.adminBind = "8.8.8.8"
         let n = c.normalized()
         XCTAssertEqual(n.maxPlayers, 64); XCTAssertEqual(n.port, 53735); XCTAssertEqual(n.gameSpeed, 4.0)
-        XCTAssertEqual(n.rulesPreset, "safe"); XCTAssertEqual(n.region, "global"); XCTAssertEqual(n.adminBind, "0.0.0.0")
+        XCTAssertEqual(n.rulesPreset, "safe"); XCTAssertEqual(n.region, "global"); XCTAssertEqual(n.adminBind, "127.0.0.1")
         var d = ServerConfig.fresh(hostname: "h"); d.adminPort = d.port + 1
         XCTAssertTrue(d.problems().contains { $0.contains("clashes") })
         d.adminPort = 53737; d.port = 80

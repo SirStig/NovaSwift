@@ -37,6 +37,11 @@ public final class SystemSyncCoordinator {
     /// be replayed into the world *after* its step (step clears events). Drained by
     /// `flushEffects`.
     private var pendingEffects: [EffectNetState] = []
+    /// Ships dropped from received snapshots as impossible (finite/range/hull checks): the driver reports a peer whose
+    /// snapshots keep losing entries.
+    public private(set) var rejectedEntries = 0
+    /// `SessionRules.deathReal`: when false a snapshot can never put our own armor below 1 (death isn't real in this game).
+    public var deathReal = true
 
     /// Authority side: the freshest input each client has sent, plus the highest
     /// `seq` seen from it so stale/out-of-order unreliable frames are dropped.
@@ -202,11 +207,19 @@ public final class SystemSyncCoordinator {
     /// defaults are provided for headless use/tests. The client's own spawner must
     /// be paused (`World.spawningPaused`) so it doesn't fight these injected NPCs.
     @discardableResult
-    public func apply(_ snapshot: WorldSnapshot, to world: World, authorityPeer: String,
+    public func apply(_ rawSnapshot: WorldSnapshot, to world: World, authorityPeer: String,
+                      shipTypeKnown: ((Int) -> Bool)? = nil,
                       makeMirror: (ShipNetState) -> Ship = SystemSyncCoordinator.defaultMirror,
                       makeNPCMirror: (ShipNetState) -> Ship = SystemSyncCoordinator.defaultMirror)
         -> (injected: [Int], removed: [Int])
     {
+        // Never trust the wire: drop non-finite / out-of-range ships, cap list sizes, and (when the game data is
+        // known) ships whose hull doesn't exist. A bad entry is simply absent, as if the ship had left.
+        var snapshot = NetValidation.sanitized(rawSnapshot)
+        if let shipTypeKnown {
+            snapshot.ships = snapshot.ships.filter { $0.shipTypeID < 0 || shipTypeKnown($0.shipTypeID) }
+        }
+        rejectedEntries += (rawSnapshot.ships.count - snapshot.ships.count)
         var seenPlayerIDs = Set<String>()
         var seenNPCIDs = Set<Int>()
         var injected: [Int] = []
@@ -216,8 +229,10 @@ public final class SystemSyncCoordinator {
             if state.playerID == localPlayerID {
                 // Our own ship: predicted locally, but health is authoritative.
                 ownAuthorityID = state.id
-                world.player.shield = state.shield
-                world.player.armor = state.armor
+                // Health is authoritative for damage, but a snapshot can't heal past our own maxima, and
+                // when death isn't real it can't kill us.
+                world.player.shield = max(0, min(state.shield, world.player.maxShield))
+                world.player.armor = max(deathReal ? 0 : 1, min(state.armor, world.player.maxArmor))
                 reconcileOwnShip(world.player, authoritative: state)
                 continue
             }
@@ -311,6 +326,7 @@ public final class SystemSyncCoordinator {
     /// per-device `gameSpeed`, a dropped input) rather than ordinary float drift,
     /// so smoothing it out over many frames would just look like sliding.
     private static let ownShipSnapDistance = 400.0
+    private static let ownShipMaxCorrection = 60_000.0
 
     /// Correct our own predicted ship toward the authority's report of it. We don't
     /// keep an input-seq history to replay (no true client-side reconciliation
@@ -325,6 +341,8 @@ public final class SystemSyncCoordinator {
         let authoritativeVelocity = Vec2(state.vx, state.vy)
         let error = (authoritativePosition - ship.position).length
         guard error > 0.01 else { return }
+        // An authority can't fling us across the galaxy: a "correction" far beyond any star system is ignored.
+        guard error <= Self.ownShipMaxCorrection else { rejectedEntries += 1; return }
         if error > Self.ownShipSnapDistance {
             ship.position = authoritativePosition
             ship.velocity = authoritativeVelocity

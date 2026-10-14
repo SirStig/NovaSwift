@@ -46,11 +46,25 @@ public final class SystemSyncDriver {
 
     // MARK: - Inbound hooks (wire to NetSession.onInput / onSnapshot)
 
+    /// Fired when a peer sends something the driver refuses (a snapshot from a non-authority, input from a player who
+    /// isn't in our system, malformed values). The app/bridge forwards it to the host/server as a report.
+    public var onInvalidMessage: ((String, String) -> Void)?
+
     public func receiveInput(_ frame: InputFrame, from peer: String) {
+        // Only the authority consumes input, and only from players actually in this system.
+        guard currentAuthorityID == localPlayerID, coLocatedIDs().contains(peer) else {
+            onInvalidMessage?(peer, "input from a player not in this system"); return
+        }
+        guard NetValidation.valid(frame) else { onInvalidMessage?(peer, "bad input values"); return }
         coordinator.receiveInput(frame, from: peer)
     }
 
     public func receiveSnapshot(_ snapshot: WorldSnapshot, from peer: String) {
+        // A snapshot is only meaningful from this system's authority. Accepting any peer's would let a griefer
+        // overwrite the real one every frame (latest-wins) and blank the shared world.
+        guard let authority = currentAuthorityID, authority != localPlayerID, peer == authority else {
+            onInvalidMessage?(peer, "snapshot from a peer that is not this system's authority"); return
+        }
         latestSnapshot = (snapshot, peer)
     }
 
@@ -129,6 +143,7 @@ public final class SystemSyncDriver {
         world.friendlyFireAllowed = rules.friendlyFire
         world.pvpDamageReal = rules.pvpDamageReal
         world.playerDeathReal = rules.deathReal
+        coordinator.deathReal = rules.deathReal
 
         let authority = currentAuthorityID
         let iAmAuthority = (authority == localPlayerID)
@@ -161,8 +176,10 @@ public final class SystemSyncDriver {
                 world.spawningPaused = true
                 world.removeAINPCs()
             }
+            let rejectedBefore = coordinator.rejectedEntries
             coordinator.apply(
                 snapshot, to: world, authorityPeer: from,
+                shipTypeKnown: world.galaxy.map { g in { g.shipSpec($0) != nil } },
                 makeMirror: { [weak self] state in
                     self?.buildMirror(shipTypeID: state.shipTypeID, government: world.player.government,
                                       name: state.name, world: world,
@@ -176,6 +193,7 @@ public final class SystemSyncDriver {
                         ?? SystemSyncCoordinator.defaultMirror(state)
                 })
             latestSnapshot = nil
+            if coordinator.rejectedEntries > rejectedBefore { onInvalidMessage?(from, "snapshot with impossible ships") }
         }
     }
 

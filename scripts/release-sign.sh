@@ -16,6 +16,15 @@
 #       public key, and writes update.json + update.json.sig into --out (default: next to the first asset).
 #       Upload BOTH files, plus the assets, to the GitHub release tagged v<version>.
 #
+#   scripts/release-sign.sh --server --version 0.2.0 \
+#       --asset linux-x86_64=dist/server/NovaSwiftServer-linux-x86_64.tar.gz \
+#       --asset linux-arm64=dist/server/NovaSwiftServer-linux-arm64.tar.gz \
+#       --asset macos-arm64=dist/server/NovaSwiftServer-macos-arm64.zip  [--out DIR] [--key PATH]
+#       Same RSA key, for the DEDICATED SERVER's self-update: writes server-update.json (version + per-platform asset
+#       name / size / sha256) and server-update.json.sig. Upload BOTH next to the archives on the GitHub release tagged
+#       server-v<version>. The server refuses to install any release that lacks them or whose signature does not verify
+#       (see docs/SECURITY.md, "Self-update").
+#
 # Needs: openssl, python3 (stdlib only).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -24,6 +33,7 @@ KEY="${NOVASWIFT_UPDATE_KEY:-$HOME/.config/novaswift/update_signing_key.pem}"
 PUB_PEM="godot/updater/update_pubkey.pem"
 PUB_GD="godot/updater/UpdatePubKey.gd"
 MODE=""
+SERVER=0
 VERSION=""
 OUT=""
 MIN_UPDATER=1
@@ -35,17 +45,18 @@ die() { echo "error: $*" >&2; exit 1; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --init) MODE=init; shift ;;
+    --server) SERVER=1; shift ;;
     --version) VERSION="$2"; MODE="${MODE:-sign}"; shift 2 ;;
     --asset) ASSETS+=("$2"); MODE="${MODE:-sign}"; shift 2 ;;
     --out) OUT="$2"; shift 2 ;;
     --key) KEY="$2"; shift 2 ;;
     --min-updater) MIN_UPDATER="$2"; shift 2 ;;
     --channel) CHANNEL="$2"; shift 2 ;;
-    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
     *) die "unknown argument $1 (try --help)" ;;
   esac
 done
-[ -n "$MODE" ] || { sed -n '2,22p' "$0"; exit 2; }
+[ -n "$MODE" ] || { sed -n '2,32p' "$0"; exit 2; }
 command -v openssl >/dev/null || die "openssl not found"
 command -v python3 >/dev/null || die "python3 not found"
 
@@ -71,6 +82,44 @@ open(sys.argv[2], "w").write(
 PY
   echo "Private key : $KEY   (mode 600 -- BACK IT UP somewhere safe; never commit it)"
   echo "Public key  : $PUB_PEM and $PUB_GD   (commit these; rebuild the game so it carries them)"
+  exit 0
+fi
+
+# --- server sign mode ---------------------------------------------------------------------------
+if [ "$SERVER" = 1 ]; then
+  [ -f "$KEY" ] || die "signing key not found at $KEY (run --init once, or pass --key)"
+  [ -n "$VERSION" ] || die "--version X.Y.Z is required"
+  [ "${#ASSETS[@]}" -gt 0 ] || die "give at least one --asset <platform>=<file> (linux-x86_64, linux-arm64, macos-arm64, windows-x86_64)"
+  grep -q "BEGIN PUBLIC KEY" "$PUB_PEM" || die "$PUB_PEM is still the placeholder: run --init first"
+  diff -q <(openssl pkey -in "$KEY" -pubout 2>/dev/null) "$PUB_PEM" >/dev/null \
+    || die "$KEY does not match $PUB_PEM -- servers built with that public key would reject this release"
+  SRV_VERSION="$(sed -n 's/.*static let current = "\(.*\)".*/\1/p' Sources/NovaSwiftServerCore/GameServer.swift | head -1)"
+  [ "$SRV_VERSION" = "$VERSION" ] || die "Sources/NovaSwiftServerCore/GameServer.swift says server version $SRV_VERSION, not $VERSION"
+  if [ -z "$OUT" ]; then OUT="$(dirname "${ASSETS[0]#*=}")"; fi
+  mkdir -p "$OUT"
+  python3 - "$VERSION" "$OUT/server-update.json" "${ASSETS[@]}" <<'PY'
+import hashlib, json, os, sys, datetime
+version, out = sys.argv[1], sys.argv[2]
+OK = {"linux-x86_64", "linux-arm64", "macos-arm64", "windows-x86_64"}
+platforms = {}
+for spec in sys.argv[3:]:
+    key, _, path = spec.partition("=")
+    if key not in OK or not os.path.isfile(path):
+        sys.exit(f"error: bad --asset {spec!r} (platforms: {', '.join(sorted(OK))}; file must exist)")
+    sha = hashlib.sha256(open(path, "rb").read()).hexdigest()
+    platforms[key] = {"asset": os.path.basename(path), "size": os.path.getsize(path), "sha256": sha}
+    print(f"  {key}: {os.path.basename(path)}  {platforms[key]['size']} bytes  sha256 {sha[:16]}...")
+manifest = {"schema": 1, "version": version, "platforms": platforms,
+            "published": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+with open(out, "w") as f:
+    json.dump(manifest, f, indent=2, sort_keys=True); f.write("\n")
+PY
+  openssl dgst -sha256 -sign "$KEY" -out "$OUT/server-update.json.sig" "$OUT/server-update.json"
+  openssl dgst -sha256 -verify "$PUB_PEM" -signature "$OUT/server-update.json.sig" "$OUT/server-update.json" >/dev/null \
+    || die "signature self-check failed"
+  echo "OK  $OUT/server-update.json"
+  echo "OK  $OUT/server-update.json.sig"
+  echo "Upload both, plus the archives, to the GitHub release tagged server-v$VERSION."
   exit 0
 fi
 

@@ -19,7 +19,7 @@ config/description="Cross-platform desktop frontend for NOVA Swift, driving the 
 run/main_scene="res://Boot.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
 config/icon="res://icon.png"
-config/version="0.7.0-beta.1"
+config/version="0.7.0-beta.2"
 
 [debug]
 

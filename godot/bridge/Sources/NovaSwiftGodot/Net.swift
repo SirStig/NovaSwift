@@ -36,8 +36,10 @@ final class NetBridge {
     private var reportedMismatch: Set<String> = []
 
     init(localPeerID: Int, displayName: String, isHost: Bool, rules: SessionRules, manifest: PluginManifest) {
-        transport = ExternalTransport(localPeerID: localPeerID)
-        session = NetSession(transport: transport, rules: rules)
+        let ext = ExternalTransport(localPeerID: localPeerID)
+        ext.hostPeerID = "1"   // the server / host is always ENet peer 1: only it may change rules or kick
+        transport = ext
+        session = NetSession(transport: ext, rules: rules)
         driver = SystemSyncDriver(session: session, localSystemID: -1)
         self.isHost = isHost
         self.displayName = displayName
@@ -71,6 +73,16 @@ final class NetBridge {
         }
         session.onTrade = { [weak self] signal, peer in self?.trade.handle(signal, from: peer) }
         session.onPluginManifest = { [weak self] m, peer in self?.handleManifest(m, from: peer) }
+        // A peer sent something the session refused (forged identity, out-of-range values, flooding): tell the frontend,
+        // which reports it to the server once the strikes pile up.
+        session.onMisbehavior = { [weak self] peer, why, strikes in
+            guard let self, strikes == 5 else { return }
+            self.push(["type": "invalid_peer", "id": Self.id(peer), "reason": why])
+        }
+        driver.onInvalidMessage = { [weak self] peer, why in
+            guard let self, self.reportedMismatch.insert("i" + peer).inserted else { return }
+            self.push(["type": "invalid_peer", "id": Self.id(peer), "reason": why])
+        }
         session.onDecodeFailure = { [weak self] peer in
             guard let self, self.reportedMismatch.insert("v" + peer).inserted else { return }
             self.push(["type": "version_mismatch", "id": Self.id(peer),

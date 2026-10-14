@@ -11,9 +11,17 @@
 # the first time. SwiftPM caches live in .build-server-<arch>/ (git-ignored via .build-*/).
 # Then publish a GitHub release tagged  server-v<version>  (the version in Sources/NovaSwiftServerCore/GameServer.swift,
 # ServerVersion.current) and attach the archives. Releases are not created by this script.
+# Then sign them (the server only self-updates from signed releases):
+#   scripts/release-sign.sh --server --version <ver> --asset linux-x86_64=dist/server/NovaSwiftServer-linux-x86_64.tar.gz ...
+# and attach server-update.json + server-update.json.sig to the same release.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-export COPYFILE_DISABLE=1
+export COPYFILE_DISABLE=1   # no ._* AppleDouble files
+# macOS bsdtar also stores extended attributes (com.apple.provenance, quarantine...) in the archive; GNU tar on the
+# users' side then prints "Ignoring unknown extended header keyword LIBARCHIVE.xattr..." warnings. Leave them out.
+TAR_FLAGS=()
+tar --no-xattrs -cf /dev/null /dev/null 2>/dev/null && TAR_FLAGS+=(--no-xattrs)
+tar --no-mac-metadata -cf /dev/null /dev/null 2>/dev/null && TAR_FLAGS+=(--no-mac-metadata)
 OUT="dist/server"
 IMAGE="${SWIFT_IMAGE:-swift:6.3-jammy}"
 VERSION="$(sed -n 's/.*static let current = "\(.*\)".*/\1/p' Sources/NovaSwiftServerCore/GameServer.swift | head -1)"
@@ -40,7 +48,8 @@ linux() {
     strip /src/.build-server-$arch/NovaSwiftServer || true"
   local d="$OUT/stage-linux-$arch"
   stage "$d" ".build-server-$arch/NovaSwiftServer" packaging/server/install-server.sh packaging/server/uninstall.sh packaging/server/docker-compose.yml packaging/server/Dockerfile
-  tar -C "$d" -czf "$OUT/NovaSwiftServer-linux-$arch.tar.gz" .
+  command -v xattr >/dev/null && xattr -rc "$d" 2>/dev/null || true
+  tar "${TAR_FLAGS[@]}" -C "$d" -czf "$OUT/NovaSwiftServer-linux-$arch.tar.gz" .
   rm -rf "$d"
   echo "    -> $OUT/NovaSwiftServer-linux-$arch.tar.gz ($(du -h "$OUT/NovaSwiftServer-linux-$arch.tar.gz" | cut -f1))"
 }
@@ -50,7 +59,8 @@ macos() {
   swift build -c release --product novaswift-server --scratch-path .build-server-macos
   local d="$OUT/stage-macos"
   stage "$d" .build-server-macos/release/novaswift-server "packaging/server/macos/Start Server.command" packaging/server/macos/com.novaswift.server.plist
-  (cd "$d" && zip -qr "../NovaSwiftServer-macos-arm64.zip" .)
+  command -v xattr >/dev/null && xattr -rc "$d" 2>/dev/null || true
+  (cd "$d" && zip -qrX "../NovaSwiftServer-macos-arm64.zip" .)   # -X: no extra file attributes
   rm -rf "$d"
   echo "    -> $OUT/NovaSwiftServer-macos-arm64.zip"
 }

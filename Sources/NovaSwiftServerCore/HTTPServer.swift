@@ -66,7 +66,7 @@ public struct HTTPResponse: Error {
         switch s {
         case 200: return "OK"; case 204: return "No Content"; case 302: return "Found"; case 400: return "Bad Request"
         case 401: return "Unauthorized"; case 403: return "Forbidden"; case 404: return "Not Found"; case 405: return "Method Not Allowed"
-        case 413: return "Payload Too Large"; case 429: return "Too Many Requests"; case 500: return "Internal Server Error"
+        case 408: return "Request Timeout"; case 413: return "Payload Too Large"; case 421: return "Misdirected Request"; case 429: return "Too Many Requests"; case 500: return "Internal Server Error"
         case 503: return "Service Unavailable"; default: return "OK"
         }
     }
@@ -86,6 +86,12 @@ public final class HTTPServer {
     private var active = 0
     private var running = false
     private let maxConnections = 48
+    /// Most simultaneous connections from one address (the panel is used by one person).
+    public var maxConnectionsPerIP = 8
+    private var perIP: [String: Int] = [:]
+    /// Seconds a client gets to send a complete request head (slow-loris defence) / a non-upload body.
+    public var headTimeout: TimeInterval = 10
+    public var bodyTimeout: TimeInterval = 30
     /// Largest body held in memory.
     public var maxMemoryBody = 4 * 1024 * 1024
     /// Largest body accepted for paths in `uploadPaths` (spooled to disk).
@@ -152,11 +158,17 @@ public final class HTTPServer {
             inet_ntop(AF_INET, &a, &ipbuf, socklen_t(INET_ADDRSTRLEN))
             let ip = String(cString: ipbuf)
             lock.lock()
-            if active >= maxConnections { lock.unlock(); Self.write(c, HTTPResponse.error("Too many connections.", status: 503)); close(c); continue }
-            active += 1; lock.unlock()
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            if active >= maxConnections || (perIP[ip] ?? 0) >= maxConnectionsPerIP {
+                lock.unlock(); Self.write(c, HTTPResponse.error("Too many connections.", status: 503)); close(c); continue
+            }
+            active += 1; perIP[ip, default: 0] += 1; lock.unlock()
+            // Default QoS on purpose: asking for an elevated QoS makes libdispatch try to raise thread priority, which an
+            // unprivileged service (systemd, containers) is refused with a "Failed to set thread priority" log line.
+            DispatchQueue.global().async { [weak self] in
                 self?.serve(c, ip: ip)
-                self?.lock.lock(); self?.active -= 1; self?.lock.unlock()
+                self?.lock.lock(); self?.active -= 1
+                if let n = self?.perIP[ip], n > 1 { self?.perIP[ip] = n - 1 } else { self?.perIP[ip] = nil }
+                self?.lock.unlock()
             }
         }
     }
@@ -188,7 +200,9 @@ public final class HTTPServer {
         var chunk = [UInt8](repeating: 0, count: 16384)
         let sep = Data("\r\n\r\n".utf8)
         var headerEnd: Range<Data.Index>?
+        let started = Date()
         while headerEnd == nil {
+            if Date().timeIntervalSince(started) > headTimeout { return .failure(HTTPResponse.error("Request timed out.", status: 408)) }
             let n = recv(fd, &chunk, chunk.count, 0)
             if n <= 0 { return .failure(HTTPResponse.error("Empty request.")) }
             buf.append(chunk, count: n)
@@ -230,6 +244,7 @@ public final class HTTPServer {
         var body = Data(already)
         already = Data()[...]
         while body.count < length {
+            if Date().timeIntervalSince(started) > bodyTimeout { return .failure(HTTPResponse.error("Request timed out.", status: 408)) }
             let n = recv(fd, &chunk, min(chunk.count, length - body.count), 0)
             if n <= 0 { return .failure(HTTPResponse.error("Request body interrupted.")) }
             body.append(chunk, count: n)

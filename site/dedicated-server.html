@@ -313,6 +313,11 @@ auto_update = false
         </table></div>
         <div class="callout"><p><b>Passwords.</b> A join password is sent hashed, but game traffic isn't encrypted. Don't reuse a password that matters.</p></div>
 
+        <h2 id="security">Security</h2>
+        <p>The server is built for the public internet. The admin panel listens on <b>this machine only</b> by default (use an SSH tunnel; the installer enforces it), logins lock out with growing waits, passwords must be strong, and every admin action is written to an audit log. The Linux service runs as a no-login account inside a systemd sandbox (read-only system, no capabilities, filtered system calls); the Docker image runs unprivileged with a read-only file system.</p>
+        <p>On the game port the server rate-limits and size-limits every connection, blocks flooding addresses for ten minutes, refuses to answer oversized or unpadded status pings (so it cannot be used to amplify an attack), strips forged identities from relayed messages, and cleans player names and chat. Admins can kick, ban, mute and run an invite-only allowlist; players can <code>/votekick</code>, <code>/report</code> and block others. Updates install only from signed GitHub releases, and plug-in downloads are HTTPS-only, size-capped and unpacked safely.</p>
+        <div class="callout"><p><b>Honest limits.</b> A player who is the sync authority of a star system runs that system's game logic, so a modified client can cheat within plausible limits there; game traffic is not encrypted; the panel has no built-in HTTPS (tunnel or reverse proxy). Details: <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/SECURITY.md">docs/SECURITY.md</a>.</p></div>
+
         <h2 id="always-on">Keep it running</h2>
         <p>The Linux installer sets up a systemd service that starts at boot and restarts after a crash: <code>sudo systemctl status novaswift-server</code>, <code>journalctl -u novaswift-server -f</code>. Docker uses <code>restart: always</code>. On Windows and macOS use <b>Start with this computer</b> in Settings. The server checks GitHub for new versions (tag <code>server-v…</code>) and shows a notice; it only installs them if you turn on automatic updates.</p>
 

@@ -53,6 +53,37 @@ public final class NetSession: TransportDelegate {
     /// signature of a peer running an incompatible protocol version. Purely
     /// additive; the packet is still dropped exactly as before.
     public var onDecodeFailure: ((PeerID) -> Void)?
+    /// A peer sent something this session refuses (spoofed identity, host-only message from a non-host, out-of-range
+    /// values, flooding). `strikes` counts those within 30 s. The app forwards it to the server as a report; the host
+    /// may kick at a threshold.
+    public var onMisbehavior: ((PeerID, String, Int) -> Void)?
+    /// Players the local user blocked: their chat is dropped (and the UI should hide them). Local only.
+    public private(set) var blockedPeers: Set<PeerID> = []
+    public func block(_ peer: PeerID) { blockedPeers.insert(peer) }
+    public func unblock(_ peer: PeerID) { blockedPeers.remove(peer) }
+    private var misbehavior = MisbehaviorTracker()
+    private var chatBuckets: [PeerID: TokenBucket] = [:]
+    private var clock: () -> Double = { ProcessInfo.processInfo.systemUptime }
+    /// Test hook: replace the clock rate limits use.
+    public func setClock(_ c: @escaping () -> Double) { clock = c }
+    /// Messages dropped as invalid since the session started.
+    public private(set) var rejectedCount = 0
+
+    private func reject(_ peer: PeerID, _ reason: String) {
+        rejectedCount += 1
+        let n = misbehavior.strike(peer, now: clock())
+        onMisbehavior?(peer, reason, n)
+    }
+
+    /// The peer id that owns host-only decisions (rules, kicks), when the transport has one.
+    private var hostID: PeerID? { transport.hostPeerID }
+    private func isHost(_ peer: PeerID) -> Bool { hostID.map { $0 == peer } ?? true }
+
+    /// Authority of the local player's system (smallest id among the co-located players, including us); nil when alone.
+    public func systemAuthorityID() -> PeerID? {
+        let others = coLocatedPlayers().map(\.playerID)
+        return others.isEmpty ? nil : ([localPlayerID] + others).min()
+    }
 
     /// Players this session (as host) has banned — their presence is refused and a
     /// rejoin is ignored until the session ends.
@@ -154,7 +185,7 @@ public final class NetSession: TransportDelegate {
     /// Send a session-wide chat message. Appears immediately in the local
     /// `chatLog` and is delivered to every connected peer. Blank text is ignored.
     public func sendChat(_ text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = CrossPlayProtocol.cleanChat(text)
         guard !trimmed.isEmpty else { return }
         let message = ChatMessage(playerID: localPlayerID,
                                   senderName: localDisplayName, text: trimmed)
@@ -216,12 +247,17 @@ public final class NetSession: TransportDelegate {
     // MARK: - TransportDelegate
 
     public func transport(_ transport: Transport, didReceive data: Data, from peer: PeerID) {
+        guard data.count <= NetLimits.maxData else { reject(peer, "oversized message"); return }
         guard let message = try? NetCodec.decode(data) else {
             onDecodeFailure?(peer)
+            reject(peer, "undecodable message")
             return
         }
         switch message {
-        case .presence(let p):
+        case .presence(let raw):
+            // A peer may only announce itself: presence for another id would let it move other players around.
+            guard raw.playerID == peer, NetValidation.valid(raw) else { reject(peer, "spoofed or invalid presence"); return }
+            let p = NetValidation.sanitized(raw)
             guard !bannedIDs.contains(p.playerID) else { return }   // banned: ignore
             let changed = presence[p.playerID] != p
             presence[p.playerID] = p
@@ -234,32 +270,70 @@ public final class NetSession: TransportDelegate {
             }
 
         case .sessionRules(let rules):
+            guard isHost(peer), NetValidation.valid(rules) else { reject(peer, "session rules from a non-host"); return }
             if rules != sessionRules {
                 sessionRules = rules
                 onRulesChanged?(rules)
             }
 
         case .chat(let chat):
-            appendChat(chat)
+            // The sender id and name are ours to fill in, never the sender's word: no speaking as someone else, as
+            // "[Server]", or with control characters. Spam is dropped, blocked players are muted locally.
+            guard chat.playerID == peer else { reject(peer, "chat with a forged sender"); return }
+            var bucket = chatBuckets[peer] ?? TokenBucket(burst: NetLimits.chatBurst, perSecond: NetLimits.chatPerSecond, now: clock())
+            let allowed = bucket.take(now: clock())
+            chatBuckets[peer] = bucket
+            guard allowed else { reject(peer, "chat flooding"); return }
+            guard !blockedPeers.contains(peer) else { return }
+            let text = CrossPlayProtocol.cleanChat(chat.text)
+            guard !text.isEmpty else { return }
+            // The relay server's own lines ("[Server]") keep their label; everyone else gets the name their presence
+            // announced (brackets and staff look-alikes removed).
+            let name: String
+            if hostID == peer, presence[peer] == nil {
+                name = CrossPlayProtocol.cleanName(chat.senderName, fallback: "Server")
+            } else {
+                name = (presence[peer]?.name).map { CrossPlayProtocol.cleanPlayerName($0, fallback: "Pilot") }
+                    ?? CrossPlayProtocol.cleanPlayerName(chat.senderName, fallback: "Pilot")
+            }
+            appendChat(ChatMessage(playerID: peer, senderName: name, text: text))
 
         case .ncb(let update):
-            onNCB?(update.setBits, peer)
+            // Story bits only ever come from the authority of the system we share, and only plausible bit numbers.
+            guard let authority = systemAuthorityID(), authority == peer, authority != localPlayerID else {
+                reject(peer, "story bits from a peer that is not this system's authority"); return
+            }
+            let bits = NetValidation.sanitizedNCB(update.setBits)
+            if bits.count != update.setBits.count { rejectedCount += 1 }
+            if !bits.isEmpty { onNCB?(bits, peer) }
 
         case .kick(let targetID):
-            // Sent to us — the host removed us from the lobby.
+            // Sent to us — the host removed us from the lobby. Only the host can do that.
+            guard isHost(peer) else { reject(peer, "kick from a non-host"); return }
             if targetID == localPlayerID { onKicked?() }
 
         case .trade(let signal):
-            onTrade?(signal, peer)
+            guard presence[peer] != nil else { reject(peer, "trade from an unknown player"); return }
+            switch signal {
+            case .offer(let o):
+                guard NetValidation.valid(o) else { reject(peer, "implausible trade offer"); return }
+                onTrade?(.offer(TradeRules.sanitized(o)), peer)
+            case .invite(let n):
+                onTrade?(.invite(fromName: CrossPlayProtocol.cleanPlayerName(n, fallback: presence[peer]?.name ?? "Player")), peer)
+            default: onTrade?(signal, peer)
+            }
 
         case .pluginManifest(let manifest):
+            guard NetValidation.valid(manifest) else { reject(peer, "oversized plug-in manifest"); return }
             peerManifests[peer] = manifest
             onPluginManifest?(manifest, peer)
 
         case .input(let frame):
+            guard NetValidation.valid(frame) else { reject(peer, "implausible input"); return }
             onInput?(frame, peer)
 
         case .snapshot(let snapshot):
+            guard snapshot.ships.count <= NetValidation.maxShips * 4 else { reject(peer, "oversized snapshot"); return }
             onSnapshot?(snapshot, peer)
         }
     }
@@ -283,6 +357,8 @@ public final class NetSession: TransportDelegate {
 
     public func transport(_ transport: Transport, peerDidDisconnect peer: PeerID) {
         peerManifests.removeValue(forKey: peer)
+        chatBuckets.removeValue(forKey: peer)
+        misbehavior.forget(peer)
         // peer id == player id, so drop that player's presence.
         if presence.removeValue(forKey: peer) != nil {
             onPresenceChanged?(self)

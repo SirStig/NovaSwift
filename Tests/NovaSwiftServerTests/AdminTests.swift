@@ -102,10 +102,10 @@ final class AdminTests: XCTestCase {
         let c = login(r.admin)
         XCTAssertEqual(r.admin.handle(req("POST", "/api/admin-password", body: ["current": "wrong", "new": "longenough1"], cookie: c)).status, 403)
         XCTAssertEqual(r.admin.handle(req("POST", "/api/admin-password", body: ["current": "hunter22hunter", "new": "short"], cookie: c)).status, 400)
-        let ok = r.admin.handle(req("POST", "/api/admin-password", body: ["current": "hunter22hunter", "new": "brand-new-pass"], cookie: c))
+        let ok = r.admin.handle(req("POST", "/api/admin-password", body: ["current": "hunter22hunter", "new": "Brand-new-pass7"], cookie: c))
         XCTAssertEqual(ok.status, 200)
         XCTAssertEqual(r.admin.handle(req("POST", "/api/login", body: ["password": "hunter22hunter"])).status, 401)
-        XCTAssertEqual(r.admin.handle(req("POST", "/api/login", body: ["password": "brand-new-pass"])).status, 200)
+        XCTAssertEqual(r.admin.handle(req("POST", "/api/login", body: ["password": "Brand-new-pass7"])).status, 200)
         XCTAssertEqual(r.admin.handle(req("GET", "/api/status", cookie: c)).status, 401, "old sessions end")
     }
 

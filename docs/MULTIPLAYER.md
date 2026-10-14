@@ -864,8 +864,10 @@ files and fails when they drift.
    server simply has no pilot. `NetSession` player ids are the decimal peer ids (`ExternalTransport`).
 7. *Moderation / chat.* `KICK {reason}` precedes a disconnect; `CHAT {id,name,text}` is only used when the
    bridge has no chat of its own (normal chat is `NetSession` chat inside `DATA`).
-8. *Status query (for browsing, no connection needed).* UDP datagram `NSQ1` to **53736** for the default port,
-   otherwise **game port + 1**; the reply is `NSB1` + JSON `{name, players, max, ver, pw, port, rules,
+8. *Status query (for browsing, no connection needed).* UDP datagram to **53736** for the default port, otherwise **game
+   port + 1**: `NSQ1` + version byte (`0x02`, or `0x01` from the status prober) + zero padding to 1200 bytes (the server drops
+   requests under 512 bytes, replies with at most `min(request, 1200)` bytes, rate-limits per address; a bare 4-byte `NSQ1` only
+   gets a tiny `{"proto":1,"upgrade":true}` notice - see docs/SECURITY.md); the reply is `NSB1` + JSON `{name, players, max, ver, pw, port, rules,
    dedicated}`. Latency = round trip. A LAN host broadcasts the same `NSB1` beacon to 255.255.255.255:53736
    every 2 s.
 9. *Directory.* `GET https://raw.githubusercontent.com/SirStig/NovaSwift-Plugins/main/servers/servers.json`

@@ -53,7 +53,8 @@ static func eligible(releases: Variant, need_assets: bool) -> Array:
 			page = UpdateConfig.RELEASES_PAGE
 		var exp: bool = looks_experimental(rel, ver)
 		out.append({"tag": tag, "version": ver, "name": str(rel.get("name", "")), "body": str(rel.get("body", "")),
-			"html_url": page, "prerelease": exp, "channel": "experimental" if exp else "stable", "assets": assets})
+			"html_url": page, "prerelease": exp, "gh_prerelease": bool(rel.get("prerelease", false)),
+			"channel": "experimental" if exp else "stable", "assets": assets})
 	return out
 
 
@@ -73,7 +74,10 @@ static func _sort_desc(list: Array) -> Array:
 static func candidates(releases: Variant, current: String, experimental: bool, need_assets: bool = true) -> Array:
 	var list: Array = []
 	for rel in eligible(releases, need_assets):
-		if str(rel["channel"]) == "experimental" and not experimental:
+		# With experimental off, skip only releases GitHub flags as pre-release. A suffix-only "experimental" guess
+		# (e.g. a full release tagged v0.7.0-beta.2) stays a candidate: its SIGNED manifest channel decides later,
+		# so a stable-signed beta-named release reaches everyone and an experimental-signed one is still refused.
+		if str(rel["channel"]) == "experimental" and not experimental and bool(rel.get("gh_prerelease", true)):
 			continue
 		if Semver.is_newer(str(rel["version"]), current):
 			list.append(rel)

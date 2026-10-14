@@ -33,7 +33,10 @@ var _tx: PacketPeerUDP = null          # unbound: broadcasts out, sends queries,
 var _provider: Callable = Callable()
 var _announce_in: float = 0.0
 var _now: float = 0.0
-var _pending: Dictionary = {}          # "ip:qport" -> {key, t0, ms0}
+var _pending: Dictionary = {}          # "ip:qport" -> {key, t0, ms0, ip, qport, legacy_sent}
+var _guard: Proto.QueryGuard = Proto.QueryGuard.new()   # per-source-IP NSQ1 rate limits (anti-amplification)
+const MAX_PENDING := 512
+const MAX_PKTS_PER_FRAME := 64
 
 
 ## Start listening for beacons (the LAN browser). Safe to call twice.
@@ -107,8 +110,10 @@ func query(host: String, game_port: int) -> String:
 		return key
 	var qport: int = Proto.LAN_PORT if game_port == Proto.DEFAULT_PORT else game_port + 1
 	_tx.set_dest_address(ip, qport)
-	_tx.put_packet(Proto.query_packet())
-	_pending["%s:%d" % [ip, qport]] = {"key": key, "ms0": Time.get_ticks_msec(), "t0": _now}
+	if _pending.size() >= MAX_PENDING:
+		return key
+	_tx.put_packet(Proto.build_query())   # v2: 1200 bytes (older servers only answer the bare 4-byte form: see _legacy_retry)
+	_pending["%s:%d" % [ip, qport]] = {"key": key, "ms0": Time.get_ticks_msec(), "t0": _now, "ip": ip, "qport": qport, "legacy_sent": false}
 	return key
 
 
@@ -159,8 +164,15 @@ func poll(delta: float) -> void:
 		if _now - float((servers[k] as Dictionary)["seen"]) > EXPIRE_AFTER:
 			servers.erase(k)
 	for pk in _pending.keys():
-		if _now - float((_pending[pk] as Dictionary)["t0"]) > QUERY_TIMEOUT:
+		var pd: Dictionary = _pending[pk]
+		var age: float = _now - float(pd["t0"])
+		if age > QUERY_TIMEOUT:
 			_pending.erase(pk)
+		elif not bool(pd["legacy_sent"]) and age > maxf(0.6, QUERY_TIMEOUT / 3.0) and _tx != null:
+			# No answer to the v2 request: an older server only knows the bare 4-byte "NSQ1". Once.
+			pd["legacy_sent"] = true
+			_tx.set_dest_address(str(pd["ip"]), int(pd["qport"]))
+			_tx.put_packet(Proto.QUERY_MAGIC.to_utf8_buffer())
 
 
 func _info() -> Dictionary:
@@ -176,16 +188,29 @@ func _broadcast() -> void:
 	_tx.put_packet(pkt)
 
 
-## Beacons -> table; queries -> unicast reply (only while announcing).
+## Beacons -> table; queries -> unicast reply (only while announcing), rate limited and size capped.
 func _drain(sock: PacketPeerUDP, take_beacons: bool) -> void:
+	var n: int = 0
 	while sock.get_available_packet_count() > 0:
 		var pkt: PackedByteArray = sock.get_packet()
+		n += 1
+		if n > MAX_PKTS_PER_FRAME:
+			continue   # flood: read and discard
 		var ip: String = sock.get_packet_ip()
 		var port: int = sock.get_packet_port()
-		if Proto.is_query(pkt):
-			if _provider.is_valid():
-				sock.set_dest_address(ip, port)
-				sock.put_packet(Proto.encode_beacon(_info(), true))
+		var qk: int = Proto.query_kind(pkt)
+		if qk != Proto.Q_DROP:
+			if _provider.is_valid() and port > 0 and _guard.admit(ip, pkt, _now) != Proto.Q_DROP:
+				var reply: PackedByteArray
+				if qk == Proto.Q_LEGACY:
+					reply = Proto.legacy_reply()   # tiny "upgrade" notice: a bare query is an amplification vector
+				elif qk == Proto.Q_CERT:
+					reply = Proto.encode_cert_reply(_info(), mini(pkt.size(), 1400))   # Godot-only 1300-byte request: the cert reply never exceeds it
+				else:
+					reply = Proto.encode_status_reply(_info(), Proto.query_reply_cap(pkt.size()))
+				if not reply.is_empty():
+					sock.set_dest_address(ip, port)
+					sock.put_packet(reply)
 		elif take_beacons:
 			_note_beacon(ip, pkt)
 
@@ -194,21 +219,27 @@ func _note_beacon(ip: String, pkt: PackedByteArray) -> void:
 	var info: Dictionary = Proto.decode_beacon(pkt)
 	if info.is_empty():
 		return
+	var key: String = "%s:%d" % [ip, int(info["port"])]
+	if servers.size() >= 256 and not servers.has(key):
+		return
 	info["ip"] = ip
 	info["seen"] = _now
-	servers["%s:%d" % [ip, int(info["port"])]] = info
+	servers[key] = info
 
 
 func _drain_replies() -> void:
+	var n: int = 0
 	while _tx.get_available_packet_count() > 0:
 		var pkt: PackedByteArray = _tx.get_packet()
+		n += 1
 		var ip: String = _tx.get_packet_ip()
 		var port: int = _tx.get_packet_port()
+		var pk: String = "%s:%d" % [ip, port]
+		if n > MAX_PKTS_PER_FRAME or not _pending.has(pk):
+			continue   # nobody asked this address
 		var info: Dictionary = Proto.decode_beacon(pkt)
 		if info.is_empty():
 			continue
-		var pk: String = "%s:%d" % [ip, port]
-		if _pending.has(pk):
-			var p: Dictionary = _pending[pk]
-			pings[str(p["key"])] = {"rtt_ms": maxi(1, Time.get_ticks_msec() - int(p["ms0"])), "info": info, "t": _now, "ok": true}
-			_pending.erase(pk)
+		var p: Dictionary = _pending[pk]
+		pings[str(p["key"])] = {"rtt_ms": maxi(1, Time.get_ticks_msec() - int(p["ms0"])), "info": info, "t": _now, "ok": true}
+		_pending.erase(pk)

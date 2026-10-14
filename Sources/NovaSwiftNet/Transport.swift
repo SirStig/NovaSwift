@@ -67,9 +67,13 @@ public protocol Transport: AnyObject {
     func broadcast(_ data: Data, channel: NetChannel)
     /// Leave the session.
     func disconnect()
+    /// The peer that owns session-wide decisions (rules, kicks) when the backend has a fixed host, e.g. the relay
+    /// server (peer "1") on ENet. `NetSession` accepts host-only messages from nobody else. nil = no fixed host known.
+    var hostPeerID: PeerID? { get }
 }
 
 public extension Transport {
+    var hostPeerID: PeerID? { nil }
     /// Default fan-out; backends with a native "send to all" may override.
     func broadcast(_ data: Data, channel: NetChannel) {
         for peer in connectedPeers { send(data, to: peer, channel: channel) }

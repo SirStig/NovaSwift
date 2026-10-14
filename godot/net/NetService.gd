@@ -184,8 +184,41 @@ func kick(id: int, ban: bool = false) -> void:
 
 
 func send_chat(text: String) -> void:
-	if transport != null:
-		transport.send_chat(text)
+	if transport == null:
+		return
+	var t: String = Proto.clean_chat(text)
+	if t == "":
+		return
+	if not transport.send_chat(t):
+		_toast("Slow down - you're sending messages too fast.", "warning")
+
+
+## Local mute: hide this player's chat from now on (by NAME, remembered across sessions, at most 64).
+func block_player(id: int) -> void:
+	var nm: String = _player_name(id)
+	if nm == "" or nm == "The player" or id == local_id():
+		return
+	NetPrefs.block(nm)
+	_toast("Blocked %s. Their chat is hidden." % nm)
+
+
+func unblock_name(nm: String) -> void:
+	NetPrefs.unblock(nm)
+
+
+func is_player_blocked(id: int) -> bool:
+	return NetPrefs.is_blocked(_player_name(id))
+
+
+## Report a player to the server (K_REPORT). reason: invalid | abuse | cheat | spam.
+func report_player(id: int, reason: String, detail: String = "") -> void:
+	if transport == null:
+		return
+	if transport.mode == "client":
+		transport.send_report(id, reason, detail)
+		_toast("Report sent to the server.", "good")
+	else:
+		_toast("You host this game: use Kick / Ban instead.", "info")
 
 
 func set_rules(rules: Dictionary) -> void:
@@ -228,7 +261,10 @@ func _session_started() -> void:
 			var why: String = trade_invite(pid)
 			if why != "":
 				_toast(why, "error"))
+		overlay.block_requested.connect(block_player)
+		overlay.report_requested.connect(func(pid: int, why: String) -> void: report_player(pid, why))
 		add_child(overlay)
+	overlay.local_is_host = transport != null and transport.mode == "server"
 	_events_in = 0.0
 	_state_in = 0.0
 	session_changed.emit()
@@ -324,7 +360,13 @@ func _system_line(text: String) -> void:
 
 
 func _chat_line(from_name: String, text: String) -> void:
-	_push_chat(from_name, text, false)
+	var clean: String = Proto.clean_chat(text)
+	if clean == "":
+		return
+	var who: String = from_name if from_name == "[Server]" else Proto.clean_player_name(from_name, "?")
+	if who != "?" and NetPrefs.is_blocked(who):
+		return   # muted by this player
+	_push_chat(who, clean, false)
 
 
 func _push_chat(from_name: String, text: String, system: bool) -> void:
@@ -341,7 +383,7 @@ func _on_bridge_event(e: Dictionary) -> void:
 	var kind: String = str(e.get("type", e.get("kind", "")))
 	match kind:
 		"chat":
-			_chat_line(str(e.get("name", "?")), str(e.get("text", "")))
+			_chat_line(str(e.get("name", "?")) if e.get("name", "?") is String else "?", e.get("text", "") as String if e.get("text", "") is String else "")
 		"rules_changed":
 			_toast("The host changed the session rules.")
 			_system_line("Session rules changed.")
@@ -349,13 +391,18 @@ func _on_bridge_event(e: Dictionary) -> void:
 			_on_trade_event(e)
 		"kicked":
 			_toast("You were kicked from the game.", "error")
+		"invalid_peer":
+			# The session refused data from this peer: report it (the server can remove abusers). Clamped, once per peer.
+			if transport != null and transport.mode == "client" and e.get("id", 0) is int:
+				transport.send_report(int(e.get("id", 0)), "invalid", Proto.clean_text(e.get("reason", ""), 100))
 		"version_mismatch":
-			_set_error("Game version mismatch: " + str(e.get("message", "update NovaSwift to match the host.")), "version", e)
+			_set_error("Game version mismatch: " + Proto.clean_text(e.get("message", "update NovaSwift to match the host."), 200), "version", e)
 			_toast(last_error, "error")
 		"plugin_mismatch":
 			if bool(e.get("as_host", false)):
-				_toast("%s's plug-ins don't match yours; they were removed." % str(e.get("name", "A player")), "warning")
-				_system_line("%s was removed: %s" % [str(e.get("name", "A player")), _plugin_mismatch_text(e).replace("Your plug-ins don't match. ", "to match, they must ")])
+				var pn: String = Proto.clean_player_name(e.get("name", ""), "A player")
+				_toast("%s's plug-ins don't match yours; they were removed." % pn, "warning")
+				_system_line("%s was removed: %s" % [pn, _plugin_mismatch_text(e).replace("Your plug-ins don't match. ", "to match, they must ")])
 			else:
 				_set_error(_plugin_mismatch_text(e), "plugins", e)
 				_toast("Plug-ins don't match the host's.", "error")
@@ -393,8 +440,8 @@ func _on_trade_event(e: Dictionary) -> void:
 	var kind: String = str(e.get("kind", ""))
 	match kind:
 		"invite":
-			var who: String = str(e.get("name", "A player"))
-			var pid: int = int(e.get("id", -1))
+			var who: String = Proto.clean_player_name(e.get("name", ""), "A player")
+			var pid: int = Proto.num_int(e.get("id", -1), -1, 2147483647, -1)
 			_toast("%s wants to trade." % who)
 			Alert.show(self, {"title": "Trade request", "message": "%s wants to trade credits, cargo or outfits with you." % who,
 				"buttons": [{"title": "Decline", "role": "cancel", "cb": func() -> void: nova.net_trade_respond(pid, false)},
@@ -433,7 +480,9 @@ static func _plugin_mismatch_text(e: Dictionary) -> String:
 		if arr is Array and not (arr as Array).is_empty():
 			var names: PackedStringArray = PackedStringArray()
 			for x in arr:
-				names.append(str((x as Dictionary).get("name", x)) if x is Dictionary else str(x))
+				if names.size() >= Proto.MAX_LIST:
+					break
+				names.append(Proto.clean_text((x as Dictionary).get("name", ""), 64) if x is Dictionary else Proto.clean_text(x, 64))
 			var label: String = {"missing": "Install", "extra": "Disable", "wrong_version": "Update"}[key]
 			parts.append("%s: %s" % [label, ", ".join(names)])
 	return "Your plug-ins don't match. " + "; ".join(parts) if not parts.is_empty() else "Your enabled plug-ins don't match the host's."
@@ -519,11 +568,20 @@ func _poll_state() -> void:
 		var v: Variant = JSON.parse_string(str(nova.net_state()))
 		if v is Dictionary:
 			net_info = v
-			for p in (v.get("players", []) as Array):
-				if p is Dictionary:
-					rows.append(p)
-			for er in (v.get("errors", []) as Array):
-				_toast(str(er), "error")
+			var plist: Variant = v.get("players", [])
+			if plist is Array:
+				for p in (plist as Array):
+					if p is Dictionary and rows.size() < Proto.MAX_LIST:
+						var pd: Dictionary = p
+						var pid2: int = Proto.num_int(pd.get("id", -1), -1, 2147483647, -1)
+						pd["id"] = pid2
+						# the host (id 1) may legitimately be "[Server]" / carry a staff-looking name: only the rest are vetted
+						pd["name"] = ("[Server]" if pd.get("name", "") == "[Server]" else Proto.clean_name(Proto.str_field(pd.get("name", ""), 24), "Pilot")) if pid2 == 1 else Proto.clean_player_name(pd.get("name", ""), "Pilot %d" % pid2)
+						rows.append(pd)
+			var elist: Variant = v.get("errors", [])
+			if elist is Array:
+				for er in (elist as Array).slice(0, 4):
+					_toast(Proto.clean_text(er, 160), "error")
 	if rows.is_empty():
 		rows = transport.roster()
 	else:

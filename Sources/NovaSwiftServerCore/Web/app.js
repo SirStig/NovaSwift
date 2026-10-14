@@ -85,6 +85,8 @@ function renderWizard() {
     <label class="check"><input type="radio" name="acc" value="open" ${s.password ? '' : 'checked'}><span><b>Open</b><br><small class="muted">Anyone who has the address can join.</small></span></label>
     <label class="check"><input type="radio" name="acc" value="pw" ${s.password ? 'checked' : ''}><span><b>Password</b><br><small class="muted">Only people you give the password to.</small></span></label>
     <label id="w-pwrow" ${s.password ? '' : 'hidden'}><span class="l">Password</span><input type="text" id="w-pw" value="${esc(s.password)}" placeholder="something easy to say out loud"></label>
+    <label><span class="l">Who can open this admin panel?</span><select id="w-admin"><option value="127.0.0.1" ${s.adminBind === '127.0.0.1' ? 'selected' : ''}>Only this computer (recommended)</option><option value="0.0.0.0" ${s.adminBind === '0.0.0.0' ? 'selected' : ''}>Other computers on my network too</option></select></label>
+    <div id="w-adminwarn" class="card warn" ${s.adminBind === '0.0.0.0' ? '' : 'hidden'}><b>Be careful.</b> The panel uses plain HTTP: the password and your session travel unencrypted, and anyone who can reach port ${s.adminPort} can try to sign in. Only choose this on a home network you trust, never on a server on the internet. (Takes effect after a restart.)</div>
     <div class="row"><label><span class="l">Player slots</span><input type="number" id="w-max" min="1" max="64" value="${s.maxPlayers}"></label>
     <label><span class="l">Rules</span><select id="w-rules"><option value="safe" ${s.rulesPreset === 'safe' ? 'selected' : ''}>Safe - fight for fun, nothing is lost</option><option value="full" ${s.rulesPreset === 'full' ? 'selected' : ''}>Full stakes - damage and death are real</option><option value="custom" ${s.rulesPreset === 'custom' ? 'selected' : ''}>Custom (set later)</option></select></label></div>`;
   if (step === 2) {
@@ -107,10 +109,11 @@ function renderWizard() {
       <button class="primary" id="w-next">${step === 3 ? 'Finish' : 'Next'}</button></div></div></div>`;
   const grab = () => {
     if (step === 0) { s.name = $('#w-name').value; s.description = $('#w-desc').value; s.region = $('#w-region').value; }
-    if (step === 1) { s.password = $('input[name=acc]:checked').value === 'pw' ? $('#w-pw').value : ''; s.maxPlayers = +$('#w-max').value || 8; s.rulesPreset = $('#w-rules').value; }
+    if (step === 1) { s.password = $('input[name=acc]:checked').value === 'pw' ? $('#w-pw').value : ''; s.maxPlayers = +$('#w-max').value || 8; s.rulesPreset = $('#w-rules').value; s.adminBind = $('#w-admin').value; }
     if (step === 3) { s.publicListed = $('input[name=pub]:checked').value === 'yes'; s.ownerName = $('#w-owner').value; s.ownerContact = $('#w-contact').value; s.publicAddress = $('#w-addr').value; }
   };
   if (step === 1) $$('input[name=acc]').forEach(r => r.onchange = () => { $('#w-pwrow').hidden = r.value !== 'pw' || !r.checked; if (r.checked && r.value === 'pw') $('#w-pw').focus(); });
+  if (step === 1) $('#w-admin').onchange = e => { $('#w-adminwarn').hidden = e.target.value !== '0.0.0.0'; };
   if (step === 3) $$('input[name=pub]').forEach(r => r.onchange = () => { $('#w-pubrow').hidden = $('input[name=pub]:checked').value !== 'yes'; });
   if (step === 2) wizPlugins();
   const back = $('#w-back'); if (back) back.onclick = () => { grab(); w.step--; renderWizard(); };
@@ -152,7 +155,7 @@ async function wizPlugins() {
 }
 
 /* ---------- shell ---------- */
-const PAGES = [['dashboard', 'Dashboard'], ['players', 'Players'], ['settings', 'Settings'], ['plugins', 'Plug-ins'], ['public', 'Public listing'], ['network', 'Network'], ['logs', 'Logs'], ['bans', 'Bans']];
+const PAGES = [['dashboard', 'Dashboard'], ['players', 'Players'], ['settings', 'Settings'], ['plugins', 'Plug-ins'], ['public', 'Public listing'], ['network', 'Network'], ['logs', 'Logs'], ['audit', 'Audit'], ['bans', 'Bans']];
 function renderShell() {
   app.innerHTML = `<div class="shell"><aside class="side">
     <div class="brand">${LOGO}<div>NovaSwift<small>Dedicated Server</small></div></div>
@@ -167,7 +170,7 @@ function renderShell() {
 function go(page) {
   state.page = page; clearInterval(state.timer);
   $$('.nav a').forEach(a => a.classList.toggle('on', a.dataset.page === page));
-  const fn = { dashboard: pgDashboard, players: pgPlayers, settings: pgSettings, plugins: pgPlugins, public: pgPublic, network: pgNetwork, logs: pgLogs, bans: pgBans }[page];
+  const fn = { dashboard: pgDashboard, players: pgPlayers, settings: pgSettings, plugins: pgPlugins, public: pgPublic, network: pgNetwork, logs: pgLogs, audit: pgAudit, bans: pgBans }[page];
   fn();
 }
 async function refreshStatus() {
@@ -191,7 +194,7 @@ function pgDashboard() {
     if (!s.running) warns.push(['bad', 'The game server is not running', esc(s.stateText)]);
     if (s.update.available) warns.push(['warn', `Server ${esc(s.update.latest)} is available`, `You have ${esc(s.version)}. <a href="${esc(s.update.url)}" target="_blank" rel="noopener">Download it</a> or use Settings to update.`]);
     if (s.missingPlugins.length) warns.push(['warn', 'Some plug-ins are not installed yet', 'Missing: ' + esc(s.missingPlugins.join(', ')) + '. Open Plug-ins to install them; players can not match until then.']);
-    if (s.adminExposed) warns.push(['warn', 'The admin panel is open to your network over plain HTTP', 'Anyone who can reach port ' + s.adminPort + ' can try to sign in. Use a strong password, or choose "this computer only" in Settings and reach it with an SSH tunnel.']);
+    if (s.adminExposed) warns.push(['warn', 'The admin panel is open to your network over plain HTTP', 'Anyone who can reach port ' + s.adminPort + ' can try to sign in, and passwords and the session cookie travel unencrypted. Choose "this computer only" in Settings and reach it with an SSH tunnel, or put it behind an HTTPS reverse proxy.']);
     if (s.restartRequired.length) warns.push(['warn', 'Restart needed', esc(s.restartRequired.join(' '))]);
     $('#d-body').innerHTML = `
       ${warns.map(w => `<div class="card ${w[0]}"><b>${w[1]}</b><br>${w[2]}</div>`).join('')}
@@ -227,9 +230,11 @@ function pgPlayers() {
     let d; try { d = await api('players'); } catch (e) { return; }
     const box = $('#pl'); if (!box) return;
     box.innerHTML = d.players.length ? `<table><tr><th>Name</th><th>Ping</th><th>System</th><th>Online</th><th>Address</th><th></th></tr>${d.players.map(p => `<tr>
-      <td><b>${esc(p.name)}</b> <small class="muted">#${p.id}</small></td><td>${p.pingMs >= 0 ? p.pingMs + ' ms' : '-'}</td><td>${p.systemID != null ? p.systemID : '-'}</td><td>${fmtDur(p.seconds)}</td><td class="mono">${esc(p.ip)}</td>
-      <td class="actions"><button class="small" data-msg="${p.id}">Message</button><button class="small" data-kick="${p.id}">Kick</button><button class="small danger" data-ban="${p.id}">Ban</button></td></tr>`).join('')}</table>`
+      <td><b>${esc(p.name)}</b> <small class="muted">#${p.id}</small>${p.muted ? ' <span class="pill warn">muted</span>' : ''}</td><td>${p.pingMs >= 0 ? p.pingMs + ' ms' : '-'}</td><td>${p.systemID != null ? p.systemID : '-'}</td><td>${fmtDur(p.seconds)}</td><td class="mono">${esc(p.ip)}</td>
+      <td class="actions"><button class="small" data-msg="${p.id}">Message</button><button class="small" data-${p.muted ? 'unmute' : 'mute'}="${p.id}">${p.muted ? 'Unmute' : 'Mute'}</button><button class="small" data-kick="${p.id}">Kick</button><button class="small danger" data-ban="${p.id}">Ban</button></td></tr>`).join('')}</table>`
       : '<div class="empty">Nobody is online right now.<br><small>Players appear here when they join.</small></div>';
+    $$('[data-mute]').forEach(b => b.onclick = () => api('players/mute', 'POST', { id: +b.dataset.mute }).then(() => toast('Muted. Nobody sees their chat.', 'ok')).catch(fail));
+    $$('[data-unmute]').forEach(b => b.onclick = () => api('players/unmute', 'POST', { id: +b.dataset.unmute }).then(() => toast('Unmuted.', 'ok')).catch(fail));
     $$('[data-kick]').forEach(b => b.onclick = () => kick(+b.dataset.kick, false));
     $$('[data-ban]').forEach(b => b.onclick = () => kick(+b.dataset.ban, true));
     $$('[data-msg]').forEach(b => b.onclick = async () => { const t = prompt('Message to this player:'); if (t) api('players/message', 'POST', { id: +b.dataset.msg, text: t }).then(() => toast('Sent.', 'ok')).catch(fail); });
@@ -261,14 +266,22 @@ async function pgSettings() {
       <div id="custom" ${s.rulesPreset === 'custom' ? '' : 'hidden'}>${c('allowPvP', 'Players can fight each other')}${c('pvpDamageReal', 'Damage from other players is real')}${c('deathReal', 'Dying to another player is permanent')}${c('friendlyFire', 'Friendly fire')}${c('allowTrade', 'Players can trade')}</div>
       ${f('gameSpeed', 'Game speed', '1 is normal (0.25 to 4). Applies to everyone online.', 'number', 'step="0.25" min="0.25" max="4"')}
       <small class="muted">Rules change instantly for players who are online.</small></div>
+    <div class="card"><h3>Moderation and limits</h3>
+      ${c('voteKick', 'Players can vote to remove someone (/votekick)', 'Needs the share of online players below, and at least 3 players online.')}
+      ${f('voteKickPercent', 'Votes needed (% of players online)', '10 to 100.', 'number', 'min="10" max="100"')}
+      ${c('allowlistMode', 'Invite-only: only allowed addresses may join', 'Manage the list on the Bans page. Careful: turning this on locks everyone else out.')}
+      ${c('announceJoins', 'Announce joins and leaves in chat')}
+      ${f('wordFilter', 'Chat word filter', 'Comma-separated words replaced by *** in chat. Empty = no filter.')}
+      ${f('maxConnectionsPerIP', 'Connections per address', 'How many players may share one address (home network, Docker). 0 = unlimited.', 'number', 'min="0" max="64"')}
+      <small class="muted">Players type /votekick name, /report name why, /votes in chat. Flooding, forged messages and oversized packets are dropped automatically and repeat offenders are blocked for ten minutes.</small></div>
     <div class="card"><h3>Network</h3>
       ${f('port', 'Game port (UDP)', `Players connect here. Port + 1 (${+s.port + 1}) answers server-list pings. Changing it restarts the game port and drops players.`, 'number', 'min="1024" max="65534"')}
       ${c('lanAnnounce', 'Show up for people on my home network (LAN)')}
       ${c('upnp', 'Open the port on my router automatically (UPnP)', 'Works on many home routers. See the Network page for the result.')}
-      <div class="row"><label><span class="l">Admin panel is reachable from</span><select data-k="adminBind"><option value="0.0.0.0">Any computer that can reach it</option><option value="127.0.0.1">This computer only (safest)</option></select><span class="hint">Takes effect after a restart.</span></label>
+      <div class="row"><label><span class="l">Admin panel is reachable from</span><select data-k="adminBind"><option value="127.0.0.1">This computer only (recommended; use an SSH tunnel from elsewhere)</option><option value="0.0.0.0">Other computers too - plain HTTP, protected only by the password (risky on the internet)</option></select><span class="hint">Takes effect after a restart.</span></label>
       ${f('adminPort', 'Admin panel port (TCP)', 'Takes effect after a restart.', 'number', 'min="1024" max="65535"')}</div></div>
     <div class="actions" style="justify-content:flex-start;margin-bottom:18px"><button class="primary" type="submit">Save changes</button><span id="sres" class="muted"></span></div></form>
-    <div class="card"><h3>Admin password</h3><div class="row"><label><span class="l">Current</span><input type="password" id="pw0" autocomplete="current-password"></label><label><span class="l">New (8+ characters)</span><input type="password" id="pw1" autocomplete="new-password"></label></div><button id="pw-go">Change password</button></div>
+    <div class="card"><h3>Admin password</h3><div class="row"><label><span class="l">Current</span><input type="password" id="pw0" autocomplete="current-password"></label><label><span class="l">New (12+ characters, mixed)</span><input type="password" id="pw1" autocomplete="new-password"></label></div><button id="pw-go">Change password</button></div>
     <div class="card"><h3>Updates and startup</h3>
       ${up ? `<p>Server version <b>${esc(up.current)}</b>. ${up.available ? `<span class="pill warn">${esc(up.latest)} is available</span> <a href="${esc(up.url)}" target="_blank" rel="noopener">Release notes and download</a>` : up.latest ? '<span class="pill ok">Up to date</span>' : (up.error ? esc(up.error) : 'Not checked yet.')}</p>
       <div class="actions" style="justify-content:flex-start"><button id="up-check">Check now</button>${up.available && up.canAutoApply ? '<button class="primary" id="up-apply">Install update</button>' : ''}</div><br>` : ''}
@@ -411,6 +424,23 @@ function pgLogs() {
   }, 1200);
 }
 
+/* ---------- audit ---------- */
+async function pgAudit() {
+  pageEl().innerHTML = head('Audit') + '<div class="card" id="au"><div class="boot">Loading...</div></div><small class="muted">What administrators did: sign-ins, kicks, bans, mutes, settings. Also saved to <code>logs/audit.log</code>. Passwords are never recorded.</small>';
+  let d; try { d = await api('audit'); } catch (e) { return fail(e); }
+  const box = $('#au');
+  box.textContent = '';
+  if (!d.entries.length) { box.innerHTML = '<div class="empty">Nothing recorded yet.</div>'; return; }
+  const t = document.createElement('table');
+  t.innerHTML = '<tr><th>Time</th><th>Who</th><th>Action</th><th>Details</th></tr>';
+  for (const e of d.entries.slice().reverse()) {
+    const tr = document.createElement('tr');
+    for (const v of [e.t.replace('T', ' ').replace('Z', ''), e.actor, e.action, e.detail]) { const td = document.createElement('td'); td.textContent = v; tr.appendChild(td); }
+    t.appendChild(tr);
+  }
+  box.appendChild(t);
+}
+
 /* ---------- bans ---------- */
 async function pgBans() {
   pageEl().innerHTML = head('Bans') + '<div id="bn"></div>';
@@ -419,6 +449,17 @@ async function pgBans() {
     $('#bn').innerHTML = `<div class="card"><p class="muted">Bans block an IP address from joining. (Kick or ban a connected player from the Players page.) Players on the same home network share one address, so be careful.</p>
       ${d.bans.length ? `<table><tr><th>Address</th><th>Note</th><th></th></tr>${d.bans.map(b => `<tr><td class="mono">${esc(b.ip)}</td><td>${esc(b.note)}</td><td class="actions"><button class="small" data-un="${esc(b.ip)}">Unban</button></td></tr>`).join('')}</table>` : '<div class="empty">Nobody is banned.</div>'}</div>
       <div class="card"><h3>Ban an address</h3><div class="row" style="align-items:end"><label style="margin:0"><span class="l">IP address</span><input type="text" id="bn-ip" placeholder="203.0.113.7"></label><label style="margin:0"><span class="l">Note</span><input type="text" id="bn-note" placeholder="why"></label><button class="primary" id="bn-add" style="flex:0 0 auto">Ban</button></div></div>`;
+    let m = null; try { m = await api('moderation'); } catch (e) { /* older server */ }
+    if (m) {
+      $('#bn').insertAdjacentHTML('beforeend', `<div class="card"><h3>Muted players</h3>${m.mutes.length ? `<table>${m.mutes.map(x => `<tr><td class="mono">${esc(x.key)}</td><td>${esc(x.note)}</td><td class="actions"><button class="small" data-unmute-key="${esc(x.key)}">Unmute</button></td></tr>`).join('')}</table>` : '<div class="empty">Nobody is muted.</div>'}</div>
+        <div class="card"><h3>Allowed addresses ${m.allowlistMode ? '<span class="pill warn">invite-only is ON</span>' : ''}</h3>${m.allowlist.length ? `<table>${m.allowlist.map(x => `<tr><td class="mono">${esc(x.ip)}</td><td>${esc(x.note)}</td><td class="actions"><button class="small" data-disallow="${esc(x.ip)}">Remove</button></td></tr>`).join('')}</table>` : '<div class="empty">The list is empty.</div>'}
+        <div class="row" style="align-items:end"><label style="margin:0"><span class="l">Allow an address</span><input type="text" id="al-ip" placeholder="203.0.113.7"></label><button id="al-add" style="flex:0 0 auto">Allow</button></div></div>
+        <div class="card"><h3>Blocked automatically (flooding, bad passwords)</h3>${m.tempBans.length ? `<table>${m.tempBans.map(x => `<tr><td class="mono">${esc(x.ip)}</td><td>${x.seconds} s left</td><td class="actions"><button class="small" data-clear-temp="${esc(x.ip)}">Unblock</button></td></tr>`).join('')}</table>` : '<div class="empty">No address is blocked right now.</div>'}</div>`);
+      $$('[data-unmute-key]').forEach(b => b.onclick = async () => { await api('players/unmute', 'POST', { key: b.dataset.unmuteKey }).catch(fail); draw(); });
+      $$('[data-disallow]').forEach(b => b.onclick = async () => { await api('allowlist/remove', 'POST', { ip: b.dataset.disallow }).catch(fail); draw(); });
+      $$('[data-clear-temp]').forEach(b => b.onclick = async () => { await api('tempbans/clear', 'POST', { ip: b.dataset.clearTemp }).catch(fail); draw(); });
+      $('#al-add').onclick = async () => { try { await api('allowlist/add', 'POST', { ip: $('#al-ip').value.trim() }); draw(); } catch (e) { fail(e); } };
+    }
     $$('[data-un]').forEach(b => b.onclick = async () => { await api('bans/remove', 'POST', { ip: b.dataset.un }).catch(fail); draw(); });
     $('#bn-add').onclick = async () => { try { await api('bans/add', 'POST', { ip: $('#bn-ip').value.trim(), note: $('#bn-note').value }); toast('Banned.', 'ok'); draw(); } catch (e) { fail(e); } };
   };

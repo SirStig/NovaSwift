@@ -1528,7 +1528,7 @@ func _page_session() -> void:
 	var ih := _hbox(im, 8)
 	_chat_edit = NC.text_field("Say something", "")
 	_chat_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_chat_edit.max_length = 240
+	_chat_edit.max_length = 200
 	_chat_edit.text_submitted.connect(func(_t2: String) -> void: _send_chat())
 	ih.add_child(_chat_edit)
 	var send: Button = _btn(ih, "Send", _send_chat, "primary", "paperplane.fill", "send")
@@ -1612,6 +1612,17 @@ func _dyn_players(into: Control) -> void:
 					_svc.last_error = why
 					_svc.last_error_code = "bad_request"
 					_render_banner(), "bordered", "arrow.left.arrow.right", "trade:%d" % id)
+		if not mine:
+			var muted: bool = _svc.is_player_blocked(id)
+			_btn(h, "Unblock" if muted else "Block", func() -> void:
+				if muted:
+					_svc.unblock_name(nm)
+				else:
+					_svc.block_player(id)
+				_refresh_dynamic(), "bordered", "", "block:%d" % id)
+			if not _svc.is_hosting():
+				_btn(h, "Report", func() -> void:
+					_svc.report_player(id, "abuse"), "bordered", "", "report:%d" % id)
 		if _svc.is_hosting() and not mine and id != 1:
 			_btn(h, "Kick", func() -> void: _svc.kick(id, false), "bordered", "", "kick:%d" % id)
 			_btn(h, "Ban", func() -> void: _svc.kick(id, true), "destructive", "", "ban:%d" % id)

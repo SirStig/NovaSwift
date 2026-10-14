@@ -11,6 +11,7 @@
 # Loaded with preload() (no class_name), like Controls.gd.
 extends CanvasLayer
 
+const Proto = preload("res://net/NetProto.gd")
 const T = preload("res://ui/novaswift/NovaTheme.gd")
 const NC = preload("res://ui/novaswift/NovaControls.gd")
 
@@ -96,7 +97,7 @@ func refresh(force: bool = false) -> void:
 		inventory = iv if iv is Dictionary else {}
 	# Our own offer, as the bridge holds it (it also resets when the deal changes).
 	var mo: Dictionary = state.get("my_offer", {}) as Dictionary
-	my_offer = {"credits": int(mo.get("credits", 0)), "cargo": _to_map(mo.get("cargo", []), "tons"), "outfits": _to_map(mo.get("outfits", []), "count")}
+	my_offer = {"credits": Proto.num_int(mo.get("credits", 0), 0, 1000000000000), "cargo": _to_map(mo.get("cargo", []), "tons"), "outfits": _to_map(mo.get("outfits", []), "count")}
 	_build()
 
 
@@ -104,7 +105,9 @@ static func _to_map(rows: Variant, key: String) -> Dictionary:
 	var m: Dictionary = {}
 	if rows is Array:
 		for r in rows:
-			m[int((r as Dictionary).get("id", -1))] = int((r as Dictionary).get(key, 0))
+			if m.size() >= 64 or not (r is Dictionary):
+				continue
+			m[Proto.num_int((r as Dictionary).get("id", -1), -1, 2147483647, -1)] = Proto.num_int((r as Dictionary).get(key, 0), 0, 1000000000)
 	return m
 
 
@@ -112,7 +115,7 @@ func _build() -> void:
 	for c in _body.get_children():
 		_body.remove_child(c)
 		c.queue_free()
-	var partner: String = str(state.get("partner_name", "?"))
+	var partner: String = Proto.clean_player_name(state.get("partner_name", ""), "Player")
 	var joined: bool = bool(state.get("joined", false))
 	var head := HBoxContainer.new()
 	head.add_theme_constant_override("separation", 10)
@@ -225,18 +228,20 @@ func _item_row(parent: Control, nm: String, held: int, unit: String, value: int,
 func _build_theirs(parent: Control, partner: String, joined: bool) -> void:
 	var col: VBoxContainer = _section(parent, "YOU RECEIVE", T.GREEN, "arrow.down.circle.fill")
 	var o: Dictionary = state.get("their_offer", {}) as Dictionary
-	var credits: int = int(o.get("credits", 0))
-	var cargo: Array = o.get("cargo", [])
-	var outfits: Array = o.get("outfits", [])
+	var credits: int = Proto.num_int(o.get("credits", 0), 0, 1000000000000)
+	var cargo: Array = (o.get("cargo", []) as Array).slice(0, 64) if o.get("cargo", []) is Array else []
+	var outfits: Array = (o.get("outfits", []) as Array).slice(0, 64) if o.get("outfits", []) is Array else []
 	if credits <= 0 and cargo.is_empty() and outfits.is_empty():
 		_text(col, ("%s hasn't offered anything yet." % partner) if joined else ("Waiting for %s to join..." % partner), 12, "regular", T.SECONDARY, true)
 		return
 	if credits > 0:
 		_recv_row(col, "Credits", "%s cr" % _fmt(credits))
 	for c in cargo:
-		_recv_row(col, str((c as Dictionary).get("name", "Cargo")), "%d t" % int((c as Dictionary).get("tons", 0)))
+		if c is Dictionary:
+			_recv_row(col, Proto.clean_text((c as Dictionary).get("name", "Cargo"), 48), "%d t" % Proto.num_int((c as Dictionary).get("tons", 0), 0, 1000000000))
 	for x in outfits:
-		_recv_row(col, str((x as Dictionary).get("name", "Outfit")), "x%d" % int((x as Dictionary).get("count", 0)))
+		if x is Dictionary:
+			_recv_row(col, Proto.clean_text((x as Dictionary).get("name", "Outfit"), 48), "x%d" % Proto.num_int((x as Dictionary).get("count", 0), 0, 1000000000))
 
 
 func _recv_row(parent: Control, nm: String, val: String) -> void:

@@ -90,6 +90,7 @@ let package = Package(
             dependencies: [
                 "NovaSwiftNet", "NovaSwiftENet", "NovaSwiftKit", "NovaSwiftPluginStore",
                 .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "_CryptoExtras", package: "swift-crypto"),   // RSA signature check for server updates
             ],
             path: "Sources/NovaSwiftServerCore",
             exclude: ["Web"]
@@ -147,7 +148,7 @@ let package = Package(
         ),
         .testTarget(
             name: "NovaSwiftServerTests",
-            dependencies: ["NovaSwiftServerCore", "NovaSwiftENet", "NovaSwiftNet", "NovaSwiftKit"],
+            dependencies: ["NovaSwiftServerCore", "NovaSwiftENet", "NovaSwiftNet", "NovaSwiftKit", "CENet", .product(name: "_CryptoExtras", package: "swift-crypto")],
             path: "Tests/NovaSwiftServerTests"
         ),
         .testTarget(

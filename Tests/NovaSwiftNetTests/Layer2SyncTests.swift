@@ -91,6 +91,8 @@ final class Layer2SyncTests: XCTestCase {
         s[1].onNCB = { bits, peer in clientGot.append((bits, peer)) }
         s[2].onNCB = { bits, peer in bystanderGot.append((bits, peer)) }
 
+        // Receivers only accept story bits from the authority of a system they share.
+        for (i, x) in s.enumerated() { x.updateLocalPresence(name: "P\(i)", systemID: 1) }
         authority.sendNCB([100, 205, 3000], to: "client")
 
         XCTAssertEqual(clientGot.count, 1)

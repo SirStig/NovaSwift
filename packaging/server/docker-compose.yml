@@ -1,5 +1,8 @@
 # docker compose up -d        (run from this folder)
 # docker compose logs novaswift | head -30      <- the admin password is printed once, on the first start
+#
+# First run: the data folder must belong to the container's user (uid 10001):
+#     mkdir -p data && sudo chown 10001:10001 data
 services:
   novaswift:
     build:
@@ -13,4 +16,17 @@ services:
       - "53736:53736/udp"               # server-list pings
       - "127.0.0.1:53737:53737/tcp"     # admin panel: this machine only (use an SSH tunnel from outside)
     volumes:
-      - ./data:/data                    # server.cfg, plugins/, logs/
+      - ./data:/data                    # server.cfg, plugins/, logs/ - the only writable path
+    # Hardening: read-only root file system, no capabilities, no privilege escalation, bounded resources.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 512m
+    ulimits:
+      nofile: 4096
+    environment:
+      NOVASWIFT_ADMIN_BIND: "0.0.0.0"   # inside the container; the published port above is host-loopback only

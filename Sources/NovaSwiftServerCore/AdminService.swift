@@ -14,7 +14,8 @@ public final class AdminService {
 
     private let lock = NSLock()
     private var sessions: [String: Date] = [:]
-    private var failures: [String: (count: Int, until: Date)] = [:]
+    private var failures: [String: (count: Int, until: Date, level: Int)] = [:]
+    private var globalFailures: [Date] = []
     /// One-time link that signs you in from this computer until the first-run wizard is done.
     public private(set) var setupCode: String?
     private var cachedPublicIP: (ip: String?, at: Date)?
@@ -22,9 +23,23 @@ public final class AdminService {
     private var restartRequired: [String] = []
     public var onShutdown: (() -> Void)?
 
+    public var audit: AuditLog { server.audit }
+    /// Extra host names the panel answers to (a reverse proxy's domain), besides localhost / IP literals / this machine.
+    public var extraHosts: Set<String> = Set((ProcessInfo.processInfo.environment["NOVASWIFT_ADMIN_HOSTS"] ?? "")
+        .lowercased().split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
+
     public init(server: GameServer, updates: UpdateChecker) {
         self.server = server; store = server.store; log = server.log; plugins = server.plugins; self.updates = updates
         if !store.config.setupDone { setupCode = (0..<12).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined() }
+    }
+
+    /// The public address (when the lookup finished or one is set in Settings) and this computer's LAN address.
+    public func joinAddresses() -> (public: String?, lan: String?) {
+        let cfg = store.config
+        lock.lock(); let cached = cachedPublicIP; lock.unlock()
+        let pub = !cfg.publicAddress.isEmpty ? cfg.publicAddress : cached?.ip
+        let lan = NetworkTools.localAddresses().first { $0.kind == "lan" }?.ip
+        return (pub, lan)
     }
 
     func setCachedPublicIP(_ ip: String?) { lock.lock(); cachedPublicIP = (ip, Date()); lock.unlock() }
@@ -32,6 +47,55 @@ public final class AdminService {
     // MARK: Entry point
 
     public func handle(_ req: HTTPRequest) -> HTTPResponse {
+        if let refused = guardRequest(req) { return Self.secured(refused) }
+        return Self.secured(route(req))
+    }
+
+    /// Security headers on every response. The panel loads one script and one stylesheet from itself and talks only
+    /// to itself, so the policy can be strict.
+    static func secured(_ r: HTTPResponse) -> HTTPResponse {
+        var r = r
+        r.headers["Content-Security-Policy"] = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+        r.headers["X-Frame-Options"] = "DENY"
+        r.headers["X-Content-Type-Options"] = "nosniff"
+        r.headers["Referrer-Policy"] = "no-referrer"
+        r.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        r.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+        r.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
+        if r.headers["Cache-Control"] == nil { r.headers["Cache-Control"] = "no-store" }
+        return r
+    }
+
+    /// DNS-rebinding and cross-site defence: the Host header must be one the panel knows (an IP literal, localhost, this
+    /// machine, the configured public address), and a state-changing request carrying an Origin must be same-origin.
+    func guardRequest(_ req: HTTPRequest) -> HTTPResponse? {
+        if let host = req.headers["host"], !Self.hostAllowed(host, store: store, extra: extraHosts) {
+            return .error("Unknown host name. Open the panel by its IP address, localhost, or an SSH tunnel.", status: 421)
+        }
+        if req.method != "GET" && req.method != "HEAD", let origin = req.headers["origin"] {
+            let originHost = origin.replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "http://", with: "")
+            if originHost.lowercased() != (req.headers["host"] ?? "").lowercased() {
+                return .error("Cross-site request refused.", status: 403)
+            }
+        }
+        return nil
+    }
+
+    static func hostAllowed(_ header: String, store: ConfigStore, extra: Set<String>) -> Bool {
+        var h = header.lowercased()
+        if h.hasPrefix("[") {                       // [::1]:53737
+            return true                              // IP literal
+        }
+        if let colon = h.lastIndex(of: ":") { h = String(h[..<colon]) }
+        if h.isEmpty || h == "localhost" || h.hasSuffix(".localhost") { return true }
+        if NetworkTools.octets(h) != nil { return true }
+        if h == ProcessInfo.processInfo.hostName.lowercased() { return true }
+        let pub = store.config.publicAddress.lowercased()
+        if !pub.isEmpty, h == pub { return true }
+        return extra.contains(h)
+    }
+
+    private func route(_ req: HTTPRequest) -> HTTPResponse {
         if req.path.hasPrefix("/api/") { return api(req) }
         guard req.method == "GET" || req.method == "HEAD" else { return .error("Not found.", status: 404) }
         switch req.path {
@@ -56,31 +120,81 @@ public final class AdminService {
     private func newSession(_ req: HTTPRequest) -> HTTPResponse {
         let token = (0..<32).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
         lock.lock()
-        sessions[token] = Date().addingTimeInterval(7 * 86400)
+        sessions[token] = Date().addingTimeInterval(Self.sessionSeconds)
         sessions = sessions.filter { $0.value > Date() }
+        if sessions.count > 64 { sessions = Dictionary(uniqueKeysWithValues: sessions.sorted { $0.value > $1.value }.prefix(64).map { ($0.key, $0.value) }) }
         lock.unlock()
         var r = HTTPResponse.json(["ok": true])
-        r.headers["Set-Cookie"] = "nsadmin=\(token); Path=/; HttpOnly; SameSite=Strict; Max-Age=\(7 * 86400)"
+        r.headers["Set-Cookie"] = Self.cookie(token, maxAge: Int(Self.sessionSeconds), secure: Self.isHTTPS(req))
         return r
+    }
+
+    static let sessionSeconds: TimeInterval = 12 * 3600
+
+    /// `HttpOnly; SameSite=Strict`, plus `Secure` when the request came over HTTPS (directly or via a local reverse proxy).
+    static func cookie(_ token: String, maxAge: Int, secure: Bool) -> String {
+        "nsadmin=\(token); Path=/; HttpOnly; SameSite=Strict; Max-Age=\(maxAge)" + (secure ? "; Secure" : "")
+    }
+
+    /// The server speaks plain HTTP; HTTPS means a TLS-terminating proxy on this machine set X-Forwarded-Proto.
+    static func isHTTPS(_ req: HTTPRequest) -> Bool {
+        req.isLoopback && (req.headers["x-forwarded-proto"] ?? "").lowercased() == "https"
     }
 
     private func throttled(_ ip: String) -> Int? {
         lock.lock(); defer { lock.unlock() }
         if let f = failures[ip], f.count >= 5, f.until > Date() { return Int(f.until.timeIntervalSinceNow.rounded(.up)) }
+        // Many wrong passwords from many addresses (a distributed guess): everyone but this computer waits.
+        globalFailures = globalFailures.filter { Date().timeIntervalSince($0) < 60 }
+        if globalFailures.count >= 60, ip != "127.0.0.1", ip != "::1" { return 30 }
         return nil
     }
 
+    /// Five wrong passwords lock an address out; each repeat lock-out doubles the wait (1 min, 2, 4 ... up to an hour).
     private func noteFailure(_ ip: String) {
         lock.lock(); defer { lock.unlock() }
-        var f = failures[ip] ?? (0, Date())
+        var f = failures[ip] ?? (0, Date(), 0)
         if f.until < Date() && f.count >= 5 { f.count = 0 }
-        f.count += 1; f.until = Date().addingTimeInterval(60)
+        f.count += 1
+        if f.count >= 5 {
+            f.until = Date().addingTimeInterval(min(3600, 60 * pow(2, Double(f.level))))
+            f.level = min(f.level + 1, 6)
+        } else {
+            f.until = Date().addingTimeInterval(60)
+        }
         failures[ip] = f
+        globalFailures.append(Date())
+        if failures.count > 2048 { failures = failures.filter { $0.value.until > Date() } }
     }
+
+    private func clearFailures(_ ip: String) { lock.lock(); failures[ip] = nil; lock.unlock() }
 
     // MARK: API router
 
+    static func sameSecret(_ a: String, _ b: String) -> Bool { AdminPassword.constantTimeEqual(Array(a.utf8), Array(b.utf8)) }
+
+    /// Routes whose request bodies never go in the audit log (secrets).
+    private static let secretRoutes: Set<String> = ["login", "setup-login", "admin-password"]
+
     private func api(_ req: HTTPRequest) -> HTTPResponse {
+        let resp = apiRoute(req)
+        let route = String(req.path.dropFirst(5))
+        // Every state-changing action by a signed-in admin is recorded (who, what, from where), never secrets.
+        if req.method != "GET", resp.status < 400, !Self.secretRoutes.contains(route), route != "logout" {
+            var detail = ""
+            if !req.body.isEmpty {
+                let b = req.json()
+                detail = b.keys.sorted().filter { !["password", "current", "new", "code"].contains($0) }
+                    .map { k in "\(k)=\(String(describing: b[k] ?? "").prefix(60))" }.joined(separator: " ")
+                if b["password"] != nil { detail += " password=(changed)" }
+            }
+            audit.record(actor: "admin@\(req.remoteIP)", route, detail)
+        }
+        if route == "admin-password", req.method == "POST", resp.status < 400 { audit.record(actor: "admin@\(req.remoteIP)", "admin-password", "changed") }
+        return resp
+    }
+
+    private func apiRoute(_ req: HTTPRequest) -> HTTPResponse {
         let route = String(req.path.dropFirst(5))   // after "/api/"
         if req.method != "GET" && req.headers["x-ns-admin"] == nil {
             return .error("Missing X-NS-Admin header.", status: 403)
@@ -93,13 +207,19 @@ public final class AdminService {
             if let wait = throttled(req.remoteIP) { return .error("Too many wrong passwords. Try again in \(wait) seconds.", status: 429) }
             let pw = (req.json()["password"] as? String) ?? ""
             if !store.config.adminPasswordHash.isEmpty, AdminPassword.verify(pw, against: store.config.adminPasswordHash) {
+                clearFailures(req.remoteIP)
+                audit.record(actor: "admin@\(req.remoteIP)", "login")
                 return newSession(req)
             }
             noteFailure(req.remoteIP)
+            audit.record(actor: "unknown@\(req.remoteIP)", "login-failed")
             return .error("That password isn't right. The admin password was printed in the console the first time the server started.", status: 401)
         case ("POST", "setup-login"):
             let code = (req.json()["code"] as? String) ?? ""
-            if let sc = setupCode, req.isLoopback, !code.isEmpty, code == sc { return newSession(req) }
+            if let sc = setupCode, req.isLoopback, !code.isEmpty, Self.sameSecret(code, sc) {
+                audit.record(actor: "setup@\(req.remoteIP)", "setup-login")
+                return newSession(req)
+            }
             return .error("That setup link is no longer valid. Sign in with the admin password instead.", status: 401)
         default: break
         }
@@ -107,15 +227,42 @@ public final class AdminService {
         switch (req.method, route) {
         case ("POST", "logout"):
             if let t = req.cookies["nsadmin"] { lock.lock(); sessions[t] = nil; lock.unlock() }
-            var r = HTTPResponse.json(["ok": true]); r.headers["Set-Cookie"] = "nsadmin=; Path=/; Max-Age=0"; return r
+            var r = HTTPResponse.json(["ok": true]); r.headers["Set-Cookie"] = Self.cookie("", maxAge: 0, secure: Self.isHTTPS(req)); return r
         case ("GET", "status"): return .json(statusJSON())
         case ("GET", "players"): return .json(["players": server.players().map(playerJSON)])
+        case ("POST", "players/mute"):
+            guard let id = Self.intValue(req.json()["id"]), let p = server.mute(String(id), actor: "admin@\(req.remoteIP)") else { return .error("That player has already left.", status: 404) }
+            _ = p
+            return .json(["ok": true])
+        case ("POST", "players/unmute"):
+            let actor = "admin@\(req.remoteIP)"
+            if let id = Self.intValue(req.json()["id"]), let p = server.players().first(where: { $0.id == id }) {
+                let a = server.unmute("ip:\(p.ip)", actor: actor), b = server.unmute("name:\(p.name.lowercased())", actor: actor)
+                return a || b ? .json(["ok": true]) : .error("That player isn't muted.", status: 404)
+            }
+            let key = (req.json()["key"] as? String) ?? ""
+            return server.unmute(key, actor: actor) ? .json(["ok": true]) : .error("That mute isn't in the list.", status: 404)
+        case ("GET", "moderation"): return .json(moderationJSON())
+        case ("POST", "allowlist/add"):
+            let ip = ((req.json()["ip"] as? String) ?? "").trimmingCharacters(in: .whitespaces)
+            guard NetworkTools.octets(ip) != nil else { return .error("That isn't an IPv4 address (like 203.0.113.7).") }
+            server.allow(ip: ip, note: (req.json()["note"] as? String) ?? "", actor: "admin@\(req.remoteIP)")
+            return .json(moderationJSON())
+        case ("POST", "allowlist/remove"):
+            server.disallow(ip: (req.json()["ip"] as? String) ?? "", actor: "admin@\(req.remoteIP)")
+            return .json(moderationJSON())
+        case ("POST", "tempbans/clear"):
+            server.clearTempBan((req.json()["ip"] as? String) ?? "", actor: "admin@\(req.remoteIP)")
+            return .json(moderationJSON())
+        case ("GET", "audit"):
+            let f = ISO8601DateFormatter()
+            return .json(["entries": audit.entries(limit: 300).map { ["t": f.string(from: $0.time), "actor": $0.actor, "action": $0.action, "detail": $0.detail] }])
         case ("POST", "players/kick"):
             let b = req.json()
             guard let id = (b["id"] as? Int) ?? (b["id"] as? Double).map(Int.init) else { return .error("Which player?") }
             let ban = (b["ban"] as? Bool) ?? false
             let reason = ((b["reason"] as? String) ?? "").trimmingCharacters(in: .whitespaces)
-            let ok = server.kick(id, reason: reason.isEmpty ? (ban ? "Banned by the server admin." : "Removed by the server admin.") : reason, ban: ban)
+            let ok = server.kick(id, reason: reason.isEmpty ? (ban ? "Banned by the server admin." : "Removed by the server admin.") : reason, ban: ban, actor: "admin@\(req.remoteIP)")
             return ok ? .json(["ok": true]) : .error("That player has already left.", status: 404)
         case ("POST", "players/message"):
             let b = req.json()
@@ -132,7 +279,7 @@ public final class AdminService {
             let b = req.json()
             let current = (b["current"] as? String) ?? "", next = (b["new"] as? String) ?? ""
             guard AdminPassword.verify(current, against: store.config.adminPasswordHash) else { return .error("Your current password isn't right.", status: 403) }
-            guard next.count >= 8 else { return .error("Pick a password with at least 8 characters.") }
+            if let why = AdminPassword.strengthProblem(next, current: current) { return .error(why) }
             try? store.update { $0.adminPasswordHash = AdminPassword.hash(next) }
             lock.lock(); sessions.removeAll(); lock.unlock()
             log.info("The admin password was changed from the panel.")
@@ -200,10 +347,10 @@ public final class AdminService {
             let b = req.json()
             let ip = ((b["ip"] as? String) ?? "").trimmingCharacters(in: .whitespaces)
             guard NetworkTools.octets(ip) != nil else { return .error("That isn't an IPv4 address (like 203.0.113.7).") }
-            server.ban(ip: ip, note: (b["note"] as? String) ?? "")
+            server.ban(ip: ip, note: (b["note"] as? String) ?? "", actor: "admin@\(req.remoteIP)")
             return .json(["ok": true])
         case ("POST", "bans/remove"):
-            server.unban(ip: (req.json()["ip"] as? String) ?? "")
+            server.unban(ip: (req.json()["ip"] as? String) ?? "", actor: "admin@\(req.remoteIP)")
             return .json(["ok": true])
         case ("GET", "update"): return .json(updateJSON())
         case ("POST", "update/check"):
@@ -230,7 +377,21 @@ public final class AdminService {
         var d: [String: Any] = ["id": p.id, "name": p.name, "ip": p.ip, "pingMs": p.pingMs,
                                 "joinedAt": ISO8601DateFormatter().string(from: p.joinedAt), "seconds": Int(Date().timeIntervalSince(p.joinedAt))]
         if let s = p.systemID { d["systemID"] = s }
+        let mutes = store.config.mutes
+        d["muted"] = mutes["ip:\(p.ip)"] != nil || mutes["name:\(p.name.lowercased())"] != nil
         return d
+    }
+
+    static func intValue(_ v: Any?) -> Int? { (v as? Int) ?? (v as? Double).map(Int.init) }
+
+    func moderationJSON() -> [String: Any] {
+        let c = store.config
+        return [
+            "mutes": c.mutes.sorted { $0.key < $1.key }.map { ["key": $0.key, "note": $0.value] },
+            "allowlist": c.allowlist.sorted { $0.key < $1.key }.map { ["ip": $0.key, "note": $0.value] },
+            "allowlistMode": c.allowlistMode,
+            "tempBans": server.tempBans.sorted { $0.key < $1.key }.map { ["ip": $0.key, "seconds": Int($0.value)] },
+        ]
     }
 
     func bestAddress() -> (host: String, source: String) {
@@ -279,6 +440,8 @@ public final class AdminService {
             "adminPort": c.adminPort, "adminBind": c.adminBind,
             "publicListed": c.publicListed, "publicAddress": c.publicAddress, "ownerName": c.ownerName, "ownerContact": c.ownerContact, "website": c.website,
             "checkForUpdates": c.checkForUpdates, "autoUpdate": c.autoUpdate,
+            "voteKick": c.voteKick, "voteKickPercent": c.voteKickPercent, "allowlistMode": c.allowlistMode,
+            "wordFilter": c.wordFilter.joined(separator: ", "), "maxConnectionsPerIP": c.maxConnectionsPerIP, "announceJoins": c.announceJoins,
             "autostart": autostartJSON(),
         ]
     }
@@ -309,6 +472,9 @@ public final class AdminService {
         bl("publicListed") { new.publicListed = $0 }; s("publicAddress") { new.publicAddress = $0 }
         s("ownerName") { new.ownerName = $0 }; s("ownerContact") { new.ownerContact = $0 }; s("website") { new.website = $0 }
         bl("checkForUpdates") { new.checkForUpdates = $0 }; bl("autoUpdate") { new.autoUpdate = $0 }
+        bl("voteKick") { new.voteKick = $0 }; bl("allowlistMode") { new.allowlistMode = $0 }; bl("announceJoins") { new.announceJoins = $0 }
+        i("voteKickPercent") { new.voteKickPercent = $0 }; i("maxConnectionsPerIP") { new.maxConnectionsPerIP = $0 }
+        if let w = b["wordFilter"] as? String { new.wordFilter = w.split(separator: ",").map { String($0) } }
         let problems = new.problems()
         if !problems.isEmpty { return .json(["error": problems.joined(separator: " "), "problems": problems], status: 400) }
         try? store.update { $0 = new }
@@ -421,7 +587,7 @@ public final class AdminService {
         let i = updates.current
         return ["current": i.current, "latest": i.latest as Any, "available": i.available, "url": i.pageURL, "assetURL": i.assetURL as Any,
                 "notes": i.notes, "error": i.error as Any, "checkedAt": i.checkedAt.map { ISO8601DateFormatter().string(from: $0) } as Any,
-                "canAutoApply": i.assetURL != nil, "supervised": PlatformTools.isSupervised, "asset": PlatformTools.releaseAssetName]
+                "canAutoApply": i.assetURL != nil && i.manifestURL != nil && i.signatureURL != nil, "signed": i.manifestURL != nil && i.signatureURL != nil, "supervised": PlatformTools.isSupervised, "asset": PlatformTools.releaseAssetName]
     }
 }
 

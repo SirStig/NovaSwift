@@ -408,6 +408,9 @@ func _on_event(ev: Dictionary) -> void:
 		"refused": _log("! refused %s: %s" % [str(ev.get("ip", "?")), str(ev["message"])])
 		"chat": _log("<%s> %s" % [str(ev["name"]), str(ev["text"])])
 		"error": _log("ERROR: " + str(ev["message"]))
+		"abuse": _log("! abuse kick #%d from %s (%d so far): %s" % [int(ev.get("id", 0)), str(ev.get("ip", "?")), int(ev.get("kicks", 0)), str(ev.get("message", ""))])
+		"report": _log("! report from %s: target %d %s [%s] %s (%s)" % [str(ev.get("from_name", "?")), int(ev.get("target", 0)), str(ev.get("target_name", "")), str(ev.get("reason", "")), str(ev.get("detail", "")), str(ev.get("message", ""))])
+		"command": _log("chat command from %s: %s (ignored unless /report)" % [str(ev.get("name", "?")), str(ev.get("text", ""))])
 
 
 # --- stdin thread -------------------------------------------------------------------------------------

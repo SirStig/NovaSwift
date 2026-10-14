@@ -46,7 +46,7 @@ final class CrossPlayTests: XCTestCase {
         XCTAssertEqual(lite.pluginSignature, req.manifest.signature); XCTAssertEqual(lite.pluginCount, 1)
         XCTAssertEqual(lite.requirements?.plugins.count ?? 0, 0)
         // A packet written by Godot's NetProto.encode_beacon (no proto / plug-in fields).
-        let godot = Data(("NSB1" + #"{"name":"G","players":1,"max":4,"ver":"0.7.0-beta.1","pw":false,"port":53735,"rules":"full","dedicated":false}"#).utf8)
+        let godot = Data(("NSB1" + #"{"name":"G","players":1,"max":4,"ver":"\#(CrossPlayProtocol.appVersion)","pw":false,"port":53735,"rules":"full","dedicated":false}"#).utf8)
         let g = try XCTUnwrap(ServerBeacon.decode(godot))
         XCTAssertEqual(g.rules, "full"); XCTAssertNil(g.proto); XCTAssertTrue(g.isCompatible); XCTAssertFalse(g.isDifferentAppVersion)
         XCTAssertTrue(ServerBeacon.isQuery(Data("NSQ1".utf8)))

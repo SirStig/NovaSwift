@@ -154,6 +154,12 @@ struct ChatOverlayView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contextMenu {
+            if !mine {
+                Button("Block \(message.senderName)") { session.blockPlayer(message.playerID) }
+                Button("Report \(message.senderName)") { session.reportPlayer(message.playerID) }
+            }
+        }
     }
 
     private var inputBar: some View {

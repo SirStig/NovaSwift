@@ -35,6 +35,7 @@ final class TradeTests: XCTestCase {
         let s = makeSessions(["a", "b"])
         var received: [(TradeSignal, PeerID)] = []
         s[1].onTrade = { sig, peer in received.append((sig, peer)) }
+        for (i, x) in s.enumerated() { x.updateLocalPresence(name: "P\(i)", systemID: 1) }   // trades come from known players
 
         s[0].sendTrade(.invite(fromName: "Ari"), to: "b")
         s[0].sendTrade(.offer(TradeOffer(credits: 100)), to: "b")

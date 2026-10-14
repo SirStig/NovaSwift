@@ -23,8 +23,9 @@ You manage it from a web admin panel (`http://localhost:53737`). The first run s
 
 1. Create the VM. In the **provider firewall** allow `udp:53735-53736` from anywhere. Leave 53737 closed.
 2. `curl -fsSL https://raw.githubusercontent.com/SirStig/NovaSwift/main/packaging/server/install-server.sh | sudo bash`
-   (x86_64 and arm64; creates the `novaswift` user, `/opt/novaswift-server`, a systemd unit with `Restart=always`, opens the
-   ports in ufw when active, prints the URL and password). Flags: `--version X.Y.Z`, `--admin-local`, `--no-firewall`, `--uninstall`.
+   (x86_64 and arm64; creates a no-login `novaswiftd` service account, `/opt/novaswift-server`, a systemd unit with `Restart=always`, opens the
+   ports in ufw when active, prints the URL and password). Flags: `--version X.Y.Z`, `--admin-public`, `--no-firewall`, `--uninstall`. The service runs sandboxed (see SECURITY.md) and the
+   installer verifies the release signature when the release has one.
 3. `ssh -L 53737:localhost:53737 you@vps`, then open `http://localhost:53737` and finish the wizard.
 4. Upgrade: run the same command again (settings, plug-ins and password are kept) or use Settings > Updates.
 
@@ -53,7 +54,7 @@ or `NOVASWIFT_SERVER_DIR`. A development build in `.build/` never uses its own f
 INI, generated with comments on the first run; the panel rewrites it on save (hand edits are kept, comments are regenerated;
 restart after editing by hand). Sections: `[server]` name, description, port (53735), max_players, password, motd, region,
 lan_announce, upnp. `[rules]` preset (safe/full/custom) and the custom switches, game_speed. `[admin]` port (53737), bind
-(`0.0.0.0` or `127.0.0.1`), password_hash, setup_done. `[plugins]` enabled (catalog ids and local folder names). `[public]` listed,
+(`127.0.0.1` default, or `0.0.0.0`), password_hash, setup_done. `[plugins]` enabled (catalog ids and local folder names). `[public]` listed,
 address, owner, contact, website. `[updates]` check, auto_update. `[bans]` `ip = note`.
 
 The admin password is generated on the first start, printed once, and stored as a salted, iterated SHA-256 hash.
@@ -64,7 +65,7 @@ The admin password is generated on the first start, printed once, and stored as 
 
 `--data DIR`, `--port N`, `--admin-port N` (both are saved to server.cfg), `--no-browser`, `--no-stdin`,
 `--reset-admin-password`, `--quiet`, `--version`, `--help`. Console commands: `status`, `players`, `kick <id|name> [reason]`,
-`ban <id|name>`, `unban <ip>`, `say <text>`, `rules [safe|full]`, `plugins`, `quit`, `help`.
+`ban <id|name>`, `unban <ip>`, `mute <id|name>`, `unmute <name|ip>`, `allow <ip>`, `disallow <ip>`, `tempbans`, `audit`, `say <text>`, `rules [safe|full]`, `plugins`, `quit`, `help`.
 
 ## The admin panel
 
@@ -73,10 +74,15 @@ Dashboard (status, uptime, players, bandwidth, version, address + Copy), Players
 raising slots above the original capacity reopens the game port; the panel's own port/bind need a restart), Plug-ins,
 Public listing, Network, Logs (live tail), Bans.
 
-Security: login is a cookie session (`HttpOnly; SameSite=Strict`), every write needs an `X-NS-Admin` header, five wrong passwords
-lock an address out for a minute, the first-run setup link works only from the same computer until the wizard is done. The panel
-is **plain HTTP**: by default it binds `0.0.0.0` (as requested) and warns on the dashboard and in the log; choose
-"This computer only" and use an SSH tunnel on anything internet-facing. The Linux installer does not open 53737.
+Security (details: [docs/SECURITY.md](SECURITY.md)): the panel binds **127.0.0.1 by default** (reach it with an SSH tunnel; "other computers"
+is an explicit opt-in in the wizard / `--admin-public` with a warning). Login is a cookie session (`HttpOnly; SameSite=Strict`, `Secure`
+behind an HTTPS proxy), every write needs `X-NS-Admin` and a same-origin `Origin`, the `Host` header is checked, wrong passwords lock an address
+out with doubling waits, new passwords must be strong, every response carries CSP/frame/referrer headers, and admin actions are written to
+`logs/audit.log` (panel: Audit). There is no built-in HTTPS: use a tunnel or a TLS reverse proxy. The Linux installer does not open 53737.
+
+Moderation: the panel and console can kick, ban, mute, allow-list (invite-only mode); players can `/votekick`, `/report`, block locally. Flooding,
+forged messages and oversize packets are dropped and repeat offenders are blocked for ten minutes. Settings > Moderation holds the knobs
+(`[moderation]` in server.cfg: `vote_kick`, `vote_kick_percent`, `allowlist_mode`, `word_filter`, `max_connections_per_ip`, `announce_joins`).
 
 ## Plug-ins without the game
 
@@ -105,8 +111,9 @@ data or ask a friend. Tailscale/ZeroTier tip is shown on the page.
 ## Updates
 
 The server checks GitHub releases tagged `server-v<version>` (every 12 h; Settings toggle) and shows a notice with the link. "Install
-update" (or the opt-in `auto_update`) downloads the archive for this platform and replaces the program file; it takes effect after a
-restart (immediately when run as a service, which restarts it).
+update" (or the opt-in `auto_update`) installs a release only if it carries a valid signature (`server-update.json` + `.sig`, the same RSA key as
+the game updater) and the download matches the signed checksum; it replaces the program file and takes effect after a restart. A sandboxed
+service install has a read-only program file: upgrade it by running the installer again.
 
 ## Building
 

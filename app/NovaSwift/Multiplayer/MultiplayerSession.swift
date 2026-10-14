@@ -282,6 +282,16 @@ final class MultiplayerSession: ObservableObject {
         drv.onNotAuthority = { [weak self] in self?.bitsInitialized = false }
         drv.onAuthorityPostStep = { [weak self] net, peers in self?.propagateEarnedBits(net: net, to: peers) }
         driver = drv
+        // A peer that keeps sending invalid data is reported to the relay server (which can remove it). `sendReport` is
+        // thread-safe; it only queues. Only the ENet client has a server to tell.
+        if let enet = transport as? ENetTransport {
+            session.onMisbehavior = { peer, why, strikes in
+                if strikes == 5, let id = Int(peer) { enet.sendReport(target: id, reason: "invalid", detail: why) }
+            }
+            drv.onInvalidMessage = { peer, why in
+                if let id = Int(peer) { enet.sendReport(target: id, reason: "invalid", detail: why) }
+            }
+        }
         self.rules = rules
         session.updateLocalPresence(name: displayName, systemID: systemID,
                                     shipTypeHint: localShipTypeID >= 0 ? localShipTypeID : nil)
@@ -581,10 +591,22 @@ final class MultiplayerSession: ObservableObject {
 
     // MARK: - Wiring
 
+    /// Hide a player's chat for the rest of this session (local only; nobody is told).
+    func blockPlayer(_ id: String) {
+        net?.block(id)
+        chatLog = chatLog.filter { $0.playerID != id }
+    }
+
+    /// Tell the relay server about a player (chat abuse). Needs a dedicated/ENet server; no-op for Game Center.
+    func reportPlayer(_ id: String, reason: String = "abuse") {
+        guard let enet = enetClient, let n = Int(id) else { return }
+        enet.sendReport(target: n, reason: reason)
+    }
+
     private func wire(_ session: NetSession) {
         session.onChat = { [weak self] message in
             guard let self else { return }
-            self.chatLog = session.chatLog
+            self.chatLog = session.chatLog.filter { !session.blockedPeers.contains($0.playerID) }
             if !self.chatVisible && message.playerID != self.localPlayerID {
                 self.unreadCount += 1
             }

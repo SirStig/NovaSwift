@@ -42,6 +42,9 @@ public final class ExternalTransport: Transport {
     public let localID: Int
     public let localPeerID: PeerID
     public weak var delegate: TransportDelegate?
+    /// Set by the frontend when a fixed host/relay exists (the Godot server is always peer "1"): `NetSession` then accepts
+    /// rules / kicks from that peer only. nil = unknown (any peer; tests, peer-to-peer backends).
+    public var hostPeerID: PeerID?
 
     private let lock = NSLock()
     private var peers: [Int: String] = [:]      // connected peer id -> display name hint
