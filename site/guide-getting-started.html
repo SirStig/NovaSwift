@@ -100,7 +100,7 @@
           <tbody>
             <tr><td>Mac, iPhone, iPad, Apple TV</td><td>The native Swift app, through <a href="https://testflight.apple.com/join/3FBzwwq1" target="_blank" rel="noopener">TestFlight</a></td><td>Beta. Recommended on Mac.</td></tr>
             <tr><td>Linux (x86_64) and Steam Deck</td><td><code>NovaSwift-linux-x86_64.tar.gz</code> from <a href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">GitHub Releases</a> (currently <code data-latest-version>v0.7.0-beta.2</code>)</td><td>Experimental beta. See the <a href="guide-steam-deck.html">Steam Deck &amp; Linux guide</a>.</td></tr>
-            <tr><td>Windows</td><td>Not released yet</td><td>Coming later. It needs a Windows build.</td></tr>
+            <tr><td>Windows 10/11 (x86_64)</td><td><code>NovaSwift-windows-x86_64.zip</code> from <a href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">GitHub Releases</a> (currently <code data-latest-version>v0.7.0-beta.2</code>)</td><td>Experimental beta.</td></tr>
             <tr><td>Mac (alternative)</td><td><code>NovaSwift-macos-arm64.zip</code> from the same Releases page</td><td>Test build only, untested. Use the TestFlight app instead.</td></tr>
           </tbody>
         </table></div>
@@ -109,6 +109,7 @@
           <div role="tablist" aria-label="Platform">
             <button role="tab" id="t-apple" aria-controls="p-apple" data-key="apple">Mac, iPhone, iPad, Apple TV</button>
             <button role="tab" id="t-linux" aria-controls="p-linux" data-key="linux">Linux and Steam Deck</button>
+            <button role="tab" id="t-windows" aria-controls="p-windows" data-key="windows">Windows</button>
           </div>
           <div role="tabpanel" id="p-apple" aria-labelledby="t-apple">
             <ol class="steps">
@@ -122,6 +123,14 @@
             <ol class="steps">
               <li><h3>Download the tarball</h3><p>Open the <a href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Releases page</a> and download <code>NovaSwift-linux-x86_64.tar.gz</code> from the newest release (<code data-latest-version>v0.7.0-beta.2</code>).</p></li>
               <li><h3>Extract and run</h3><p>Extract it anywhere, for example <code>~/Games/NovaSwift</code>, then run <code>NovaSwift.sh</code>.</p></li>
+              <li><h3>Import your data</h3><p>The Data Setup wizard opens first. See <a href="#data">the next section</a>.</p></li>
+            </ol>
+          </div>
+          <div role="tabpanel" id="p-windows" aria-labelledby="t-windows" hidden>
+            <ol class="steps">
+              <li><h3>Download the zip</h3><p>Open the <a href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener">Releases page</a> and download <code>NovaSwift-windows-x86_64.zip</code> from the newest release (<code data-latest-version>v0.7.0-beta.2</code>).</p></li>
+              <li><h3>Extract and run</h3><p>Right-click the zip, choose <em>Extract All</em>, and put the folder anywhere, for example <code>Documents\NovaSwift</code>. Run <code>NovaSwift.exe</code> from the extracted folder, not from inside the zip.</p></li>
+              <li><h3>Get past SmartScreen</h3><p>The build is not code-signed yet, so Windows may say it protected your PC. Choose <em>More info</em>, then <em>Run anyway</em>. You only need to do this once.</p></li>
               <li><h3>Import your data</h3><p>The Data Setup wizard opens first. See <a href="#data">the next section</a>.</p></li>
             </ol>
           </div>
@@ -160,7 +169,7 @@
           <thead><tr><th>Platform</th><th>Data folder</th></tr></thead>
           <tbody>
             <tr><td>Linux and Steam Deck</td><td><code>~/.local/share/NovaSwift/data</code></td></tr>
-            <tr><td>Windows (when released)</td><td><code>%APPDATA%\NovaSwift\data</code></td></tr>
+            <tr><td>Windows</td><td><code>%APPDATA%\NovaSwift\data</code></td></tr>
             <tr><td>macOS (Godot build)</td><td><code>~/Library/Application Support/NovaSwift/data</code></td></tr>
           </tbody>
         </table></div>

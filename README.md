@@ -5,7 +5,7 @@
 NOVA Swift is a reimplementation of the Escape Velocity Nova engine (Ambrosia
 Software, 2002), written in Swift from a reverse-engineered reading of the
 original executable. It runs natively on macOS, iPadOS, iOS and tvOS, with a
-Godot frontend for Linux and Steam Deck (experimental beta) and Windows (not yet built).
+Godot frontend for Linux, Steam Deck and Windows (experimental beta).
 
 It is not an emulator or a wrapper. The engine reads the game data from your
 own copy of EV Nova and plays it. No game data is included.
@@ -88,8 +88,9 @@ Releases page rather than "latest", which skips pre-releases.
 - `NovaSwift-macos-arm64.zip`: macOS on Apple silicon, for testing. On a Mac,
   the native app is the one to use. It is not notarised, so right-click the app
   and choose Open the first time.
-- Windows (x86_64): not built. `scripts/package-windows.ps1` needs a Windows PC
-  with the Swift toolchain.
+- `NovaSwift-windows-x86_64.zip`: Windows 10/11 x86_64. Extract it anywhere and
+  run `NovaSwift.exe`. The build is not code-signed, so SmartScreen may warn the
+  first time: choose More info, then Run anyway.
 
 Install and first-run steps are on the
 [download page](https://sirstig.github.io/NovaSwift/download.html). To build it
