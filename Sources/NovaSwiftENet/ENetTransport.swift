@@ -347,8 +347,8 @@ public final class ENetTransport: Transport, TransportDelegate {
 
     private func sendRaw(_ bytes: [UInt8], reliable: Bool) {
         guard let peer = peer else { return }
-        let flags: UInt32 = reliable ? ENET_PACKET_FLAG_RELIABLE.rawValue
-            : (ENET_PACKET_FLAG_UNSEQUENCED.rawValue | ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT.rawValue)
+        let flags: UInt32 = reliable ? UInt32(truncatingIfNeeded: ENET_PACKET_FLAG_RELIABLE.rawValue)
+            : (UInt32(truncatingIfNeeded: ENET_PACKET_FLAG_UNSEQUENCED.rawValue) | UInt32(truncatingIfNeeded: ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT.rawValue))
         guard let packet = bytes.withUnsafeBufferPointer({ enet_packet_create($0.baseAddress, $0.count, flags) }) else { return }
         if enet_peer_send(peer, reliable ? Wire.chReliable : Wire.chUnreliable, packet) != 0 { enet_packet_destroy(packet) }
     }

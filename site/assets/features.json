@@ -781,7 +781,7 @@
     {
      "name": "Windows package",
      "status": "done",
-     "where": "scripts/package-windows.ps1; released in v0.7.0-beta.2, played on a real Windows PC (not code-signed)"
+     "where": "scripts/package-windows.ps1; built on Windows 11 with Swift 6.3.3 and run with EV Nova CE data; released in v0.7.0-beta.2 (not code-signed)"
     },
     {
      "name": "Release signing tooling",

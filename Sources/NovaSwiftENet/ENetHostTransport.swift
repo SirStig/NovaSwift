@@ -326,7 +326,7 @@ public final class ENetHostTransport: Transport, TransportDelegate {
                 conns[id] = c
             case ENET_EVENT_TYPE_RECEIVE:
                 if let pkt = event.packet {
-                    let reliable = (pkt.pointee.flags & ENET_PACKET_FLAG_RELIABLE.rawValue) != 0
+                    let reliable = (pkt.pointee.flags & UInt32(truncatingIfNeeded: ENET_PACKET_FLAG_RELIABLE.rawValue)) != 0
                     let bytes = Array(UnsafeBufferPointer(start: pkt.pointee.data, count: pkt.pointee.dataLength))
                     enet_packet_destroy(pkt)
                     if let raw = event.peer?.pointee.data {
@@ -605,8 +605,8 @@ public final class ENetHostTransport: Transport, TransportDelegate {
 
     private func sendRaw(_ id: Int, _ bytes: [UInt8], reliable: Bool) {
         guard let c = conns[id] else { return }
-        let flags: UInt32 = reliable ? ENET_PACKET_FLAG_RELIABLE.rawValue
-            : (ENET_PACKET_FLAG_UNSEQUENCED.rawValue | ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT.rawValue)
+        let flags: UInt32 = reliable ? UInt32(truncatingIfNeeded: ENET_PACKET_FLAG_RELIABLE.rawValue)
+            : (UInt32(truncatingIfNeeded: ENET_PACKET_FLAG_UNSEQUENCED.rawValue) | UInt32(truncatingIfNeeded: ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT.rawValue))
         guard let packet = bytes.withUnsafeBufferPointer({ enet_packet_create($0.baseAddress, $0.count, flags) }) else { return }
         // Godot's unreliable channel is ENet 2; fall back to the highest channel the peer negotiated.
         let top = max(0, Int(c.peer.pointee.channelCount) - 1)

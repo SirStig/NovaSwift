@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(ZIPFoundation)
 import ZIPFoundation
+#endif
 import NovaSwiftKit
 
 public enum PluginInstallError: Error, LocalizedError {
@@ -107,6 +109,9 @@ public enum PluginInstaller {
     /// Refuse an archive that tries to leave its folder (`../x`, absolute paths, symlinks), holds too many files, or
     /// would unpack to an absurd size. Run before extraction; the extractor also checks containment.
     public static func validateZip(at url: URL) throws {
+        #if os(Windows)
+        try validateZipWindows(at: url)
+        #else
         guard let archive = Archive(url: url, accessMode: .read) else { throw PluginInstallError.unsupportedArchive }
         var count = 0
         var total: UInt64 = 0
@@ -122,6 +127,7 @@ public enum PluginInstaller {
             if count > maxZipEntries { throw PluginInstallError.unsafeArchive("it contains too many files.") }
             if total > maxZipUncompressed { throw PluginInstallError.unsafeArchive("it would unpack to more than \(maxZipUncompressed >> 30) GB.") }
         }
+        #endif
     }
 
     static func isZip(_ url: URL) -> Bool {

@@ -4,6 +4,8 @@ import NovaSwiftNet
 import Darwin
 #elseif canImport(Glibc)
 import Glibc
+#elseif os(Windows)
+import WinSDK
 #endif
 
 // UDP status queries (`NSQ1` -> `NSB1`) and LAN beacons, over plain BSD sockets so the same code runs on macOS,
@@ -15,6 +17,138 @@ import Glibc
 
 // MARK: - Socket helpers
 
+#if os(Windows)
+private let sockDgram = Int32(SOCK_DGRAM)
+
+enum UDP {
+    // Winsock is started once per process (ENet starts it too; the calls are reference counted).
+    private static let winsock: Bool = {
+        var d = WSADATA()
+        return WSAStartup(0x0202, &d) == 0
+    }()
+
+    static func addr(_ networkOrder: UInt32) -> in_addr { var a = in_addr(); a.S_un.S_addr = networkOrder; return a }
+    static func raw(_ a: in_addr) -> UInt32 { a.S_un.S_addr }
+    static func closeSocket(_ fd: Int32) { _ = closesocket(SOCKET(UInt32(bitPattern: fd))) }
+
+    /// libdispatch has no socket read sources on Windows, so poll the socket on a short timer instead.
+    static func makeReadSource(_ fd: Int32, queue: DispatchQueue, handler: @escaping () -> Void) -> DispatchSourceProtocol {
+        let t = DispatchSource.makeTimerSource(queue: queue)
+        t.schedule(deadline: .now() + 0.02, repeating: 0.02)
+        t.setEventHandler { if waitReadable(fd, seconds: 0) { handler() } }
+        return t
+    }
+
+    static func resolveIPv4(_ host: String) -> in_addr? {
+        _ = winsock
+        var a = in_addr()
+        if inet_pton(AF_INET, host, &a) == 1 { return a }
+        var hints = addrinfo()
+        hints.ai_family = AF_INET
+        hints.ai_socktype = sockDgram
+        var res: UnsafeMutablePointer<addrinfo>?
+        guard getaddrinfo(host, nil, &hints, &res) == 0, let first = res else { return nil }
+        defer { freeaddrinfo(res) }
+        guard let sa = first.pointee.ai_addr else { return nil }
+        return sa.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr }
+    }
+
+    static func sockaddr(_ ip: in_addr, port: Int) -> sockaddr_in {
+        var s = sockaddr_in()
+        s.sin_family = ADDRESS_FAMILY(AF_INET)
+        s.sin_port = UInt16(clamping: port).bigEndian
+        s.sin_addr = ip
+        return s
+    }
+
+    static func string(_ a: in_addr) -> String {
+        var a = a
+        var buf = [CChar](repeating: 0, count: 32)
+        inet_ntop(AF_INET, &a, &buf, buf.count)
+        return String(cString: buf)
+    }
+
+    static func makeSocket(bindPort: Int?, broadcast: Bool, shared: Bool, loopbackOnly: Bool = false) -> Int32? {
+        _ = winsock
+        let s = socket(AF_INET, sockDgram, 0)
+        guard s != INVALID_SOCKET else { return nil }
+        var one: Int32 = 1
+        func opt(_ name: Int32) {
+            withUnsafePointer(to: &one) {
+                $0.withMemoryRebound(to: CChar.self, capacity: MemoryLayout<Int32>.size) {
+                    _ = setsockopt(s, SOL_SOCKET, name, $0, Int32(MemoryLayout<Int32>.size))
+                }
+            }
+        }
+        if shared { opt(SO_REUSEADDR) }
+        if broadcast { opt(SO_BROADCAST) }
+        var nonBlocking: u_long = 1
+        _ = ioctlsocket(s, Int32(bitPattern: 0x8004667E), &nonBlocking)   // FIONBIO
+        if let bindPort {
+            var a = sockaddr(addr(loopbackOnly ? UInt32(0x7f000001).bigEndian : 0), port: bindPort)
+            let ok = withUnsafePointer(to: &a) {
+                $0.withMemoryRebound(to: WinSDK.sockaddr.self, capacity: 1) { bind(s, $0, Int32(MemoryLayout<sockaddr_in>.size)) }
+            }
+            if ok != 0 { _ = closesocket(s); return nil }
+        }
+        return Int32(truncatingIfNeeded: s)    // Winsock handles are 32-bit significant
+    }
+
+    static func send(_ fd: Int32, _ data: Data, to dest: sockaddr_in) {
+        var dest = dest
+        let s = SOCKET(UInt32(bitPattern: fd))
+        data.withUnsafeBytes { (buf: UnsafeRawBufferPointer) in
+            guard let base = buf.baseAddress?.assumingMemoryBound(to: CChar.self) else { return }
+            withUnsafePointer(to: &dest) {
+                $0.withMemoryRebound(to: WinSDK.sockaddr.self, capacity: 1) { sa in
+                    _ = sendto(s, base, Int32(buf.count), 0, sa, Int32(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+        }
+    }
+
+    static func receive(_ fd: Int32) -> (data: Data, from: sockaddr_in)? {
+        var buf = [CChar](repeating: 0, count: 2048)
+        var from = sockaddr_in()
+        var len = Int32(MemoryLayout<sockaddr_in>.size)
+        let n = withUnsafeMutablePointer(to: &from) {
+            $0.withMemoryRebound(to: WinSDK.sockaddr.self, capacity: 1) {
+                recvfrom(SOCKET(UInt32(bitPattern: fd)), &buf, Int32(buf.count), 0, $0, &len)
+            }
+        }
+        guard n >= 0 else { return nil }
+        return (Data(buf[0..<Int(n)].map { UInt8(bitPattern: $0) }), from)
+    }
+
+    static func waitReadable(_ fd: Int32, seconds: Double) -> Bool {
+        var p = WSAPOLLFD(fd: SOCKET(UInt32(bitPattern: fd)), events: 0x0100, revents: 0)   // POLLRDNORM
+        return WSAPoll(&p, 1, Int32(max(0, seconds * 1000))) > 0 && (p.revents & 0x0100) != 0
+    }
+
+    /// This machine's IPv4 addresses (from its host name; loopback excluded). Per-interface subnet broadcast
+    /// addresses aren't enumerated on Windows: the limited broadcast (255.255.255.255) is always sent.
+    static func interfaces() -> (local: Set<String>, broadcast: [in_addr]) {
+        _ = winsock
+        var local = Set<String>()
+        var name = [CChar](repeating: 0, count: 256)
+        guard gethostname(&name, Int32(name.count)) == 0 else { return (local, []) }
+        var hints = addrinfo()
+        hints.ai_family = AF_INET
+        var res: UnsafeMutablePointer<addrinfo>?
+        guard getaddrinfo(name, nil, &hints, &res) == 0, let head = res else { return (local, []) }
+        defer { freeaddrinfo(res) }
+        var cur: UnsafeMutablePointer<addrinfo>? = head
+        while let p = cur {
+            defer { cur = p.pointee.ai_next }
+            guard let sa = p.pointee.ai_addr else { continue }
+            let ip = sa.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr }
+            if UDP.raw(ip) != UInt32(0x7f000001).bigEndian { local.insert(string(ip)) }
+        }
+        return (local, [])
+    }
+}
+
+#else
 #if canImport(Darwin)
 private let sockDgram = SOCK_DGRAM
 #else
@@ -22,6 +156,15 @@ private let sockDgram = Int32(SOCK_DGRAM.rawValue)
 #endif
 
 enum UDP {
+    static func addr(_ networkOrder: UInt32) -> in_addr { in_addr(s_addr: networkOrder) }
+    static func raw(_ a: in_addr) -> UInt32 { a.s_addr }
+    static func closeSocket(_ fd: Int32) { close(fd) }
+    /// Calls `handler` on `queue` whenever `fd` has data.
+    static func makeReadSource(_ fd: Int32, queue: DispatchQueue, handler: @escaping () -> Void) -> DispatchSourceProtocol {
+        let src = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
+        src.setEventHandler(handler: handler)
+        return src
+    }
     static func resolveIPv4(_ host: String) -> in_addr? {
         var a = in_addr()
         if inet_pton(AF_INET, host, &a) == 1 { return a }
@@ -136,6 +279,8 @@ enum UDP {
     }
 }
 
+#endif
+
 // MARK: - Status query (ping)
 
 /// Asks a server for its beacon with a one-shot UDP `NSQ1` datagram (no connection): live players / version /
@@ -154,7 +299,7 @@ public enum ServerStatusQuery {
 
     static func query(ip: in_addr, queryPort: Int, timeout: TimeInterval) -> Result? {
         guard let fd = UDP.makeSocket(bindPort: nil, broadcast: false, shared: false) else { return nil }
-        defer { close(fd) }
+        defer { UDP.closeSocket(fd) }
         let t0 = DispatchTime.now().uptimeNanoseconds
         let dest = UDP.sockaddr(ip, port: queryPort)
         // The padded request (a server never answers it with more bytes than it received). Servers older than this
@@ -173,7 +318,7 @@ public enum ServerStatusQuery {
                 continue
             }
             while let (data, from) = UDP.receive(fd) {
-                guard from.sin_addr.s_addr == ip.s_addr, let b = ServerBeacon.decode(data) else { continue }
+                guard UDP.raw(from.sin_addr) == UDP.raw(ip), let b = ServerBeacon.decode(data) else { continue }
                 let ms = Int((DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000)
                 return Result(beacon: b, rttMilliseconds: Swift.max(1, ms))
             }
@@ -253,9 +398,9 @@ public final class LANBeaconService {
     private let q: DispatchQueue
     private let listenPort: Int
     private var listenFD: Int32 = -1
-    private var listenSource: DispatchSourceRead?
+    private var listenSource: DispatchSourceProtocol?
     private var txFD: Int32 = -1
-    private var querySource: DispatchSourceRead?
+    private var querySource: DispatchSourceProtocol?
     private var queryFD: Int32 = -1
     private var timer: DispatchSourceTimer?
     private var provider: (() -> ServerBeacon)?
@@ -303,8 +448,7 @@ public final class LANBeaconService {
             } else if queryFD < 0 {
                 if let fd = UDP.makeSocket(bindPort: qport, broadcast: false, shared: true) {
                     queryFD = fd
-                    let src = DispatchSource.makeReadSource(fileDescriptor: fd, queue: q)
-                    src.setEventHandler { [weak self] in self?.drain(fd, takeBeacons: false) }
+                    let src = UDP.makeReadSource(fd, queue: q) { [weak self] in self?.drain(fd, takeBeacons: false) }
                     src.resume(); querySource = src
                 } else {
                     lastError = "Server pinging is off (UDP \(qport) is busy)."
@@ -321,8 +465,8 @@ public final class LANBeaconService {
         q.sync {
             provider = nil
             querySource?.cancel(); querySource = nil
-            if queryFD >= 0 { close(queryFD); queryFD = -1 }
-            if txFD >= 0 { close(txFD); txFD = -1 }
+            if queryFD >= 0 { UDP.closeSocket(queryFD); queryFD = -1 }
+            if txFD >= 0 { UDP.closeSocket(txFD); txFD = -1 }
         }
     }
 
@@ -331,7 +475,7 @@ public final class LANBeaconService {
         q.sync {
             timer?.cancel(); timer = nil
             listenSource?.cancel(); listenSource = nil
-            if listenFD >= 0 { close(listenFD); listenFD = -1 }
+            if listenFD >= 0 { UDP.closeSocket(listenFD); listenFD = -1 }
             seen.removeAll()
             lastPublished = []
         }
@@ -349,8 +493,7 @@ public final class LANBeaconService {
             return false
         }
         listenFD = fd
-        let src = DispatchSource.makeReadSource(fileDescriptor: fd, queue: q)
-        src.setEventHandler { [weak self] in self?.drain(fd, takeBeacons: true) }
+        let src = UDP.makeReadSource(fd, queue: q) { [weak self] in self?.drain(fd, takeBeacons: true) }
         src.resume(); listenSource = src
         return true
     }
@@ -368,7 +511,7 @@ public final class LANBeaconService {
         if broadcastBeacons, let provider, txFD >= 0, now >= announceDue {
             announceDue = now.addingTimeInterval(Self.announceEvery)
             let pkt = provider().encode()
-            UDP.send(txFD, pkt, to: UDP.sockaddr(in_addr(s_addr: INADDR_BROADCAST.bigEndian), port: listenPort))
+            UDP.send(txFD, pkt, to: UDP.sockaddr(UDP.addr(UInt32.max), port: listenPort))
             for b in broadcastTargets { UDP.send(txFD, pkt, to: UDP.sockaddr(b, port: listenPort)) }
         }
         let before = seen.count

@@ -263,11 +263,11 @@ The Godot frontend ([GODOT_LAYER.md](GODOT_LAYER.md)) runs the same engine and c
 
 Releases: v0.7.0-beta.2 (2026-10-14) on [GitHub Releases](https://github.com/SirStig/NovaSwift/releases) ships `NovaSwift-linux-x86_64.tar.gz` (Linux and Steam Deck), `NovaSwift-windows-x86_64.zip` (not code-signed) and `NovaSwift-macos-arm64.zip` (not notarised), with a signed `update.json`. The maintainer has played it on a real Windows PC, on Linux hardware and on a Steam Deck, and played multiplayer across two machines.
 
-Packaging is local, with no CI ([PACKAGING.md](PACKAGING.md)): the Linux package is built on a Linux machine, the Windows package on a Windows PC with the Swift toolchain (`scripts/package-windows.ps1`), and the macOS package on the Mac.
+Packaging is local, with no CI ([PACKAGING.md](PACKAGING.md)): the Linux package is built on a Linux machine, the Windows package on a Windows 11 PC with Swift 6.3.3 (`scripts/package-windows.ps1`; under Windows PowerShell 5.1 the script stops on a harmless Godot warning, so the steps can be run by hand), and the macOS package on the Mac.
 
 Auto-updater ([UPDATER.md](UPDATER.md), `godot/updater/`): releases carry a manifest signed with `scripts/release-sign.sh` (the public key is in `godot/updater/`, the private key is outside the repository). It offers Skip This Version / Later / Update Now, has a stable and an experimental channel (Settings ▸ Support ▸ Updates), and can return to stable from an experimental build. An installed build updating itself has not yet been verified end to end. It does not touch the Apple app.
 
-Dedicated server ([DEDICATED_SERVER.md](DEDICATED_SERVER.md)): released as server-v0.1.0 for Linux and macOS. The Windows server is untested.
+Dedicated server ([DEDICATED_SERVER.md](DEDICATED_SERVER.md)): released as server-v0.1.0 for Linux, macOS and Windows. The Windows build uses Winsock paths for discovery, HTTP and UPnP and tar.exe for zips (ZIPFoundation does not build there).
 
 | Subsystem | State |
 |---|---|

@@ -133,7 +133,8 @@ Released on GitHub as `server-v0.1.0` (2026-10-14).
 
 Tested: config/auth/HTTP/plug-in/handshake unit tests (36); the real server against the Swift ENet client and two real headless
 Godot clients (`net_e2e_client.gd`: handshake, presence, co-located sync, chat, trade, authority handoff - PASS). Built for Linux
-arm64 and x86_64 in `swift:6.3-jammy`, and macOS arm64. **Windows is untested and probably needs a Winsock port** of the POSIX
-socket code in `NovaSwiftENet/UDPDiscovery.swift`, `HTTPServer.swift` and `NetworkTools.swift`. The Linux installer was
+arm64 and x86_64, macOS arm64, and Windows x86_64. On Windows the socket code (`NovaSwiftENet/UDPDiscovery.swift`,
+`HTTPServer.swift`, `NetworkTools.swift`) has Winsock paths (`Sock.swift`), a polling timer replaces libdispatch read
+sources, and zips go through the system `tar.exe` because ZIPFoundation does not build there. The Linux installer was
 syntax-checked and its logic reviewed but not run on a real VM; the Docker image was not built. Not yet: TLS for the panel,
 DTLS (the vendored ENet has none), automatic outside-in reachability checks.
