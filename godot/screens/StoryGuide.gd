@@ -1271,6 +1271,16 @@ func _build_overview() -> void:
 		_label("AVAILABLE NOW" if avail else "NEXT UP", 10, cc, cv, "bold")
 		_rich(str(l.currentName), 14, COL_TEXT, cv, "semibold")
 		var rid := _current_row_id()
+		if str(l.currentStatus) == "locked":
+			for row in _rows:
+				if int(row.id) == rid:
+					var start := start_hint(row)
+					var unmet := first_unmet(row)
+					if start != "":
+						_rich("Start with: " + start, 12, COL_DIM, cv)
+					elif unmet != "":
+						_rich("Needs: " + unmet, 12, COL_DIM, cv)
+					break
 		if rid >= 0:
 			var go := NC.button("Show step", "bordered", jump_to.bind(rid), "arrow.right")
 			go.name = "ShowStep"
@@ -1336,9 +1346,42 @@ func _make_row(i: int) -> Control:
 	return h
 
 
+## Where to begin on a locked step: the deepest link of its unlock path that can be done now (the
+## deepest link overall when nothing can), as "Accept “X” — Spaceport Bar at Y". "" with no path.
+static func start_hint(row: Dictionary) -> String:
+	var path: Array = row.get("path", [])
+	var pick: Dictionary = {}
+	for p in path:
+		var doable: bool = str(p.status) in ["available", "active"]
+		if doable and (pick.is_empty() or int(p.depth) >= int(pick.depth) or not (str(pick.status) in ["available", "active"])):
+			pick = p
+	if pick.is_empty() and not path.is_empty():
+		for p in path:
+			if pick.is_empty() or int(p.depth) > int(pick.depth):
+				pick = p
+	if pick.is_empty():
+		return ""
+	var where := str(pick.offeredAt)
+	return str(pick.action) + ("" if where == "" else " -- " + where)
+
+
+## The first requirement this pilot definitely fails, or "".
+static func first_unmet(row: Dictionary) -> String:
+	for q in row.get("requirements", []):
+		if int(q.met) == 0:
+			return str(q.text)
+	return ""
+
+
 func _summary(row: Dictionary) -> String:
 	match str(row.status):
 		"locked":
+			var start := start_hint(row)
+			if start != "":
+				return "Start with: " + start
+			var unmet := first_unmet(row)
+			if unmet != "":
+				return "Needs: " + unmet
 			var bl: Array = row.blockers
 			if bl.is_empty():
 				return "Prerequisites not yet met."
@@ -1420,16 +1463,25 @@ func _fill_detail(v: VBoxContainer, row: Dictionary) -> void:
 		_field("mappin.circle.fill", "Get it at", str(row.offeredAt), v)
 	if str(row.govtName) != "":
 		_field("person.2.fill", "Government", str(row.govtName), v)
-	if status == "locked":
-		var uh := HBoxContainer.new()
-		uh.add_theme_constant_override("separation", 6)
-		uh.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		v.add_child(uh)
-		_icon(uh, "lock.open.fill", _fs(13), COL_ACCENT)
-		_label("HOW TO UNLOCK", 11, COL_ACCENT, uh, "bold")
+	var reqs: Array = row.get("requirements", [])
+	if status in ["locked", "available"] and not reqs.is_empty():
+		_section_head("checklist", "REQUIREMENTS", v)
+		for q in reqs:
+			var met := int(q.met)
+			var col := COL_DONE if met == 1 else (Color(1.0, 0.45, 0.4) if met == 0 else COL_DIM)
+			var mark := "✓" if met == 1 else ("✗" if met == 0 else "•")
+			_mark_row(mark, col, str(q.text), COL_TEXT if met != 1 else COL_DIM, v, 0)
+	var path: Array = row.get("path", [])
+	if status == "locked" and not path.is_empty():
+		_section_head("lock.open.fill", "WHAT TO DO FIRST", v)
+		_label("Read from the bottom up: the last line is where to start.", 11, COL_DIM, v)
+		for p in path:
+			_path_row(p, v)
+	if status == "locked" and path.is_empty():
+		_section_head("lock.open.fill", "HOW TO UNLOCK", v)
 		var blockers: Array = row.blockers
 		if blockers.is_empty():
-			_label("Prerequisites not yet met.", 13, COL_DIM, v)
+			_label("Meet the requirements above." if not reqs.is_empty() else "Prerequisites not yet met.", 13, COL_DIM, v)
 		for b in blockers:
 			var bh := HBoxContainer.new()
 			bh.add_theme_constant_override("separation", 8)
@@ -1453,6 +1505,60 @@ func _fill_detail(v: VBoxContainer, row: Dictionary) -> void:
 		var ab := NC.button("Abort mission", "destructive", _abort.bind(int(row.id)), "xmark.octagon.fill")
 		ab.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 		v.add_child(ab)
+
+
+## An "icon  HEADING" line opening a detail section.
+func _section_head(icon_name: String, title: String, v: Node) -> void:
+	var uh := HBoxContainer.new()
+	uh.add_theme_constant_override("separation", 6)
+	uh.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(uh)
+	_icon(uh, icon_name, _fs(13), COL_ACCENT)
+	_label(title, 11, COL_ACCENT, uh, "bold")
+
+
+## A row with a coloured marker (✓ ✗ • ↳) before wrapped text, indented `indent` levels.
+func _mark_row(mark: String, mark_color: Color, text: String, text_color: Color, parent: Node, indent: int) -> VBoxContainer:
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 8)
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(h)
+	if indent > 0:
+		var pad := Control.new()
+		pad.custom_minimum_size = Vector2(_fs(18) * indent, 0)
+		pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		h.add_child(pad)
+	var m := _label(mark, 13, mark_color, h, "bold")
+	m.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 1)
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(col)
+	_rich(text, 13, text_color, col)
+	return col
+
+
+## One link of the unlock chain: what to do, its status, where, its own unmet requirements.
+func _path_row(p: Dictionary, v: Node) -> void:
+	var st := str(p.status)
+	var doable: bool = st in ["available", "active"]
+	var mark := "→" if doable else ("?" if str(p.kind) == "" else "↳")
+	var col := _mark_row(mark, status_color(st) if str(p.kind) != "" else COL_DIM, str(p.action),
+		COL_TEXT if str(p.kind) != "" else COL_DIM, v, int(p.depth))
+	var bits: PackedStringArray = []
+	if str(p.kind) != "":
+		bits.append(status_label(st) if str(p.kind) == "mission" else ("Can happen now" if doable else "Waiting on its conditions"))
+	if str(p.offeredAt) != "":
+		bits.append(str(p.offeredAt))
+	if str(p.storyline) != "" and str(p.storyline) != selected_key:
+		bits.append("%s storyline" % str(p.storyline))
+	if int(p.alternatives) > 0:
+		bits.append("or %d other way%s" % [int(p.alternatives), "" if int(p.alternatives) == 1 else "s"])
+	if not bits.is_empty():
+		_rich(" · ".join(bits), 12, COL_DIM, col)
+	for u in p.get("unmet", []):
+		_rich("✗ " + str(u), 12, Color(1.0, 0.55, 0.5), col)
 
 
 func _fill_chips(v: VBoxContainer, row: Dictionary) -> void:

@@ -207,4 +207,91 @@ final class StorylineAnalyzerTests: XCTestCase {
         XCTAssertTrue(step.objective.contains("8t"))
         XCTAssertTrue(step.reward.contains("5,000") || step.reward.contains("5000"))
     }
+
+    // MARK: Requirements and unlock path (how to reach a campaign's first step)
+
+    /// A campaign whose first step is gated only by combat rating used to show "Prerequisites
+    /// not yet met." with nothing else: no bit blocks it. The rating is now a requirement.
+    func testRatingGatedFirstStepExplainsRating() {
+        let p1 = MissionSpec(id: 500, name: "Join up; Polaris1", availRating: 400).resource()
+        let p2 = MissionSpec(id: 501, name: "Next; Polaris2", availBits: "b800").resource()
+        let a = StorylineAnalyzer(game: makeGame([p1, p2]))
+        let step1 = try! XCTUnwrap(a.storylines(for: PlayerState()).first?.steps.first)
+        XCTAssertEqual(step1.status, .locked)
+        XCTAssertTrue(step1.blockers.isEmpty)
+        let rating = try! XCTUnwrap(step1.requirements.first { $0.kind == .rating })
+        XCTAssertEqual(rating.met, false)
+        XCTAssertTrue(rating.text.contains("Combat rating"))
+    }
+
+    /// The path walks back through missions outside the campaign: Polaris1 needs b900, set by an
+    /// untagged job that itself needs b901, set by a job available right now.
+    func testUnlockPathWalksBackToSomethingDoableNow() {
+        let p1 = MissionSpec(id: 500, name: "Join up; Polaris1", availBits: "b900").resource()
+        let p2 = MissionSpec(id: 501, name: "Next; Polaris2", availBits: "b902").resource()
+        let x = MissionSpec(id: 600, name: "Meet a stranger", availBits: "b901", onSuccess: "b900").resource()
+        let y = MissionSpec(id: 601, name: "Odd job", availStellar: 128, availLocation: 1, onSuccess: "b901").resource()
+        let a = StorylineAnalyzer(game: makeGame([p1, p2, x, y, spobResource(id: 128, govt: 128)]))
+        let step1 = try! XCTUnwrap(a.storylines(for: PlayerState()).first?.steps.first { $0.missionID == 500 })
+        XCTAssertEqual(step1.unlockPath.map(\.id), [600, 601])
+        XCTAssertEqual(step1.unlockPath.map(\.depth), [0, 1])
+        XCTAssertEqual(step1.unlockPath.map(\.status), [.locked, .available])
+        XCTAssertTrue(step1.unlockPath[1].offeredAt.contains("Spaceport Bar"))
+    }
+
+    /// An available source wins over a locked one for the same bit, and the others are counted.
+    func testUnlockPathPrefersDoableSourceAndCountsAlternatives() {
+        let p1 = MissionSpec(id: 500, name: "Join up; Polaris1", availBits: "b900").resource()
+        let p2 = MissionSpec(id: 501, name: "Next; Polaris2").resource()
+        let locked = MissionSpec(id: 600, name: "Hard way", availBits: "b999", onSuccess: "b900").resource()
+        let open = MissionSpec(id: 601, name: "Easy way", onSuccess: "b900").resource()
+        let a = StorylineAnalyzer(game: makeGame([p1, p2, locked, open]))
+        let step1 = try! XCTUnwrap(a.storylines(for: PlayerState()).first?.steps.first { $0.missionID == 500 })
+        XCTAssertEqual(step1.unlockPath.first?.id, 601)
+        XCTAssertEqual(step1.unlockPath.first?.alternatives, 1)
+        XCTAssertEqual(step1.unlockPath.count, 1)   // nothing to walk past an available source
+    }
+
+    /// A background event as the source: the path says when it can happen and walks its EnableOn.
+    func testUnlockPathThroughCronEnableOn() {
+        let p1 = MissionSpec(id: 500, name: "Join up; Polaris1", availBits: "b900").resource()
+        let p2 = MissionSpec(id: 501, name: "Next; Polaris2").resource()
+        let cron = CronSpec(id: 200, name: "War breaks out", random: 25, enableOn: "b901", onStart: "b900").resource()
+        let job = MissionSpec(id: 600, name: "Spark", onSuccess: "b901").resource()
+        let a = StorylineAnalyzer(game: makeGame([p1, p2, cron, job]))
+        let step1 = try! XCTUnwrap(a.storylines(for: PlayerState()).first?.steps.first { $0.missionID == 500 })
+        XCTAssertEqual(step1.unlockPath.first?.kind, .cron)
+        XCTAssertTrue(step1.unlockPath.first?.offeredAt.contains("25%") ?? false)
+        XCTAssertEqual(step1.unlockPath.last?.id, 600)
+    }
+
+    /// A bit nothing sets is reported, not silently dropped; a cycle terminates.
+    func testUnlockPathReportsUnreachableBitAndSurvivesCycles() {
+        let p1 = MissionSpec(id: 500, name: "Join up; Polaris1", availBits: "b900 & b950").resource()
+        let p2 = MissionSpec(id: 501, name: "Next; Polaris2").resource()
+        let a1 = MissionSpec(id: 600, name: "Loop A", availBits: "b901", onSuccess: "b900").resource()
+        let b1 = MissionSpec(id: 601, name: "Loop B", availBits: "b900", onSuccess: "b901").resource()
+        let a = StorylineAnalyzer(game: makeGame([p1, p2, a1, b1]))
+        let step1 = try! XCTUnwrap(a.storylines(for: PlayerState()).first?.steps.first { $0.missionID == 500 })
+        XCTAssertTrue(step1.unlockPath.contains { $0.kind == nil && $0.id == 950 })
+        XCTAssertLessThan(step1.unlockPath.count, 10)
+    }
+
+    /// Ship type, outfit and gender gates become requirements; failing one keeps the step locked
+    /// even though its bits pass.
+    func testShipAndOutfitRequirements() {
+        let p1 = MissionSpec(id: 500, name: "Join up; Polaris1", availShipType: 130, availBits: "o140 & g").resource()
+        let p2 = MissionSpec(id: 501, name: "Next; Polaris2").resource()
+        let a = StorylineAnalyzer(game: makeGame([p1, p2, shipResource(id: 130, cargo: 10),
+                                                  outfitResource(id: 140, name: "Polaris Pass")]))
+        var pilot = PlayerState()
+        pilot.isMale = true
+        let step1 = try! XCTUnwrap(a.storylines(for: pilot).first?.steps.first { $0.missionID == 500 })
+        XCTAssertEqual(step1.status, .locked)
+        XCTAssertEqual(step1.requirements.first { $0.kind == .shipType }?.met, false)
+        let outfit = try! XCTUnwrap(step1.requirements.first { $0.kind == .outfit })
+        XCTAssertEqual(outfit.met, false)
+        XCTAssertTrue(outfit.text.contains("Polaris Pass"))
+        XCTAssertEqual(step1.requirements.first { $0.kind == .gender }?.met, true)
+    }
 }

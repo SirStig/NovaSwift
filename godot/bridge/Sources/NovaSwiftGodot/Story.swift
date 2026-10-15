@@ -270,6 +270,16 @@ final class StoryMapState: @unchecked Sendable {
                      "hint": b.unlockedBy.first.map { "\($0.hint)\(b.unlockedBy.count > 1 ? " (or others)" : "")" } ?? "",
                      "unknown": b.unlockedBy.isEmpty]
                 },
+                // Every offer gate with met (true / false / null = depends where you look).
+                "requirements": s.requirements.map { q -> [String: Any] in
+                    ["kind": q.kind.rawValue, "text": q.text, "met": q.met.map { $0 ? 1 : 0 } ?? -1]
+                },
+                // The chain of missions / events to do first, deepest = where to start.
+                "path": s.unlockPath.map { p -> [String: Any] in
+                    ["depth": p.depth, "kind": p.kind?.rawValue ?? "", "id": p.id, "name": p.name,
+                     "action": p.action, "status": p.status.rawValue, "offeredAt": p.offeredAt,
+                     "storyline": p.storyline ?? "", "unmet": p.unmet, "alternatives": p.alternatives]
+                },
                 "jumps": r.jumps.map { ["id": $0.targetID, "label": $0.connector.label ?? "Leads to",
                                         "name": $0.targetName] as [String: Any] },
                 "cross": r.crossLinks.map { ["key": $0.key, "outgoing": $0.outgoing] as [String: Any] },

@@ -56,6 +56,48 @@ public struct UnlockSource: Codable, Sendable, Hashable {
     }
 }
 
+/// One gate a mission puts on being offered (rating, record, ship, outfit…), phrased for the
+/// player, with whether this pilot meets it. `met == nil` = it depends on where / when you look
+/// (legal record in the offering system, the arrival's random roll).
+public struct StepRequirement: Codable, Sendable, Hashable {
+    public enum Kind: String, Codable, Sendable {
+        case rating, record, shipType, hull, outfit, explored, registration, gender
+        case equipment, fee, cargoSpace, chance
+    }
+    public let kind: Kind
+    public let text: String
+    public let met: Bool?
+
+    public init(kind: Kind, text: String, met: Bool?) {
+        self.kind = kind; self.text = text; self.met = met
+    }
+}
+
+/// One link in the chain that leads to a locked step: a mission (or background event) that
+/// flips a bit something further down the chain needs. `depth` 0 unlocks the step itself,
+/// depth 1 unlocks that one, and so on, so the list reads top-down as an indented tree; the
+/// deepest entries are where the player can start.
+public struct PrerequisiteLink: Codable, Sendable, Hashable {
+    public let depth: Int
+    public let kind: UnlockSource.Kind?   // nil: nothing in the data flips the bit
+    public let id: Int
+    public let name: String
+    public let action: String             // "Complete “X”", "Accept “X”", a background event…
+    public let status: MissionStatus      // the source's own status for this pilot
+    public let offeredAt: String          // missions: where it's offered; events: when it can happen
+    public let storyline: String?         // the campaign the source belongs to, if any
+    public let unmet: [String]            // the source's own unmet non-bit requirements
+    public let alternatives: Int          // other missions / events that would also do
+
+    public init(depth: Int, kind: UnlockSource.Kind?, id: Int, name: String, action: String,
+                status: MissionStatus, offeredAt: String, storyline: String?, unmet: [String],
+                alternatives: Int) {
+        self.depth = depth; self.kind = kind; self.id = id; self.name = name; self.action = action
+        self.status = status; self.offeredAt = offeredAt; self.storyline = storyline
+        self.unmet = unmet; self.alternatives = alternatives
+    }
+}
+
 /// One mission's place in a storyline, resolved for a specific pilot.
 public struct StorylineStep: Identifiable, Codable, Sendable {
     public var id: Int { missionID }
@@ -73,14 +115,21 @@ public struct StorylineStep: Identifiable, Codable, Sendable {
     /// belongs to by that government's real map color. `nil` when the step
     /// carries no reward-government field.
     public let governmentID: Int?
+    /// Every non-bit gate on the offer (empty once completed / active).
+    public let requirements: [StepRequirement]
+    /// For a locked step: the missions / events to do first, as an indented chain (see
+    /// `PrerequisiteLink`). Empty otherwise.
+    public let unlockPath: [PrerequisiteLink]
 
     public init(missionID: Int, displayName: String, stepNumber: Int, status: MissionStatus,
                 offeredAt: String, objective: String, reward: String,
-                blockers: [BlockingBit], synopsis: String, governmentID: Int? = nil) {
+                blockers: [BlockingBit], synopsis: String, governmentID: Int? = nil,
+                requirements: [StepRequirement] = [], unlockPath: [PrerequisiteLink] = []) {
         self.missionID = missionID; self.displayName = displayName; self.stepNumber = stepNumber
         self.status = status; self.offeredAt = offeredAt; self.objective = objective
         self.reward = reward; self.blockers = blockers; self.synopsis = synopsis
         self.governmentID = governmentID
+        self.requirements = requirements; self.unlockPath = unlockPath
     }
 }
 
@@ -441,6 +490,7 @@ public final class StorylineAnalyzer {
     private func makeStep(_ m: MissionRes, player: PlayerState, engine: StoryEngine) -> StorylineStep {
         let status = statusOf(m, player: player, engine: engine)
         let blockers = status == .locked ? blockingBits(for: m, player: player) : []
+        let open = status == .locked || status == .available
         return StorylineStep(
             missionID: m.id,
             displayName: cleanName(m.name),
@@ -451,16 +501,266 @@ public final class StorylineAnalyzer {
             reward: describeReward(m),
             blockers: blockers,
             synopsis: briefingText(for: m),
-            governmentID: m.compRewardGovt >= 128 ? m.compRewardGovt : nil)
+            governmentID: m.compRewardGovt >= 128 ? m.compRewardGovt : nil,
+            requirements: open ? requirements(for: m, player: player) : [],
+            unlockPath: status == .locked ? unlockPath(for: m, player: player, engine: engine) : [])
     }
+
+    // MARK: Requirements (the offer gates, MissionOffers.isEligible, in player terms)
+
+    /// Every gate on `m` besides its plain control bits, phrased for the player. Mirrors
+    /// `MissionOffers.isEligible`'s gates; location (AvailStel / AvailLocation) is `offeredAt`.
+    func requirements(for m: MissionRes, player: PlayerState) -> [StepRequirement] {
+        var out: [StepRequirement] = []
+        let text = OriginalText(game: game)
+        if m.availRating >= 1 {
+            out.append(StepRequirement(kind: .rating,
+                text: "Combat rating of \(text.combatRating(m.availRating)) or better (you: \(text.combatRating(player.combatRating)))",
+                met: player.combatRating >= m.availRating))
+        }
+        if m.availRecord != 0 {
+            let t: String
+            switch m.availRecord {
+            case -32000: t = "Only at a planet you have dominated"
+            case -32001: t = "You must have dominated at least one planet"
+            case ..<(-32001): t = "Never offered (disabled by its record setting)"
+            case ..<0: t = "A criminal record (\(m.availRecord) or lower) in the system it's offered in"
+            default: t = "A good legal record (\(m.availRecord) or better) in the system it's offered in"
+            }
+            let met: Bool? = m.availRecord == -32001 ? !(player.dominatedStellars ?? []).isEmpty
+                : (m.availRecord < -32001 ? false : nil)
+            out.append(StepRequirement(kind: .record, text: t, met: met))
+        }
+        if let r = shipTypeRequirement(m.availShipType, player: player) { out.append(r) }
+        let ai = game.ship(player.shipType)?.inherentAI ?? 0
+        if m.flags1 & 0x2000 != 0 {
+            out.append(StepRequirement(kind: .hull, text: "Fly a warship (a combat hull, not a trader)", met: ai >= 3))
+        }
+        if m.flags1 & 0x4000 != 0 {
+            out.append(StepRequirement(kind: .hull, text: "Fly a trader or cargo hull, not a warship", met: ai <= 2))
+        }
+        out.append(contentsOf: testTermRequirements(m.availBits, player: player))
+        if m.require != 0 {
+            out.append(StepRequirement(kind: .equipment,
+                text: "Special equipment: an outfit or ship that provides what this mission requires", met: nil))
+        }
+        if m.pay < -50000 {
+            let fee = -50000 - m.pay
+            out.append(StepRequirement(kind: .fee, text: "\(formatted(fee)) cr to accept",
+                                       met: player.credits >= fee))
+        }
+        if m.requiresCargoSpace, m.cargoQty > 0 {
+            out.append(StepRequirement(kind: .cargoSpace, text: "\(m.cargoQty) tons of free cargo space", met: nil))
+        }
+        if m.availRandom >= 1, m.availRandom < 100 {
+            out.append(StepRequirement(kind: .chance,
+                text: "Only appears \(m.availRandom)% of the time: keep landing there until it shows up", met: nil))
+        }
+        return out
+    }
+
+    /// AvailShipType (MissionOffers.shipTypeMatches) as a requirement.
+    private func shipTypeRequirement(_ value: Int, player: PlayerState) -> StepRequirement? {
+        let hull = game.ship(player.shipType)
+        func shipName(_ id: Int) -> String { game.ship(id).map { $0.name.novaDisplayName } ?? "ship #\(id)" }
+        func govtName(_ id: Int) -> String { game.govt(id)?.displayName ?? "govt #\(id)" }
+        switch value {
+        case 128...896:
+            return StepRequirement(kind: .shipType, text: "Fly a \(shipName(value))", met: player.shipType == value)
+        case 1128...1896:
+            return StepRequirement(kind: .shipType, text: "Not while flying a \(shipName(value - 1000))",
+                                   met: player.shipType != value - 1000)
+        case 2128...2384:
+            let g = value - 2000
+            return StepRequirement(kind: .shipType, text: "Fly a \(govtName(g)) ship",
+                met: hull.map { $0.inherentCombatGovt == g || $0.inherentAttributesGovt == g } ?? false)
+        case 3128...3384:
+            let g = value - 3000
+            return StepRequirement(kind: .shipType, text: "Not while flying a \(govtName(g)) ship",
+                met: hull.map { $0.inherentCombatGovt != g && $0.inherentAttributesGovt != g } ?? true)
+        default:
+            return nil
+        }
+    }
+
+    /// The non-bit terms of an NCB test (`o` outfit, `e` explored, `p` registration, `g` gender),
+    /// each checked on its own. Bits are covered by `blockers` / `unlockPath`.
+    private func testTermRequirements(_ expr: String, player: PlayerState) -> [StepRequirement] {
+        var out: [StepRequirement] = []
+        var seen = Set<String>()
+        let chars = Array(expr)
+        var i = 0
+        var negated = false
+        while i < chars.count {
+            let c = chars[i]
+            if c == "!" { negated = true; i += 1; continue }
+            let lower = Character(c.lowercased())
+            guard "oepg".contains(lower) else {
+                if !c.isWhitespace { negated = false }
+                i += 1; continue
+            }
+            var j = i + 1
+            while j < chars.count, chars[j].isNumber { j += 1 }
+            let n = Int(String(chars[(i + 1)..<j])) ?? 0
+            let term = (negated ? "!" : "") + String(lower) + (lower == "g" ? "" : String(n))
+            i = j
+            let neg = negated
+            negated = false
+            guard seen.insert(term).inserted else { continue }
+            let met = NCBTest(term).evaluate(player)
+            let t: String
+            switch lower {
+            case "o":
+                let name = game.outfit(n).map { $0.name.novaDisplayName } ?? "outfit #\(n)"
+                t = neg ? "Must not own: \(name)" : "Own: \(name)"
+                out.append(StepRequirement(kind: .outfit, text: t, met: met))
+            case "e":
+                let name = game.system(n)?.name ?? "system #\(n)"
+                t = neg ? "Must not have explored \(name)" : "Have explored \(name)"
+                out.append(StepRequirement(kind: .explored, text: t, met: met))
+            case "p":
+                t = neg ? "Ship registration lapsed for more than \(n) days"
+                        : "Ship registration lapsed no more than \(n) days"
+                out.append(StepRequirement(kind: .registration, text: t, met: met))
+            default:
+                out.append(StepRequirement(kind: .gender, text: neg ? "Female pilot" : "Male pilot", met: met))
+            }
+        }
+        return out
+    }
+
+    // MARK: Unlock path (recursive "what to do first")
+
+    /// The chain of missions / events that leads to `m`: for each bit blocking it, the best
+    /// source (active > available > locked; a campaign mission before a one-off; missions before
+    /// background events), recursing into a source that is itself locked. Bounded so a cyclic or
+    /// huge graph can't run away.
+    func unlockPath(for m: MissionRes, player: PlayerState, engine: StoryEngine) -> [PrerequisiteLink] {
+        var out: [PrerequisiteLink] = []
+        var visited: Set<String> = ["mission-\(m.id)"]
+        walk(test: m.availBits, selfID: m.id, depth: 0, player: player, engine: engine,
+             visited: &visited, out: &out)
+        return out
+    }
+
+    private static let maxPathDepth = 8
+    private static let maxPathLinks = 40
+
+    private func walk(test: String, selfID: Int?, depth: Int, player: PlayerState, engine: StoryEngine,
+                      visited: inout Set<String>, out: inout [PrerequisiteLink]) {
+        guard depth < Self.maxPathDepth else { return }
+        var seenBits = Set<Int>()
+        for ref in NCBTest(test).referencedBits {
+            guard out.count < Self.maxPathLinks else { return }
+            let isSet = player.isBitSet(ref.bit)
+            guard ref.negated ? isSet : !isSet, seenBits.insert(ref.bit).inserted else { continue }
+            let needsSet = !ref.negated
+            let sources = ((needsSet ? setters[ref.bit] : clearers[ref.bit]) ?? [])
+                .filter { !($0.kind == .mission && $0.id == selfID) }
+            guard !sources.isEmpty else {
+                out.append(PrerequisiteLink(depth: depth, kind: nil, id: ref.bit,
+                    name: "Control bit \(ref.bit)",
+                    action: needsSet ? "Nothing in the game data sets bit \(ref.bit) (a plug-in or a special pilot may)"
+                                     : "Nothing in the game data clears bit \(ref.bit)",
+                    status: .locked, offeredAt: "", storyline: nil, unmet: [], alternatives: 0))
+                continue
+            }
+            let ranked = sources.map { src -> (UnlockSource, MissionStatus) in (src, sourceStatus(src, player: player, engine: engine)) }
+                .sorted { a, b in
+                    let (ra, rb) = (rank(a.0, a.1), rank(b.0, b.1))
+                    return ra != rb ? ra < rb : a.0.id < b.0.id
+                }
+            let (best, status) = ranked[0]
+            let key = "\(best.kind.rawValue)-\(best.id)"
+            let firstVisit = visited.insert(key).inserted
+            var offeredAt = "", unmet: [String] = [], storyline: String? = nil, nextTest: String? = nil
+            switch best.kind {
+            case .mission:
+                if let src = game.mission(best.id) {
+                    offeredAt = describeOffer(src)
+                    storyline = storylineKeys[src.id]
+                    unmet = requirements(for: src, player: player).filter { $0.met == false }.map(\.text)
+                    nextTest = src.availBits
+                }
+            case .cron:
+                if let c = game.cron(best.id) {
+                    offeredAt = describeCron(c)
+                    nextTest = c.enableOn
+                }
+            }
+            out.append(PrerequisiteLink(depth: depth, kind: best.kind, id: best.id, name: best.name,
+                action: best.hint + (firstVisit ? "" : " (see above)"), status: status, offeredAt: offeredAt,
+                storyline: storyline, unmet: unmet, alternatives: ranked.count - 1))
+            if firstVisit, status == .locked, let next = nextTest {
+                walk(test: next, selfID: best.kind == .mission ? best.id : nil, depth: depth + 1,
+                     player: player, engine: engine, visited: &visited, out: &out)
+            }
+        }
+    }
+
+    /// Lower is better: something doable now beats something locked; a campaign mission beats a
+    /// one-off; a mission beats a background event.
+    private func rank(_ src: UnlockSource, _ status: MissionStatus) -> Int {
+        let s: Int
+        switch status {
+        case .active: s = 0
+        case .available: s = 1
+        case .completed: s = 2
+        case .locked: s = 3
+        }
+        let campaign = src.kind == .mission && storylineKeys[src.id] != nil ? 0 : 1
+        let kind = src.kind == .mission ? 0 : 1
+        return s * 4 + campaign * 2 + kind
+    }
+
+    private func sourceStatus(_ src: UnlockSource, player: PlayerState, engine: StoryEngine) -> MissionStatus {
+        switch src.kind {
+        case .mission:
+            guard let m = game.mission(src.id) else { return .locked }
+            return statusOf(m, player: player, engine: engine)
+        case .cron:
+            guard let c = game.cron(src.id) else { return .locked }
+            return NCBTest(c.enableOn).evaluate(player) ? .available : .locked
+        }
+    }
+
+    /// When a background event can fire, for the unlock path.
+    private func describeCron(_ c: CronRes) -> String {
+        var parts = ["Happens on its own once its conditions are met"]
+        if c.firstYear > 0 || c.lastYear > 0 {
+            func date(_ d: Int, _ m: Int, _ y: Int) -> String { "\(m > 0 ? "\(m)/" : "")\(d > 0 ? "\(d)/" : "")\(y)" }
+            if c.firstYear > 0, c.lastYear > 0 {
+                parts.append("between \(date(c.firstDay, c.firstMonth, c.firstYear)) and \(date(c.lastDay, c.lastMonth, c.lastYear))")
+            } else if c.firstYear > 0 {
+                parts.append("from \(date(c.firstDay, c.firstMonth, c.firstYear))")
+            } else {
+                parts.append("until \(date(c.lastDay, c.lastMonth, c.lastYear))")
+            }
+        }
+        if c.random >= 1, c.random < 100 { parts.append("\(c.random)% chance each day") }
+        if c.preHoldoff > 0 { parts.append("after a wait of \(c.preHoldoff) days") }
+        return parts.joined(separator: ", ")
+    }
+
+    /// mission id -> storyline key, for every mission in a real campaign (built once).
+    private lazy var storylineKeys: [Int: String] = {
+        var out: [Int: String] = [:]
+        for (key, missions) in groupedByStoryline() {
+            for m in missions { out[m.id] = key }
+        }
+        return out
+    }()
 
     private func statusOf(_ m: MissionRes, player: PlayerState, engine: StoryEngine) -> MissionStatus {
         if player.completedMissions.contains(m.id) { return .completed }
         if player.isMissionActive(m.id) { return .active }
         // Eligible = gate passes and record/rating met (ignore offer location so
         // the guide can say "available — go here"); random chance excluded.
+        // A gate this pilot definitely fails (ship type, outfit, fee…) keeps it locked too; the
+        // location-dependent ones (record, the random roll) don't.
         if player.combatRating >= m.availRating,
-           NCBTest(m.availBits).evaluate(player) {
+           NCBTest(m.availBits).evaluate(player),
+           !requirements(for: m, player: player).contains(where: { $0.met == false }) {
             return .available
         }
         return .locked
