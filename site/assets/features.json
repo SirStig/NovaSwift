@@ -71,7 +71,7 @@
     {
      "name": "Testing on more real devices",
      "status": "partial",
-     "where": "Godot builds played across two real machines (2026-10-14); Game Center and Apple-to-desktop sessions not yet played on real devices"
+     "where": "Godot builds played across two real machines (2026-10-14); Game Center sessions not yet played on real devices"
     },
     {
      "name": "LAN browser, direct IP and Quick Connect (desktop)",
@@ -91,12 +91,21 @@
     {
      "name": "Standalone dedicated server with web admin panel",
      "status": "done",
-     "where": "Sources/NovaSwiftServer, Sources/NovaSwiftServerCore; released as server-v1.0.0-beta.1 (Linux, macOS, Windows)"
+     "where": "Sources/NovaSwiftServer, Sources/NovaSwiftServerCore; released as server-v1.0.0-beta.1 (Linux x86_64 and arm64, macOS arm64, Windows x86_64)"
     },
     {
      "name": "Apple to desktop cross-play",
-     "status": "partial",
-     "where": "Sources/NovaSwiftENet, app/NovaSwift/Multiplayer/CrossPlayModel.swift, MultiplayerBrowseViews.swift; loopback-tested, not yet in a TestFlight build or played across devices"
+     "status": "done",
+     "where": "Sources/NovaSwiftENet, app/NovaSwift/Multiplayer/CrossPlayModel.swift, MultiplayerBrowseViews.swift; the Apple app hosts and joins ENet sessions and dedicated servers"},
+    {
+     "name": "IPv6 networking (dual-stack)",
+     "status": "done",
+     "where": "Sources/CENet (patched ENet), Sources/NovaSwiftENet/IPAddressTools.swift, server bind_address; the server admin panel is IPv4 only"
+    },
+    {
+     "name": "Auto-reconnect after a dropped connection (Apple)",
+     "status": "done",
+     "where": "MultiplayerSession reconnectState; the Godot client has none"
     }
    ]
   },

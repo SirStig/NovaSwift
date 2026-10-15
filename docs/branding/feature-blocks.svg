@@ -3,12 +3,12 @@
 <rect width="592" height="741" rx="10" fill="#0d0a0e"/>
 <text x="16" y="32" class="h1">Beyond the original: NovaSwift's own features, one square per task</text>
 <rect x="16" y="46" width="9" height="9" fill="#3fb950"/>
-<text x="30" y="55" class="lg">Done (179)</text>
+<text x="30" y="55" class="lg">Done (182)</text>
 <rect x="110" y="46" width="9" height="9" fill="#e3a52b"/>
-<text x="124" y="55" class="lg">Partly done (22)</text>
+<text x="124" y="55" class="lg">Partly done (21)</text>
 <rect x="241" y="46" width="9" height="9" fill="none" stroke="#8d807c"/>
 <text x="255" y="55" class="lg">Planned (24)</text>
-<text x="16" y="92" class="gh">Multiplayer co-op</text><text x="576" y="92" class="gn" text-anchor="end">13 of 19 done</text>
+<text x="16" y="92" class="gh">Multiplayer co-op</text><text x="576" y="92" class="gn" text-anchor="end">16 of 21 done</text>
 <rect x="216" y="80" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Local Wi-Fi lobbies — Done</title></rect>
 <rect x="231" y="80" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Game Center matches and invites — Done</title></rect>
 <rect x="246" y="80" width="12" height="12" fill="#e3a52b"><title>Multiplayer co-op: Public online lobby list — Partly done</title></rect>
@@ -27,7 +27,9 @@
 <rect x="231" y="95" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Public server directory and browser — Done</title></rect>
 <rect x="246" y="95" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Optional encryption (DTLS, pinned server keys) — Done</title></rect>
 <rect x="261" y="95" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Standalone dedicated server with web admin panel — Done</title></rect>
-<rect x="276" y="95" width="12" height="12" fill="#e3a52b"><title>Multiplayer co-op: Apple to desktop cross-play — Partly done</title></rect>
+<rect x="276" y="95" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Apple to desktop cross-play — Done</title></rect>
+<rect x="291" y="95" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: IPv6 networking (dual-stack) — Done</title></rect>
+<rect x="306" y="95" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Auto-reconnect after a dropped connection (Apple) — Done</title></rect>
 <text x="16" y="134" class="gh">Story Guide and storyline map</text><text x="576" y="134" class="gn" text-anchor="end">7 of 7 done</text>
 <rect x="216" y="122" width="12" height="12" fill="#3fb950"><title>Story Guide and storyline map: Campaigns rebuilt from the control-bit graph — Done</title></rect>
 <rect x="231" y="122" width="12" height="12" fill="#3fb950"><title>Story Guide and storyline map: Storyline flow view with branches — Done</title></rect>

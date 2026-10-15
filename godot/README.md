@@ -143,7 +143,7 @@ milestones in [`../docs/GODOT_LAYER.md`](../docs/GODOT_LAYER.md).
 
 ## Note on the current status
 
-v0.7.0-beta.2 (2026-10-14) is released for Linux x86_64 / Steam Deck, Windows x86_64 and macOS arm64, and has been played
+v1.0.0-beta.1 (2026-10-14) is released for Linux x86_64 / Steam Deck, Windows x86_64 and macOS arm64, and has been played
 on real hardware (a Windows PC, Linux, a Steam Deck, and multiplayer across two machines). Packages are built locally
 ([`../docs/PACKAGING.md`](../docs/PACKAGING.md)); there is no CI for packaging. Open items are tracked in
 [`../docs/GODOT_FIDELITY_GAPS.md`](../docs/GODOT_FIDELITY_GAPS.md).

@@ -164,7 +164,7 @@
         <p><b>Trading</b> lets two players swap credits, cargo and outfits, if the host allows trading. Both sides see the other's offer live; changing either offer clears both confirmations, and the swap happens only when both accept. Each side applies it to its own save. On Apple it starts from the player's Trade button in the lobby roster. On Godot there is a Trade button on the player rows in chat, and the trade window shows what you give next to what you receive. Test it on Safe stakes first.</p>
 
         <h2 id="crossplay">Cross-play: Apple and Godot</h2>
-        <p>Today the Apple app and the Godot app cannot join each other's games. Apple uses Game Center and local Wi-Fi, Godot uses ENet. The groundwork to join Godot hosts and dedicated servers from Apple devices is written and tested at the protocol level, and both apps share the same protocol version and plug-in rules. The Apple app's server browser and hosting aren't in a TestFlight build yet, and no Apple-to-desktop game has been played. We will announce it when it ships.</p>
+        <p>The Apple app and the Godot app can join each other's games. Apple's Game Center and local Wi-Fi lobbies are separate from the desktop ones, but the Apple app also speaks ENet like the Godot builds: it can browse the public server list, join dedicated servers and desktop hosts by address, and host games they join. Both apps share the same protocol version and plug-in rules. The Apple app can't join servers that use encryption (DTLS).</p>
 
         <h2 id="trouble">Troubleshooting</h2>
         <div class="table-wrap"><table class="data">

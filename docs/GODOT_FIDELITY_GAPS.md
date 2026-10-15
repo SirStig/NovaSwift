@@ -115,7 +115,7 @@ no-FX path). Do not touch HUD files.
 - F3: no shader-by-shader comparison against the original (flight visuals themselves have been played on real GPUs).
 - Sound S12 and the `quickHyperjump` enhancement: ported to the Godot bridge 2026-10-13 (shared `QuickHyperjump`, `screens/HyperjumpFx.gd`, `audio/GameAudio.gd`); built and tested 2026-10-14.
 - Everything written on 2026-10-13 was built and tested 2026-10-14; see the status words at the top.
-- Packages: macOS arm64, Linux x86_64 (Steam Deck) and Windows x86_64 archives ship in v0.7.0-beta.2 and have been run on real hardware (Windows PC, Linux, Steam Deck). Linux packages are built on the maintainer's Linux machine, Windows packages on a Windows PC. Auto-updater ([UPDATER.md](UPDATER.md)): signed manifests are published with releases; an in-app update has not been verified end to end.
+- Packages: macOS arm64, Linux x86_64 (Steam Deck) and Windows x86_64 archives ship in v1.0.0-beta.1 (since v0.7.0-beta.2) and have been run on real hardware (Windows PC, Linux, Steam Deck). Linux packages are built on the maintainer's Linux machine, Windows packages on a Windows PC. Auto-updater ([UPDATER.md](UPDATER.md)): signed manifests are published with releases; an in-app update has not been verified end to end.
 
 ## Deferred: ENHANCEMENT gaps (NovaSwift-only; not original)
 

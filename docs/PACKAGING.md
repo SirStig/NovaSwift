@@ -65,7 +65,7 @@ library validation disabled, then runs the exported binary headless and checks t
 
 ### Linux x86_64 / Steam Deck - built on a Linux machine
 
-Linux packages are built on a Linux x86_64 computer (the maintainer's, for v0.7.0-beta.2), not on the Mac. Docker, Colima and Lima
+Linux packages are built on a Linux x86_64 computer (the maintainer's, for the v0.7.0 and v1.0.0 betas), not on the Mac. Docker, Colima and Lima
 are no longer used on the Mac. With the Swift 6.x toolchain, Godot 4.7.2 and its Linux export templates installed:
 
     scripts/package-linux.sh            # -> godot/export/NovaSwift-linux-x86_64.tar.gz
@@ -155,7 +155,7 @@ tiny decode-only ffmpeg (~3.3–3.7 MB) beside the executable, so nothing has to
 
 ## Status / caveats
 
-- v0.7.0-beta.2 (2026-10-14) ships all three: macOS arm64 (built and ad-hoc signed locally), Linux x86_64 (built with
+- v1.0.0-beta.1 (2026-10-14; also v0.7.0-beta.2 before it) ships all three: macOS arm64 (built and ad-hoc signed locally), Linux x86_64 (built with
   `scripts/package-linux.sh` on a Linux machine) and Windows x86_64 (built with `scripts/package-windows.ps1` on a Windows PC).
   Each has been played on real hardware (Mac, Windows PC, Linux, Steam Deck). The release also carries a signed `update.json` + `.sig`.
 - There is no GitHub CI for packaging; the workflow is manual-only and is not used.

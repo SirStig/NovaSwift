@@ -3,7 +3,7 @@
 **In progress.** The frontend plays a pilot from the main menu through flight,
 landing, the spaceport, missions, the map and saving. Verified on-toolchain (macOS,
 Swift 6.3 + Godot 4.7): the bridge builds, headless self-checks load real EV Nova
-data and step the simulation, and all 13 catalog plug-ins load. v0.7.0-beta.2 (2026-10-14) ships macOS arm64, Linux x86_64
+data and step the simulation, and all 13 catalog plug-ins load. v1.0.0-beta.1 (2026-10-14; earlier betas v0.7.0-beta.1 and -beta.2) ships macOS arm64, Linux x86_64
 (Steam Deck) and Windows x86_64 packages (see [PACKAGING.md](PACKAGING.md)). The maintainer has played the Windows build on a
 Windows PC, the Linux build on Linux hardware and a Steam Deck, and multiplayer across two machines, so flight visuals have run
 on real GPUs; there has been no shader-by-shader comparison against the original. The galaxy map, gate movies, sound
@@ -495,7 +495,7 @@ and not yet tested end to end.
    Headless checks: `tests/story_selfcheck.gd` (accept a BBS delivery, jump, land,
    pay + text, calendar advance) and `tests/story_menu_check.gd` (offer modal
    owns input, BBS/bar/info focus). Gambling, hire escort, jettison and in-flight `pêrs` offers are wired through the same helpers as the Apple app. The gambling reset fix (the previous winner resets when the bar opens, `barOpened`) is DONE (EC-26, built and tested 2026-10-14). The outfitter bank promotion and visit-scoped items (`outfitterOpen` / `outfitterClose`, EC-09, EC-28) are likewise DONE (built and tested 2026-10-14). Mission-offer `dësc` movies are wired (see "Total-conversion add-ons").
-6. **Packaging** — Godot export presets and local package scripts: macOS arm64, Linux x86_64 and Windows x86_64 packages ship in v0.7.0-beta.2 and have been run on real hardware; auto-updater built, signed manifests published, not yet tested end to end.
+6. **Packaging** — Godot export presets and local package scripts: macOS arm64, Linux x86_64 and Windows x86_64 packages ship in v1.0.0-beta.1 (since v0.7.0-beta.2) and have been run on real hardware; auto-updater built, signed manifests published, not yet tested end to end.
 
 ## Non-goals
 

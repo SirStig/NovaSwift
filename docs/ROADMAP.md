@@ -65,11 +65,11 @@ Left:
 
 ### Godot frontend for Linux and Windows
 
-In public beta: v0.7.0-beta.2 (2026-10-14) ships for Linux x86_64 / Steam Deck, Windows x86_64 and macOS arm64, and has been played on real hardware on all three. What remains: verify the auto-updater by updating an installed build from a signed release, finish the early desktop plug-in editor, bring HD graphics packs to the desktop build, and keep fixing what testers report. The row-by-row list is [GODOT_FIDELITY_GAPS.md](GODOT_FIDELITY_GAPS.md). The state table is in [STATUS.md](STATUS.md#linux-and-windows); the design is in [GODOT_LAYER.md](GODOT_LAYER.md).
+In public beta: v1.0.0-beta.1 (2026-10-14) ships for Linux x86_64 / Steam Deck, Windows x86_64 and macOS arm64; the earlier betas were played on real hardware on all three. The Windows and macOS builds are not code-signed or notarised. What remains: verify the auto-updater by updating an installed build from a signed release, finish the early desktop plug-in editor, bring HD graphics packs to the desktop build, and keep fixing what testers report. The row-by-row list is [GODOT_FIDELITY_GAPS.md](GODOT_FIDELITY_GAPS.md). The state table is in [STATUS.md](STATUS.md#linux-and-windows); the design is in [GODOT_LAYER.md](GODOT_LAYER.md).
 
 ### Multiplayer
 
-Desktop multiplayer (LAN, direct IP, public servers, the dedicated server) is released and has been played across two machines. Next: ship Apple-to-desktop cross-play in a TestFlight build and play a real cross-play session, play Game Center sessions on real devices, promote the CloudKit schema for the public lobby list, finer PvP options, and handing authority over when the host drops without rebuilding the world. See [MULTIPLAYER.md](MULTIPLAYER.md).
+Multiplayer is released: LAN, direct IP, public servers, the dedicated server (with IPv6), and Apple-to-desktop cross-play over ENet, where the Apple app hosts and joins. The official server, NovaSwift Official West, is running. Next: play Game Center sessions on real devices, give the Godot client auto-reconnect (the Apple app has it), add IPv6 to the server admin panel, promote the CloudKit schema for the public lobby list, finer PvP options, and handing authority over when the host drops without rebuilding the world. See [MULTIPLAYER.md](MULTIPLAYER.md).
 
 ### Plug-in toolkit
 

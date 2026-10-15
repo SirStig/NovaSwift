@@ -13,8 +13,9 @@ die with the original's consequences. Plug-ins and total conversions load in the
 original's order.
 
 The Godot frontend for Linux, Steam Deck and Windows is in public beta:
-v0.7.0-beta.2 was released on 2026-10-14 for Linux x86_64 / Steam Deck, Windows
-x86_64 and macOS arm64, and has been played on real hardware on all three. It
+v1.0.0-beta.1 was released on 2026-10-14 for Linux x86_64 / Steam Deck, Windows
+x86_64 and macOS arm64 (v0.7.0-beta.1 and -beta.2 came before it), and the earlier
+betas were played on real hardware on all three. It
 runs the same engine, so it plays the same game. Its status table is under
 [Linux and Windows](#linux-and-windows), with the packaging, the auto-updater and
 the dedicated server.
@@ -47,7 +48,7 @@ against its output.
 The plan has 179 items in eight areas, and all 179 are done. A later read of the
 executable reopened 16 items whose heading said done (and added EC-27 and
 EC-28). All 16 were implemented in both apps on 2026-10-13 and built and tested
-by the maintainer on 2026-10-14; they ship in v0.7.0-beta.2.
+by the maintainer on 2026-10-14; they shipped in v0.7.0-beta.2 and are in v1.0.0-beta.1.
 
 | Area | Items | Open |
 |---|---:|---:|
@@ -206,19 +207,18 @@ costing a day.
 
 ## Beyond the original
 
-![NovaSwift's own features](branding/feature-blocks.svg?v=f9a924e3)
+![NovaSwift's own features](branding/feature-blocks.svg?v=7a4f3c8a)
 
 NovaSwift's own features, one square per task: green done, amber partly done,
-outline planned. Currently 165 done, 25 partly done, 28 planned. The list is kept
+outline planned. Currently 168 done, 24 partly done, 28 planned. The list is kept
 by hand in `site/assets/features.json`, with a pointer to the code for each
 task. After editing it, run `python3 scripts/render-progress.py` to redraw
-[feature-blocks.svg](branding/feature-blocks.svg?v=f9a924e3) and the summary graphic.
+[feature-blocks.svg](branding/feature-blocks.svg?v=7a4f3c8a) and the summary graphic.
 
 Partly done, in short: the public online lobby list and iCloud game-data upload
 need the CloudKit schema promoted to Production; multiplayer host migration
 rebuilds the world rather than handing over; the `carryEncounter` session rule
-is not used yet; Apple-to-desktop cross-play is written and loopback-tested but
-not yet in a TestFlight build; no plug-ins ship inside the app; the Godot port's
+is not used yet; no plug-ins ship inside the app; the Godot port's
 auto-updater has not yet updated an installed build end to end, its plug-in
 editor is early, and it has no HD packs yet. Live 3D hulls are written but not
 yet checked on real devices. Desktop multiplayer has been played across two
@@ -261,13 +261,13 @@ None of these change the game's rules:
 
 The Godot frontend ([GODOT_LAYER.md](GODOT_LAYER.md)) runs the same engine and calls the same Swift helpers as the Apple app, so the fidelity work above applies to both frontends. This section is only about frontend wiring and distribution. The row-by-row list is [GODOT_FIDELITY_GAPS.md](GODOT_FIDELITY_GAPS.md).
 
-Releases: v0.7.0-beta.2 (2026-10-14) on [GitHub Releases](https://github.com/SirStig/NovaSwift/releases) ships `NovaSwift-linux-x86_64.tar.gz` (Linux and Steam Deck), `NovaSwift-windows-x86_64.zip` (not code-signed) and `NovaSwift-macos-arm64.zip` (not notarised), with a signed `update.json`. The maintainer has played it on a real Windows PC, on Linux hardware and on a Steam Deck, and played multiplayer across two machines.
+Releases: v1.0.0-beta.1 (2026-10-14, the latest; v0.7.0-beta.1 and -beta.2 are the earlier betas) on [GitHub Releases](https://github.com/SirStig/NovaSwift/releases) ships `NovaSwift-linux-x86_64.tar.gz` (Linux and Steam Deck), `NovaSwift-windows-x86_64.zip` (not code-signed) and `NovaSwift-macos-arm64.zip` (not notarised), with a signed `update.json`. The maintainer has played the beta builds on a real Windows PC, on Linux hardware and on a Steam Deck, and played multiplayer across two machines.
 
 Packaging is local, with no CI ([PACKAGING.md](PACKAGING.md)): the Linux package is built on a Linux machine, the Windows package on a Windows 11 PC with Swift 6.3.3 (`scripts/package-windows.ps1`; under Windows PowerShell 5.1 the script stops on a harmless Godot warning, so the steps can be run by hand), and the macOS package on the Mac.
 
 Auto-updater ([UPDATER.md](UPDATER.md), `godot/updater/`): releases carry a manifest signed with `scripts/release-sign.sh` (the public key is in `godot/updater/`, the private key is outside the repository). It offers Skip This Version / Later / Update Now, has a stable and an experimental channel (Settings ▸ Support ▸ Updates), and can return to stable from an experimental build. An installed build updating itself has not yet been verified end to end. It does not touch the Apple app.
 
-Dedicated server ([DEDICATED_SERVER.md](DEDICATED_SERVER.md)): released as server-v0.1.0 for Linux, macOS and Windows. The Windows build uses Winsock paths for discovery, HTTP and UPnP and tar.exe for zips (ZIPFoundation does not build there).
+Dedicated server ([DEDICATED_SERVER.md](DEDICATED_SERVER.md)): released as server-v1.0.0-beta.1 (2026-10-14) for Linux x86_64, Linux arm64, macOS arm64 and Windows x86_64; its version now matches the game's. Earlier: server-v0.1.0. It listens on IPv4 and IPv6; the admin panel is IPv4 only. The official server, "NovaSwift Official West" (Google Cloud), runs it. The Windows build uses Winsock paths for discovery, HTTP and UPnP and tar.exe for zips (ZIPFoundation does not build there).
 
 | Subsystem | State |
 |---|---|
@@ -284,9 +284,9 @@ Dedicated server ([DEDICATED_SERVER.md](DEDICATED_SERVER.md)): released as serve
 | Sound parity, spaceport ambient loop, brightness veil, About-dialog picture | Done |
 | Key Settings dialog (DITL 4002), title music from a `.mov`, shot murk fog, `playMovies` gate audit, NPC warp effect, map link-cycle and silent-J sounds (S25, S26) | Done, built and tested |
 | Quick hyperjump enhancement and its charge loop (S12), Player Info Tab cycling | Done, built and tested |
-| Multiplayer: LAN browser, direct IP, public server browser, optional DTLS, trade | Released in beta.2, played across two machines |
-| Apple-to-desktop cross-play | Written on both sides and loopback-tested; the Apple side is not yet in a TestFlight build |
-| Plug-in editor (`godot/editor/`) | In beta.2, early (undo does not clear the unsaved mark) |
+| Multiplayer: LAN browser, direct IP, public server browser, optional DTLS, trade, chat, block/report/vote-kick, IPv6 | Released (beta.2; IPv6 in 1.0.0-beta.1), played across two machines |
+| Apple-to-desktop cross-play | Done. The Apple app hosts and joins Godot-compatible ENet sessions and the dedicated server (it cannot join DTLS servers); auto-reconnect on the Apple side only |
+| Plug-in editor (`godot/editor/`) | In the betas, early (undo does not clear the unsaved mark) |
 | macOS arm64 package | Released |
 | Linux x86_64 / Steam Deck package | Released, played on real hardware |
 | Windows x86_64 package | Released, played on a real Windows PC |

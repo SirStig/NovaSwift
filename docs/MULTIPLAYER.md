@@ -1,11 +1,12 @@
 # Multiplayer
 
 Almost everything described here is built and covered by tests (the
-`carryEncounter` rule is declared but not used yet). What hasn't happened is
-verification of the Apple side on real hardware: the netcode and sync logic are
+`carryEncounter` rule is declared but not used yet). The netcode and sync logic are
 proven headlessly (two live `World`s talking over a loopback transport), and the Godot
 frontend's multiplayer (shipped in v0.7.0-beta.2, 2026-10-14) has been played across two
-real machines. The Apple app's Game Center path and Apple<->Godot cross-play have not been
+real machines. Apple-to-desktop cross-play is implemented (the Apple app hosts and joins
+Godot-compatible ENet sessions and the dedicated server); IPv6 and Apple auto-reconnect
+arrived with v1.0.0-beta.1 (2026-10-14). The Apple app's Game Center path has not been
 played on real devices. Known gaps are listed at the bottom.
 
 ## What multiplayer is
@@ -18,8 +19,8 @@ together, or fight each other. When you're in different systems, nothing heavy i
 synced; you each just play your own game. The canonical flow is "I'm stuck, come
 help me": your friend jumps to your system and drops in.
 
-**We host no servers.** Internet play rides Apple's Game Center infrastructure
-(Apple runs matchmaking and the relay). Local play uses the LAN directly via
+**Game Center and Bonjour need no servers of ours.** Internet play over Game Center rides Apple's infrastructure
+(Apple runs matchmaking and the relay). Cross-play over ENet uses community servers, the dedicated server, or one run by the maintainer ("NovaSwift Official West", Google Cloud). Local play uses the LAN directly via
 Bonjour. The public lobby list rides CloudKit, which Apple also hosts. There is no
 NovaSwift backend to run or pay for.
 
@@ -422,12 +423,15 @@ one copy on a second Mac or iPad on the same Wi-Fi — same flow, no env var.
 
 ## What isn't done
 
-- **No real-hardware runtime verification on the Apple side.** The Godot frontend's
+- **Game Center has had no real-hardware runtime verification.** The Godot frontend's
   multiplayer (LAN browser, direct IP, public server browser, DTLS, trade) has been played
   across two real machines (2026-10-14, beta.2). The Apple app has not been played over a
-  real Game Center match, and no Apple<->Godot session has been played. The sync logic is
-  proven headlessly and the app wiring compiles, but the first live Apple session will
-  surface things tests can't. This is the biggest outstanding item for Apple and cross-play.
+  real Game Center match. The sync logic is proven headlessly, so the first live Game
+  Center session may surface things tests can't.
+- **Godot client has no auto-reconnect** (the Apple app has; see `reconnectState` in
+  `MultiplayerSession`). Godot also does not set ENet's unreliable-fragment flag on the
+  high-level `ENetMultiplayerPeer`. The dedicated server's admin panel is IPv4 only, and
+  the official VM has no IPv6 address.
 - **`carryEncounter` is declared but never read.** It's a field on `SessionRules` with
   a doc comment and a value in both presets, and nothing in the engine, app, or tests
   ever consults it. It also has no toggle in `HostSetupView`, so a host can't set it
@@ -539,8 +543,7 @@ chat and appears in nobody's roster.
 session is active, exactly like the Apple game loop; with no session it is a no-op.
 Co-located remote players appear as ordinary ships in the world, so they render through
 the normal ship arrays. Presence is announced on the first `step()` after `make_world`
-and on every system change. Not yet bridged: trade UI (invites are auto-declined and
-surfaced as events) and co-op NCB story propagation (received bits arrive as `ncb_bits`
+and on every system change. Trade is bridged (`screens/multiplayer/TradeDialog.gd`). Not yet bridged: co-op NCB story propagation (received bits arrive as `ncb_bits`
 events; the authority does not yet send them).
 
 ### Playing online on Linux / Steam Deck / Windows
@@ -776,8 +779,9 @@ Hostnames are resolved once and remembered, and at most 60 entries are queried p
 
 ### Cross-play with the Apple app
 
-**Status (2026-10-14).** The code that lets Apple devices (iPhone, iPad, Mac; Apple TV can join) and Godot players (Linux, Windows,
-Steam Deck, dedicated servers) play together over ENet, in both directions, exists and passes loopback tests. Apple<->Godot play has not yet happened on real devices.
+**Status (2026-10-14).** Done. Apple devices (iPhone, iPad, Mac; Apple TV can join) and Godot players (Linux, Windows,
+Steam Deck, dedicated servers) play together over ENet, in both directions: the Apple app can host and join Godot-compatible sessions and the
+dedicated server. It passes loopback tests and has been played iOS <-> Steam Deck on the official server. IPv6 and auto-reconnect on the Apple side were added in v1.0.0-beta.1.
 
 What exists:
 
@@ -821,12 +825,11 @@ open and other pilots share the system, the Apple scene keeps stepping with idle
   `NOVASWIFT_GODOT_CLIENT=1 NOVASWIFT_HOST_READY_FILE=/tmp/ready NOVASWIFT_HOST_SECONDS=30 NOVASWIFT_HOST_PORT=53777 swift test --filter testHostForGodotClient`
   then run a Godot client at 127.0.0.1:53777 (poll the ready file: `swift test` buffers stdout).
 - The Swift client against a live Godot dedicated server (earlier, `testAgainstLiveGodotServer`): handshake, ping/pong, leave.
-- `swift build` and a whole-app `swiftc -typecheck` of `app/NovaSwift` for macOS pass. **Not built with Xcode, not run on
-  iOS / tvOS, the UI has not been looked at, and no Apple<->Godot gameplay session (two worlds in one system) has been
-  played.**
+- `swift build` and a whole-app `swiftc -typecheck` of `app/NovaSwift` for macOS pass. An iOS <-> Steam Deck session in one
+  system was played on the official server on 2026-10-14; the heading and jump desync it showed is fixed in v1.0.0-beta.1.
 
 **Not done / limits.** DTLS (`dtls: true` servers): the vendored ENet has no DTLS, so the Apple client reads it from the
-status reply and says "Encrypted server - not supported on this device yet" instead of timing out. IPv4 only (ENet 1.3).
+status reply and says "Encrypted server - not supported on this device yet" instead of timing out. IPv6 works (dual-stack, patched ENet in `Sources/CENet`; bans and rate limits are per /64; the server has a `bind_address` option).
 No NAT traversal. A server whose status port (game port + 1) is unreachable shows "Offline" but its row still has a **Try**
 button. A borrowed plug-in set reloads the game data, so the pilot is saved and the game goes through the main menu and back
 around the swap; plug-ins installed from the catalog stay installed (they are only enabled for the session).
@@ -838,7 +841,7 @@ files and fails when they drift.
 
 **The wire spec an Apple client must match** (everything below is implemented by `ENetTransport`):
 
-1. *Transport.* UDP, ENet 1.3.x, **IPv4**, default port **53735**. Connect with **3 channels** and the ENet
+1. *Transport.* UDP, ENet 1.3.x, **IPv4 or IPv6**, default port **53735**. Connect with **3 channels** and the ENet
    *connect data* = your chosen peer id, a random 32-bit integer **>= 2** (Godot's `ENetMultiplayerPeer`
    uses it as your peer id and resets the connection if it is < 2 or already in use). The server is peer
    **1**. No ENet compression, no checksum. Godot adds no framing of its own: an ENet packet is exactly the
@@ -856,7 +859,7 @@ files and fails when they drift.
    banned | bad_request`, then drops the connection. Client timeouts: 10 s to connect, 8 s for the handshake, 20 s of
    silence; the client sends **PING** `{t, rtt}` unreliably every 2 s and the server returns **PONG** `{t}`.
 5. *Version and plug-in gate.* (`version` is informational; see Protocol changes.) Historically `version` had to equal the server's `application/config/version` exactly (the
-   Apple build must report the Godot project's version string, currently `0.7.0-beta.1`), and `proto` must be 1.
+   Apple build must report the Godot project's version string, currently `1.0.0-beta.1`), and `proto` must be 1.
    `manifest` is the `net_ready_manifest()` JSON `{plugins:[{id,name,contentHash}], signature, count}`; the server
    compares canonical forms (sorted keys), so the plug-in set and **content hashes** must be identical.
 6. *Game data.* `DATA` = `0x10` + **int32 little-endian peer id** + payload (the same `NetSession` bytes as

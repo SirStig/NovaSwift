@@ -129,12 +129,12 @@ byte counters), `LANBeaconService.broadcastBeacons`, and Linux fixes in `UDPDisc
 
 ## Status
 
-Released on GitHub as `server-v0.1.0` (2026-10-14).
+Released on GitHub as `server-v1.0.0-beta.1` (2026-10-14), for Linux x86_64, Linux arm64, macOS arm64 and Windows x86_64. Its version now matches the game's, and its update check uses semver ordering (`1.0.0-beta.1` < `1.0.0`). The previous release was `server-v0.1.0`. The maintainer runs the official server, "NovaSwift Official West", on a Google Cloud VM.
 
 Tested: config/auth/HTTP/plug-in/handshake unit tests (36); the real server against the Swift ENet client and two real headless
 Godot clients (`net_e2e_client.gd`: handshake, presence, co-located sync, chat, trade, authority handoff - PASS). Built for Linux
-arm64 and x86_64, macOS arm64, and Windows x86_64. On Windows the socket code (`NovaSwiftENet/UDPDiscovery.swift`,
+arm64 and x86_64, macOS arm64, and Windows x86_64; the Windows build runs. On Windows the socket code (`NovaSwiftENet/UDPDiscovery.swift`,
 `HTTPServer.swift`, `NetworkTools.swift`) has Winsock paths (`Sock.swift`), a polling timer replaces libdispatch read
-sources, and zips go through the system `tar.exe` because ZIPFoundation does not build there. The Linux installer was
-syntax-checked and its logic reviewed but not run on a real VM; the Docker image was not built. Not yet: TLS for the panel,
-DTLS (the vendored ENet has none), automatic outside-in reachability checks.
+sources, and zips go through the system `tar.exe` because ZIPFoundation does not build there. The Linux installer runs the
+official server (Google Cloud e2-micro, Ubuntu 22.04); the Docker image was not built. Networking is dual-stack IPv4/IPv6 (set `bind_address` under `[server]` to pin one address; IPv6 bans and rate limits apply per /64). Not yet: TLS for the panel,
+DTLS (the vendored ENet has none), IPv6 for the admin panel (IPv4 only), automatic outside-in reachability checks.
