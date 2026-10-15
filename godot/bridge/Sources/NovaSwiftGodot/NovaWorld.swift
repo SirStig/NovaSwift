@@ -715,12 +715,25 @@ class NovaWorld: Node2D {
         return renderAngle(of: p)
     }
 
+    /// While docked the pilot record, not the parked flight ship, owns the tank and hull (refuelling,
+    /// repairs and purchases change `pilot`), so the status bar that stays up over the spaceport reads
+    /// these. Same capping as the Apple `syncHUDFromPilotState`; nil in flight.
+    private func dockedStats() -> (fuel: Double, maxFuel: Double, shield: Double, maxShield: Double,
+                                   armor: Double, maxArmor: Double)? {
+        guard dockedSpobID != nil, let galaxy, let lo = PilotEconomy.loadout(pilot, galaxy: galaxy) else { return nil }
+        return (pilot.fuel.map { min($0, lo.maxFuel) } ?? lo.maxFuel, lo.maxFuel,
+                pilot.shield.map { min($0, lo.maxShield) } ?? lo.maxShield, lo.maxShield,
+                pilot.armor.map { min($0, lo.maxArmor) } ?? lo.maxArmor, lo.maxArmor)
+    }
+
     @Callable(autoSnakeCase: true) func playerShieldFraction() -> Double {
+        if let d = dockedStats() { return d.maxShield > 0 ? max(0, min(1, d.shield / d.maxShield)) : 0 }
         guard let p = world?.player, p.maxShield > 0 else { return 0 }
         return max(0, min(1, p.shield / p.maxShield))
     }
 
     @Callable(autoSnakeCase: true) func playerArmorFraction() -> Double {
+        if let d = dockedStats() { return d.maxArmor > 0 ? max(0, min(1, d.armor / d.maxArmor)) : 0 }
         guard let p = world?.player, p.maxArmor > 0 else { return 0 }
         return max(0, min(1, p.armor / p.maxArmor))
     }
@@ -2061,7 +2074,10 @@ class NovaWorld: Node2D {
     @Callable(autoSnakeCase: true) func hasGame() -> Bool { game != nil }
 
     /// The player hull's `shïp` id, or -1.
-    @Callable(autoSnakeCase: true) func playerShipType() -> Int { world?.player.shipTypeID ?? -1 }
+    /// The pilot's hull while docked (a shipyard purchase applies at once), the flight ship's otherwise.
+    @Callable(autoSnakeCase: true) func playerShipType() -> Int {
+        dockedSpobID != nil ? pilot.shipType : (world?.player.shipTypeID ?? -1)
+    }
 
     /// A hull's display name, or "" if unknown / no data.
     @Callable(autoSnakeCase: true) func shipTypeName(shipType: Int) -> String {
@@ -5700,10 +5716,14 @@ class NovaWorld: Node2D {
     /// is whole hyperjumps (ïntf fuelFull), `full..full+partial` the remainder
     /// (fuelPartial). `[0, 0]` with no world.
     @Callable(autoSnakeCase: true) func classicFuelBar() -> PackedFloat64Array {
-        guard let p = world?.player, p.maxFuel > 0 else { return PackedFloat64Array([0, 0]) }
-        let jumps = Int((p.fuel / ShipFuel.perJump).rounded(.down))
-        let s = ClassicUIGeometry.fuelSplit(fuelFraction: max(0, min(1, p.fuel / p.maxFuel)),
-                                            jumps: jumps, maxFuelUnits: p.maxFuel)
+        let fuel: Double, maxFuel: Double
+        if let d = dockedStats() { (fuel, maxFuel) = (d.fuel, d.maxFuel) }   // refuelling shows while docked
+        else if let p = world?.player { (fuel, maxFuel) = (p.fuel, p.maxFuel) }
+        else { return PackedFloat64Array([0, 0]) }
+        guard maxFuel > 0 else { return PackedFloat64Array([0, 0]) }
+        let jumps = Int((fuel / ShipFuel.perJump).rounded(.down))
+        let s = ClassicUIGeometry.fuelSplit(fuelFraction: max(0, min(1, fuel / maxFuel)),
+                                            jumps: jumps, maxFuelUnits: maxFuel)
         return PackedFloat64Array([s.full, s.partial])
     }
 

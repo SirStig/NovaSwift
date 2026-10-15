@@ -640,17 +640,40 @@ func _ready() -> void:
 	_wire_focus()
 	fit()
 	get_viewport().size_changed.connect(fit)
+	var area := _fit_area()
+	if area != null:
+		area.resized.connect(fit)
 	focus_first.call_deferred()
 
 
-## Scale crisply and centre in the viewport (call again after changing the window).
+## The full-rect Control the dialog is placed in (its modal host, or the spaceport root), or null
+## to use the whole viewport. The spaceport narrows its root to keep the status bar visible.
+func _fit_area() -> Control:
+	var p := get_parent() as Control
+	if p != null and p.anchor_left == 0.0 and p.anchor_top == 0.0 and p.anchor_right == 1.0 and p.anchor_bottom == 1.0:
+		return p
+	return null
+
+
+## Scale crisply and centre in the area it sits in (call again after changing the window).
 func fit() -> void:
 	if not is_inside_tree():
 		return
-	var vp := get_viewport_rect().size
+	var screen := get_viewport_rect().size
+	var vp := screen
+	var area := _fit_area()
+	if area != null and area.size.x > 0.0 and area.size.y > 0.0:
+		vp = area.size
 	var s := 1.0
 	if fit_to_viewport and nova != null and nova.has_method("classic_crisp_scale"):
-		s = float(nova.classic_crisp_scale(window_size.x, window_size.y, vp.x, vp.y))
+		# The scale step comes from the whole screen (the original laid its dialogs out against
+		# the full 1024x768 screen, status bar included); the area only caps it when the window
+		# wouldn't fit there, so the status bar's share of the width doesn't cost the spaceport a
+		# whole scale step.
+		s = float(nova.classic_crisp_scale(window_size.x, window_size.y, screen.x, screen.y))
+		var fit := minf(vp.x / float(window_size.x), vp.y / float(window_size.y))
+		if fit < s:
+			s = fit if fit < 1.0 else maxf(1.0, floorf(fit / 0.5) * 0.5)
 	scale = Vector2(s, s)
 	position = ((vp - Vector2(window_size) * s) / 2.0).round()
 
