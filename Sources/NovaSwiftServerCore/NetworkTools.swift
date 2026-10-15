@@ -94,18 +94,21 @@ public enum NetworkTools {
         return send(req, timeout: timeout)
     }
 
+    /// One long-lived session. On Linux, deallocating a URLSession (swift-corelibs-foundation) can trip
+    /// "_MultiHandle deallocated with non-zero retain count" and abort the process, so never make one per request.
+    private static let session = URLSession(configuration: .ephemeral)
+
     static func send(_ req: URLRequest, timeout: TimeInterval) -> Data? {
         let sem = DispatchSemaphore(value: 0)
         var result: Data?
-        let cfg = URLSessionConfiguration.ephemeral
-        cfg.timeoutIntervalForRequest = timeout
-        let session = URLSession(configuration: cfg)
-        session.dataTask(with: req) { d, r, _ in
+        var req = req
+        req.timeoutInterval = timeout
+        let task = session.dataTask(with: req) { d, r, _ in
             if let h = r as? HTTPURLResponse, (200...299).contains(h.statusCode) { result = d }
             sem.signal()
-        }.resume()
-        _ = sem.wait(timeout: .now() + timeout + 2)
-        session.invalidateAndCancel()
+        }
+        task.resume()
+        if sem.wait(timeout: .now() + timeout + 2) == .timedOut { task.cancel() }
         return result
     }
 

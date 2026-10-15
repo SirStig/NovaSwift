@@ -40,12 +40,16 @@ public final class ServerDirectoryClient {
         self.cacheURL = cacheURL
         self.now = now
         self.fetch = fetcher ?? { req, done in
-            let cfg = URLSessionConfiguration.ephemeral
-            cfg.timeoutIntervalForRequest = 12
-            URLSession(configuration: cfg).dataTask(with: req) { d, r, e in done(d, r as? HTTPURLResponse, e) }.resume()
+            var req = req
+            req.timeoutInterval = 12
+            Self.session.dataTask(with: req) { d, r, e in done(d, r as? HTTPURLResponse, e) }.resume()
         }
         loadCache()
     }
+
+    /// Shared, never deallocated: a per-request URLSession can abort the process on Linux when it is freed
+    /// ("_MultiHandle deallocated with non-zero retain count", swift-corelibs-foundation).
+    private static let session = URLSession(configuration: .ephemeral)
 
     public static var defaultCacheURL: URL? {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?

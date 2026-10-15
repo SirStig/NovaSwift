@@ -150,7 +150,9 @@ enum Sock {
     }
 
     private static func timeval(_ seconds: Double) -> timeval {
-        Foundation.timeval(tv_sec: Int(seconds), tv_usec: Int32((seconds - Double(Int(seconds))) * 1_000_000))
+        // Field widths differ per platform (tv_usec: Int32 on Darwin, Int on Linux; both 32-bit on Windows).
+        Foundation.timeval(tv_sec: numericCast(Int(seconds)),
+                           tv_usec: numericCast(Int((seconds - Double(Int(seconds))) * 1_000_000)))
     }
 
     static func setTimeouts(_ fd: Int32, seconds: Double) {
