@@ -91,7 +91,7 @@
     {
      "name": "Standalone dedicated server with web admin panel",
      "status": "done",
-     "where": "Sources/NovaSwiftServer, Sources/NovaSwiftServerCore; released as server-v0.1.0 (Linux, macOS; Windows untested)"
+     "where": "Sources/NovaSwiftServer, Sources/NovaSwiftServerCore; released as server-v1.0.0-beta.1 (Linux, macOS, Windows)"
     },
     {
      "name": "Apple to desktop cross-play",
@@ -771,17 +771,17 @@
     {
      "name": "macOS package (arm64, ad-hoc signed)",
      "status": "done",
-     "where": "scripts/package-macos.sh; released in v0.7.0-beta.2 (not notarised)"
+     "where": "scripts/package-macos.sh; released in v1.0.0-beta.1 (not notarised)"
     },
     {
      "name": "Linux x86_64 and Steam Deck package",
      "status": "done",
-     "where": "scripts/package-linux.sh; released in v0.7.0-beta.2, played on real Linux hardware and Steam Deck"
+     "where": "scripts/package-linux.sh; released in v1.0.0-beta.1, played on real Linux hardware and Steam Deck"
     },
     {
      "name": "Windows package",
      "status": "done",
-     "where": "scripts/package-windows.ps1; built on Windows 11 with Swift 6.3.3 and run with EV Nova CE data; released in v0.7.0-beta.2 (not code-signed)"
+     "where": "scripts/package-windows.ps1; built on Windows 11 with Swift 6.3.3 and run with EV Nova CE data; released in v1.0.0-beta.1 (not code-signed)"
     },
     {
      "name": "Release signing tooling",
@@ -871,12 +871,12 @@
     {
      "name": "LAN, direct IP and public-server multiplayer",
      "status": "done",
-     "where": "godot/net/, godot/screens/multiplayer/; released in v0.7.0-beta.2, played across two machines"
+     "where": "godot/net/, godot/screens/multiplayer/; released in v1.0.0-beta.1, played across two machines"
     },
     {
      "name": "Plug-in editor on Linux and Windows",
      "status": "partial",
-     "where": "godot/editor/; in v0.7.0-beta.2, early (undo does not clear the unsaved mark)"
+     "where": "godot/editor/; in v1.0.0-beta.1, early (undo does not clear the unsaved mark)"
     },
     {
      "name": "HD graphics packs",
