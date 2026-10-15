@@ -3,9 +3,9 @@
 <rect width="592" height="726" rx="10" fill="#0d0a0e"/>
 <text x="16" y="32" class="h1">Beyond the original: NovaSwift's own features, one square per task</text>
 <rect x="16" y="46" width="9" height="9" fill="#3fb950"/>
-<text x="30" y="55" class="lg">Done (165)</text>
+<text x="30" y="55" class="lg">Done (166)</text>
 <rect x="110" y="46" width="9" height="9" fill="#e3a52b"/>
-<text x="124" y="55" class="lg">Partly done (25)</text>
+<text x="124" y="55" class="lg">Partly done (24)</text>
 <rect x="241" y="46" width="9" height="9" fill="none" stroke="#8d807c"/>
 <text x="255" y="55" class="lg">Planned (28)</text>
 <text x="16" y="92" class="gh">Multiplayer co-op</text><text x="576" y="92" class="gn" text-anchor="end">9 of 14 done</text>
@@ -145,7 +145,7 @@
 <rect x="231" y="473" width="12" height="12" fill="#3fb950"><title>Native Apple builds: iPhone and iPad — Done</title></rect>
 <rect x="246" y="473" width="12" height="12" fill="#3fb950"><title>Native Apple builds: Mouse aiming on Mac — Done</title></rect>
 <rect x="261" y="473" width="12" height="12" fill="#3fb950"><title>Native Apple builds: Shared portable Swift core — Done</title></rect>
-<text x="16" y="512" class="gh">Godot port for Linux and Windows</text><text x="576" y="512" class="gn" text-anchor="end">26 of 38 done</text>
+<text x="16" y="512" class="gh">Godot port for Linux and Windows</text><text x="576" y="512" class="gn" text-anchor="end">27 of 38 done</text>
 <rect x="216" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: SwiftGodot bridge and build script — Done</title></rect>
 <rect x="231" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Flight with real-data sprites — Done</title></rect>
 <rect x="246" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: HUD, radar, targeting — Done</title></rect>
@@ -162,7 +162,7 @@
 <rect x="411" y="500" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Controls and targeting checklist (Tab and ` cycle, \ link cycle, route mini map) — Done</title></rect>
 <rect x="216" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: macOS package (arm64, ad-hoc signed) — Done</title></rect>
 <rect x="231" y="515" width="12" height="12" fill="#e3a52b"><title>Godot port for Linux and Windows: Linux x86_64 and Steam Deck package — Partly done</title></rect>
-<rect x="246" y="515" width="12" height="12" fill="#e3a52b"><title>Godot port for Linux and Windows: Windows package — Partly done</title></rect>
+<rect x="246" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Windows package — Done</title></rect>
 <rect x="261" y="515" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Release signing tooling — Done</title></rect>
 <rect x="276" y="515" width="12" height="12" fill="#e3a52b"><title>Godot port for Linux and Windows: Auto-updater (signed releases, Skip / Later / Update Now, rollback) — Partly done</title></rect>
 <rect x="291" y="515" width="12" height="12" fill="#e3a52b"><title>Godot port for Linux and Windows: Experimental update channel and return to stable — Partly done</title></rect>
