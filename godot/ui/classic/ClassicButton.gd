@@ -72,6 +72,11 @@ func setup(text: String, width: int, btn_style: int = Style.ART, height := 20) -
 	_face.btn = self
 	_face.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_face.set_anchors_preset(Control.PRESET_FULL_RECT)
+	# The label is drawn by hand, so it doesn't get the dialog's scale oversampling: _Face passes
+	# its on-screen scale to draw_string and redraws when that changes. Text is sampled linearly;
+	# the art (the TextureButton itself) stays nearest-filtered.
+	_face.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	_face.set_notify_transform(true)
 	add_child(_face)
 	for sig in [button_down, button_up, toggled]:
 		sig.connect(func(_a = null): _face.queue_redraw())
@@ -115,10 +120,21 @@ func _notification(what: int) -> void:
 
 class _Face extends Control:
 	var btn: TextureButton
+	var _os := 0.0
+
+	## Font oversampling for this face's on-screen size (0 = the viewport's, at 1:1).
+	func oversampling() -> float:
+		var k := snappedf(get_screen_transform().get_scale().x, 0.01)
+		return 0.0 if is_equal_approx(k, 1.0) else k
+
+	func _notification(what: int) -> void:
+		if what == NOTIFICATION_TRANSFORM_CHANGED and not is_equal_approx(oversampling(), _os):
+			queue_redraw()
 
 	func _draw() -> void:
 		if btn == null:
 			return
+		_os = oversampling()
 		var w := size.x
 		var h := size.y
 		var disabled: bool = btn.disabled
@@ -156,7 +172,7 @@ class _Face extends Control:
 		var tw := font.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		# ThreeStateButton.labelOrigin: centred, baseline = h/2 + 5.
 		draw_string(font, Vector2(roundf(w / 2.0 - tw / 2.0), floorf(h / 2.0) + 5), t,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
+			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col, 3, 0, 0, _os)
 
 	## The vector glyphs the original draws for "^ & + -" labels (2 px pen).
 	func _draw_glyph(t: String, w: float, h: float, col: Color) -> void:
@@ -200,7 +216,7 @@ class _Face extends Control:
 		var col := Color(0.35, 0.35, 0.35) if disabled else Color.BLACK
 		# baseline (top + bottom + size) / 2 - 1
 		draw_string(font, Vector2(roundf(w / 2.0 - tw / 2.0), floorf((h + fs) / 2.0) - 1), btn.label,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
+			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col, 3, 0, 0, _os)
 		if btn.is_default and not Theme_.show_focus(btn):
 			_dotted_rect(Rect2(3, 3, w - 6, h - 6), Color.BLACK)
 
@@ -213,7 +229,7 @@ class _Face extends Control:
 			draw_line(Vector2(3, 3), Vector2(14, 14), Color.BLACK, 1.0)
 			draw_line(Vector2(14, 3), Vector2(3, 14), Color.BLACK, 1.0)
 		draw_string(T.body_font(), Vector2(20, 13), btn.label, HORIZONTAL_ALIGNMENT_LEFT, w - 20, 12,
-			Color(0.35, 0.35, 0.35) if disabled else Color.BLACK)
+			Color(0.35, 0.35, 0.35) if disabled else Color.BLACK, 3, 0, 0, _os)
 
 	func _dotted_rect(r: Rect2, col: Color) -> void:
 		var x := r.position.x
