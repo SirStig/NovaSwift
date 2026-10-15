@@ -36,7 +36,7 @@ extension WorldSnapshot {
                 government: ship.government, name: ship.name,
                 x: ship.position.x, y: ship.position.y,
                 vx: ship.velocity.x, vy: ship.velocity.y,
-                angle: ship.angle, shield: ship.shield, armor: ship.armor,
+                angle: wireAngle(ship.angle), shield: ship.shield, armor: ship.armor,
                 control: control))
         }
         // Live shots, so co-located clients see fire (visual only — damage already
@@ -73,4 +73,13 @@ extension WorldSnapshot {
         return WorldSnapshot(tick: tick, ackInputSeq: ackInputSeq, ships: ships,
                              shots: shots, beams: beams, effects: effects)
     }
+}
+
+/// The engine never wraps a ship's heading (each turn step just adds), so a ship that keeps circling one way grows
+/// past the receiver's ±1000 rad plausibility limit and gets dropped. Send it wrapped to (-π, π].
+func wireAngle(_ a: Double) -> Double {
+    guard a.isFinite else { return a }
+    var r = a.truncatingRemainder(dividingBy: 2 * .pi)
+    if r > .pi { r -= 2 * .pi } else if r <= -.pi { r += 2 * .pi }
+    return r
 }

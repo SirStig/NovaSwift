@@ -465,4 +465,17 @@ final class SystemSyncCoordinatorTests: XCTestCase {
         XCTAssertNil(frame.pose)
         XCTAssertTrue(frame.intent.turnLeft)
     }
+
+    func testWireAngleWrapsUnboundedHeadings() {
+        // A ship circling one way for minutes accumulates an angle beyond the ±1000 rad receiver limit.
+        let world = World(player: Ship(name: "A", stats: combatStats()))
+        world.player.angle = 2_000.25
+        let snap = WorldSnapshot.build(from: world, localPlayerID: "A", tick: 1, ackInputSeq: 0)
+        let a = snap.ships[0].angle
+        XCTAssertLessThanOrEqual(abs(a), .pi)
+        XCTAssertEqual(cos(a), cos(2_000.25), accuracy: 1e-9)
+        XCTAssertTrue(NetValidation.valid(snap.ships[0]))
+        let pose = SystemSyncCoordinator(localPlayerID: "A").input(from: ControlIntent(), tick: 1, seq: 1, ship: world.player).pose!
+        XCTAssertTrue(NetValidation.valid(pose))
+    }
 }

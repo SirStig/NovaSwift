@@ -47,6 +47,11 @@ func blocks_flight() -> bool:
 	return _map != null and _map.is_open()
 
 
+# The map's chart cursor handed the pad to the UI pointer (to reach the frame's buttons).
+func map_pad_outside() -> bool:
+	return _map != null and _map.pad_outside()
+
+
 # Flight-time hotkeys: M / Back opens the map, J / D-pad up engages the hyperdrive.
 func process_hotkeys() -> void:
 	if Input.is_action_just_pressed("galaxy_map"):

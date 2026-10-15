@@ -449,7 +449,10 @@ func _process(delta: float) -> void:
 			_drain_events_to_log(0.0)
 			queue_redraw()
 			return
-	nova.set_intent(_held("turn_left"), _held("turn_right"), _held("thrust"), _held("reverse"),
+	# Thrust / reverse ignore a left stick tilted mostly sideways (a hard turn grazing the top of the gate).
+	var thrust: bool = _held("thrust") and not Controls.stick_cone_blocks("thrust")
+	var reverse: bool = _held("reverse") and not Controls.stick_cone_blocks("reverse")
+	nova.set_intent(_held("turn_left"), _held("turn_right"), thrust, reverse,
 		_held("afterburner"), _held("fire_primary"), _held("fire_secondary"))
 	nova.set_self_destruct(_held("self_destruct"))   # Alt-−, held: the five-second countdown
 	var aim: float = Controls.aim_heading()
@@ -489,7 +492,7 @@ func _cursor_state(flying: bool) -> void:
 	if pc == null:
 		return
 	pc.set_suppressed("flight", flying)
-	pc.set_suppressed("map", _nav != null and _nav.blocks_flight())
+	pc.set_suppressed("map", _nav != null and _nav.blocks_flight() and not _nav.map_pad_outside())
 	pc.set_suppressed("intro", _shell != null and _shell.intro != null)
 
 

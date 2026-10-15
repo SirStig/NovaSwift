@@ -210,7 +210,7 @@ public final class SystemSyncCoordinator {
     /// carrying our ship's predicted pose when given.
     public func input(from intent: ControlIntent, tick: UInt32, seq: UInt32, ship: Ship? = nil) -> InputFrame {
         let pose = ship.map {
-            ShipPose(x: $0.position.x, y: $0.position.y, vx: $0.velocity.x, vy: $0.velocity.y, angle: $0.angle)
+            ShipPose(x: $0.position.x, y: $0.position.y, vx: $0.velocity.x, vy: $0.velocity.y, angle: wireAngle($0.angle))
         }
         return InputFrame(tick: tick, seq: seq, intent: NetIntent(intent), pose: pose)
     }

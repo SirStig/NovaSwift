@@ -133,9 +133,31 @@ static func on_nav_changed(cb: Callable) -> void:
 		_tracker.changed.connect(cb)
 
 
-## Should a focused control draw its focus indication right now?
+## Should a focused control draw its focus indication right now? The control under the gamepad UI pointer
+## (ui/PadCursor.gd) draws it too, without taking focus: focus_entered handlers select rows, switch tabs and
+## start editing fields, and hovering must never click anything.
 static func show_focus(c: Control) -> bool:
-	return nav_active and c.has_focus()
+	return nav_active and (c.has_focus() or is_same(c, pad_hover))
+
+
+## The control under the gamepad UI pointer, or null (a Variant: it may be freed under the pointer).
+static var pad_hover: Variant = null
+
+
+static func set_pad_hover(c: Control) -> void:
+	if is_same(c, pad_hover):
+		return
+	var old: Variant = pad_hover
+	pad_hover = c
+	for x: Variant in [old, c]:
+		if x == null or not is_instance_valid(x):
+			continue
+		var ctl: Control = x
+		if ctl.has_method("_sync_focus"):
+			ctl.call("_sync_focus")
+		elif ctl.has_method("_sync"):
+			ctl.call("_sync")
+		ctl.queue_redraw()
 
 
 # --- fonts ---------------------------------------------------------------------

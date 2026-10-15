@@ -48,6 +48,9 @@ final class GameControllerInput {
     /// Analog dead zone (the player's "Stick dead zone" setting) — how far a
     /// stick must move off centre before it registers. Pushed from the scene.
     var deadzone: Float = 0.15
+    /// Left-stick thrust / reverse cone: 55° either side of straight up/down
+    /// (tan 55°). Same cone as the Godot frontend (`Controls.THRUST_CONE_DEG`).
+    static let thrustConeSlope: Float = 1.428
 
     /// Live controller map. Read each poll so a rebind in Settings applies
     /// immediately; set by `GameHost` and refreshed by the container.
@@ -160,8 +163,12 @@ final class GameControllerInput {
         let dz = max(0.05, deadzone)
         if lx < -dz { c.turnLeft = true }
         if lx > dz { c.turnRight = true }
-        if ly > dz { c.thrust = true }
-        if ly < -dz { c.reverse = true }
+        // Thrust / reverse only within the thrust cone of straight up / down, so
+        // a hard sideways turn that drifts toward the top of the stick's gate
+        // doesn't also fire the engines.
+        let inCone = abs(lx) <= abs(ly) * Self.thrustConeSlope
+        if ly > dz, inCone { c.thrust = true }
+        if ly < -dz, inCone { c.reverse = true }
 
         // Right stick (fixed): absolute aim (magnitude past deadzone).
         let rx = pad.rightThumbstick.xAxis.value

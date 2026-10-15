@@ -25,6 +25,7 @@ extends CanvasLayer
 
 const Prefs = preload("res://Prefs.gd")
 const Controls = preload("res://Controls.gd")
+const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
 
 const LAYER := 400                    # above PadKeyboard (200) and every screen
 const SPEED_VIEWPORT_HEIGHTS := 1.1   # full-tilt speed, in viewport heights per second
@@ -238,6 +239,7 @@ func _process(delta: float) -> void:
 	var target_alpha := 1.0 if active else 0.0
 	_alpha = move_toward(_alpha, target_alpha, delta * 8.0)
 	if not active:
+		ClassicTheme.set_pad_hover(null)
 		_scroll_acc = Vector2.ZERO
 		if _a_held:
 			_a_held = false
@@ -400,24 +402,24 @@ func _update_hover(moved: bool) -> void:
 		_send_motion(Vector2.ZERO)
 	var target: Control = _clickable_at()
 	_over_clickable = target != null
+	ClassicTheme.set_pad_hover(target if target != _pointer else null)
 	if moved:
 		_focus_follow(target)
 
 
-## Keyboard / pad focus follows the pointer, so the "selected" highlight is always what is under it and pad A
-## (ui_accept) can never press a control the pointer has left. Over empty space focus is lifted (parked) and the
-## next d-pad press resumes from it.
+## A moving pointer lifts keyboard / pad focus (parked; the next d-pad press resumes from it), so no stale focus
+## highlight lingers and pad A (ui_accept) can never press a control the pointer has left. It never GRABS focus
+## for what it hovers: many screens act on focus_entered (outfitter / shipyard rows select, Settings tabs switch,
+## a search field starts editing), and hovering must not click anything. The pointer's own hover (synthetic mouse
+## motion) highlights the control; A clicks it.
 func _focus_follow(target: Control) -> void:
 	var fo: Control = get_viewport().gui_get_focus_owner()
-	if target != null and target != _pointer and target.focus_mode != Control.FOCUS_NONE:
-		if fo != target:
-			_focus_from_pointer = true
-			target.grab_focus()
-			_focus_from_pointer = false
-		_parked_focus = null
-	elif target == null and fo != null and not (fo is LineEdit and (fo as LineEdit).editable):
-		_parked_focus = fo
-		fo.release_focus()
+	if fo == null or fo == target:
+		return
+	if (fo is LineEdit and (fo as LineEdit).editable) or (fo is TextEdit and (fo as TextEdit).editable):
+		return   # a field being typed into keeps the keyboard
+	_parked_focus = fo
+	fo.release_focus()
 
 
 # --- hit testing -----------------------------------------------------------------------------------------
@@ -504,6 +506,20 @@ func draw_pointer(ci: CanvasItem) -> void:
 	ci.draw_circle(Vector2.ZERO, r, Color(AMBER.r, AMBER.g, AMBER.b, a * lerpf(0.15, 0.3, _hover_anim)))
 	ci.draw_arc(Vector2.ZERO, r - line * 0.5, 0.0, TAU, 48, Color(AMBER.r, AMBER.g, AMBER.b, a), line, true)
 	ci.draw_circle(Vector2.ZERO, 2.5, Color(AMBER.r, AMBER.g, AMBER.b, a))
+
+
+## Put the pointer at viewport position `p` (the galaxy map hands the stick over here when its chart cursor runs
+## off the chart, so the frame's buttons are reachable).
+func place_at(p: Vector2) -> void:
+	last_was_pad = true
+	_have_pos = true
+	var vp := get_viewport().get_visible_rect().size
+	var q := p.clamp(Vector2.ZERO, vp)
+	var rel := q - _pos
+	_pos = q
+	_glide_t = -1.0
+	_send_motion(rel)
+	_update_hover(true)
 
 
 # --- testing hooks ---------------------------------------------------------------------------------------

@@ -125,6 +125,10 @@ var _zoom := 0.8
 var _cursor := Vector2.ZERO      # screen space
 var _hover := -1
 var _pad_mode := false           # the pad last moved the cursor (drives hint text)
+# The stick pushed the cursor off the chart: the gamepad UI cursor (ui/PadCursor.gd) takes over so the frame's
+# buttons (Done, Find, Clear Route, zoom...) are reachable; it hands back once the pointer is well inside again.
+var _pad_outside := false
+const HANDOFF_INSET := 12.0      # hysteresis: how far inside the chart the UI pointer must come to hand back
 var _auto_route := bool(Prefs.get_value("gameplay", "auto_route_plotting"))   # Settings > Automatic route plotting; the map key still toggles it
 var _dragging := false
 # Left button: a press that moves past DRAG_SLOP pans (Apple's DragGesture); one
@@ -187,6 +191,7 @@ func open(silent: bool = false) -> void:
 	_cursor = _canvas.size * 0.5
 	_hover = -1
 	_pad_mode = _pad_connected()
+	_pad_outside = false
 	_borders_key = ""
 	visible = true
 	if not silent:
@@ -216,6 +221,7 @@ func open_gate() -> void:
 	_cursor = _canvas.size * 0.5
 	_hover = -1
 	_pad_mode = _pad_connected()
+	_pad_outside = false
 	_borders_key = ""
 	visible = true
 	nova.sound_beep(3)
@@ -226,6 +232,7 @@ func close() -> void:
 	if not visible:
 		return
 	visible = false
+	_pad_outside = false
 	if not _gate.is_empty():
 		nova.gate_picker_cancel()
 		_gate = {}
@@ -340,17 +347,22 @@ func _process(delta: float) -> void:
 
 	# Stick cursor with magnetic snapping.
 	var v := Input.get_vector("map_cursor_left", "map_cursor_right", "map_cursor_up", "map_cursor_down", 0.2)
+	if _pad_outside:
+		v = Vector2.ZERO   # the UI pointer is out on the frame's buttons; the stick is its
+		_reclaim_from_pad_cursor()
 	if v != Vector2.ZERO:
 		_pad_mode = true
-		_cursor += v * CURSOR_SPEED * delta
+		var raw := _cursor + v * CURSOR_SPEED * delta
 		var size := _canvas.size
 		if _cursor.x < EDGE_PAN and v.x < 0.0 or _cursor.x > size.x - EDGE_PAN and v.x > 0.0:
 			_center.x += v.x * PAN_SPEED * delta / _zoom
 		if _cursor.y < EDGE_PAN and v.y < 0.0 or _cursor.y > size.y - EDGE_PAN and v.y > 0.0:
 			_center.y += v.y * PAN_SPEED * delta / _zoom
-		_cursor = _cursor.clamp(Vector2.ZERO, size)
+		_cursor = raw.clamp(Vector2.ZERO, size)
+		if raw != _cursor:
+			_hand_to_pad_cursor(raw)
 		moved = true
-	if _pad_mode:
+	if _pad_mode and not _pad_outside:
 		var near := _nearest(_cursor, SNAP_RADIUS)
 		if near != -1:
 			# Weak pull while the stick is held (so it can leave), strong at rest.
@@ -368,6 +380,14 @@ func _process(delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if not visible:
 		return
+	# The UI pointer is out on the frame: pad A / Y belong to it (it clicks the button under it); the d-pad
+	# brings the chart cursor back.
+	if _pad_outside and event is InputEventJoypadButton:
+		var bi: int = (event as InputEventJoypadButton).button_index
+		if bi in [JOY_BUTTON_DPAD_LEFT, JOY_BUTTON_DPAD_RIGHT, JOY_BUTTON_DPAD_DOWN]:
+			_pad_outside = false
+		elif event.is_action_pressed("map_select") or event.is_action_pressed("map_extend"):
+			return
 
 	# The Find box owns the keyboard while it is up (Esc closes just the box).
 	if _find_box.visible:
@@ -818,7 +838,7 @@ func _draw_classic(c: Control, size: Vector2) -> void:
 		if known and _names.get(id, "") != "" and (show_labels or id == selected):
 			c.draw_string(font, p + Vector2(7, 4), _names[id], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color.WHITE)
 	_draw_mission_marks(c, false)
-	if _pad_mode:
+	if _pad_mode and not _pad_outside:
 		c.draw_arc(_cursor, 10.0, 0.0, TAU, 24, Color(0.4, 0.85, 1.0, 0.9), 1.0, true)
 
 
@@ -920,7 +940,7 @@ func _on_draw() -> void:
 	_draw_mission_marks(c, true)
 
 	# Cursor reticle (pad / mouse).
-	if _pad_mode:
+	if _pad_mode and not _pad_outside:
 		c.draw_arc(_cursor, 10.0, 0.0, TAU, 24, Color(0.4, 0.85, 1.0, 0.9), 1.5, true)
 		c.draw_line(_cursor + Vector2(-16, 0), _cursor + Vector2(-6, 0), Color(0.4, 0.85, 1.0), 1.5)
 		c.draw_line(_cursor + Vector2(16, 0), _cursor + Vector2(6, 0), Color(0.4, 0.85, 1.0), 1.5)
@@ -1197,6 +1217,47 @@ func _draw_bar(c: Control) -> void:
 
 
 ## Viewport position -> the starmap canvas's own space (identity when full-screen).
+## The stick ran the chart cursor off the chart's edge (at `raw`, chart-local): hand the pad to the UI pointer,
+## placed just past that edge, unless the chart already fills the screen on that side (nothing out there to
+## reach; the edge keeps panning instead).
+func _hand_to_pad_cursor(raw: Vector2) -> void:
+	var pc: Node = get_node_or_null("/root/PadCursor")
+	if pc == null or not pc.has_method("place_at"):
+		return
+	var xf := _canvas.get_global_transform()
+	var gr := Rect2(xf * Vector2.ZERO, _canvas.size * xf.get_scale())
+	var vp := get_viewport().get_visible_rect().size
+	var room := (raw.x < 0.0 and gr.position.x > 4.0) or (raw.x > _canvas.size.x and gr.end.x < vp.x - 4.0) \
+			or (raw.y < 0.0 and gr.position.y > 4.0) or (raw.y > _canvas.size.y and gr.end.y < vp.y - 4.0)
+	if not room:
+		return
+	_pad_outside = true
+	_hover = -1
+	var edge := raw.clamp(Vector2.ZERO, _canvas.size)
+	pc.place_at(xf * edge + (raw - edge).normalized() * 8.0)
+	_canvas.queue_redraw()
+
+
+## While the UI pointer is out on the frame: once it comes back well inside the chart, the chart cursor
+## picks up where it is.
+func _reclaim_from_pad_cursor() -> void:
+	var pc: Node = get_node_or_null("/root/PadCursor")
+	if pc == null:
+		_pad_outside = false
+		return
+	var lp := _local(pc.cursor_position())
+	if Rect2(Vector2.ZERO, _canvas.size).grow(-HANDOFF_INSET).has_point(lp):
+		_pad_outside = false
+		_pad_mode = true
+		_cursor = lp
+		_canvas.queue_redraw()
+
+
+## The pad's stick currently drives the UI pointer out on the frame (Main lifts the PadCursor "map" hold).
+func pad_outside() -> bool:
+	return visible and _pad_outside
+
+
 func _local(p: Vector2) -> Vector2:
 	return _canvas.get_global_transform().affine_inverse() * p
 

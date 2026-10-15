@@ -75,6 +75,9 @@ static var stick_deadzone := STICK_DEADZONE
 const AIM_THRESHOLD := 0.5
 # Analog triggers count as "held" past this, as GameControllerInput does (0.1).
 const TRIGGER_THRESHOLD := 0.1
+# Left stick thrust / reverse only count within this many degrees of straight up / down, so a hard sideways
+# turn that drifts toward the top of the stick's gate doesn't also fire the engines (same cone as the Apple app).
+const THRUST_CONE_DEG := 55.0
 
 # action -> { keys: [Key], alt_keys: [Key] (Alt chords), shift_keys: [Key] (Shift
 # chords), buttons: [JoyButton], axes: [[JoyAxis, sign]] }. Godot matches a chord's
@@ -405,6 +408,41 @@ static func active_wheel_triggers() -> Array:
 		if not held:
 			out.append(int(t))
 	return out
+
+
+## True when `action` (thrust / reverse) reads as held ONLY because the left stick is tilted mostly sideways
+## (outside THRUST_CONE_DEG of its axis). Keys, buttons, triggers and a stick inside the cone all still count.
+static func stick_cone_blocks(action: String) -> bool:
+	var spec: Dictionary = effective(action)
+	var stick_signs: Array = []
+	for pair in spec.get("axes", []):
+		if int(pair[0]) == JOY_AXIS_LEFT_Y:
+			stick_signs.append(float(pair[1]))
+	if stick_signs.is_empty():
+		return false
+	for key in spec.get("keys", []) + spec.get("alt_keys", []) + spec.get("shift_keys", []):
+		if Input.is_physical_key_pressed(key):
+			return false
+	var cone: float = tan(deg_to_rad(THRUST_CONE_DEG))
+	var sideways := false   # some pad's left stick is pushed this way but outside the cone
+	for pad: int in Input.get_connected_joypads():
+		for button in spec.get("buttons", []):
+			if Input.is_joy_button_pressed(pad, button):
+				return false
+		for pair in spec.get("axes", []):
+			var axis: int = int(pair[0])
+			var along: float = Input.get_joy_axis(pad, axis) * float(pair[1])
+			if axis == JOY_AXIS_LEFT_Y:
+				if along > stick_deadzone:
+					if absf(Input.get_joy_axis(pad, JOY_AXIS_LEFT_X)) <= along * cone:
+						return false
+					sideways = true
+			elif axis == JOY_AXIS_TRIGGER_LEFT or axis == JOY_AXIS_TRIGGER_RIGHT:
+				if along > TRIGGER_THRESHOLD:
+					return false
+			elif along > stick_deadzone:
+				return false
+	return sideways   # held by nothing physical we can see (Input.action_press, touch): never block
 
 
 static func register() -> void:

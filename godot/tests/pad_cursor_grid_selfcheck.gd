@@ -1,5 +1,6 @@
 extends SceneTree
-# Focus follows the pad cursor across a 3x3 grid; A over empty space presses nothing (the 2026-10-13
+const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
+# The pad cursor's hover highlight follows it across a 3x3 grid without taking focus; A over empty space presses nothing (the 2026-10-13
 # "stuck selected on one control" bug). Run windowed too: a Retina window has a 2x final transform.
 var frames := 0
 var buttons: Array = []
@@ -18,6 +19,7 @@ func _process(_d: float) -> bool:
 		for i in 9:
 			var b := Button.new()
 			b.text = str(i)
+			b.name = "B%d" % i
 			b.size = Vector2(80, 40)
 			b.position = Vector2(vp.x * (0.15 + 0.35 * (i % 3)), vp.y * (0.15 + 0.35 * (i / 3)))
 			b.pressed.connect(func(): presses.append(i))
@@ -27,10 +29,19 @@ func _process(_d: float) -> bool:
 	if frames >= 6 and frames < 15:
 		var b: Button = buttons[frames - 6]
 		pc.debug_move_to(b.position + b.size * 0.5)
+		# Hover never grabs focus (focus_entered handlers select / switch tabs / start editing); it lifts any
+		# focus and marks the hovered control for the focus highlight instead.
 		var fo: Control = root.gui_get_focus_owner()
-		if fo != b:
+		if fo != null and fo != b:
 			bad += 1
-			print("FAIL focus not following at ", frames - 6, " fo=", fo)
+			print("FAIL hover left focus on ", fo, " at ", frames - 6)
+
+	if frames >= 7 and frames < 16:
+		# Hover lands a frame later (Godot updates the hovered control when it processes the motion).
+		var hb: Button = buttons[frames - 7]
+		if not is_same(ClassicTheme.pad_hover, hb):
+			bad += 1
+			print("FAIL hover highlight not on button ", frames - 7, " got ", ClassicTheme.pad_hover)
 	if frames == 16:
 		pc.debug_move_to(Vector2(5, 5))
 		if root.gui_get_focus_owner() != null:
