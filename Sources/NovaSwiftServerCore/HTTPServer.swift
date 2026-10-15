@@ -1,9 +1,4 @@
 import Foundation
-#if canImport(Darwin)
-import Darwin
-#elseif canImport(Glibc)
-import Glibc
-#endif
 
 public struct HTTPRequest {
     public var method: String
@@ -109,25 +104,17 @@ public final class HTTPServer {
     public private(set) var boundPort = 0
 
     public func start() throws {
+        #if !os(Windows)
         signal(SIGPIPE, SIG_IGN)
-        let fd = socket(AF_INET, SockType.stream, 0)
-        guard fd >= 0 else { throw StartError.failed("Couldn't create a network socket.") }
-        var one: Int32 = 1
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, socklen_t(MemoryLayout<Int32>.size))
-        var addr = sockaddr_in()
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = UInt16(port).bigEndian
-        guard inet_pton(AF_INET, bind, &addr.sin_addr) == 1 else { close(fd); throw StartError.failed("\"\(bind)\" isn't a valid address.") }
-        let rc = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin_or_Glibc_bind(fd, $0) } }
-        if rc != 0 {
-            let e = errno
-            close(fd)
-            throw e == EADDRINUSE ? StartError.inUse(port) : StartError.failed("Couldn't open port \(port): \(String(cString: strerror(e))).")
+        #endif
+        guard let fd = Sock.tcp() else { throw StartError.failed("Couldn't create a network socket.") }
+        switch Sock.bindIPv4(fd, address: bind, port: port) {
+        case .invalidAddress: Sock.close(fd); throw StartError.failed("\"\(bind)\" isn't a valid address.")
+        case .inUse: Sock.close(fd); throw StartError.inUse(port)
+        case .failed(let why): Sock.close(fd); throw StartError.failed("Couldn't open port \(port): \(why).")
+        case .ok(let p): boundPort = p
         }
-        guard listen(fd, 64) == 0 else { close(fd); throw StartError.failed("Couldn't listen on port \(port).") }
-        var bound = sockaddr_in(); var len = socklen_t(MemoryLayout<sockaddr_in>.size)
-        _ = withUnsafeMutablePointer(to: &bound) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &len) } }
-        boundPort = Int(UInt16(bigEndian: bound.sin_port))
+        guard Sock.listen(fd, backlog: 64) else { Sock.close(fd); throw StartError.failed("Couldn't listen on port \(port).") }
         listenFD = fd
         running = true
         let t = Thread { [weak self] in self?.acceptLoop(fd) }
@@ -137,29 +124,20 @@ public final class HTTPServer {
         t.start()
     }
 
-    private func Darwin_or_Glibc_bind(_ fd: Int32, _ p: UnsafePointer<sockaddr>) -> Int32 {
-        bind_(fd, p, socklen_t(MemoryLayout<sockaddr_in>.size))
-    }
-
     public func stop() {
         lock.lock(); running = false; lock.unlock()
-        if listenFD >= 0 { shutdown(listenFD, Int32(SHUT_RDWR)); close(listenFD); listenFD = -1 }
+        if listenFD >= 0 { Sock.shutdown(listenFD); Sock.close(listenFD); listenFD = -1 }
     }
 
     private func acceptLoop(_ fd: Int32) {
         while true {
-            var peer = sockaddr_in(); var len = socklen_t(MemoryLayout<sockaddr_in>.size)
-            let c = withUnsafeMutablePointer(to: &peer) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { accept(fd, $0, &len) } }
+            let accepted = Sock.accept(fd)
             lock.lock(); let go = running; lock.unlock()
-            if !go { if c >= 0 { close(c) }; return }
-            if c < 0 { if errno == EINTR { continue }; return }
-            var ipbuf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-            var a = peer.sin_addr
-            inet_ntop(AF_INET, &a, &ipbuf, socklen_t(INET_ADDRSTRLEN))
-            let ip = String(cString: ipbuf)
+            if !go { if let accepted { Sock.close(accepted.fd) }; return }
+            guard let (c, ip) = accepted else { return }
             lock.lock()
             if active >= maxConnections || (perIP[ip] ?? 0) >= maxConnectionsPerIP {
-                lock.unlock(); Self.write(c, HTTPResponse.error("Too many connections.", status: 503)); close(c); continue
+                lock.unlock(); Self.write(c, HTTPResponse.error("Too many connections.", status: 503)); Sock.close(c); continue
             }
             active += 1; perIP[ip, default: 0] += 1; lock.unlock()
             // Default QoS on purpose: asking for an elevated QoS makes libdispatch try to raise thread priority, which an
@@ -174,14 +152,8 @@ public final class HTTPServer {
     }
 
     private func serve(_ fd: Int32, ip: String) {
-        defer { close(fd) }
-        var tv = timeval(tv_sec: 20, tv_usec: 0)
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
-        #if canImport(Darwin)
-        var one: Int32 = 1
-        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
-        #endif
+        defer { Sock.close(fd) }
+        Sock.setTimeouts(fd, seconds: 20)
         switch readRequest(fd, ip: ip) {
         case .failure(let r): Self.write(fd, r)
         case .success(let req):
@@ -203,7 +175,7 @@ public final class HTTPServer {
         let started = Date()
         while headerEnd == nil {
             if Date().timeIntervalSince(started) > headTimeout { return .failure(HTTPResponse.error("Request timed out.", status: 408)) }
-            let n = recv(fd, &chunk, chunk.count, 0)
+            let n = Sock.recv(fd, &chunk, max: chunk.count)
             if n <= 0 { return .failure(HTTPResponse.error("Empty request.")) }
             buf.append(chunk, count: n)
             headerEnd = buf.range(of: sep)
@@ -233,7 +205,7 @@ public final class HTTPServer {
             var got = 0
             if !already.isEmpty { try? fh.write(contentsOf: already); got = already.count }
             while got < length {
-                let n = recv(fd, &chunk, min(chunk.count, length - got), 0)
+                let n = Sock.recv(fd, &chunk, max: length - got)
                 if n <= 0 { try? fh.close(); try? FileManager.default.removeItem(at: url); return .failure(HTTPResponse.error("Upload interrupted.")) }
                 try? fh.write(contentsOf: Data(chunk[0..<n])); got += n
             }
@@ -245,7 +217,7 @@ public final class HTTPServer {
         already = Data()[...]
         while body.count < length {
             if Date().timeIntervalSince(started) > bodyTimeout { return .failure(HTTPResponse.error("Request timed out.", status: 408)) }
-            let n = recv(fd, &chunk, min(chunk.count, length - body.count), 0)
+            let n = Sock.recv(fd, &chunk, max: length - body.count)
             if n <= 0 { return .failure(HTTPResponse.error("Request body interrupted.")) }
             body.append(chunk, count: n)
         }
@@ -276,23 +248,10 @@ public final class HTTPServer {
         data.withUnsafeBytes { raw in
             var sent = 0
             while sent < raw.count {
-                #if canImport(Glibc)
-                let n = send(fd, raw.baseAddress! + sent, raw.count - sent, Int32(MSG_NOSIGNAL))
-                #else
-                let n = send(fd, raw.baseAddress! + sent, raw.count - sent, 0)
-                #endif
+                let n = Sock.send(fd, raw.baseAddress! + sent, raw.count - sent)
                 if n <= 0 { break }
                 sent += n
             }
         }
     }
-}
-
-// `bind` is shadowed by the `bind` property inside HTTPServer, so reach the C function through this alias.
-private func bind_(_ fd: Int32, _ addr: UnsafePointer<sockaddr>, _ len: socklen_t) -> Int32 {
-    #if canImport(Darwin)
-    return Darwin.bind(fd, addr, len)
-    #else
-    return Glibc.bind(fd, addr, len)
-    #endif
 }

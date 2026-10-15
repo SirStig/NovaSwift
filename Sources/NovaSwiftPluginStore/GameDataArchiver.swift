@@ -1,6 +1,8 @@
 import Foundation
 import Crypto
+#if canImport(ZIPFoundation)
 import ZIPFoundation
+#endif
 
 /// Zips and unzips the imported base-data directory ("Nova Files") for
 /// cross-device sync, plus a content fingerprint to tell whether two copies

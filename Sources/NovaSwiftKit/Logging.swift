@@ -111,7 +111,12 @@ public struct FallbackLogger: Sendable {
     let category: String
     private func emit(_ level: String, _ message: LogMessage) {
         let text = message.description
+        #if os(Windows)
+        // A double-clicked (GUI-subsystem) process has no stderr; FileHandle.write traps on it, fputs just fails.
+        fputs("[\(category)] \(text)\n", stderr)
+        #else
         FileHandle.standardError.write("[\(category)] \(text)\n".data(using: .utf8)!)
+        #endif
         // Mirror into the debug suite's in-memory log (no-op unless a frontend installed a sink).
         DebugLogSink.emit(level: level, category: category, message: text)
     }

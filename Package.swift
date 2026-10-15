@@ -76,7 +76,9 @@ let package = Package(
             name: "NovaSwiftPluginStore",
             dependencies: [
                 "NovaSwiftKit",
-                .product(name: "ZIPFoundation", package: "ZIPFoundation"),
+                // ZIPFoundation needs a system zlib and doesn't compile on Windows; ZipSupport_Windows.swift uses tar.exe there.
+                .product(name: "ZIPFoundation", package: "ZIPFoundation",
+                         condition: .when(platforms: [.macOS, .iOS, .tvOS, .watchOS, .visionOS, .linux])),
                 .product(name: "Crypto", package: "swift-crypto"),
             ],
             path: "Sources/NovaSwiftPluginStore",

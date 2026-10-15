@@ -20,6 +20,11 @@ public enum NetworkTools {
     /// IPv4 addresses of this machine (loopback skipped).
     public static func localAddresses() -> [LocalAddress] {
         var out: [LocalAddress] = []
+        #if os(Windows)
+        // Per-interface names aren't enumerated on Windows; list the addresses the host name resolves to.
+        for ip in Sock.localIPv4() { out.append(LocalAddress(interface: "network", ip: ip, kind: classify(ip: ip, interface: "network"))) }
+        return out
+        #else
         var list: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&list) == 0, let head = list else { return out }
         defer { freeifaddrs(list) }
@@ -37,6 +42,7 @@ public enum NetworkTools {
             out.append(LocalAddress(interface: name, ip: ip, kind: classify(ip: ip, interface: name)))
         }
         return out
+        #endif
     }
 
     static func classify(ip: String, interface: String) -> String {
@@ -140,27 +146,17 @@ public enum NetworkTools {
     }
 
     static func ssdpDiscover() -> URL? {
-        let fd = socket(AF_INET, SockType.dgram, 0)
-        guard fd >= 0 else { return nil }
-        defer { close(fd) }
-        var tv = timeval(tv_sec: 1, tv_usec: 500_000)
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
-        var dest = sockaddr_in()
-        dest.sin_family = sa_family_t(AF_INET)
-        dest.sin_port = UInt16(1900).bigEndian
-        inet_pton(AF_INET, "239.255.255.250", &dest.sin_addr)
+        guard let fd = Sock.udp() else { return nil }
+        defer { Sock.close(fd) }
+        Sock.setReceiveTimeout(fd, seconds: 1.5)
         let targets = ["urn:schemas-upnp-org:device:InternetGatewayDevice:1", "urn:schemas-upnp-org:device:InternetGatewayDevice:2", "upnp:rootdevice"]
         for st in targets {
             let msg = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 1\r\nST: \(st)\r\n\r\n"
-            _ = msg.withCString { c in
-                withUnsafePointer(to: &dest) {
-                    $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sendto(fd, c, strlen(c), 0, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
-                }
-            }
+            Sock.sendTo(fd, msg, ip: "239.255.255.250", port: 1900)
             var buf = [UInt8](repeating: 0, count: 2048)
             let deadline = Date().addingTimeInterval(1.6)
             while Date() < deadline {
-                let n = recv(fd, &buf, buf.count, 0)
+                let n = Sock.recv(fd, &buf, max: buf.count)
                 if n <= 0 { break }
                 let text = String(decoding: buf[0..<n], as: UTF8.self)
                 for line in text.components(separatedBy: "\r\n") where line.lowercased().hasPrefix("location:") {
@@ -198,13 +194,4 @@ public enum NetworkTools {
         req.httpBody = Data(body.utf8)
         return send(req, timeout: 4).flatMap { String(data: $0, encoding: .utf8) }
     }
-}
-
-/// `SOCK_STREAM` / `SOCK_DGRAM` are plain Int32 on Darwin and an enum on Glibc.
-enum SockType {
-    #if canImport(Darwin)
-    static let stream = SOCK_STREAM, dgram = SOCK_DGRAM
-    #else
-    static let stream = Int32(SOCK_STREAM.rawValue), dgram = Int32(SOCK_DGRAM.rawValue)
-    #endif
 }

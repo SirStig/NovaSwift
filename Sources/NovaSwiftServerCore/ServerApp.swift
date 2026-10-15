@@ -5,6 +5,8 @@ import NovaSwiftENet
 import Darwin
 #elseif canImport(Glibc)
 import Glibc
+#elseif os(Windows)
+import ucrt
 #endif
 
 public struct ServerOptions: Equatable {
@@ -245,6 +247,12 @@ public final class ServerApp {
     }
 
     func installSignalHandlers() {
+        #if os(Windows)
+        // libdispatch has no signal sources on Windows: Ctrl-C / Ctrl-Break arrive through the C runtime's signal().
+        windowsShutdown = { [weak self] in self?.shutdown() }
+        signal(SIGINT) { _ in DispatchQueue.main.async { windowsShutdown?() } }
+        signal(SIGBREAK) { _ in DispatchQueue.main.async { windowsShutdown?() } }
+        #else
         for sig in [SIGINT, SIGTERM] {
             signal(sig, SIG_IGN)
             let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
@@ -252,6 +260,7 @@ public final class ServerApp {
             src.resume()
             signalSources.append(src)
         }
+        #endif
     }
 
     public func shutdown() {
@@ -381,3 +390,7 @@ public enum ConsoleCommands {
 public enum NovaSwiftServerCore {
     public static var protocolNumber: Int { CrossPlayProtocol.version }
 }
+
+#if os(Windows)
+nonisolated(unsafe) private var windowsShutdown: (() -> Void)?
+#endif
