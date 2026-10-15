@@ -270,7 +270,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletvos*]" = "NovaSwift/NovaSwift-tvOS.entitlements";
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletvsimulator*]" = "NovaSwift/NovaSwift-tvOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 451;
+				CURRENT_PROJECT_VERSION = 454;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
@@ -332,7 +332,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletvos*]" = "NovaSwift/NovaSwift-tvOS.entitlements";
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletvsimulator*]" = "NovaSwift/NovaSwift-tvOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 451;
+				CURRENT_PROJECT_VERSION = 454;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
