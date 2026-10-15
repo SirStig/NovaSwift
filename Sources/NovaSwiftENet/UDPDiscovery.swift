@@ -9,13 +9,92 @@ import WinSDK
 #endif
 
 // UDP status queries (`NSQ1` -> `NSB1`) and LAN beacons, over plain BSD sockets so the same code runs on macOS,
-// iOS, tvOS and in `swift test`. Mirrors `godot/net/LanDiscovery.gd`. IPv4 only, like ENet 1.3.
+// iOS, tvOS and in `swift test`. Mirrors `godot/net/LanDiscovery.gd`. Status queries (`NSQ1`) work over IPv4 and
+// IPv6 (a client resolves the host with getaddrinfo, so an IPv6-only NAT64 network gets the synthesized address; a
+// server answers on an extra IPv6-only socket next to its IPv4 one). LAN broadcast beacons stay IPv4: IPv6 has no
+// broadcast, and Godot's LanDiscovery.gd only listens for IPv4 broadcasts.
 //
 // Local-network privacy: on iOS / tvOS the first LAN beacon send / receive (or a query to a private address)
 // triggers the Local Network permission prompt, which needs `NSLocalNetworkUsageDescription` in Info.plist.
 // See docs/MULTIPLAYER.md, "Cross-play with the Apple app".
 
 // MARK: - Socket helpers
+
+/// An IPv4 or IPv6 socket address of either family, family-agnostic for the query / responder paths.
+struct UDPAddr {
+    var storage = sockaddr_storage()
+    var length = 0
+    init() {}
+    init<T>(_ raw: T) {
+        withUnsafeMutableBytes(of: &storage) { d in withUnsafeBytes(of: raw) { d.copyMemory(from: $0) } }
+        length = MemoryLayout<T>.size
+    }
+    init(raw: UnsafeRawPointer, length n: Int) {
+        let n = min(n, MemoryLayout<sockaddr_storage>.size)
+        withUnsafeMutableBytes(of: &storage) { $0.copyMemory(from: UnsafeRawBufferPointer(start: raw, count: n)) }
+        length = n
+    }
+    /// From raw address bytes (4 = IPv4, 16 = IPv6); port 0.
+    init(literal b: [UInt8]) {
+        if b.count == 4 {
+            var s = sockaddr_in()
+            #if os(Windows)
+            s.sin_family = ADDRESS_FAMILY(AF_INET)
+            #else
+            s.sin_family = sa_family_t(AF_INET)
+            #endif
+            withUnsafeMutableBytes(of: &s.sin_addr) { for i in 0..<4 { $0[i] = b[i] } }
+            #if canImport(Darwin)
+            s.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            #endif
+            self.init(s)
+        } else {
+            var s = sockaddr_in6()
+            #if os(Windows)
+            s.sin6_family = ADDRESS_FAMILY(AF_INET6)
+            #else
+            s.sin6_family = sa_family_t(AF_INET6)
+            #endif
+            withUnsafeMutableBytes(of: &s.sin6_addr) { for i in 0..<min(16, b.count) { $0[i] = b[i] } }
+            #if canImport(Darwin)
+            s.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
+            #endif
+            self.init(s)
+        }
+    }
+    var family: Int32 { Int32(storage.ss_family) }
+    var isIPv6: Bool { family == Int32(AF_INET6) }
+
+    /// Address bytes: 4 (IPv4) or 16 (IPv6).
+    var addressBytes: [UInt8] {
+        withUnsafeBytes(of: storage) { raw in
+            if isIPv6 {
+                let a = raw.baseAddress!.assumingMemoryBound(to: sockaddr_in6.self).pointee.sin6_addr
+                return withUnsafeBytes(of: a) { Array($0.prefix(16)) }
+            }
+            let a = raw.baseAddress!.assumingMemoryBound(to: sockaddr_in.self).pointee.sin_addr
+            return withUnsafeBytes(of: a) { Array($0.prefix(4)) }
+        }
+    }
+    /// Normalized text (IPv4-mapped IPv6 shows as the dotted quad).
+    var host: String { IPAddressTools.format(bytes: addressBytes) }
+    var port: Int {
+        withUnsafeBytes(of: storage) { raw in
+            Int(UInt16(bigEndian: isIPv6 ? raw.baseAddress!.assumingMemoryBound(to: sockaddr_in6.self).pointee.sin6_port
+                                         : raw.baseAddress!.assumingMemoryBound(to: sockaddr_in.self).pointee.sin_port))
+        }
+    }
+    func with(port p: Int) -> UDPAddr {
+        var a = self
+        let be = UInt16(clamping: p).bigEndian
+        withUnsafeMutableBytes(of: &a.storage) { raw in
+            if isIPv6 { raw.baseAddress!.assumingMemoryBound(to: sockaddr_in6.self).pointee.sin6_port = be }
+            else { raw.baseAddress!.assumingMemoryBound(to: sockaddr_in.self).pointee.sin_port = be }
+        }
+        return a
+    }
+    func sameHost(as o: UDPAddr) -> Bool { addressBytes == o.addressBytes || host == o.host }
+}
 
 #if os(Windows)
 private let sockDgram = Int32(SOCK_DGRAM)
@@ -68,10 +147,19 @@ enum UDP {
         return String(cString: buf)
     }
 
-    static func makeSocket(bindPort: Int?, broadcast: Bool, shared: Bool, loopbackOnly: Bool = false) -> Int32? {
+    static func makeSocket(bindPort: Int?, broadcast: Bool, shared: Bool, loopbackOnly: Bool = false, family: Int32 = AF_INET) -> Int32? {
         _ = winsock
-        let s = socket(AF_INET, sockDgram, 0)
+        let s = socket(family, sockDgram, 0)
         guard s != INVALID_SOCKET else { return nil }
+        if family == AF_INET6 {
+            // IPv6-only: leaves the IPv4 socket on the same port alone (Windows defaults V6ONLY to on, but be explicit).
+            var on: Int32 = 1
+            withUnsafePointer(to: &on) {
+                $0.withMemoryRebound(to: CChar.self, capacity: MemoryLayout<Int32>.size) {
+                    _ = setsockopt(s, Int32(IPPROTO_IPV6.rawValue), IPV6_V6ONLY, $0, Int32(MemoryLayout<Int32>.size))
+                }
+            }
+        }
         var one: Int32 = 1
         func opt(_ name: Int32) {
             withUnsafePointer(to: &one) {
@@ -85,9 +173,19 @@ enum UDP {
         var nonBlocking: u_long = 1
         _ = ioctlsocket(s, Int32(bitPattern: 0x8004667E), &nonBlocking)   // FIONBIO
         if let bindPort {
-            var a = sockaddr(addr(loopbackOnly ? UInt32(0x7f000001).bigEndian : 0), port: bindPort)
-            let ok = withUnsafePointer(to: &a) {
-                $0.withMemoryRebound(to: WinSDK.sockaddr.self, capacity: 1) { bind(s, $0, Int32(MemoryLayout<sockaddr_in>.size)) }
+            var ok: Int32
+            if family == AF_INET6 {
+                var a = sockaddr_in6()
+                a.sin6_family = ADDRESS_FAMILY(AF_INET6)
+                a.sin6_port = UInt16(clamping: bindPort).bigEndian          // sin6_addr zero = in6addr_any
+                ok = withUnsafePointer(to: &a) {
+                    $0.withMemoryRebound(to: WinSDK.sockaddr.self, capacity: 1) { bind(s, $0, Int32(MemoryLayout<sockaddr_in6>.size)) }
+                }
+            } else {
+                var a = sockaddr(addr(loopbackOnly ? UInt32(0x7f000001).bigEndian : 0), port: bindPort)
+                ok = withUnsafePointer(to: &a) {
+                    $0.withMemoryRebound(to: WinSDK.sockaddr.self, capacity: 1) { bind(s, $0, Int32(MemoryLayout<sockaddr_in>.size)) }
+                }
             }
             if ok != 0 { _ = closesocket(s); return nil }
         }
@@ -107,17 +205,50 @@ enum UDP {
         }
     }
 
-    static func receive(_ fd: Int32) -> (data: Data, from: sockaddr_in)? {
+    static func send(_ fd: Int32, _ data: Data, to dest: UDPAddr) {
+        var dest = dest
+        let s = SOCKET(UInt32(bitPattern: fd))
+        let len = Int32(dest.length)
+        data.withUnsafeBytes { (buf: UnsafeRawBufferPointer) in
+            guard let base = buf.baseAddress?.assumingMemoryBound(to: CChar.self) else { return }
+            withUnsafePointer(to: &dest.storage) {
+                $0.withMemoryRebound(to: WinSDK.sockaddr.self, capacity: 1) { sa in
+                    _ = sendto(s, base, Int32(buf.count), 0, sa, len)
+                }
+            }
+        }
+    }
+
+    static func receive(_ fd: Int32) -> (data: Data, from: UDPAddr)? {
         var buf = [CChar](repeating: 0, count: 2048)
-        var from = sockaddr_in()
-        var len = Int32(MemoryLayout<sockaddr_in>.size)
-        let n = withUnsafeMutablePointer(to: &from) {
+        var from = UDPAddr()
+        var len = Int32(MemoryLayout<sockaddr_storage>.size)
+        let n = withUnsafeMutablePointer(to: &from.storage) {
             $0.withMemoryRebound(to: WinSDK.sockaddr.self, capacity: 1) {
                 recvfrom(SOCKET(UInt32(bitPattern: fd)), &buf, Int32(buf.count), 0, $0, &len)
             }
         }
         guard n >= 0 else { return nil }
+        from.length = Int(len)
         return (Data(buf[0..<Int(n)].map { UInt8(bitPattern: $0) }), from)
+    }
+
+    /// Resolve with getaddrinfo (any family). `AI_ADDRCONFIG` isn't requested on Windows.
+    static func resolve(_ host: String) -> UDPAddr? {
+        _ = winsock
+        if let lit = IPAddressTools.bytes(host), lit.count == 16 || IPAddressTools.isLoopback(host) {
+            return UDPAddr(literal: lit)
+        }
+        var hints = addrinfo()
+        hints.ai_family = AF_UNSPEC
+        hints.ai_socktype = sockDgram
+        var res: UnsafeMutablePointer<addrinfo>?
+        if getaddrinfo(host, nil, &hints, &res) == 0, let first = res {
+            defer { freeaddrinfo(res) }
+            if let sa = first.pointee.ai_addr { return UDPAddr(raw: UnsafeRawPointer(sa), length: Int(first.pointee.ai_addrlen)) }
+        }
+        if let lit = IPAddressTools.bytes(host) { return UDPAddr(literal: lit) }
+        return nil
     }
 
     static func waitReadable(_ fd: Int32, seconds: Double) -> Bool {
@@ -198,10 +329,14 @@ enum UDP {
 
     /// A non-blocking UDP socket. `bindPort` nil = ephemeral. `shared` allows several processes (Godot + this app)
     /// to listen on the beacon port.
-    static func makeSocket(bindPort: Int?, broadcast: Bool, shared: Bool, loopbackOnly: Bool = false) -> Int32? {
-        let fd = socket(AF_INET, sockDgram, 0)
+    static func makeSocket(bindPort: Int?, broadcast: Bool, shared: Bool, loopbackOnly: Bool = false, family: Int32 = AF_INET) -> Int32? {
+        let fd = socket(family, sockDgram, 0)
         guard fd >= 0 else { return nil }
         var one: Int32 = 1
+        if family == AF_INET6 {
+            // IPv6-only: the IPv4 socket bound to the same port keeps its own traffic.
+            setsockopt(fd, Int32(IPPROTO_IPV6), IPV6_V6ONLY, &one, socklen_t(MemoryLayout<Int32>.size))
+        }
         if shared {
             setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, socklen_t(MemoryLayout<Int32>.size))
             setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, socklen_t(MemoryLayout<Int32>.size))
@@ -213,9 +348,22 @@ enum UDP {
         let flags = fcntl(fd, F_GETFL, 0)
         _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
         if let bindPort {
-            var addr = sockaddr(in_addr(s_addr: loopbackOnly ? UInt32(0x7f000001).bigEndian : INADDR_ANY.bigEndian), port: bindPort)
-            let ok = withUnsafePointer(to: &addr) {
-                $0.withMemoryRebound(to: Foundation.sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+            var ok: Int32
+            if family == AF_INET6 {
+                var addr = sockaddr_in6()
+                addr.sin6_family = sa_family_t(AF_INET6)
+                addr.sin6_port = UInt16(clamping: bindPort).bigEndian          // sin6_addr zero = in6addr_any
+                #if canImport(Darwin)
+                addr.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
+                #endif
+                ok = withUnsafePointer(to: &addr) {
+                    $0.withMemoryRebound(to: Foundation.sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in6>.size)) }
+                }
+            } else {
+                var addr = sockaddr(in_addr(s_addr: loopbackOnly ? UInt32(0x7f000001).bigEndian : INADDR_ANY.bigEndian), port: bindPort)
+                ok = withUnsafePointer(to: &addr) {
+                    $0.withMemoryRebound(to: Foundation.sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+                }
             }
             if ok != 0 { close(fd); return nil }
         }
@@ -233,18 +381,57 @@ enum UDP {
         }
     }
 
-    /// One pending datagram or nil.
-    static func receive(_ fd: Int32) -> (data: Data, from: sockaddr_in)? {
+    static func send(_ fd: Int32, _ data: Data, to dest: UDPAddr) {
+        var dest = dest
+        let len = socklen_t(dest.length)
+        _ = data.withUnsafeBytes { buf in
+            withUnsafePointer(to: &dest.storage) {
+                $0.withMemoryRebound(to: Foundation.sockaddr.self, capacity: 1) {
+                    sendto(fd, buf.baseAddress, buf.count, 0, $0, len)
+                }
+            }
+        }
+    }
+
+    /// One pending datagram (from an IPv4 or IPv6 sender) or nil.
+    static func receive(_ fd: Int32) -> (data: Data, from: UDPAddr)? {
         var buf = [UInt8](repeating: 0, count: 2048)
-        var from = sockaddr_in()
-        var len = socklen_t(MemoryLayout<sockaddr_in>.size)
-        let n = withUnsafeMutablePointer(to: &from) {
+        var from = UDPAddr()
+        var len = socklen_t(MemoryLayout<sockaddr_storage>.size)
+        let n = withUnsafeMutablePointer(to: &from.storage) {
             $0.withMemoryRebound(to: Foundation.sockaddr.self, capacity: 1) {
                 recvfrom(fd, &buf, buf.count, 0, $0, &len)
             }
         }
         guard n >= 0 else { return nil }
+        from.length = Int(len)
         return (Data(buf[0..<n]), from)
+    }
+
+    /// Resolve with getaddrinfo (any family). On Apple platforms `AI_DEFAULT` makes an IPv6-only NAT64 network
+    /// synthesize a `64:ff9b::` address for an IPv4 literal or an A-only host name; the first result (the system's own
+    /// ordering) wins. Loopback / IPv6 literals skip the resolver; a routable IPv4 literal falls back to itself.
+    static func resolve(_ host: String) -> UDPAddr? {
+        if let lit = IPAddressTools.bytes(host), lit.count == 16 || IPAddressTools.isLoopback(host) { return UDPAddr(literal: lit) }
+        for pass in 0..<2 {
+            var hints = addrinfo()
+            hints.ai_family = AF_UNSPEC
+            hints.ai_socktype = sockDgram
+            if pass == 0 {
+                #if canImport(Darwin)
+                hints.ai_flags = AI_DEFAULT
+                #else
+                hints.ai_flags = AI_ADDRCONFIG
+                #endif
+            }
+            var res: UnsafeMutablePointer<addrinfo>?
+            if getaddrinfo(host, nil, &hints, &res) == 0, let first = res {
+                defer { freeaddrinfo(res) }
+                if let sa = first.pointee.ai_addr { return UDPAddr(raw: UnsafeRawPointer(sa), length: Int(first.pointee.ai_addrlen)) }
+            }
+        }
+        if let lit = IPAddressTools.bytes(host) { return UDPAddr(literal: lit) }
+        return nil
     }
 
     /// Wait up to `seconds` for the socket to become readable.
@@ -293,15 +480,16 @@ public enum ServerStatusQuery {
 
     /// Blocking (up to `timeout`); call off the main thread. nil = no answer (offline, firewalled, wrong port).
     public static func query(host: String, gamePort: Int, timeout: TimeInterval = 3) -> Result? {
-        guard let ip = UDP.resolveIPv4(host) else { return nil }
+        guard let ip = UDP.resolve(host) else { return nil }
         return query(ip: ip, queryPort: CrossPlayProtocol.queryPort(forGamePort: gamePort), timeout: timeout)
     }
 
-    static func query(ip: in_addr, queryPort: Int, timeout: TimeInterval) -> Result? {
-        guard let fd = UDP.makeSocket(bindPort: nil, broadcast: false, shared: false) else { return nil }
+    static func query(ip: UDPAddr, queryPort: Int, timeout: TimeInterval) -> Result? {
+        // A socket of the target's family: IPv6 targets (including NAT64-synthesized ones) need an AF_INET6 socket.
+        guard let fd = UDP.makeSocket(bindPort: nil, broadcast: false, shared: false, family: ip.family) else { return nil }
         defer { UDP.closeSocket(fd) }
         let t0 = DispatchTime.now().uptimeNanoseconds
-        let dest = UDP.sockaddr(ip, port: queryPort)
+        let dest = ip.with(port: queryPort)
         // The padded request (a server never answers it with more bytes than it received). Servers older than this
         // build only know the bare 4-byte query, so if nothing came back after a third of the timeout we try that too.
         UDP.send(fd, ServerBeacon.queryPacket, to: dest)
@@ -318,7 +506,7 @@ public enum ServerStatusQuery {
                 continue
             }
             while let (data, from) = UDP.receive(fd) {
-                guard UDP.raw(from.sin_addr) == UDP.raw(ip), let b = ServerBeacon.decode(data) else { continue }
+                guard from.sameHost(as: ip), let b = ServerBeacon.decode(data) else { continue }
                 let ms = Int((DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000)
                 return Result(beacon: b, rttMilliseconds: Swift.max(1, ms))
             }
@@ -402,6 +590,9 @@ public final class LANBeaconService {
     private var txFD: Int32 = -1
     private var querySource: DispatchSourceProtocol?
     private var queryFD: Int32 = -1
+    /// IPv6-only twin of the IPv4 query responder (same port), so `NSQ1` status queries also work over IPv6.
+    private var query6FD: Int32 = -1
+    private var query6Source: DispatchSourceProtocol?
     private var timer: DispatchSourceTimer?
     private var provider: (() -> ServerBeacon)?
     private var gamePort = CrossPlayProtocol.defaultPort
@@ -455,6 +646,11 @@ public final class LANBeaconService {
                     ok = false
                 }
             }
+            if query6FD < 0, let fd6 = UDP.makeSocket(bindPort: qport, broadcast: false, shared: true, family: Int32(AF_INET6)) {
+                query6FD = fd6     // best effort: no IPv6 on this machine just means no IPv6 status queries
+                let src = UDP.makeReadSource(fd6, queue: q) { [weak self] in self?.drain(fd6, takeBeacons: false) }
+                src.resume(); query6Source = src
+            }
             announceDue = .distantPast
             startTimer()
             return ok
@@ -466,6 +662,8 @@ public final class LANBeaconService {
             provider = nil
             querySource?.cancel(); querySource = nil
             if queryFD >= 0 { UDP.closeSocket(queryFD); queryFD = -1 }
+            query6Source?.cancel(); query6Source = nil
+            if query6FD >= 0 { UDP.closeSocket(query6FD); query6FD = -1 }
             if txFD >= 0 { UDP.closeSocket(txFD); txFD = -1 }
         }
     }
@@ -525,7 +723,7 @@ public final class LANBeaconService {
                 // Anti-amplification: padded requests only (plus a trickle of legacy ones), a per-address budget, and a
                 // reply never larger than the request. Everything else is dropped without an answer.
                 guard let provider else { continue }
-                switch queryGuard.decide(data, from: UDP.string(from.sin_addr)) {
+                switch queryGuard.decide(data, from: IPAddressTools.groupKey(from.host)) {   /* IPv6: one budget per /64 */
                 case .drop: continue
                 case .upgradeNotice: UDP.send(fd, QueryGuard.upgradeNotice, to: from)
                 case .reply(let maxBytes):
@@ -533,7 +731,7 @@ public final class LANBeaconService {
                     if !pkt.isEmpty, pkt.count <= maxBytes { UDP.send(fd, pkt, to: from) }
                 }
             } else if takeBeacons, let b = ServerBeacon.decode(data) {
-                let ip = UDP.string(from.sin_addr)
+                let ip = from.host
                 if ignoredLocalPorts.contains(b.port), localIPs.contains(ip) || ip == "127.0.0.1" { continue }
                 let s = LANServer(ip: ip, beacon: b)
                 let isNew = seen[s.id]?.server != s

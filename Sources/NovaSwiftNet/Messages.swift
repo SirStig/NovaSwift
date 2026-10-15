@@ -48,12 +48,86 @@ public struct InputFrame: Codable, Equatable, Sendable {
     /// whatever heading error it started with forever; the pose lets it hold the client's ship where the client
     /// actually is. Optional so frames from older builds (no pose) still decode.
     public var pose: ShipPose?
+    /// The sender's real combat loadout (hull, health maxima, regen, weapons), so the authority simulates a faithful
+    /// copy of the ship instead of a stock hull. Sent when it changes and as a ~2 s refresh; nil in between and from
+    /// older builds (the authority then keeps the stock hull for the presence `shipTypeHint`).
+    public var loadout: ShipLoadoutNet?
+    /// True while the sender is landed on a stellar: the authority removes its ship until the flag clears.
+    public var landed: Bool?
+    /// The sender's "life" generation. It changes whenever the sender's ship starts over (respawn after death, a new
+    /// world). The authority holds off re-creating a client's destroyed ship until it reports a new life.
+    public var lifeID: UInt32?
+    /// The highest `KillCreditNet.seq` the sender has applied; the authority stops resending credits up to it.
+    public var ackCreditSeq: UInt32?
 
-    public init(tick: UInt32, seq: UInt32, intent: NetIntent, pose: ShipPose? = nil) {
+    public init(tick: UInt32, seq: UInt32, intent: NetIntent, pose: ShipPose? = nil,
+                loadout: ShipLoadoutNet? = nil, landed: Bool? = nil, lifeID: UInt32? = nil,
+                ackCreditSeq: UInt32? = nil) {
         self.tick = tick
         self.seq = seq
         self.intent = intent
         self.pose = pose
+        self.loadout = loadout
+        self.landed = landed
+        self.lifeID = lifeID
+        self.ackCreditSeq = ackCreditSeq
+    }
+}
+
+/// One weapon group of a ship: the `wëap` id, how many copies are fitted, and the rounds left (-1 = unlimited).
+public struct WeaponMountNet: Codable, Equatable, Sendable {
+    public var id: Int
+    public var count: Int
+    public var ammo: Int
+    public init(id: Int, count: Int, ammo: Int) { self.id = id; self.count = count; self.ammo = ammo }
+}
+
+/// A client's combat loadout as the authority needs it to simulate that client's ship faithfully. The client owns the
+/// health maxima (`maxShield`/`maxArmor`); `shield`/`armor` are only the starting health when the authority (re)creates
+/// the copy (landing, death, a new hull) and are ignored for a copy that already exists.
+public struct ShipLoadoutNet: Codable, Equatable, Sendable {
+    public var shipTypeID: Int
+    public var maxShield: Double
+    public var maxArmor: Double
+    public var shieldRegenPerSec: Double
+    public var armorRegenPerSec: Double
+    public var weapons: [WeaponMountNet]
+    public var shield: Double?
+    public var armor: Double?
+    /// Client-side revision counter, echoed back in `WorldSnapshot.ackLoadoutRev` once the authority applied it.
+    public var rev: UInt32?
+
+    public init(shipTypeID: Int, maxShield: Double, maxArmor: Double, shieldRegenPerSec: Double,
+                armorRegenPerSec: Double, weapons: [WeaponMountNet], shield: Double? = nil,
+                armor: Double? = nil, rev: UInt32? = nil) {
+        self.shipTypeID = shipTypeID
+        self.maxShield = maxShield; self.maxArmor = maxArmor
+        self.shieldRegenPerSec = shieldRegenPerSec; self.armorRegenPerSec = armorRegenPerSec
+        self.weapons = weapons
+        self.shield = shield; self.armor = armor; self.rev = rev
+    }
+
+    /// The fields whose change means "send it now" (health and ammo drift every shot and are left to the refresh).
+    public var stableKey: [Double] {
+        [Double(shipTypeID), maxShield, maxArmor, shieldRegenPerSec, armorRegenPerSec]
+            + weapons.flatMap { [Double($0.id), Double($0.count)] }
+    }
+}
+
+/// A kill (or disable) the authority credits to a client because that client's ship landed the blow. The client replays
+/// it into its own world so rating, bounties, legal record and "destroy X" mission goals work as for a local kill.
+public struct KillCreditNet: Codable, Equatable, Sendable {
+    /// Monotonic per recipient; the client applies each once and acks the highest in `InputFrame.ackCreditSeq`.
+    public var seq: UInt32
+    public var shipTypeID: Int
+    public var government: Int
+    public var missionID: Int?
+    public var strength: Int
+    public var disabled: Bool
+    public init(seq: UInt32, shipTypeID: Int, government: Int, missionID: Int? = nil, strength: Int = 1,
+                disabled: Bool = false) {
+        self.seq = seq; self.shipTypeID = shipTypeID; self.government = government
+        self.missionID = missionID; self.strength = strength; self.disabled = disabled
     }
 }
 
@@ -105,10 +179,18 @@ public struct ShipNetState: Codable, Equatable, Sendable {
     public var shield: Double
     public var armor: Double
     public var control: NetControlSource
+    /// True for a player ship that was destroyed on the authority (armor 0). Lets the owner learn of its death instead
+    /// of the entry silently vanishing. Nil from older builds / for living ships.
+    public var destroyed: Bool?
+    /// On a `destroyed` entry: the owner's life generation (`InputFrame.lifeID`) that died, so a late-arriving death
+    /// notice can't kill the owner's next life.
+    public var life: UInt32?
 
     public init(id: Int, playerID: String? = nil, shipTypeID: Int = -1, government: Int = 0,
                 name: String, x: Double, y: Double, vx: Double, vy: Double, angle: Double,
-                shield: Double, armor: Double, control: NetControlSource) {
+                shield: Double, armor: Double, control: NetControlSource, destroyed: Bool? = nil,
+                life: UInt32? = nil) {
+        self.destroyed = destroyed; self.life = life
         self.id = id; self.playerID = playerID; self.shipTypeID = shipTypeID
         self.government = government; self.name = name
         self.x = x; self.y = y; self.vx = vx; self.vy = vy
@@ -224,10 +306,18 @@ public struct WorldSnapshot: Codable, Equatable, Sendable {
     /// then stops pulling its own ship toward the echoed state (that echo is a round trip old). Nil from older builds,
     /// which simulate clients from inputs only, so the client keeps converging toward them.
     public var clientPosesAuthoritative: Bool?
+    /// Per-recipient: kills/disables this recipient's ship earned that it has not acked yet. Nil in broadcast snapshots
+    /// and from older builds.
+    public var credits: [KillCreditNet]?
+    /// Per-recipient: the highest `ShipLoadoutNet.rev` of this recipient the authority has applied to its copy.
+    public var ackLoadoutRev: UInt32?
 
     public init(tick: UInt32, ackInputSeq: UInt32, ships: [ShipNetState],
                 shots: [ProjectileNetState] = [], beams: [BeamNetState] = [],
-                effects: [EffectNetState] = [], clientPosesAuthoritative: Bool? = nil) {
+                effects: [EffectNetState] = [], clientPosesAuthoritative: Bool? = nil,
+                credits: [KillCreditNet]? = nil, ackLoadoutRev: UInt32? = nil) {
+        self.credits = credits
+        self.ackLoadoutRev = ackLoadoutRev
         self.tick = tick
         self.ackInputSeq = ackInputSeq
         self.ships = ships

@@ -69,8 +69,23 @@ func _work(port: int, description: String) -> void:
 	external_ip = u.query_external_address()
 	ok = true
 	message = "Router forwarded UDP %d%s." % [port, "; public address " + external_ip if external_ip != "" else ""]
-	if external_ip.begins_with("10.") or external_ip.begins_with("192.168.") or external_ip.begins_with("100."):
+	if _is_non_public(external_ip):
 		message += " That address is not public: your ISP shares one address between customers (CGNAT), so friends can't reach you directly. Try Tailscale."
+
+
+## Private (10/8, 172.16/12, 192.168/16) or CGNAT shared (100.64.0.0/10) IPv4 address: friends can't reach it directly.
+static func _is_non_public(ip: String) -> bool:
+	if ip.begins_with("10.") or ip.begins_with("192.168."):
+		return true
+	var parts: PackedStringArray = ip.split(".")
+	if parts.size() != 4 or not parts[1].is_valid_int():
+		return false
+	var second: int = parts[1].to_int()
+	if parts[0] == "172":
+		return second >= 16 and second <= 31
+	if parts[0] == "100":
+		return second >= 64 and second <= 127
+	return false
 
 
 ## Remove the mappings we added. Safe to call anytime (blocks briefly).

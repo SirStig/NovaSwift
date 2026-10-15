@@ -416,6 +416,9 @@ func _process(delta: float) -> void:
 		if not _spaceport.is_open():
 			_spaceport.open()   # screens/Spaceport.gd owns input while docked
 		_flight.prewarm_step(4.0)   # warm the launch system's art while docked (off-thread decode, budgeted upload)
+		var ns: Node = get_node_or_null("/root/NetService")
+		if ns != null and ns.has_method("wants_landed_sim") and ns.wants_landed_sim():
+			nova.net_landed_step(delta)   # multiplayer: the shared world keeps ticking under the spaceport
 		_drain_events_to_log(0.0)   # docked: the sim (and the status line's clock) is stopped
 		queue_redraw()
 		return

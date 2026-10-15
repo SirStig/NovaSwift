@@ -335,7 +335,7 @@ public enum ConsoleCommands {
             server.kick(p.id, reason: why.isEmpty ? "Removed by the server admin." : why, ban: cmd == "ban")
             return "\(cmd == "ban" ? "Banned" : "Kicked") \(p.name)."
         case "unban":
-            guard NetworkTools.octets(rest.trimmingCharacters(in: .whitespaces)) != nil else { return "Usage: unban <ip address>" }
+            guard NetworkTools.isIP(rest) else { return "Usage: unban <ip address>" }
             server.unban(ip: rest.trimmingCharacters(in: .whitespaces)); return "Unbanned \(rest)."
         case "say":
             guard !rest.isEmpty else { return "Usage: say <text>" }
@@ -356,7 +356,7 @@ public enum ConsoleCommands {
         case "unmute":
             return server.unmute(rest) ? "Unmuted \(rest)." : "Nobody is muted as \"\(rest)\"."
         case "allow":
-            guard NetworkTools.octets(rest.trimmingCharacters(in: .whitespaces)) != nil else { return "Usage: allow <ip address>" }
+            guard NetworkTools.isIP(rest) else { return "Usage: allow <ip address>" }
             server.allow(ip: rest.trimmingCharacters(in: .whitespaces)); return "Allowed \(rest)."
         case "disallow":
             server.disallow(ip: rest.trimmingCharacters(in: .whitespaces)); return "Removed \(rest) from the allowlist."

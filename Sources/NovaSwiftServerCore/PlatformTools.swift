@@ -238,8 +238,39 @@ public final class UpdateChecker {
     public var current: Info { lock.lock(); defer { lock.unlock() }; return info }
 
     /// Numeric dotted compare: "0.10.0" > "0.9.2".
-    public static func isNewer(_ a: String, than b: String) -> Bool {
-        a.compare(b, options: .numeric) == .orderedDescending
+    /// Semantic-version ordering (semver.org §11): numeric core first, then a pre-release ranks below its
+    /// release (`1.0.0-beta.1` < `1.0.0-beta.2` < `1.0.0`), pre-release ids compare numerically when both are
+    /// numbers. A plain string compare got `1.0.0-beta.1` > `1.0.0`, so beta servers would never update to final.
+    public static func isNewer(_ a: String, than b: String) -> Bool { compareVersions(a, b) > 0 }
+
+    public static func compareVersions(_ a: String, _ b: String) -> Int {
+        func split(_ v: String) -> (core: [Int], pre: [Substring]) {
+            let trimmed = v.hasPrefix("v") ? v.dropFirst() : Substring(v)
+            let noBuild = trimmed.split(separator: "+", maxSplits: 1).first ?? ""
+            let parts = noBuild.split(separator: "-", maxSplits: 1)
+            let core = (parts.first ?? "").split(separator: ".").map { Int($0) ?? 0 }
+            let pre = parts.count > 1 ? parts[1].split(separator: ".") : []
+            return (core, pre)
+        }
+        let (ca, pa) = split(a), (cb, pb) = split(b)
+        for i in 0..<max(ca.count, cb.count) {
+            let x = i < ca.count ? ca[i] : 0, y = i < cb.count ? cb[i] : 0
+            if x != y { return x < y ? -1 : 1 }
+        }
+        if pa.isEmpty || pb.isEmpty { return pa.isEmpty == pb.isEmpty ? 0 : (pa.isEmpty ? 1 : -1) }
+        for i in 0..<max(pa.count, pb.count) {
+            guard i < pa.count else { return -1 }
+            guard i < pb.count else { return 1 }
+            let x = pa[i], y = pb[i]
+            if x == y { continue }
+            switch (Int(x), Int(y)) {
+            case let (nx?, ny?): return nx < ny ? -1 : 1
+            case (_?, nil): return -1
+            case (nil, _?): return 1
+            default: return x < y ? -1 : 1
+            }
+        }
+        return 0
     }
 
     @discardableResult

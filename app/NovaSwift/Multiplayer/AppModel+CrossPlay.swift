@@ -249,11 +249,28 @@ extension AppModel {
     /// Puts the player's own plug-in set back after a borrowed one, and returns to flight if that's where they were.
     func restorePlugins() async {
         guard crossPlay.borrowedFrom != nil || data.sessionPluginOverride != nil else { return }
+        guard !crossPlay.restoringPlugins else { return }
+        crossPlay.restoringPlugins = true
+        defer { crossPlay.restoringPlugins = false }
         let wasInGame = screen == .game
         await swapPlugins(to: nil)
         crossPlay.borrowedFrom = nil
         crossPlay.notice = "Your own plug-ins are back."
         if wasInGame { finishLoadingIntoGame() }
+    }
+
+    /// The "Reconnect" button after auto-reconnect gave up. The session already ended normally (borrowed plug-ins
+    /// are being / were restored), so this is just a fresh join from the kept ticket: it re-checks the server's
+    /// plug-ins and re-opens the "Install & Join" plan when the set must be borrowed again.
+    func reconnectToLostServer() {
+        guard let lost = session.lostConnection else { return }
+        session.dismissLostConnection()
+        let join = PendingENetJoin(address: lost.ticket.address, name: lost.ticket.lobbyName,
+                                   password: lost.ticket.password, save: nil)
+        Task { @MainActor in
+            while crossPlay.restoringPlugins { try? await Task.sleep(nanoseconds: 100_000_000) }
+            connectToServer(join)
+        }
     }
 
     private func crossPlaySessionEnded() {

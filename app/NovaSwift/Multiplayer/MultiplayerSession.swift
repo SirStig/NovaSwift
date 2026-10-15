@@ -8,6 +8,9 @@ import NovaSwiftENet
 #if canImport(GameKit)
 import GameKit
 #endif
+#if os(iOS)
+import UIKit
+#endif
 
 /// App-level owner of a live multiplayer `NetSession` (from `NovaSwiftNet`),
 /// bridged into SwiftUI as an `ObservableObject`. Hangs off `AppModel` so every
@@ -107,7 +110,55 @@ final class MultiplayerSession: ObservableObject {
     /// Fired after a live session ends, however it ends (the app restores borrowed plug-ins here).
     var onSessionEnded: (() -> Void)?
 
+    // MARK: - Auto-reconnect (ENet client sessions)
+
+    /// Everything needed to rejoin the server we are in, kept in memory only while a cross-play session is live
+    /// (the password is never written anywhere by this type; saved servers keep their own copy as before).
+    /// The borrowed-plug-in state is deliberately NOT here: it lives in `AppModel.crossPlay.borrowedFrom`, and a
+    /// reconnect never runs `stop()`, so it is never touched.
+    struct RejoinTicket: Equatable {
+        var address: CrossPlayAddress
+        var password: String
+        var displayName: String
+        /// The lobby / server display name.
+        var lobbyName: String
+    }
+    /// Where the auto-reconnect is. `.idle` = connected, never connected, or finished.
+    enum ReconnectState: Equatable {
+        case idle
+        case reconnecting(attempt: Int, of: Int)
+    }
+    /// A connection that could not be restored after the retries ran out. Drives the "Reconnect" button.
+    struct LostConnection: Equatable {
+        var message: String
+        var ticket: RejoinTicket
+    }
+    @Published private(set) var reconnectState: ReconnectState = .idle
+    @Published private(set) var lostConnection: LostConnection?
+    private var rejoinTicket: RejoinTicket?
+    private var reconnectTask: Task<Void, Never>?
+    private var reconnectStartedAt = Date()
+    private var reconnectAttemptsStarted = 0
+    private var lastReconnectFailure: ENetFailure?
+    /// Seconds to wait before each attempt: immediately, then 2 s, 5 s, 10 s, 15 s.
+    private static let reconnectDelays: [TimeInterval] = [0, 2, 5, 10, 15]
+    /// Stop starting new attempts after this long.
+    private static let reconnectBudget: TimeInterval = 60
+    /// ENet's idle timeout (`ENetTransport.Wire.idleTimeout`, internal there): a gap this long drops us server-side.
+    private static let serverIdleTimeout: TimeInterval = 20
+    /// Latest pilot facts, so a rejoin announces where the pilot is now, not where they were at the first join.
+    private var localSystemID = -1
+    private var localName = ""
+    private var backgroundedAt: Date?
+    #if os(iOS)
+    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    #endif
+
     private var enetClient: ENetTransport?
+    /// Peers we already reported as sending invalid data this session (one report each).
+    private var reportedInvalidPeers = Set<String>()
+    /// Whether the local player is docked at a spaceport (mirrored into the sync driver).
+    private var localLanded = false
     private var enetHost: ENetHostTransport?
     private var enetAnnouncer: LANBeaconService?
     private var pendingActivation: (name: String, systemID: Int, shipTypeID: Int?)?
@@ -265,6 +316,8 @@ final class MultiplayerSession: ObservableObject {
     private func activate(transport: Transport, displayName: String, systemID: Int,
                           shipTypeID: Int?, rules: SessionRules, broadcastRules: Bool = true) {
         if let shipTypeID { localShipTypeID = shipTypeID }
+        localSystemID = systemID
+        localName = displayName
         let session = NetSession(transport: transport, rules: rules)
         // The host owns the rules: it must (re)send them to every peer that connects
         // later, or a joiner keeps its seed `.safe` rules (no real PvP damage) even
@@ -281,15 +334,20 @@ final class MultiplayerSession: ObservableObject {
         let drv = SystemSyncDriver(session: session, localSystemID: systemID)
         drv.onNotAuthority = { [weak self] in self?.bitsInitialized = false }
         drv.onAuthorityPostStep = { [weak self] net, peers in self?.propagateEarnedBits(net: net, to: peers) }
+        drv.isLocalPlayerLanded = localLanded
         driver = drv
+        reportedInvalidPeers.removeAll()
         // A peer that keeps sending invalid data is reported to the relay server (which can remove it). `sendReport` is
         // thread-safe; it only queues. Only the ENet client has a server to tell.
         if let enet = transport as? ENetTransport {
             session.onMisbehavior = { peer, why, strikes in
                 if strikes == 5, let id = Int(peer) { enet.sendReport(target: id, reason: "invalid", detail: why) }
             }
-            drv.onInvalidMessage = { peer, why in
-                if let id = Int(peer) { enet.sendReport(target: id, reason: "invalid", detail: why) }
+            drv.onInvalidMessage = { [weak self] peer, why in
+                // Once per peer per session: a malformed-snapshot stream must not become a report flood
+                // (the server counts distinct reporters, but our own repeats are pure noise).
+                guard let self, let id = Int(peer), self.reportedInvalidPeers.insert(peer).inserted else { return }
+                enet.sendReport(target: id, reason: "invalid", detail: why)
             }
         }
         self.rules = rules
@@ -303,6 +361,12 @@ final class MultiplayerSession: ObservableObject {
     /// Leave the session and clear all mirrored state.
     func stop() {
         let wasLive = isActive
+        reconnectTask?.cancel(); reconnectTask = nil
+        reconnectState = .idle
+        lostConnection = nil
+        rejoinTicket = nil
+        backgroundedAt = nil
+        endBackgroundTask()
         enetClient?.onEvent = nil; enetHost?.onEvent = nil    // no callbacks (or re-entry) while we tear down
         enetClient?.stopPumping()
         enetHost?.stopPumping()
@@ -315,6 +379,7 @@ final class MultiplayerSession: ObservableObject {
         transport = nil
         driver?.reset()
         driver = nil
+        reportedInvalidPeers.removeAll()
         lastKnownBits = []
         bitsInitialized = false
         isActive = false
@@ -349,6 +414,7 @@ final class MultiplayerSession: ObservableObject {
         isHost = false
         joinedHostID = String(ENetTransport.Wire.serverID)
         pendingActivation = (displayName, systemID, shipTypeID)
+        rejoinTicket = RejoinTicket(address: address, password: password, displayName: displayName, lobbyName: lobbyName)
         t.onEvent = { [weak self, weak t] event in
             MainActor.assumeIsolated { if let self, let t { self.handleENet(event, from: t) } }
         }
@@ -356,6 +422,7 @@ final class MultiplayerSession: ObservableObject {
             try t.connect()
         } catch {
             enetClient = nil
+            rejoinTicket = nil
             enetFailure = ENetFailure(code: "bad_request", message: "Couldn't start connecting to \(address.formatted).", serverManifestJSON: nil)
             return
         }
@@ -365,33 +432,222 @@ final class MultiplayerSession: ObservableObject {
 
     private func handleENet(_ event: ENetTransport.Event, from t: ENetTransport) {
         guard t === enetClient else { return }
+        // A reconnect attempt is in flight (reconnectState != .idle and we have not re-activated yet).
+        let attempting = reconnectState != .idle && pendingActivation != nil
         switch event {
         case .connected(let serverName, _, _, _, _):
             guard let p = pendingActivation else { return }
             pendingActivation = nil
             connectingTo = nil
-            if !serverName.isEmpty { lobbyName = serverName }
+            if !serverName.isEmpty { lobbyName = serverName; rejoinTicket?.lobbyName = serverName }
             // Joiners adopt the host's rules over the wire (NetSession); seed safe.
+            // On a reconnect this builds a fresh NetSession + sync driver (clean mirrors, new peer id) and
+            // re-announces presence; the plug-in set was never changed, so nothing is reloaded.
             activate(transport: t, displayName: p.name, systemID: p.systemID, shipTypeID: p.shipTypeID,
                      rules: .safe, broadcastRules: false)
+            if reconnectState != .idle {
+                reconnectTask?.cancel(); reconnectTask = nil
+                reconnectState = .idle
+                lastReconnectFailure = nil
+            }
         case .rejected(let code, let message):
             let manifest = t.rejectServerManifest
+            let failure = ENetFailure(code: code, message: message, serverManifestJSON: manifest)
+            // "full" can just be our dead slot still being held by the server; everything else is final.
+            if attempting, code == "full" || code == "refused" { reconnectAttemptFailed(failure); return }
+            if attempting { reconnectGiveUp(failure); return }
             endENetClient()
-            enetFailure = ENetFailure(code: code, message: message, serverManifestJSON: manifest)
+            enetFailure = failure
         case .kicked:
             stop()
             wasKicked = true
         case .timedOut(let message):
-            endENetClient()
-            enetFailure = ENetFailure(code: "timeout", message: message, serverManifestJSON: nil)
+            if attempting {
+                reconnectAttemptFailed(ENetFailure(code: "timeout", message: message, serverManifestJSON: nil))
+            } else if isActive {
+                beginReconnect(message: message, code: "timeout", from: t)       // the idle timeout: transport loss
+            } else {
+                endENetClient()
+                enetFailure = ENetFailure(code: "timeout", message: message, serverManifestJSON: nil)
+            }
         case .disconnected(let reason):
             guard t.state == .closed else { return }
-            let wasLive = isActive
-            endENetClient()
-            if wasLive { enetFailure = ENetFailure(code: "disconnected", message: reason, serverManifestJSON: nil) }
+            if attempting {
+                reconnectAttemptFailed(ENetFailure(code: "disconnected", message: reason, serverManifestJSON: nil))
+            } else if isActive {
+                beginReconnect(message: reason, code: "disconnected", from: t)   // socket lost without a kick/refusal
+            } else {
+                endENetClient()
+            }
         case .chat:
             break     // the in-session chat rides NetSession; this is the transport's fallback only
         }
+    }
+
+    // MARK: - Auto-reconnect
+
+    /// The transport died under a live ENet client session (idle timeout / lost socket / app was suspended).
+    /// Kicks, bans, refusals and Leave never get here. Keeps the flight scene, the pilot, the plug-in set and the
+    /// sync driver; just drops everyone else, then retries with backoff.
+    private func beginReconnect(message: String, code: String, from t: ENetTransport) {
+        guard isActive, !isHost, reconnectState == .idle, rejoinTicket != nil, net != nil else {
+            endENetClient()
+            enetFailure = ENetFailure(code: code, message: message, serverManifestJSON: nil)
+            return
+        }
+        // Retire the dead client (sends a polite ENet disconnect if it is somehow still open).
+        let peers = t.inner.connectedPeers
+        t.onEvent = nil
+        t.stopPumping()
+        t.disconnect()
+        enetClient = nil
+        pendingActivation = nil
+        connectingTo = nil
+        // Everyone else is gone from our point of view: the session's presence empties, so the driver's authority
+        // becomes nil and it clears mirrors on the next pre-step (forceResync is belt and braces).
+        for p in peers { net?.transport(t, peerDidDisconnect: p) }
+        driver?.forceResync()
+        // An in-flight trade cannot survive: the partner's id and our id both change.
+        tradeCoord.reset()
+        refreshTrade()
+        tradeNotice = "Trade cancelled: connection lost."
+        incomingTradeInvite = nil
+        syncPresence()
+        lastReconnectFailure = ENetFailure(code: code, message: message, serverManifestJSON: nil)
+        reconnectStartedAt = Date()
+        reconnectAttemptsStarted = 0
+        reconnectState = .reconnecting(attempt: 0, of: Self.reconnectDelays.count)
+        scheduleReconnectAttempt()
+    }
+
+    private func scheduleReconnectAttempt() {
+        guard case .reconnecting = reconnectState else { return }
+        let index = reconnectAttemptsStarted
+        guard index < Self.reconnectDelays.count else {
+            reconnectGiveUp(lastReconnectFailure ?? ENetFailure(code: "timeout", message: "The server stopped responding.", serverManifestJSON: nil))
+            return
+        }
+        let delay = Self.reconnectDelays[index]
+        reconnectTask?.cancel()
+        reconnectTask = Task { [weak self] in
+            if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+            guard !Task.isCancelled, let self else { return }
+            self.startReconnectAttempt()
+        }
+    }
+
+    private func startReconnectAttempt() {
+        guard case .reconnecting = reconnectState, let ticket = rejoinTicket else { return }
+        if reconnectAttemptsStarted > 0, Date().timeIntervalSince(reconnectStartedAt) > Self.reconnectBudget {
+            reconnectGiveUp(lastReconnectFailure ?? ENetFailure(code: "timeout", message: "The server stopped responding.", serverManifestJSON: nil))
+            return
+        }
+        reconnectAttemptsStarted += 1
+        reconnectState = .reconnecting(attempt: reconnectAttemptsStarted, of: Self.reconnectDelays.count)
+        let manifest = pluginManifestProvider?() ?? .empty
+        // A fresh transport picks a fresh random peer id: the server may still hold our old slot until it times out.
+        let t = ENetTransport(config: .init(host: ticket.address.host, port: ticket.address.port, displayName: ticket.displayName,
+                                            password: ticket.password, gameVersion: CrossPlayProtocol.appVersion,
+                                            manifestJSON: ENetTransport.manifestJSON(manifest)))
+        t.connectTimeout = 6
+        enetClient = t
+        pendingActivation = (localName.isEmpty ? ticket.displayName : localName, localSystemID,
+                             localShipTypeID >= 0 ? localShipTypeID : nil)
+        t.onEvent = { [weak self, weak t] event in
+            MainActor.assumeIsolated { if let self, let t { self.handleENet(event, from: t) } }
+        }
+        do {
+            try t.connect()
+        } catch {
+            discardAttemptClient()
+            reconnectAttemptFailed(ENetFailure(code: "timeout", message: "Couldn't reach \(ticket.address.formatted).", serverManifestJSON: nil))
+            return
+        }
+        t.startPumping(interval: 1.0 / 60.0, queue: .main)
+    }
+
+    private func discardAttemptClient() {
+        enetClient?.onEvent = nil
+        enetClient?.stopPumping()
+        enetClient?.disconnect()
+        enetClient = nil
+        pendingActivation = nil
+        connectingTo = nil
+    }
+
+    /// One attempt failed in a retryable way: wait for the next slot in the schedule.
+    private func reconnectAttemptFailed(_ failure: ENetFailure) {
+        lastReconnectFailure = failure
+        discardAttemptClient()
+        scheduleReconnectAttempt()
+    }
+
+    /// Out of retries (or a final refusal): the normal full teardown, which restores borrowed plug-ins, then the
+    /// usual failure message plus a manual Reconnect offer (not for bans, wrong passwords, mismatches).
+    private func reconnectGiveUp(_ failure: ENetFailure) {
+        let ticket = rejoinTicket
+        let retryableLater = !["banned", "password", "proto", "version", "plugins", "bad_request"].contains(failure.code)
+        stop()
+        enetFailure = ENetFailure(code: failure.code,
+                                  message: retryableLater ? "Lost the connection to the server and couldn't get back in. \(failure.message)" : failure.message,
+                                  serverManifestJSON: failure.serverManifestJSON)
+        if retryableLater, let ticket { lostConnection = LostConnection(message: enetFailure?.message ?? failure.message, ticket: ticket) }
+    }
+
+    /// The Cancel button on the reconnecting banner: full teardown, usual message.
+    func cancelReconnect() {
+        guard reconnectState != .idle else { return }
+        let ticket = rejoinTicket
+        stop()
+        enetFailure = ENetFailure(code: "disconnected", message: "Disconnected from the server.", serverManifestJSON: nil)
+        if let ticket { lostConnection = LostConnection(message: "Disconnected from the server.", ticket: ticket) }
+    }
+
+    /// Hides the "connection lost" banner without reconnecting.
+    func dismissLostConnection() { lostConnection = nil }
+
+    // MARK: App lifecycle (iOS suspends the app; macOS just keeps going)
+
+    /// Call when the app goes to the background. On iOS this asks for a short background task so a quick app
+    /// switch keeps the main-queue ENet pump (and so the connection) alive for the ~25 s the system grants.
+    func appDidEnterBackground() {
+        guard isActive, enetClient != nil, reconnectState == .idle else { return }
+        backgroundedAt = Date()
+        #if os(iOS)
+        endBackgroundTask()
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "NovaSwift.multiplayer") { [weak self] in
+            MainActor.assumeIsolated { self?.endBackgroundTask() }
+        }
+        #endif
+    }
+
+    /// Call when the app is active again. If we were away long enough to be dropped (or the transport already
+    /// closed) start reconnecting now instead of waiting for the next idle-timeout event.
+    func appDidBecomeActive() {
+        let away = backgroundedAt.map { Date().timeIntervalSince($0) } ?? 0
+        backgroundedAt = nil
+        #if os(iOS)
+        // A live background task means the pump kept running the whole time: the connection is as good as ever.
+        let keptAlive = backgroundTask != .invalid
+        endBackgroundTask()
+        #else
+        let keptAlive = true      // desktop never suspends the pump
+        #endif
+        guard isActive, !isHost, reconnectState == .idle, let t = enetClient else { return }
+        if t.state == .closed {
+            beginReconnect(message: "The connection was lost while the app was in the background.", code: "timeout", from: t)
+        } else if !keptAlive, away >= Self.serverIdleTimeout {
+            beginReconnect(message: "The connection was lost while the app was in the background.", code: "timeout", from: t)
+        }
+    }
+
+    private func endBackgroundTask() {
+        #if os(iOS)
+        if backgroundTask != .invalid {
+            UIApplication.shared.endBackgroundTask(backgroundTask)
+            backgroundTask = .invalid
+        }
+        #endif
     }
 
     /// Tear down a client that failed or closed (keeps `enetFailure`).
@@ -571,6 +827,8 @@ final class MultiplayerSession: ObservableObject {
     /// hull) rides along so co-located peers can sprite this ship's mirror.
     func updatePresence(systemID: Int, name: String, shipTypeID: Int? = nil) {
         if let shipTypeID { localShipTypeID = shipTypeID }
+        localSystemID = systemID
+        if !name.isEmpty { localName = name }
         driver?.setLocalSystem(systemID)   // new system ⇒ fresh world ⇒ drop mirrors
         net?.updateLocalPresence(name: name, systemID: systemID,
                                  shipTypeHint: localShipTypeID >= 0 ? localShipTypeID : nil)
@@ -641,6 +899,7 @@ final class MultiplayerSession: ObservableObject {
         if isHost {
             if !manifest.isCompatible(with: localManifest) {
                 net?.kick(peer)
+                if let id = Int(peer) { enetHost?.kick(id, reason: "Your plug-ins don't match the host's.") }   // drop the link too (else a ghost)
                 syncPresence()
             }
         } else if peer == joinedHostID {
@@ -663,17 +922,24 @@ final class MultiplayerSession: ObservableObject {
     /// Whether Layer-2 sync is engaged right now (≥2 players co-located).
     var isSyncingSystem: Bool { isActive && driver?.currentAuthorityID != nil }
 
-    /// Called by the game scene each frame **before** `world.step`. A no-op in
+    /// Called when the local player lands / launches. A landed player is not simulated, so the sync driver
+    /// must not treat their stale world as live.
+    func setLocalLanded(_ landed: Bool) {
+        localLanded = landed
+        driver?.isLocalPlayerLanded = landed
+    }
+
+    /// Called by the game scene each sim tick **before** `world.step`. A no-op in
     /// single-player or when the local player is alone in the system.
     func syncPreStep(world: World) {
         guard isActive, let driver, net != nil else { return }
-        driver.syncPreStep(world: world)
+        driver.syncPreStep(world: world)    // while reconnecting this runs solo: presence is empty, mirrors get cleared
     }
 
-    /// Called by the game scene each frame **after** `world.step`. The authority
+    /// Called by the game scene each sim tick **after** `world.step`. The authority
     /// broadcasts a fresh snapshot; a client sends its input. No-op when alone.
     func syncPostStep(world: World) {
-        guard isActive, let driver, net != nil else { return }
+        guard isActive, reconnectState == .idle, let driver, net != nil else { return }
         driver.syncPostStep(world: world)
     }
 

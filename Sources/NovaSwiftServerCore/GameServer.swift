@@ -140,6 +140,7 @@ public final class GameServer {
             manifestJSON: ENetTransport.manifestJSON(manifest.all),
             rulesJSON: CrossPlayProtocol.rulesJSON(cfg.sessionRules), rulesName: CrossPlayProtocol.presetName(cfg.sessionRules),
             requirements: manifest.requirements, loopbackOnly: false, dedicated: true)
+        c.bindAddress = cfg.bindAddress
         c.maxConnectionsPerIP = cfg.maxConnectionsPerIP
         return c
     }
@@ -170,7 +171,7 @@ public final class GameServer {
         h.joinGate = { [weak self] ip, name in
             guard let self else { return nil }
             let cfg = self.store.config
-            if cfg.allowlistMode, cfg.allowlist[ip] == nil {
+            if cfg.allowlistMode, !cfg.allowlist.keys.contains(where: { IPAddressTools.matches(entry: $0, ip: ip) }) {
                 return ("allowlist", "This server is invite-only. Ask the admin to allow your address (\(ip)).")
             }
             return nil
@@ -201,7 +202,7 @@ public final class GameServer {
             log.warn("\(name) reported \(who)\(detail.isEmpty ? "" : ": " + detail)")
             sendChat(reply, to: String(id))
             if moderation.noteReport(target: target, reporter: id, now: now) >= 3 {
-                host?.reportAbuse(target, "was reported by other players")
+                host?.reportAbuse(target, "was reported by other players", countsTowardBan: false)
             }
         }
     }
@@ -228,7 +229,7 @@ public final class GameServer {
         manifest = plugins.manifest(enabled: new.enabledPlugins)
         guard state == .running else { return report }
         let capacityGrew = new.maxPlayers > createdCapacity
-        if old.port != new.port || capacityGrew {
+        if old.port != new.port || old.bindAddress != new.bindAddress || capacityGrew {
             do { try restartNetwork(); report.restartedNetwork = true
                  log.info("Game port settings changed: the server was restarted. Connected players need to rejoin.")
             } catch {
@@ -317,8 +318,11 @@ public final class GameServer {
                 log.warn("\(who) reported \(t) (\(reason))\(detail.isEmpty ? "" : ": " + detail)")
                 let now = ProcessInfo.processInfo.systemUptime
                 var kick = moderation.noteReport(target: target, reporter: reporter, now: now) >= 3
-                if reason == "invalid", moderation.noteInvalidReport(target: target) { kick = true }
-                if kick { host?.reportAbuse(target, "was reported by other players") }
+                if reason == "invalid",
+                   moderation.noteInvalidReport(target: target, reporter: reporter, now: now,
+                                                online: host?.clients.count ?? 0) { kick = true }
+                // A kick driven by reports never feeds the address temp-ban (only the server's own flood/limit kicks do).
+                if kick { host?.reportAbuse(target, "was reported by other players", countsTowardBan: false) }
             }
         case .versionNote(_, let name, let theirs, let ours):
             log.info("\(name) runs NovaSwift \(theirs) (server \(ours)); same protocol, playing anyway.")
@@ -409,7 +413,7 @@ public final class GameServer {
         let player = players().first { $0.id == id }
         guard let player else { return false }
         if ban && !player.ip.isEmpty {
-            try? store.update { $0.bans[player.ip] = "\(player.name) (banned \(Self.dateOnly(Date())))" }
+            try? store.update { $0.bans[IPAddressTools.groupKey(player.ip)] = "\(player.name) (banned \(Self.dateOnly(Date())))" }
         }
         let ok: Bool = queue.sync {
             session?.kick(String(id), ban: ban)
@@ -421,17 +425,18 @@ public final class GameServer {
     }
 
     public func ban(ip: String, note: String, actor: String = "console") {
-        guard NetworkTools.octets(ip) != nil else { return }
+        guard NetworkTools.isIP(ip) else { return }
+        let ip = IPAddressTools.groupKey(ip)          // IPv4: the address; IPv6: its /64 ("2001:db8:1:2::/64")
         audit.record(actor: actor, "ban-ip", "\(ip) \(note)")
         try? store.update { $0.bans[ip] = note.isEmpty ? "banned \(Self.dateOnly(Date()))" : note }
         queue.sync { host?.bannedIPs = Set(store.config.bans.keys) }
-        for p in players() where p.ip == ip { kick(p.id, reason: "Banned by the server admin.", ban: false) }
+        for p in players() where IPAddressTools.matches(entry: ip, ip: p.ip) { kick(p.id, reason: "Banned by the server admin.", ban: false) }
         log.info("Banned \(ip).")
     }
 
     public func unban(ip: String, actor: String = "console") {
         audit.record(actor: actor, "unban-ip", ip)
-        try? store.update { $0.bans[ip] = nil }
+        try? store.update { cfg in cfg.bans = cfg.bans.filter { !IPAddressTools.matches(entry: $0.key, ip: ip) } }   // an IPv6 address lifts its whole /64
         queue.sync { host?.bannedIPs = Set(store.config.bans.keys) }
         log.info("Unbanned \(ip).")
     }
@@ -473,13 +478,14 @@ public final class GameServer {
     }
 
     public func allow(ip: String, note: String = "", actor: String = "console") {
-        guard NetworkTools.octets(ip) != nil else { return }
+        guard NetworkTools.isIP(ip) else { return }
+        let ip = IPAddressTools.groupKey(ip)          // IPv6 entries cover the whole /64
         try? store.update { $0.allowlist[ip] = note.isEmpty ? "added \(Self.dateOnly(Date()))" : note }
         audit.record(actor: actor, "allow", ip)
     }
 
     public func disallow(ip: String, actor: String = "console") {
-        try? store.update { $0.allowlist[ip] = nil }
+        try? store.update { cfg in cfg.allowlist = cfg.allowlist.filter { !IPAddressTools.matches(entry: $0.key, ip: ip) } }
         audit.record(actor: actor, "disallow", ip)
     }
 
@@ -525,7 +531,7 @@ public struct ServerError: Error, LocalizedError, Equatable {
 
 public enum ServerVersion {
     /// The server program's own version (release tag `server-v<version>`).
-    public static let current = "0.1.0"
+    public static let current = "1.0.0-beta.1"
     public static let releasesAPI = URL(string: "https://api.github.com/repos/SirStig/NovaSwift/releases?per_page=30")!
     public static let releasesPage = URL(string: "https://github.com/SirStig/NovaSwift/releases")!
     public static let tagPrefix = "server-v"

@@ -73,24 +73,26 @@ typedef enum _ENetSocketShutdown
     ENET_SOCKET_SHUTDOWN_READ_WRITE = 2
 } ENetSocketShutdown;
 
-#define ENET_HOST_ANY       0
-#define ENET_HOST_BROADCAST 0xFFFFFFFFU
 #define ENET_PORT_ANY       0
 
 /**
- * Portable internet address structure. 
+ * Portable internet address structure (dual-stack).
  *
- * The host must be specified in network byte-order, and the port must be in host 
- * byte-order. The constant ENET_HOST_ANY may be used to specify the default 
- * server host. The constant ENET_HOST_BROADCAST may be used to specify the
- * broadcast address (255.255.255.255).  This makes sense for enet_host_connect,
- * but not for enet_host_create.  Once a server responds to a broadcast, the
- * address is updated from ENET_HOST_BROADCAST to the server's actual IP address.
+ * NovaSwift patch: the host is a 16 byte IPv6 address in network byte-order. IPv4 addresses are stored
+ * IPv4-mapped (::ffff:a.b.c.d), so one AF_INET6 socket (IPV6_V6ONLY off) serves both families; where
+ * AF_INET6 sockets are unavailable the socket layer falls back to AF_INET and converts at the boundary.
+ * The port is in host byte-order. scopeID is the IPv6 zone (interface index) for link-local addresses, 0
+ * otherwise; it is ignored when comparing peers.
+ *
+ * Use enet_address_set_host_any () for the wildcard address (the old ENET_HOST_ANY), and
+ * enet_address_set_host_broadcast () for IPv4 broadcast (the old ENET_HOST_BROADCAST, 255.255.255.255).
+ * The wire protocol carries no addresses, so this is invisible to peers.
  */
 typedef struct _ENetAddress
 {
-   enet_uint32 host;
+   enet_uint8  host [16];
    enet_uint16 port;
+   enet_uint32 scopeID;
 } ENetAddress;
 
 /**
@@ -516,6 +518,29 @@ ENET_API int        enet_socketset_select (ENetSocket, ENetSocketSet *, ENetSock
 /** @defgroup Address ENet address functions
     @{
 */
+
+/** Sets the address to the wildcard (::, or 0.0.0.0 on an IPv4-only socket). */
+ENET_API void enet_address_set_host_any (ENetAddress * address);
+/** Sets the host to IPv4 broadcast (::ffff:255.255.255.255). */
+ENET_API void enet_address_set_host_broadcast (ENetAddress * address);
+/** Stores an IPv4 address given in network byte-order as an IPv4-mapped IPv6 address. Port is untouched. */
+ENET_API void enet_address_set_host_ipv4 (ENetAddress * address, enet_uint32 ipv4NetworkOrder);
+/** Stores a raw 16 byte IPv6 address (network order). Port is untouched. */
+ENET_API void enet_address_set_host_ipv6 (ENetAddress * address, const enet_uint8 bytes [16]);
+/** Non-zero if the host is IPv4-mapped (::ffff:a.b.c.d). */
+ENET_API int  enet_address_is_ipv4_mapped (const ENetAddress * address);
+/** Non-zero if the host is the wildcard address. */
+ENET_API int  enet_address_is_any (const ENetAddress * address);
+/** Non-zero if the host is IPv4 broadcast. */
+ENET_API int  enet_address_is_broadcast (const ENetAddress * address);
+/** Non-zero if the host is a loopback address (127.0.0.0/8, ::1). */
+ENET_API int  enet_address_is_loopback (const ENetAddress * address);
+/** If the host is IPv4-mapped, stores the IPv4 address (network order) and returns 0; otherwise returns -1. */
+ENET_API int  enet_address_get_ipv4 (const ENetAddress * address, enet_uint32 * ipv4NetworkOrder);
+/** Non-zero if both hosts are the same address (port and scope ignored). */
+ENET_API int  enet_address_hosts_equal (const ENetAddress * a, const ENetAddress * b);
+/** Non-zero if sockets are real AF_INET6 dual-stack sockets on this machine (0 = IPv4-only fallback). */
+ENET_API int  enet_socket_ipv6_available (void);
 
 /** Attempts to parse the printable form of the IP address in the parameter hostName
     and sets the host field in the address parameter if successful.

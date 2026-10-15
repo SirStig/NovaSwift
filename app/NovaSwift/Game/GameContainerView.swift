@@ -994,6 +994,9 @@ struct GameContainerView: View {
                     #endif
                 }
 
+                // Connection-lost / reconnecting banner (non-blocking, top centre).
+                MultiplayerConnectionBanner(session: model.session)
+
                 // Trade / item hand-off — a live trade window, or an incoming
                 // invite prompt. Modal overlays, only while in a session.
                 if model.session.trade != nil {
@@ -1299,6 +1302,9 @@ struct GameContainerView: View {
             // Backgrounding/quitting: landed, save like the original's quit
             // while landed; in flight, only under `frequentAutosave` — the
             // original rolls a quit in flight back to the last launch.
+            // Multiplayer (ENet): keep the link alive through a quick app switch; on return, rejoin if dropped.
+            if phase == .background { model.session.appDidEnterBackground() }
+            else if phase == .active { model.session.appDidBecomeActive() }
             if phase != .active {
                 syncCombatStanding()
                 saveGame(reason: landedSpobID != nil ? .backgroundLanded : .background)
@@ -1339,6 +1345,7 @@ struct GameContainerView: View {
             checkMissionShipSightings(host)
         }
         .onChange(of: landedSpobID) { _, id in
+            model.session.setLocalLanded(id != nil)   // co-op: a landed player isn't simulated by the authority
             setScenePaused(id != nil, reason: "landedSpobID=\(id.map(String.init) ?? "nil")")
             if id != nil { host?.scene.cancelCombatChatter() }   // 0x004313c0 on landing
             // Mirror the docked state into the persisted pilot so the on-land save

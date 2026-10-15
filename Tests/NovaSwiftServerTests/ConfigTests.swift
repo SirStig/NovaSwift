@@ -140,3 +140,16 @@ final class AdminPasswordTests: XCTestCase {
         }
     }
 }
+
+final class ServerVersionOrderTests: XCTestCase {
+    func testPreReleasesRankBelowTheirRelease() {
+        XCTAssertTrue(UpdateChecker.isNewer("1.0.0-beta.1", than: "0.1.0"))
+        XCTAssertTrue(UpdateChecker.isNewer("1.0.0", than: "1.0.0-beta.1"), "the final release must reach beta servers")
+        XCTAssertTrue(UpdateChecker.isNewer("1.0.0-beta.10", than: "1.0.0-beta.2"))
+        XCTAssertTrue(UpdateChecker.isNewer("1.0.0-rc.1", than: "1.0.0-beta.9"))
+        XCTAssertTrue(UpdateChecker.isNewer("1.0.1", than: "1.0.0"))
+        XCTAssertFalse(UpdateChecker.isNewer("1.0.0-beta.1", than: "1.0.0"))
+        XCTAssertFalse(UpdateChecker.isNewer("1.0.0", than: "1.0.0"))
+        XCTAssertFalse(UpdateChecker.isNewer("0.9.9", than: "1.0.0-beta.1"))
+    }
+}

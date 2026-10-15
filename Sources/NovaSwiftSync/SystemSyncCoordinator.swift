@@ -1,3 +1,4 @@
+import Foundation
 import NovaSwiftEngine
 import NovaSwiftNet
 
@@ -53,9 +54,85 @@ public final class SystemSyncCoordinator {
     /// Authority side: client playerID → local entity id of the mirror ship we
     /// inject for that co-located client and simulate from its inputs.
     private var clientShipID: [String: Int] = [:]
+    /// Monotonic clock (seconds) for input staleness and loadout refresh. Tests replace it.
+    public var clock: () -> Double = { ProcessInfo.processInfo.systemUptime }
+
+    /// Authority side: when each client's newest accepted input arrived (`clock()` time).
+    private var lastInputAt: [String: Double] = [:]
+    /// A client that sent nothing newer for this long is treated as releasing every control (coast, no fire) instead of
+    /// replaying its last held keys forever.
+    public static let staleInputSeconds = 0.5
+    /// Authority side: each client's latest combat loadout, applied to its simulated copy. `loadoutDirty` marks one
+    /// that arrived since the copy was last configured.
+    private var pendingLoadout: [String: ShipLoadoutNet] = [:]
+    private var loadoutDirty: Set<String> = []
+    private var appliedLoadoutKey: [String: [Double]] = [:]
+    /// Highest loadout `rev` applied per client, echoed in its snapshots (`ackLoadoutRev`).
+    private var ackedLoadoutRev: [String: UInt32] = [:]
+    /// A hull we failed to rebuild a copy into (type unknown to the game data), so we don't retry every frame.
+    private var typeRebuildFailed: [String: Int] = [:]
+    /// Each client's reported life generation (`InputFrame.lifeID`).
+    private var clientLife: [String: UInt32] = [:]
+    /// Clients whose simulated copy was destroyed and who have not reported a new life yet: no re-injection (that
+    /// instant full-health respawn is what hid the death), and their snapshot entry stays `destroyed`.
+    private struct DeathMark { var life: UInt32?; var at: Double; var lastType: Int; var name: String }
+    private var deathPending: [String: DeathMark] = [:]
+    /// Clients that told us they are landed: no ship in the world or snapshot until they launch.
+    private var landedClients: Set<String> = []
+    /// Kills credited to a client, resent in each of its snapshots until it acks them.
+    private var pendingCredits: [String: [KillCreditNet]] = [:]
+    private var creditSeq: [String: UInt32] = [:]
+    private static let maxPendingCredits = 64
+
+    // Client side.
+    /// Our life generation: bumped whenever our ship starts over (respawn, world rebuild). Never reset to 0.
+    private var lifeID: UInt32 = 1
+    private var wasPlayerAlive = true
+    private var loadoutRev: UInt32 = 0
+    private var lastLoadoutKey: [Double]?
+    private var lastLoadoutSentAt = -Double.infinity
+    private var forceLoadout = true
+    private var launchPending = false
+    private var holdingHealth = false
+    private var holdRev: UInt32?
+    /// Seconds between loadout refreshes when nothing changed (covers a dropped unreliable frame / a new authority).
+    public static let loadoutRefreshSeconds = 2.0
+    /// The app/driver sets this while the local player is landed: snapshots must not touch our (just repaired) health.
+    public var suspendHealthAdoption = false
+    private var lastCreditSeq: UInt32 = 0
+    private var pendingKillCredits: [KillCreditNet] = []
 
     public init(localPlayerID: String) {
         self.localPlayerID = localPlayerID
+    }
+
+    private func clearAuthorityState() {
+        latestInput.removeAll()
+        highestSeq.removeAll()
+        pendingPose.removeAll()
+        clientShipID.removeAll()
+        lastInputAt.removeAll()
+        pendingLoadout.removeAll()
+        loadoutDirty.removeAll()
+        appliedLoadoutKey.removeAll()
+        ackedLoadoutRev.removeAll()
+        typeRebuildFailed.removeAll()
+        clientLife.removeAll()
+        deathPending.removeAll()
+        landedClients.removeAll()
+        pendingCredits.removeAll()
+        creditSeq.removeAll()
+    }
+
+    private func clearClientState() {
+        pendingEffects.removeAll()
+        pendingKillCredits.removeAll()
+        lastCreditSeq = 0
+        forceLoadout = true
+        lastLoadoutKey = nil
+        holdingHealth = false
+        holdRev = nil
+        launchPending = false
     }
 
     /// Drop all per-system state. Call on a local system change or role change —
@@ -63,11 +140,10 @@ public final class SystemSyncCoordinator {
     public func reset() {
         playerMirrorID.removeAll()
         npcMirrorIDByAuthorityID.removeAll()
-        latestInput.removeAll()
-        highestSeq.removeAll()
-        pendingPose.removeAll()
-        clientShipID.removeAll()
-        pendingEffects.removeAll()
+        clearAuthorityState()
+        clearClientState()
+        lifeID &+= 1           // a fresh world is a fresh life: lets an authority re-create a destroyed copy
+        wasPlayerAlive = true
     }
 
     /// Drop only the **NPC** mirrors + NPC-side state, keeping player mirrors. Used
@@ -76,22 +152,49 @@ public final class SystemSyncCoordinator {
     /// ships carry through the switch without blinking.
     public func resetForAuthorityChange() {
         npcMirrorIDByAuthorityID.removeAll()
-        latestInput.removeAll()
-        highestSeq.removeAll()
-        pendingPose.removeAll()
-        clientShipID.removeAll()
+        clearAuthorityState()
         pendingEffects.removeAll()
+        pendingKillCredits.removeAll()
+        lastCreditSeq = 0
+        forceLoadout = true     // the new authority has never seen our loadout
+        lastLoadoutKey = nil
+    }
+
+    /// The local player just launched from a landing (called by the driver on the landed -> flying edge). The next input
+    /// carries a fresh loadout, and snapshots may not touch our health until the authority confirms it built our copy
+    /// from it - otherwise the pre-launch copy's health would undo the repair done on landing.
+    public func beginLaunchHold() {
+        launchPending = true
+        holdingHealth = true
+        holdRev = nil
+        forceLoadout = true
+    }
+
+    /// The hull the authority should simulate for `client`: its reported loadout's, nil until one arrived.
+    public func desiredShipType(for client: String) -> Int? {
+        guard let t = pendingLoadout[client]?.shipTypeID, t >= 0 else { return nil }
+        return t
     }
 
     /// Replay one-shot effects (explosions) from applied snapshots into the world,
     /// then clear them. Call **after** `world.step` (which clears the frame's
     /// events) and before the scene drains — so a client sees the authority's booms.
     public func flushEffects(into world: World) {
-        guard !pendingEffects.isEmpty else { return }
-        for e in pendingEffects {
-            world.emitVisualExplosion(at: Vec2(e.x, e.y), radius: e.radius, boomID: e.boomID)
+        if !pendingEffects.isEmpty {
+            for e in pendingEffects {
+                world.emitVisualExplosion(at: Vec2(e.x, e.y), radius: e.radius, boomID: e.boomID)
+            }
+            pendingEffects.removeAll(keepingCapacity: true)
         }
-        pendingEffects.removeAll(keepingCapacity: true)
+        // Kills the authority credited to us: replay as the engine's own player-kill bookkeeping (rating, legal
+        // record, "destroy" mission goal), after the step like the effects above.
+        if !pendingKillCredits.isEmpty {
+            for c in pendingKillCredits {
+                world.applyNetworkKillCredit(government: c.government, shipStrength: max(1, min(c.strength, 100_000)),
+                                             missionID: c.missionID, disabled: c.disabled)
+            }
+            pendingKillCredits.removeAll(keepingCapacity: true)
+        }
     }
 
     // MARK: - Authority handoff
@@ -134,31 +237,133 @@ public final class SystemSyncCoordinator {
     /// hull at the origin.
     @discardableResult
     public func syncClients(_ clients: [(id: String, name: String)], into world: World,
-                            makeShip: (String, String) -> Ship = SystemSyncCoordinator.defaultClientShip)
+                            makeShip: (String, String) -> Ship = SystemSyncCoordinator.defaultClientShip,
+                            typeOf: (String) -> Int? = { _ in nil })
         -> (injected: [Int], removed: [Int])
     {
         var present = Set<String>()
         var injected: [Int] = []
-        for client in clients {
-            present.insert(client.id)
-            if let localID = clientShipID[client.id], world.ship(id: localID) != nil { continue }
-            let ship = makeShip(client.id, client.name)
-            let localID = world.spawnRemotePlayer(
-                ship, info: RemotePlayerInfo(peerID: client.id, name: client.name),
-                arrival: .populate)
-            clientShipID[client.id] = localID
-            injected.append(localID)
-        }
         var removed: [Int] = []
+        noteDeaths(in: world)
+        for client in clients {
+            let id = client.id
+            present.insert(id)
+            // Landed: no ghost ship (in the world or the snapshot) until the client launches.
+            if landedClients.contains(id) {
+                if let localID = clientShipID[id] {
+                    world.removeShip(entityID: localID)
+                    clientShipID[id] = nil
+                    removed.append(localID)
+                }
+                continue
+            }
+            // Destroyed: stay dead until the client reports a new life (or, for a build that doesn't report one, a
+            // short cooldown) instead of re-injecting a fresh full-health copy the next frame.
+            if let mark = deathPending[id] {
+                let cleared: Bool
+                if mark.life != nil || clientLife[id] != nil { cleared = clientLife[id] != mark.life }
+                else { cleared = clock() - mark.at > 3 }
+                guard cleared else {
+                    if let localID = clientShipID[id], world.ship(id: localID) == nil { clientShipID[id] = nil }
+                    continue
+                }
+                deathPending[id] = nil
+            }
+            let wanted = desiredShipType(for: id) ?? typeOf(id)
+            if let localID = clientShipID[id], let existing = world.ship(id: localID) {
+                // A wreck plays out its death sequence (noteDeaths marked it); a living copy of the wrong hull (the
+                // client bought a ship) is rebuilt in place, keeping its pose.
+                guard existing.isAlive, let wanted, wanted >= 0, existing.shipTypeID != wanted,
+                      typeRebuildFailed[id] != wanted else { continue }
+                let fresh = makeShip(id, client.name)
+                guard fresh.shipTypeID == wanted else { typeRebuildFailed[id] = wanted; continue }
+                fresh.position = existing.position
+                fresh.velocity = existing.velocity
+                fresh.angle = existing.angle
+                world.removeShip(entityID: localID)
+                removed.append(localID)
+                let newID = world.spawnRemotePlayer(
+                    fresh, info: RemotePlayerInfo(peerID: id, name: client.name), arrival: .populate)
+                clientShipID[id] = newID
+                injected.append(newID)
+                configureCopy(fresh, for: id, world: world, fresh: false)
+                continue
+            }
+            let ship = makeShip(id, client.name)
+            let localID = world.spawnRemotePlayer(
+                ship, info: RemotePlayerInfo(peerID: id, name: client.name),
+                arrival: .populate)
+            clientShipID[id] = localID
+            injected.append(localID)
+            configureCopy(ship, for: id, world: world, fresh: true)
+        }
         for (clientID, localID) in clientShipID where !present.contains(clientID) {
             world.removeShip(entityID: localID)
             clientShipID[clientID] = nil
+            removed.append(localID)
+        }
+        let known = Set(lastInputAt.keys).union(pendingLoadout.keys).union(deathPending.keys)
+            .union(pendingCredits.keys).union(landedClients).union(latestInput.keys).union(pendingPose.keys)
+        for clientID in known where !present.contains(clientID) {
             latestInput[clientID] = nil
             highestSeq[clientID] = nil
             pendingPose[clientID] = nil
-            removed.append(localID)
+            lastInputAt[clientID] = nil
+            pendingLoadout[clientID] = nil
+            loadoutDirty.remove(clientID)
+            appliedLoadoutKey[clientID] = nil
+            ackedLoadoutRev[clientID] = nil
+            typeRebuildFailed[clientID] = nil
+            clientLife[clientID] = nil
+            deathPending[clientID] = nil
+            landedClients.remove(clientID)
+            pendingCredits[clientID] = nil
+            creditSeq[clientID] = nil
         }
         return (injected, removed)
+    }
+
+    /// Mark clients whose simulated copy just died (while the wreck is still in the world, so it can't be missed).
+    private func noteDeaths(in world: World) {
+        for (client, localID) in clientShipID where deathPending[client] == nil {
+            if let ship = world.ship(id: localID), !ship.isAlive {
+                deathPending[client] = DeathMark(life: clientLife[client], at: clock(), lastType: ship.shipTypeID,
+                                                 name: ship.remotePlayer?.name ?? client)
+            }
+        }
+    }
+
+    /// Make a client's copy match its reported loadout: health maxima and regen (the client owns those), the weapon
+    /// set, and - only for a freshly created copy - the starting health the client had.
+    private func configureCopy(_ ship: Ship, for client: String, world: World, fresh: Bool) {
+        guard let l = pendingLoadout[client] else { return }
+        loadoutDirty.remove(client)
+        ship.maxShield = l.maxShield
+        ship.maxArmor = l.maxArmor
+        ship.shieldRechargePerSec = l.shieldRegenPerSec
+        ship.armorRechargePerSec = l.armorRegenPerSec
+        if fresh {
+            ship.shield = min(max(0, l.shield ?? l.maxShield), l.maxShield)
+            ship.armor = min(max(1, l.armor ?? l.maxArmor), l.maxArmor)
+        } else {
+            ship.shield = min(ship.shield, l.maxShield)
+            ship.armor = min(ship.armor, l.maxArmor)
+        }
+        // Weapons: rebuild the mounts only when the fitted set changed (rebuilding resets cooldowns); otherwise just
+        // follow the client's ammo count.
+        let have = ship.weapons.flatMap { [Double($0.spec.id), Double($0.count)] }
+        let want = l.weapons.flatMap { [Double($0.id), Double($0.count)] }
+        if have != want, let galaxy = world.galaxy {
+            ship.weapons = l.weapons.compactMap { w in
+                guard let spec = galaxy.weaponSpec(w.id) else { return nil }
+                return WeaponMount(spec: spec, ammo: spec.ammoPerShot > 0 ? max(0, w.ammo) : -1,
+                                   count: max(1, min(w.count, 12)))
+            }
+        } else if have == want {
+            for (mount, w) in zip(ship.weapons, l.weapons) where mount.ammo >= 0 && w.ammo >= 0 { mount.ammo = w.ammo }
+        }
+        appliedLoadoutKey[client] = l.stableKey
+        if let rev = l.rev { ackedLoadoutRev[client] = rev }
     }
 
     /// Record a client's input (wire `NetSession.onInput` to this). Keeps only the
@@ -168,7 +373,18 @@ public final class SystemSyncCoordinator {
         if let seen = highestSeq[client], frame.seq <= seen { return }
         highestSeq[client] = frame.seq
         latestInput[client] = frame.intent
+        lastInputAt[client] = clock()
         if let pose = frame.pose, NetValidation.valid(pose) { pendingPose[client] = pose }
+        if let life = frame.lifeID { clientLife[client] = life }
+        if frame.landed == true { landedClients.insert(client) } else { landedClients.remove(client) }
+        if let l = frame.loadout, NetValidation.valid(l) {
+            pendingLoadout[client] = l
+            loadoutDirty.insert(client)
+        }
+        if let ack = frame.ackCreditSeq, var list = pendingCredits[client] {
+            list.removeAll { $0.seq <= ack }
+            pendingCredits[client] = list
+        }
     }
 
     /// Publish each client's freshest input into `world.remoteIntents`, keyed by the
@@ -182,7 +398,8 @@ public final class SystemSyncCoordinator {
     /// friend's ship shows rotated, and pulling the client toward our copy bends its
     /// thrust and stops its jump brake from settling).
     public func applyInputs(to world: World) {
-        guard !latestInput.isEmpty || !pendingPose.isEmpty else { return }
+        guard !latestInput.isEmpty || !pendingPose.isEmpty || !loadoutDirty.isEmpty else { return }
+        let now = clock()
         for ship in world.remotePlayerShips {
             guard let peer = ship.remotePlayer?.peerID else { continue }
             if let pose = pendingPose.removeValue(forKey: peer) {
@@ -190,29 +407,101 @@ public final class SystemSyncCoordinator {
                 ship.velocity = Vec2(pose.vx, pose.vy)
                 ship.angle = pose.angle
             }
+            if loadoutDirty.contains(peer), ship.isAlive { configureCopy(ship, for: peer, world: world, fresh: false) }
             if let intent = latestInput[peer] {
-                world.remoteIntents[ship.entityID] = intent.engineIntent
+                if let at = lastInputAt[peer], now - at > Self.staleInputSeconds {
+                    world.remoteIntents[ship.entityID] = nil     // silent client: coast, no fire
+                } else {
+                    world.remoteIntents[ship.entityID] = intent.engineIntent
+                }
             }
         }
     }
 
-    /// Build the snapshot to broadcast to clients. Call **after** `world.step`.
+    /// Build the snapshot to send to clients. Call **after** `world.step`. Recipient-agnostic; use
+    /// `snapshot(for:from:)` to add the parts that are per client.
     public func snapshot(of world: World, tick: UInt32, ackInputSeq: UInt32 = 0) -> WorldSnapshot {
+        noteDeaths(in: world)
         var snap = WorldSnapshot.build(from: world, localPlayerID: localPlayerID,
                                        tick: tick, ackInputSeq: ackInputSeq)
         snap.clientPosesAuthoritative = true
+        // A client whose copy is gone but whose death is still pending keeps a `destroyed` entry (armor 0), so the
+        // client learns it died instead of the entry just vanishing. Entries are tagged with the client's life.
+        for i in snap.ships.indices where snap.ships[i].destroyed == true {
+            if let owner = snap.ships[i].playerID { snap.ships[i].life = deathPending[owner]?.life }
+        }
+        for (client, mark) in deathPending where !snap.ships.contains(where: { $0.playerID == client }) {
+            snap.ships.append(ShipNetState(
+                id: -1, playerID: client, shipTypeID: mark.lastType, name: mark.name,
+                x: 0, y: 0, vx: 0, vy: 0, angle: 0, shield: 0, armor: 0, control: .remote,
+                destroyed: true, life: mark.life))
+        }
+        // Kills a client's copy landed since the last frame, queued with a per-client sequence.
+        for credit in world.drainRemoteKillCredits() where clientShipID[credit.peerID] != nil {
+            let seq = (creditSeq[credit.peerID] ?? 0) &+ 1
+            creditSeq[credit.peerID] = seq
+            var list = pendingCredits[credit.peerID] ?? []
+            list.append(KillCreditNet(seq: seq, shipTypeID: credit.shipTypeID, government: credit.government,
+                                      missionID: credit.missionID, strength: credit.strength, disabled: credit.disabled))
+            if list.count > Self.maxPendingCredits { list.removeFirst(list.count - Self.maxPendingCredits) }
+            pendingCredits[credit.peerID] = list
+        }
         return snap
+    }
+
+    /// `base` addressed to one client: its own kill credits, the loadout revision the authority has applied for it, and
+    /// the newest input seq received from it.
+    public func snapshot(for client: String, from base: WorldSnapshot) -> WorldSnapshot {
+        var s = base
+        s.ackInputSeq = highestSeq[client] ?? 0
+        s.ackLoadoutRev = ackedLoadoutRev[client]
+        if let c = pendingCredits[client], !c.isEmpty { s.credits = c }
+        return s
     }
 
     // MARK: - Client side
 
     /// This frame's input to send to the authority (from the local player's intent),
-    /// carrying our ship's predicted pose when given.
-    public func input(from intent: ControlIntent, tick: UInt32, seq: UInt32, ship: Ship? = nil) -> InputFrame {
+    /// carrying our ship's predicted pose, and its combat loadout when that changed (plus a slow refresh).
+    /// `landed` flags us as docked so the authority drops our ship from the shared world.
+    public func input(from intent: ControlIntent, tick: UInt32, seq: UInt32, ship: Ship? = nil,
+                      landed: Bool = false) -> InputFrame {
         let pose = ship.map {
             ShipPose(x: $0.position.x, y: $0.position.y, vx: $0.velocity.x, vy: $0.velocity.y, angle: wireAngle($0.angle))
         }
-        return InputFrame(tick: tick, seq: seq, intent: NetIntent(intent), pose: pose)
+        var loadout: ShipLoadoutNet?
+        if let ship, !landed {
+            // Coming back to life (respawn, eject into a pod) starts a new life generation.
+            let alive = ship.isAlive
+            if alive && !wasPlayerAlive { lifeID &+= 1; forceLoadout = true }
+            wasPlayerAlive = alive
+            if alive { loadout = nextLoadout(for: ship) }
+        }
+        return InputFrame(tick: tick, seq: seq, intent: NetIntent(intent), pose: pose, loadout: loadout,
+                          landed: landed ? true : nil, lifeID: lifeID,
+                          ackCreditSeq: lastCreditSeq > 0 ? lastCreditSeq : nil)
+    }
+
+    private func nextLoadout(for ship: Ship) -> ShipLoadoutNet? {
+        var l = ShipLoadoutNet(
+            shipTypeID: ship.shipTypeID, maxShield: ship.maxShield, maxArmor: ship.maxArmor,
+            shieldRegenPerSec: ship.shieldRechargePerSec, armorRegenPerSec: ship.armorRechargePerSec,
+            weapons: ship.weapons.compactMap { m in
+                m.spec.id >= 0 ? WeaponMountNet(id: m.spec.id, count: max(1, min(m.count, 100)),
+                                                ammo: max(-1, min(m.ammo, 1_000_000))) : nil
+            },
+            shield: max(0, ship.shield), armor: max(0, ship.armor))
+        let now = clock()
+        let key = l.stableKey
+        let changed = key != lastLoadoutKey
+        guard changed || forceLoadout || now - lastLoadoutSentAt >= Self.loadoutRefreshSeconds else { return nil }
+        if changed || forceLoadout { loadoutRev &+= 1 }
+        l.rev = loadoutRev
+        lastLoadoutKey = key
+        lastLoadoutSentAt = now
+        forceLoadout = false
+        if launchPending { holdRev = loadoutRev; launchPending = false }
+        return l
     }
 
     /// Reconcile a received snapshot into the local `World` — the shared co-op
@@ -254,10 +543,36 @@ public final class SystemSyncCoordinator {
             if state.playerID == localPlayerID {
                 // Our own ship: predicted locally, but health is authoritative.
                 ownAuthorityID = state.id
+                if state.destroyed == true {
+                    // The authority destroyed our ship: run the normal local death (armor <= 0). A notice from an
+                    // earlier life, or while we're landed / just launched, must not kill the current one; when death
+                    // isn't real it can't kill us at all.
+                    if deathReal, state.life == nil || state.life == lifeID, !holdingHealth,
+                       !suspendHealthAdoption, world.player.isAlive {
+                        world.player.shield = 0
+                        world.player.armor = 0
+                    }
+                    continue
+                }
+                // After a launch (or while landed) the authority's copy of us predates the repair: don't adopt its
+                // health until it confirms it rebuilt the copy from our fresh loadout.
+                var adoptHealth = !suspendHealthAdoption
+                if holdingHealth {
+                    adoptHealth = false
+                    if let need = holdRev {
+                        if let ack = snapshot.ackLoadoutRev {
+                            if ack >= need { holdingHealth = false; holdRev = nil; adoptHealth = !suspendHealthAdoption }
+                        } else {
+                            holdingHealth = false; holdRev = nil     // an authority that doesn't ack: resume next time
+                        }
+                    }
+                }
                 // Health is authoritative for damage, but a snapshot can't heal past our own maxima, and
                 // when death isn't real it can't kill us.
-                world.player.shield = max(0, min(state.shield, world.player.maxShield))
-                world.player.armor = max(deathReal ? 0 : 1, min(state.armor, world.player.maxArmor))
+                if adoptHealth {
+                    world.player.shield = max(0, min(state.shield, world.player.maxShield))
+                    world.player.armor = max(deathReal ? 0 : 1, min(state.armor, world.player.maxArmor))
+                }
                 // An authority that adopts our sent pose echoes it back a round trip late: converging toward
                 // that would drag us backwards. Only older, input-replaying authorities need the correction.
                 if snapshot.clientPosesAuthoritative != true {
@@ -266,7 +581,9 @@ public final class SystemSyncCoordinator {
                 continue
             }
             if let owner = state.playerID {
-                // Another player — keyed by stable playerID so it survives a handoff.
+                // Another player — keyed by stable playerID so it survives a handoff. A destroyed one is simply
+                // absent (its mirror is removed below).
+                if state.destroyed == true { continue }
                 seenPlayerIDs.insert(owner)
                 if let localID = playerMirrorID[owner], let ship = world.ship(id: localID) {
                     updateMirror(ship, from: state)
@@ -334,6 +651,14 @@ public final class SystemSyncCoordinator {
         // Buffer one-shot effects; the app flushes them into the world after its
         // step (events are cleared at the start of `step`, so we can't emit now).
         pendingEffects.append(contentsOf: snapshot.effects)
+        // Kills the authority credits to us. Each is resent until we ack it (the channel is unreliable), so apply
+        // each sequence number once.
+        if let credits = snapshot.credits {
+            for c in credits.sorted(by: { $0.seq < $1.seq }) where c.seq > lastCreditSeq {
+                pendingKillCredits.append(c)
+                lastCreditSeq = c.seq
+            }
+        }
         return (injected, removed)
     }
 

@@ -296,6 +296,7 @@ class NovaWorld: Node2D {
     @Callable(autoSnakeCase: true)
     func step(dt: Double) {
         guard let world = self.world else { return }
+        syncNetLanded()
         world.viewportHalfExtent = viewHalf           // the asteroid field lives in the window's view (FL-16)
         // The engine flies a hyperjump itself; held keys mustn't fight it.
         var live = settingsPlayerIntent(self.intent)  // Settings: invert turn, mouse aim, auto-landing
@@ -346,6 +347,30 @@ class NovaWorld: Node2D {
         interpolationAlpha = fixed > 0 ? simAccumulator / fixed : 0
     }
 
+    /// Docked in a shared system: keep the co-op world and its sync ticking with idle controls, as the Apple app
+    /// does while landed. A client keeps telling the authority it's landed (so its ship leaves space); an authority
+    /// keeps simulating and snapshotting for the pilots still flying. None of the flight-only clocks (landing arm,
+    /// story, autosave, cargo) run - this is the shared world only. A no-op outside a session.
+    @Callable(autoSnakeCase: true)
+    func netLandedStep(dt: Double) {
+        guard let world = self.world, let net = netBridge else { return }
+        syncNetLanded()
+        world.intent = ControlIntent()
+        let speed = settingsSpeed(world)
+        let fixed = Self.fixedStep
+        let cap = fixed * Double(GameSpeedRules.catchupTickCap(multiplier: speed, base: Self.maxCatchupTicks))
+        simAccumulator = min(simAccumulator + max(0, dt) * speed, cap)
+        net.prepare(world: world, systemID: currentSystemID, shipType: pilot.shipType)
+        while simAccumulator >= fixed {
+            net.preStep(world)
+            world.snapshotRenderState()
+            world.step(fixed)
+            net.postStep(world)
+            simAccumulator -= fixed
+            collectEvents(from: world)
+        }
+    }
+
     // MARK: Multiplayer
     //
     // The same NetSession + SystemSyncDriver the Apple app runs; GDScript owns the sockets (ENet)
@@ -370,6 +395,7 @@ class NovaWorld: Node2D {
         // Already flying: announce now rather than on the next step.
         if let w = world, let sys = currentSystemID { nb.prepare(world: w, systemID: sys, shipType: pilot.shipType) }
         netBridge = nb
+        syncNetLanded()
         if isHost { nb.session.broadcastRules(rules) }
         return true
     }
@@ -962,6 +988,7 @@ class NovaWorld: Node2D {
         }
         storyLeavingSystem()                      // surviving aux ships go back to their budgets
         dockedSpobID = spobID
+        syncNetLanded()
         sound.pending.append(SoundCues.docking)   // .shipLanded for entity 0: snd 390
         // `Stellar_RunDockAndLaunchSequence` 0x00455e10: at an uninhabited stellar (no auto-refuel) the
         // landing sounds snd 151 as well (Apple `SpaceportView.onAppear`).
@@ -1044,6 +1071,7 @@ class NovaWorld: Node2D {
         player.currentTargetID = nil
         self.world = w
         dockedSpobID = nil
+        syncNetLanded()
         pilot.landedSpob = nil
         resetFrameState()
         // The launch line (0x00456134; UI-11): a staged mission `Q` message replaces it
@@ -5410,10 +5438,21 @@ class NovaWorld: Node2D {
         return i
     }
 
+    /// Co-op: a docked player isn't simulated, so the sync driver must know (mirrors the Apple app's land/launch hook).
+    private func syncNetLanded() {
+        guard let nb = netBridge, !nb.closed else { return }
+        nb.driver.isLocalPlayerLanded = dockedSpobID != nil
+    }
+
     /// Settings game speed x the original's Caps Lock 2x flag -> the world's `timeScale`.
     private func settingsSpeed(_ world: World) -> Double {
-        plumbing.x2Flag = plumbing.evaluateX2Flag(world)
-        let m = GameSpeedRules.effectiveMultiplier(setting: plumbing.gameSpeed.multiplier, x2Flag: plumbing.x2Flag)
+        // In a live net session every device uses the lobby's shared multiplier (and ignores the local x2 flag),
+        // exactly like the Apple app, so all sims share one clock.
+        var coopSpeed: Double?
+        if let nb = netBridge, !nb.closed { coopSpeed = nb.session.sessionRules.gameSpeedMultiplier }
+        plumbing.x2Flag = coopSpeed != nil ? false : plumbing.evaluateX2Flag(world)
+        let m = GameSpeedRules.effectiveMultiplier(setting: plumbing.gameSpeed.multiplier, x2Flag: plumbing.x2Flag,
+                                                   coopOverride: coopSpeed)
         plumbing.multiplier = m
         world.timeScale = m
         world.x2Mode = plumbing.x2Flag

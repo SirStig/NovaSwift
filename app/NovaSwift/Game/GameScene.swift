@@ -1850,7 +1850,6 @@ final class GameScene: SKScene {
             pmark = profiler.lap(name, since: pmark)
         }
 
-        syncPreStep?(world)   // co-op: inject/feed friends' ships (authority) or apply snapshot (client)
         // Fixed-step accumulator. The entire simulation (flight, AI, weapons,
         // reload/regen) was tuned against EV Nova's fixed 30 Hz tick, so advance it
         // in whole `simFixedStep` slices regardless of whether the display runs at
@@ -1871,7 +1870,12 @@ final class GameScene: SKScene {
         while simAccumulator >= fixedStep {
             world.intent = intent
             world.snapshotRenderState()   // capture each ship's pre-tick pose for render interpolation
+            // Co-op sync rides the sim tick (30 Hz), never the display frame:
+            // pre-step injects/feeds friends' ships (authority) or applies the
+            // snapshot (client); post-step broadcasts / sends input.
+            syncPreStep?(world)
             world.step(fixedStep)         // sim sub-phases recorded via `world.profiler`
+            syncPostStep?(world)
             simAccumulator -= fixedStep
             if world.player.isAlive {
                 onPlayerTick?()
@@ -1887,7 +1891,6 @@ final class GameScene: SKScene {
         // instead of stepping — the "seamless" part. 0 on a frame that ran no tick
         // (nothing new to show yet); approaches 1 just before the next tick fires.
         renderAlpha = fixedStep > 0 ? simAccumulator / fixedStep : 0
-        syncPostStep?(world)  // co-op: broadcast snapshot (authority) or send input (client)
 
         // The status-bar message runs on sim time, frozen while paused (UI-11).
         hud?.tickMessage(dt: simDT)

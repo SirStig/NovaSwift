@@ -30,6 +30,15 @@ public final class SystemSyncDriver {
     private var needsResync = true
     private var lastAuthorityID: String?
     private var wasAuthority = false
+    /// The `World` the previous pre-step saw. A different instance means the host rebuilt its world (launch, jump,
+    /// relocate, respawn): every entity id the coordinator tracks is stale, so resync without being told.
+    private weak var lastWorld: World?
+    private var wasLanded = false
+
+    /// Set by the app/bridge while the local player is landed on a stellar. The client then tells the authority (which
+    /// removes its ship from the shared world instead of leaving a ghost) and ignores snapshot health until the first
+    /// authority confirmation after it launches. The post-step hook must keep running while landed so the flag is sent.
+    public var isLocalPlayerLanded = false
 
     /// Called every pre-step frame in which this node is NOT the authority (solo
     /// or client). The Apple app uses it to re-seed its NCB baseline.
@@ -149,6 +158,11 @@ public final class SystemSyncDriver {
         let iAmAuthority = (authority == localPlayerID)
         if !iAmAuthority { onNotAuthority?() }
 
+        if lastWorld !== world {
+            lastWorld = world
+            needsResync = true      // a new World instance: same as `forceResync()`, no caller help needed
+        }
+
         if needsResync {
             fullClearMirrors(world)
             needsResync = false
@@ -159,17 +173,22 @@ public final class SystemSyncDriver {
             wasAuthority = iAmAuthority
             lastAuthorityID = authority
         }
+        // Landing/launching (client side): snapshots must not undo the repair, and the launch re-sends our loadout.
+        coordinator.suspendHealthAdoption = isLocalPlayerLanded
+        if wasLanded && !isLocalPlayerLanded { coordinator.beginLaunchHold() }
+        wasLanded = isLocalPlayerLanded
         guard let authority else { return }
 
         if authority == localPlayerID {
             let presence = session.presence
             let clients = coLocatedIDs().map { (id: $0, name: presence[$0]?.name ?? $0) }
-            coordinator.syncClients(clients, into: world) { [weak self] id, name in
-                self?.buildMirror(shipTypeID: presence[id]?.shipTypeHint ?? -1,
+            coordinator.syncClients(clients, into: world, makeShip: { [weak self] id, name in
+                // The hull the client reported in its loadout wins over the (older) presence hint.
+                self?.buildMirror(shipTypeID: self?.coordinator.desiredShipType(for: id) ?? presence[id]?.shipTypeHint ?? -1,
                                   government: world.player.government, name: name,
                                   world: world, at: world.player.position + Vec2(220, 0))
                     ?? SystemSyncCoordinator.defaultClientShip(id, name)
-            }
+            }, typeOf: { presence[$0]?.shipTypeHint })
             coordinator.applyInputs(to: world)
         } else if let (snapshot, from) = latestSnapshot, from == authority {
             if !world.spawningPaused {
@@ -202,12 +221,18 @@ public final class SystemSyncDriver {
         guard let authority = currentAuthorityID else { return }
         netTick &+= 1
         if authority == localPlayerID {
-            session.broadcastSnapshot(coordinator.snapshot(of: world, tick: netTick))
-            onAuthorityPostStep?(session, coLocatedIDs())
+            // Only to the players actually in this system (not every peer on the server), each with its own kill
+            // credits / loadout ack.
+            let base = coordinator.snapshot(of: world, tick: netTick)
+            let others = coLocatedIDs()
+            for id in others {
+                session.sendSnapshot(coordinator.snapshot(for: id, from: base), to: id)
+            }
+            onAuthorityPostStep?(session, others)
         } else {
             inputSeq &+= 1
             session.sendInput(coordinator.input(from: world.intent, tick: netTick, seq: inputSeq,
-                                                 ship: world.player), to: authority)
+                                                 ship: world.player, landed: isLocalPlayerLanded), to: authority)
             coordinator.flushEffects(into: world)
         }
     }
@@ -224,6 +249,7 @@ public final class SystemSyncDriver {
         needsResync = false
         netTick = 0
         inputSeq = 0
+        wasLanded = false
     }
 
     private func buildMirror(shipTypeID: Int, government: Int, name: String, world: World,

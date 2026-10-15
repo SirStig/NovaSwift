@@ -1,5 +1,6 @@
 import Foundation
 import NovaSwiftNet
+import NovaSwiftENet
 #if canImport(CryptoKit)
 import CryptoKit
 #else
@@ -25,6 +26,9 @@ public struct ServerConfig: Equatable {
     public var lanAnnounce = true
     /// Ask the router to forward the game port (UPnP) on start.
     public var upnp = false
+    /// Game-port listen address. Empty (default), "::" or "0.0.0.0" = every interface, IPv4 and IPv6 together (dual-stack).
+    /// Otherwise an IPv4 or IPv6 address of this machine.
+    public var bindAddress = ""
 
     // [rules]
     /// "safe", "full" or "custom".
@@ -131,6 +135,7 @@ public struct ServerConfig: Equatable {
         if name.trimmingCharacters(in: .whitespaces).isEmpty { out.append("The server needs a name.") }
         if !["safe", "full", "custom"].contains(rulesPreset) { out.append("Rules must be safe, full or custom.") }
         if !(0.25...4.0).contains(gameSpeed) { out.append("Game speed must be between 0.25 and 4.") }
+        if !bindAddress.isEmpty, !IPAddressTools.isValid(bindAddress) { out.append("The game listen address must be empty (all interfaces) or an IPv4/IPv6 address of this computer.") }
         if !["0.0.0.0", "127.0.0.1"].contains(adminBind) { out.append("The admin bind address must be 0.0.0.0 (anyone who can reach it) or 127.0.0.1 (this computer only).") }
         return out
     }
@@ -146,6 +151,8 @@ public struct ServerConfig: Equatable {
         if !(1024...65535).contains(c.adminPort) { c.adminPort = Self.defaultAdminPort }
         if !["safe", "full", "custom"].contains(c.rulesPreset) { c.rulesPreset = "safe" }
         c.gameSpeed = min(4.0, max(0.25, c.gameSpeed))
+        c.bindAddress = c.bindAddress.trimmingCharacters(in: .whitespaces)
+        if !c.bindAddress.isEmpty, !IPAddressTools.isValid(c.bindAddress) { c.bindAddress = "" }
         if !["0.0.0.0", "127.0.0.1"].contains(c.adminBind) { c.adminBind = "127.0.0.1" }
         c.voteKickPercent = min(100, max(10, c.voteKickPercent))
         c.maxConnectionsPerIP = min(64, max(0, c.maxConnectionsPerIP))
@@ -199,6 +206,7 @@ public struct ServerConfig: Equatable {
             case "server.region": c.region = value.lowercased()
             case "server.lan_announce": if let b = bool(value, k) { c.lanAnnounce = b }
             case "server.upnp": if let b = bool(value, k) { c.upnp = b }
+            case "server.bind_address": c.bindAddress = value
             case "rules.preset": c.rulesPreset = value.lowercased()
             case "rules.pvp_damage_real": if let b = bool(value, k) { c.pvpDamageReal = b }
             case "rules.death_real": if let b = bool(value, k) { c.deathReal = b }
@@ -266,6 +274,8 @@ public struct ServerConfig: Equatable {
         lan_announce = \(b(lanAnnounce))
         # Ask your router to forward the port automatically (works on many home routers).
         upnp = \(b(upnp))
+        # Game-port listen address: empty = all interfaces, IPv4 and IPv6 (dual-stack); or one address, e.g. :: or 0.0.0.0.
+        bind_address = \(bindAddress)
 
         [rules]
         # safe   = players can fight but nothing is lost for real (sparring).

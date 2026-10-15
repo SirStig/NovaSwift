@@ -50,6 +50,52 @@ struct MultiplayerChatCluster: View {
     private static let menuButtonClearance: CGFloat = 68
 }
 
+/// Small non-blocking banner at the top of the flight view: "Connection lost, reconnecting… (Cancel)" while the
+/// auto-reconnect runs, then "Reconnect / Dismiss" if it ran out of retries. Renders nothing otherwise.
+struct MultiplayerConnectionBanner: View {
+    @ObservedObject var session: MultiplayerSession
+    @EnvironmentObject private var model: AppModel
+    private let warn = Color(red: 1.0, green: 0.6, blue: 0.2)
+
+    var body: some View {
+        VStack {
+            if case .reconnecting(let attempt, let total) = session.reconnectState {
+                banner(icon: "wifi.exclamationmark",
+                       text: attempt > 0 ? "Connection lost, reconnecting… (\(attempt)/\(total))" : "Connection lost, reconnecting…",
+                       spinner: true) {
+                    Button("Cancel") { session.cancelReconnect() }.buttonStyle(.novaPlain)
+                }
+            } else if let lost = session.lostConnection {
+                banner(icon: "wifi.slash", text: lost.message, spinner: false) {
+                    HStack(spacing: 14) {
+                        Button("Reconnect") { model.reconnectToLostServer() }.buttonStyle(.novaPlain)
+                        Button { session.dismissLostConnection() } label: { Image(systemName: "xmark") }.buttonStyle(.novaPlain)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.top, 10)
+        .padding(.horizontal, 16)
+        .allowsHitTesting(session.reconnectState != .idle || session.lostConnection != nil)
+    }
+
+    private func banner<Actions: View>(icon: String, text: String, spinner: Bool,
+                                       @ViewBuilder actions: () -> Actions) -> some View {
+        HStack(spacing: 10) {
+            if spinner { ProgressView().controlSize(.small).tint(warn) }
+            else { Image(systemName: icon).foregroundStyle(warn) }
+            Text(text).novaFont(.caption).foregroundStyle(.white).fixedSize(horizontal: false, vertical: true)
+            actions().novaFont(.caption, weight: .semibold).foregroundStyle(warn)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(warn.opacity(0.5)))
+        .frame(maxWidth: 520)
+    }
+}
+
 /// Round chat toggle with an unread badge.
 struct ChatButton: View {
     @ObservedObject var session: MultiplayerSession

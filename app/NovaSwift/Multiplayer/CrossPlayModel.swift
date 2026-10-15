@@ -117,6 +117,9 @@ final class CrossPlayModel: ObservableObject {
     @Published var busy: String?
     /// The player's own enabled plug-ins, remembered while a server's set is borrowed; nil = not borrowed.
     var borrowedFrom: Set<String>?
+    /// True while `restorePlugins()` is swapping the player's own set back (guards a double restore and lets a
+    /// manual Reconnect wait for it).
+    var restoringPlugins = false
     /// The ENet join in flight (or last attempted), so a late "plug-ins" refusal can be retried.
     var lastJoin: PendingENetJoin?
     /// True from tapping Join until the session is up or fails: the hub closes itself when it goes live.

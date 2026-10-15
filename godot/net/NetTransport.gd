@@ -53,8 +53,19 @@ const CHAT_REFILL := 2.0         # tokens / s  (= 1 message per 0.5 s sustained)
 const CHAT_VIOLATIONS := 10      # dropped chat lines within 30 s -> kick
 const CHAT_VIOLATION_WINDOW := 30.0
 const REPORT_WINDOW := 60.0
-const REPORT_DISTINCT_KICK := 3
-const REPORT_INVALID_KICK := 5
+const REPORT_DISTINCT_KICK := 3  # cap on distinct reporters (from distinct IPs) needed; fewer players -> fewer needed (min 2)
+const REPORT_INVALID_KICK := 4   # same, for auto-detected "invalid data" reports
+## Reliable control traffic (presence, rules, kick, trade, NCB) has its own generous budget so unreliable sync
+## traffic can never starve it. Exceeding it is a counted violation, not a silent drop.
+const RPKT_RATE := 60.0
+const RPKT_BURST := 200.0
+const RBYTE_RATE := 131072.0
+const RBYTE_BURST := 524288.0
+## Connections that never finish the handshake hold a slot for HANDSHAKE_TIMEOUT: 5 within 60 s from one address
+## and that address is refused for 60 s (not a ban; never feeds the temp-ban).
+const UNAUTH_LIMIT := 5
+const UNAUTH_WINDOW := 60.0
+const UNAUTH_BLOCK_SECS := 60.0
 
 var peer: ENetMultiplayerPeer = null
 ## "none" | "server" | "client"
@@ -84,6 +95,9 @@ var banned: Dictionary = {}
 var temp_bans: Dictionary = {}
 ## ip -> number of abuse kicks.
 var abuse_kicks: Dictionary = {}
+## ip -> Array of clock times of connections that never completed the handshake / ip -> clock time the block ends.
+var _unauth: Dictionary = {}
+var _connect_blocked: Dictionary = {}
 ## target id -> {by: {reporter id -> time}, invalid: {reporter id -> true}}
 var _reports: Dictionary = {}
 ## Client side: the chat token bucket and the host's display label.
@@ -411,6 +425,8 @@ func _server_timers() -> void:
 			if _clock - float(info.get("last_rx", _clock)) > IDLE_TIMEOUT:
 				_drop(int(id), "timeout")
 		elif _clock - float(info.get("t0", _clock)) > HANDSHAKE_TIMEOUT:
+			if not _closing.has(int(id)):
+				_note_unauth(str(info.get("ip", "")))
 			_drop(int(id), "handshake timeout")
 
 
@@ -448,7 +464,7 @@ func _handle_packet(from: int, ch: int, pkt: PackedByteArray) -> void:
 			peers[from] = _new_peer(from)
 		var info: Dictionary = peers[from]
 		info["last_rx"] = _clock
-		if not _rate_ok(from, info, pkt.size()):
+		if not _rate_ok(from, info, pkt.size(), ch != Proto.CH_UNRELIABLE):
 			return
 		var lim: int = Proto.packet_limit(kind, false)
 		if lim == 0:
@@ -482,9 +498,20 @@ func _handle_packet(from: int, ch: int, pkt: PackedByteArray) -> void:
 
 
 ## Per-peer token buckets (packets and bytes). False = drop this packet (and count a violation).
-func _rate_ok(id: int, info: Dictionary, size: int) -> bool:
+func _rate_ok(id: int, info: Dictionary, size: int, reliable: bool = false) -> bool:
 	var dt: float = maxf(0.0, _clock - float(info.get("rl_at", _clock)))
 	info["rl_at"] = _clock
+	if reliable:
+		var rpk: float = minf(RPKT_BURST, float(info.get("rpk_tok", RPKT_BURST)) + dt * RPKT_RATE)
+		var rby: float = minf(RBYTE_BURST, float(info.get("rby_tok", RBYTE_BURST)) + dt * RBYTE_RATE)
+		if rpk < 1.0 or rby < float(size):
+			info["rpk_tok"] = rpk
+			info["rby_tok"] = rby
+			_violation(id, "reliable packet rate limit")
+			return false
+		info["rpk_tok"] = rpk - 1.0
+		info["rby_tok"] = rby - float(size)
+		return true
 	var pk: float = minf(PKT_BURST, float(info.get("pk_tok", PKT_BURST)) + dt * PKT_RATE)
 	var by: float = minf(BYTE_BURST, float(info.get("by_tok", BYTE_BURST)) + dt * BYTE_RATE)
 	if pk < 1.0 or by < float(size):
@@ -508,6 +535,33 @@ func _violation(id: int, why: String) -> void:
 	info["viol"] = int(info.get("viol", 0)) + 1
 	if int(info["viol"]) >= MAX_VIOLATIONS:
 		_abuse_kick(id, "Too many invalid or too-fast packets (%s)." % why)
+
+
+## Count a connection that never completed the handshake (slot-exhaustion guard).
+func _note_unauth(ip: String) -> void:
+	if ip == "" or _is_loopback(ip):
+		return
+	var list: Array = _unauth.get(ip, []) as Array
+	while not list.is_empty() and _clock - float(list[0]) > UNAUTH_WINDOW:
+		list.pop_front()
+	list.append(_clock)
+	if list.size() >= UNAUTH_LIMIT:
+		_connect_blocked[ip] = _clock + UNAUTH_BLOCK_SECS
+		list = []
+	_unauth[ip] = list
+	if _unauth.size() > 4096:
+		_unauth.clear()
+	if _connect_blocked.size() > 4096:
+		_connect_blocked.clear()
+
+
+func _is_connect_blocked(ip: String) -> bool:
+	if ip == "" or _is_loopback(ip) or not _connect_blocked.has(ip):
+		return false
+	if _clock >= float(_connect_blocked[ip]):
+		_connect_blocked.erase(ip)
+		return false
+	return true
 
 
 func _abuse_kick(id: int, why: String) -> void:
@@ -548,6 +602,13 @@ func _on_peer_connected(id: int) -> void:
 		if _is_temp_banned(ip) or banned.has(ip):
 			_reject(id, Proto.REJECT_BANNED, "You are banned from this server.", {})
 			return
+		if _is_connect_blocked(ip):
+			# Too many half-open connections from this address: drop at once (no REJECT, no slot held).
+			peers.erase(id)
+			_closing[id] = _clock + 0.3
+			if peer != null:
+				peer.disconnect_peer(id, true)
+			return
 		if not _is_loopback(ip):
 			var same: int = 0
 			for oid in peers:
@@ -578,8 +639,11 @@ func _is_temp_banned(ip: String) -> bool:
 
 
 func _on_peer_disconnected(id: int) -> void:
+	var was_closing: bool = _closing.has(id)
 	_closing.erase(id)
 	if mode == "server":
+		if not was_closing and peers.has(id) and not bool((peers[id] as Dictionary).get("ready", false)):
+			_note_unauth(str((peers[id] as Dictionary).get("ip", "")))   # hung up before the handshake finished
 		_forget(id, "left")
 	elif mode == "client" and id == SERVER_ID:
 		_closed_reason = _closed_reason if _closed_reason != "" else "The server closed the connection."
@@ -627,6 +691,12 @@ func _server_hello(id: int, hello: Dictionary) -> void:
 	if theirs.length() > 30000:
 		_reject(id, Proto.REJECT_BAD, "Bad handshake.", {})
 		return
+	if theirs == "" and _manifest_requires_plugins(mine):
+		# No manifest at all can't prove the plug-ins match (real clients always send one, even an empty list).
+		var li0: Dictionary = NetPlugins.local_info(bridge, true)
+		_reject(id, Proto.REJECT_PLUGINS, "This server needs specific plug-ins and your client didn't report yours. Update NovaSwift, then rejoin.",
+			{"server_manifest": mine, "client_manifest": "", "server_tc": str(li0.get("tc", "")), "server_addons": li0.get("addons", [])})
+		return
 	if mine != "" and theirs != "" and Proto.manifest_signature(mine) != Proto.manifest_signature(theirs):
 		var li: Dictionary = NetPlugins.local_info(bridge, true)
 		_reject(id, Proto.REJECT_PLUGINS, "Your enabled plug-ins don't match the server's. Match its plug-in list, then rejoin.",
@@ -650,6 +720,22 @@ func _server_hello(id: int, hello: Dictionary) -> void:
 	if bridge_active and bridge.has_method("net_peer_joined"):
 		bridge.net_peer_joined(id, nm)
 	_emit({"type": "peer_joined", "id": id, "name": nm})
+
+
+## True when the manifest JSON lists at least one gameplay (non-cosmetic) plug-in.
+static func _manifest_requires_plugins(manifest: String) -> bool:
+	if manifest == "":
+		return false
+	var parsed: Variant = JSON.parse_string(manifest)
+	if not (parsed is Dictionary):
+		return false
+	var plugins: Variant = (parsed as Dictionary).get("plugins", [])
+	if not (plugins is Array):
+		return false
+	for p in (plugins as Array):
+		if p is Dictionary and not bool((p as Dictionary).get("cosmetic", false)):
+			return true
+	return false
 
 
 func _unique_name(want: String, id: int) -> String:
@@ -758,24 +844,44 @@ func _server_report(id: int, body: Dictionary) -> void:
 func _apply_report(from: int, target: int, reason: String, detail: String) -> void:
 	if target == from or target == SERVER_ID or not peers.has(target) or not bool((peers[target] as Dictionary).get("ready", false)):
 		return
-	var rec: Dictionary = _reports.get(target, {"by": {}, "invalid": {}})
+	if not peers.has(from):
+		return
+	var from_ip: String = str((peers[from] as Dictionary).get("ip", ""))
+	var target_ip: String = str((peers[target] as Dictionary).get("ip", ""))
+	var rec: Dictionary = _reports.get(target, {"by": {}, "invalid": {}, "ips": {}})
 	var by: Dictionary = rec["by"]
-	by[from] = _clock
+	var inv: Dictionary = rec["invalid"]
+	var ips: Dictionary = rec["ips"]
+	# A report only counts when it comes from another address than the target's (an alt can't vouch against a friend).
+	if from_ip == "" or from_ip != target_ip or _is_loopback(from_ip):
+		by[from] = _clock
+		ips[from] = from_ip
+		if reason == "invalid":
+			inv[from] = _clock   # one "invalid" vote per reporter per target
 	for k in by.keys():
 		if _clock - float(by[k]) > REPORT_WINDOW:
 			by.erase(k)
-	if reason == "invalid":
-		(rec["invalid"] as Dictionary)[from] = true   # one "invalid" vote per reporter per target
+			ips.erase(k)
+	for k in inv.keys():
+		if _clock - float(inv[k]) > REPORT_WINDOW:
+			inv.erase(k)
 	_reports[target] = rec
+	var others: int = maxi(0, ready_count() - 1)
+	var need: int = maxi(2, mini(REPORT_DISTINCT_KICK, ceili(float(others) / 2.0)))
+	var need_inv: int = maxi(2, mini(REPORT_INVALID_KICK, ceili(float(others) / 2.0)))
+	var distinct_ips: Dictionary = {}
+	for k in by.keys():
+		distinct_ips[str(ips.get(k, ""))] = true
+	var distinct_inv_ips: Dictionary = {}
+	for k in inv.keys():
+		distinct_inv_ips[str(ips.get(k, ""))] = true
 	_emit({"type": "report", "from": from, "from_name": str((peers[from] as Dictionary).get("name", "")), "target": target,
 		"target_name": str((peers[target] as Dictionary).get("name", "")), "reason": reason, "detail": detail,
-		"message": "%d distinct reporter(s), %d invalid" % [by.size(), (rec["invalid"] as Dictionary).size()]})
-	if by.size() >= REPORT_DISTINCT_KICK or (rec["invalid"] as Dictionary).size() >= REPORT_INVALID_KICK:
-		var ip: String = str((peers[target] as Dictionary).get("ip", ""))
-		if ip != "" and not _is_loopback(ip):
-			temp_bans[ip] = _clock + TEMPBAN_SECS
+		"message": "%d distinct reporter address(es), %d invalid" % [distinct_ips.size(), distinct_inv_ips.size()]})
+	if distinct_ips.size() >= need or distinct_inv_ips.size() >= need_inv:
 		_reports.erase(target)
-		kick(target, "Removed after player reports. You can rejoin in 10 minutes.")
+		# A kick from reports never feeds the temp-ban (abuse_kicks / temp_bans): they can be gamed by a few clients.
+		kick(target, "Removed after player reports.")
 
 
 func _server_data(from: int, ch: int, pkt: PackedByteArray) -> void:
@@ -789,7 +895,9 @@ func _server_data(from: int, ch: int, pkt: PackedByteArray) -> void:
 	var payload: PackedByteArray = d["data"] as PackedByteArray
 	var reliable: bool = ch != Proto.CH_UNRELIABLE
 	if target == -1 or target == SERVER_ID:
-		if bridge_active:
+		# A dedicated server's own session only needs presence / chat / rules (reliable); skip the unreliable
+		# snapshot/input stream it would otherwise decode for nothing (it is still relayed on below).
+		if bridge_active and (reliable or has_local_player):
 			bridge.net_receive(from, payload)
 	if target == -1:
 		var out: PackedByteArray = Proto.pack_data(from, payload)
@@ -917,7 +1025,11 @@ func _client_reject(r: Dictionary) -> void:
 func _client_peer_join(b: Dictionary) -> void:
 	if state != "connected":
 		return
-	var id: int = Proto.num_int(b.get("id", 0), 0, 2147483647)
+	var raw_id: Variant = b.get("id", 0)
+	# Out-of-range ids are refused, not clamped: two clamped peers would collide on 2147483647.
+	if not (raw_id is int or raw_id is float) or float(raw_id) < 1.0 or float(raw_id) > 2147483647.0:
+		return
+	var id: int = int(raw_id)
 	if id <= 0 or (peers.size() >= Proto.MAX_LIST and not peers.has(id)):
 		return
 	var nm: String = Proto.clean_player_name(b.get("name", ""), "Pilot %d" % id)

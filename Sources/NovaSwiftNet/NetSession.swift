@@ -123,6 +123,7 @@ public final class NetSession: TransportDelegate {
                                   currentSystemID: systemID, shipTypeHint: shipTypeHint)
         let changed = presence[localPlayerID] != mine
         presence[localPlayerID] = mine
+        lastPresenceSentAt = clock()
         broadcast(.presence(mine))
         if changed { onPresenceChanged?(self) }
     }
@@ -193,8 +194,12 @@ public final class NetSession: TransportDelegate {
         broadcast(.chat(message))
     }
 
+    /// Most chat lines kept in `chatLog` (oldest dropped first) so a long-lived session or server can't grow without bound.
+    public static let maxChatLog = 200
+
     private func appendChat(_ message: ChatMessage) {
         chatLog.append(message)
+        if chatLog.count > Self.maxChatLog { chatLog.removeFirst(chatLog.count - Self.maxChatLog) }
         onChat?(message)
     }
 
@@ -246,7 +251,22 @@ public final class NetSession: TransportDelegate {
 
     // MARK: - TransportDelegate
 
+    /// Presence heartbeat: while any traffic is flowing, re-send our presence (reliable) at most this often. A
+    /// reliable presence/rules packet the relay once refused or lost then heals itself instead of leaving a ghost.
+    public static let presenceHeartbeatInterval = 5.0
+    private var lastPresenceSentAt = 0.0
+
+    /// Re-announce the local presence if it's been `presenceHeartbeatInterval` since the last announcement. Driven by
+    /// incoming traffic (every peer heartbeats, so the chain keeps itself alive) and callable from a host's timer.
+    public func presenceHeartbeat() {
+        let now = clock()
+        guard let mine = presence[localPlayerID], now - lastPresenceSentAt >= Self.presenceHeartbeatInterval else { return }
+        lastPresenceSentAt = now
+        broadcast(.presence(mine))
+    }
+
     public func transport(_ transport: Transport, didReceive data: Data, from peer: PeerID) {
+        defer { presenceHeartbeat() }
         guard data.count <= NetLimits.maxData else { reject(peer, "oversized message"); return }
         guard let message = try? NetCodec.decode(data) else {
             onDecodeFailure?(peer)

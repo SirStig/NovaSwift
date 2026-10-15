@@ -43,6 +43,9 @@ public final class ENetHostTransport: Transport, TransportDelegate {
         public var requirements: PluginRequirements?
         /// Bind 127.0.0.1 only (tests).
         public var loopbackOnly: Bool
+        /// Listen address. Empty (default), "::" or "0.0.0.0" = every interface, IPv4 and IPv6 on one dual-stack socket.
+        /// Otherwise an IPv4 or IPv6 literal (or host name) to bind to.
+        public var bindAddress: String = ""
         /// A dedicated server: no pilot of its own. It takes no player slot, is not listed in anyone's roster
         /// (WELCOME `has_local_player` false, `host_name` "[Server]") and its beacon says `dedicated`.
         public var dedicated: Bool = false
@@ -95,11 +98,19 @@ public final class ENetHostTransport: Transport, TransportDelegate {
         let t0: Double
         var lastRx: Double
         var rtt = -1
-        var ip = ""
+        /// Peer address as text: IPv4 dotted quad (IPv4-mapped IPv6 collapsed), IPv6 compressed.
+        var ip = "" { didSet { ipKey = IPAddressTools.groupKey(ip); isLoopback = IPAddressTools.isLoopback(ip) } }
+        /// What limits, temp-bans and bans are tracked under: the address (IPv4) or its /64 (IPv6).
+        private(set) var ipKey = ""
+        private(set) var isLoopback = false
         var packets: TokenBucket
         var bytes: TokenBucket
         var chat: TokenBucket
         var reports: TokenBucket
+        /// Reliable control traffic (presence, rules, kick, trade, NCB) has its own, generous budget so a busy
+        /// unreliable stream can never starve it; exceeding it is still a violation, never a silent drop.
+        var reliablePackets: TokenBucket
+        var reliableBytes: TokenBucket
         var violations = 0
         var violationsSince: Double
         var lastChat = ""
@@ -111,6 +122,8 @@ public final class ENetHostTransport: Transport, TransportDelegate {
             bytes = TokenBucket(burst: NetLimits.byteBurst, perSecond: NetLimits.bytesPerSecond, now: now)
             chat = TokenBucket(burst: NetLimits.chatBurst, perSecond: NetLimits.chatPerSecond, now: now)
             reports = TokenBucket(burst: 3, perSecond: 0.2, now: now)
+            reliablePackets = TokenBucket(burst: 200, perSecond: 60, now: now)
+            reliableBytes = TokenBucket(burst: 512 * 1024, perSecond: 128 * 1024, now: now)
         }
     }
 
@@ -145,10 +158,15 @@ public final class ENetHostTransport: Transport, TransportDelegate {
     private var tempBanUntil: [String: Double] = [:]
     private var abuseKicks: [String: [Double]] = [:]
     private var handshakeFailures: [String: [Double]] = [:]
+    /// Connections that never finished the handshake, per IP (slot-exhaustion guard), and addresses refused for it.
+    private var unauthenticated: [String: [Double]] = [:]
+    private var connectBlockedUntil: [String: Double] = [:]
 
     private var host: UnsafeMutablePointer<ENetHost>?
     private var conns: [Int: Conn] = [:]
     private var banned = Set<String>()
+    /// `banned` as group keys (IPv6 entries cover their whole /64), what the handshake checks against.
+    private var bannedKeys = Set<String>()
     private var closing: [Int: Double] = [:]
     private var clock = 0.0
     private var sentTotal: UInt64 = 0
@@ -197,7 +215,13 @@ public final class ENetHostTransport: Transport, TransportDelegate {
     public func start() throws {
         guard host == nil else { throw HostError.alreadyStarted }
         var addr = ENetAddress()
-        if config.loopbackOnly { enet_address_set_host(&addr, "127.0.0.1") } else { addr.host = 0 }   // ENET_HOST_ANY
+        if config.loopbackOnly {
+            enet_address_set_host(&addr, "127.0.0.1")
+        } else if !config.bindAddress.isEmpty, config.bindAddress != "::", config.bindAddress != "0.0.0.0" {
+            guard enet_address_set_host(&addr, config.bindAddress) == 0 else { throw HostError.cannotBind(config.port) }
+        } else {
+            enet_address_set_host_any(&addr)      // `::` dual-stack (IPv4 clients arrive IPv4-mapped); 0.0.0.0 on IPv4-only machines
+        }
         addr.port = UInt16(clamping: config.port)
         // +2 slack so a refused (full / wrong version) joiner can still be told why before it is dropped.
         guard let h = enet_host_create(&addr, max(1, config.maxPlayers) + 2, 0, 0, 0) else { throw HostError.cannotBind(config.port) }
@@ -210,6 +234,7 @@ public final class ENetHostTransport: Transport, TransportDelegate {
         isRunning = true
         beaconLock.lock(); beaconPlayers = config.dedicated ? 0 : 1; beaconLock.unlock()
         tempBanUntil.removeAll(); abuseKicks.removeAll(); handshakeFailures.removeAll()
+        unauthenticated.removeAll(); connectBlockedUntil.removeAll()
         clock = 0
         sentTotal = 0; receivedTotal = 0
         lastService = ProcessInfo.processInfo.systemUptime
@@ -267,7 +292,7 @@ public final class ENetHostTransport: Transport, TransportDelegate {
     /// IPs refused at the handshake (host moderation). Persist it yourself; set it again after a restart.
     public var bannedIPs: Set<String> {
         get { banned }
-        set { banned = newValue }
+        set { banned = newValue; bannedKeys = Set(newValue.map { IPAddressTools.groupKey($0) }) }
     }
     /// Bytes sent / received on the game socket since `start()` (UDP payload plus ENet framing).
     public var bytesSent: UInt64 { sentTotal }
@@ -287,7 +312,7 @@ public final class ENetHostTransport: Transport, TransportDelegate {
     public func kick(_ id: Int, reason: String = "Kicked by the host.", ban: Bool = false) -> Bool {
         guard let c = conns[id] else { return false }
         flushOutgoing()   // the NetSession's own kick message must precede the control kick
-        if ban, !c.ip.isEmpty { banned.insert(c.ip) }
+        if ban, !c.ip.isEmpty { banned.insert(c.ipKey); bannedKeys.insert(c.ipKey) }
         sendControl(id, Kind.kick, ["reason": reason])
         forget(id, reason: "kicked")
         closing[id] = clock + 0.3
@@ -308,17 +333,22 @@ public final class ENetHostTransport: Transport, TransportDelegate {
             case ENET_EVENT_TYPE_CONNECT:
                 let id = Int(event.data)
                 guard let p = event.peer else { break }
-                if id < 2 || conns[id] != nil {
+                if id < 2 || id > Int(Int32.max) || conns[id] != nil {   // ids are Int32 on the wire (PEER_JOIN, DATA headers)
                     enet_peer_reset(p)        // Godot does the same: ids below 2 or already in use are refused
                     break
                 }
                 var buf = [CChar](repeating: 0, count: 64)
                 enet_address_get_host_ip(&p.pointee.address, &buf, 64)
-                let ip = String(cString: buf)
-                if let until = tempBanUntil[ip], until > clock { enet_peer_reset(p); break }
+                let ip = IPAddressTools.normalize(String(cString: buf))
+                let key = IPAddressTools.groupKey(ip)
+                if let until = tempBanUntil[key], until > clock { enet_peer_reset(p); break }
+                if let until = connectBlockedUntil[key] {
+                    if until > clock { enet_peer_reset(p); break }
+                    connectBlockedUntil[key] = nil
+                }
                 let limit = config.maxConnectionsPerIP
-                if limit > 0, ip != "127.0.0.1", conns.values.filter({ $0.ip == ip }).count >= limit {
-                    enet_peer_reset(p); break      // one address can't hold every slot
+                if limit > 0, !IPAddressTools.isLoopback(ip), conns.values.filter({ $0.ipKey == key }).count >= limit {
+                    enet_peer_reset(p); break      // one address (IPv6: one /64) can't hold every slot
                 }
                 p.pointee.data = UnsafeMutableRawPointer(bitPattern: id)
                 let c = Conn(peer: p, now: clock)
@@ -336,6 +366,7 @@ public final class ENetHostTransport: Transport, TransportDelegate {
             case ENET_EVENT_TYPE_DISCONNECT:
                 if let raw = event.peer?.pointee.data {
                     let id = Int(bitPattern: raw)
+                    if let c = conns[id], !c.ready, closing[id] == nil { noteUnauthenticated(c) }   // hung up before HELLO finished
                     closing[id] = nil
                     forget(id, reason: "left")
                     conns[id] = nil
@@ -359,9 +390,22 @@ public final class ENetHostTransport: Transport, TransportDelegate {
             if c.ready {
                 if clock - c.lastRx > idleTimeout { drop(id, "timeout") }
             } else if clock - c.t0 > handshakeTimeout {
+                noteUnauthenticated(c)
                 drop(id, "handshake timeout")
             }
         }
+    }
+
+    /// A connection that never completed the handshake held a slot for nothing. Five of those from one address in a
+    /// minute and further connects from it are refused for a minute (this is not a ban and never feeds the temp-ban).
+    private func noteUnauthenticated(_ c: Conn) {
+        guard !c.ip.isEmpty, !c.isLoopback else { return }
+        var list = (unauthenticated[c.ipKey] ?? []).filter { clock - $0 < 60 }
+        list.append(clock)
+        unauthenticated[c.ipKey] = list
+        if list.count >= 5 { connectBlockedUntil[c.ipKey] = clock + 60; unauthenticated[c.ipKey] = nil }
+        if unauthenticated.count > 4096 { unauthenticated = unauthenticated.filter { ($0.value.last ?? 0) > clock - 60 } }
+        if connectBlockedUntil.count > 4096 { connectBlockedUntil = connectBlockedUntil.filter { $0.value > clock } }
     }
 
     private func drop(_ id: Int, _ reason: String) {
@@ -393,7 +437,10 @@ public final class ENetHostTransport: Transport, TransportDelegate {
         default: return                       // unknown kinds are ignored
         }
         if pkt.count > cap { return violation(id, c, weight: 10, "sent an oversized packet") }
-        guard c.packets.take(now: clock), c.bytes.take(Double(pkt.count), now: clock) else {
+        let withinBudget = reliable
+            ? (c.reliablePackets.take(now: clock) && c.reliableBytes.take(Double(pkt.count), now: clock))
+            : (c.packets.take(now: clock) && c.bytes.take(Double(pkt.count), now: clock))
+        guard withinBudget else {
             return violation(id, c, weight: 1, "sent too much data too fast")
         }
         if !c.ready, kind != Kind.hello, kind != Kind.ping { return violation(id, c, weight: 2, "sent game data before joining") }
@@ -426,7 +473,7 @@ public final class ENetHostTransport: Transport, TransportDelegate {
             noteHandshakeFailure(c)
             return reject(id, "password", theirPW.isEmpty ? "This server needs a password." : "Wrong password.")
         }
-        if !c.ip.isEmpty, banned.contains(c.ip) { return reject(id, "banned", "You are banned from this server.") }
+        if !c.ip.isEmpty, bannedKeys.contains(c.ipKey) { return reject(id, "banned", "You are banned from this server.") }
         if let refusal = joinGate?(c.ip, CrossPlayProtocol.cleanPlayerName((h["name"] as? String) ?? "", fallback: "Pilot")) {
             return reject(id, refusal.code, refusal.message)
         }
@@ -434,6 +481,12 @@ public final class ENetHostTransport: Transport, TransportDelegate {
             return reject(id, "full", "The server is full (\(playerCount)/\(config.maxPlayers)).")
         }
         let theirs = (h["manifest"] as? String).flatMap { $0.utf8.count <= NetLimits.maxHello ? $0 : nil } ?? ""
+        // A joiner that sends no manifest at all can't prove its plug-ins match: when the server needs gameplay
+        // plug-ins, that's a mismatch (every real client sends a manifest, even an empty one).
+        if theirs.isEmpty, Self.requiresGameplayPlugins(config.manifestJSON) {
+            return reject(id, "plugins", "This server needs specific plug-ins and your client didn't report yours. Update NovaSwift, then rejoin.",
+                          detail: ["server_manifest": config.manifestJSON, "client_manifest": ""])
+        }
         if !config.manifestJSON.isEmpty, !theirs.isEmpty, !Self.sameManifest(config.manifestJSON, theirs) {
             return reject(id, "plugins", "Your enabled plug-ins don't match the server's. Match its plug-in list, then rejoin.",
                           detail: ["server_manifest": config.manifestJSON, "client_manifest": theirs])
@@ -482,7 +535,9 @@ public final class ENetHostTransport: Transport, TransportDelegate {
             guard let out = f(id, payload) else { return }
             payload = out
         }
-        if target == -1 || target == ENetTransport.Wire.serverID { inner.receive(from: id, data: payload) }
+        // A dedicated server's own session only needs presence / chat / rules (all reliable). The unreliable stream is
+        // snapshots and inputs, which it has no use for, so don't make it decode them (it still relays them on).
+        if (target == -1 || target == ENetTransport.Wire.serverID), reliable || !config.dedicated { inner.receive(from: id, data: payload) }
         if target == -1 {
             let out = Self.dataPacket(peer: id, payload: payload)
             for (oid, o) in conns where oid != id && o.ready { sendRaw(oid, out, reliable: reliable) }
@@ -528,13 +583,13 @@ public final class ENetHostTransport: Transport, TransportDelegate {
         if c.violations >= NetLimits.violationsToKick { abuseKick(id, c, what) }
     }
 
-    private func abuseKick(_ id: Int, _ c: Conn, _ what: String) {
+    private func abuseKick(_ id: Int, _ c: Conn, _ what: String, countsTowardBan: Bool = true) {
         var banned = false
-        if !c.ip.isEmpty, c.ip != "127.0.0.1" {
-            var list = (abuseKicks[c.ip] ?? []).filter { clock - $0 < 600 }
+        if countsTowardBan, !c.ip.isEmpty, !c.isLoopback {
+            var list = (abuseKicks[c.ipKey] ?? []).filter { clock - $0 < 600 }
             list.append(clock)
-            abuseKicks[c.ip] = list
-            if list.count >= NetLimits.abuseKicksToTempBan { tempBanUntil[c.ip] = clock + config.tempBanSeconds; banned = true }
+            abuseKicks[c.ipKey] = list
+            if list.count >= NetLimits.abuseKicksToTempBan { tempBanUntil[c.ipKey] = clock + config.tempBanSeconds; banned = true }
             if abuseKicks.count > 4096 { abuseKicks = abuseKicks.filter { ($0.value.last ?? 0) > clock - 600 } }
         }
         emit(.abuse(id: id, name: c.name, ip: c.ip, reason: what, banned: banned))
@@ -544,21 +599,22 @@ public final class ENetHostTransport: Transport, TransportDelegate {
     }
 
     private func noteHandshakeFailure(_ c: Conn) {
-        guard !c.ip.isEmpty, c.ip != "127.0.0.1" else { return }
-        var list = (handshakeFailures[c.ip] ?? []).filter { clock - $0 < 60 }
+        guard !c.ip.isEmpty, !c.isLoopback else { return }
+        var list = (handshakeFailures[c.ipKey] ?? []).filter { clock - $0 < 60 }
         list.append(clock)
-        handshakeFailures[c.ip] = list
+        handshakeFailures[c.ipKey] = list
         if list.count >= 10 {
-            tempBanUntil[c.ip] = clock + config.tempBanSeconds
-            handshakeFailures[c.ip] = nil
+            tempBanUntil[c.ipKey] = clock + config.tempBanSeconds
+            handshakeFailures[c.ipKey] = nil
             emit(.abuse(id: 0, name: "", ip: c.ip, reason: "failed the handshake or password too many times", banned: true))
         }
         if handshakeFailures.count > 4096 { handshakeFailures = handshakeFailures.filter { ($0.value.last ?? 0) > clock - 60 } }
     }
 
     /// Kick a connection for abuse found above this layer (e.g. the session saw repeated invalid messages).
-    public func reportAbuse(_ id: Int, _ what: String) {
-        if let c = conns[id], c.ready { abuseKick(id, c, what) }
+    /// `countsTowardBan: false` (player reports) kicks the connection without counting toward the address temp-ban.
+    public func reportAbuse(_ id: Int, _ what: String, countsTowardBan: Bool = true) {
+        if let c = conns[id], c.ready { abuseKick(id, c, what, countsTowardBan: countsTowardBan) }
     }
 
     /// Send a server chat line to one player.
@@ -567,7 +623,10 @@ public final class ENetHostTransport: Transport, TransportDelegate {
     }
 
     /// Lift a temporary block (admin action).
-    public func clearTempBan(_ ip: String) { tempBanUntil[ip] = nil; abuseKicks[ip] = nil; handshakeFailures[ip] = nil }
+    public func clearTempBan(_ ip: String) {
+        let k = IPAddressTools.groupKey(ip)      // accepts a plain address or a "prefix::/64" group
+        tempBanUntil[k] = nil; abuseKicks[k] = nil; handshakeFailures[k] = nil; connectBlockedUntil[k] = nil; unauthenticated[k] = nil
+    }
 
     private func forget(_ id: Int, reason: String) {
         guard let c = conns[id], c.ready else { return }
@@ -633,6 +692,13 @@ public final class ENetHostTransport: Transport, TransportDelegate {
         if let i = v as? Int { return i }
         if let d = v as? Double { return Int(d) }
         return nil
+    }
+
+    /// Whether a manifest lists at least one gameplay (non-cosmetic) plug-in.
+    static func requiresGameplayPlugins(_ manifest: String) -> Bool {
+        guard !manifest.isEmpty, let o = (try? JSONSerialization.jsonObject(with: Data(manifest.utf8))) as? [String: Any],
+              let plugins = o["plugins"] as? [[String: Any]] else { return false }
+        return plugins.contains { ($0["cosmetic"] as? Bool) != true }
     }
 
     /// Gameplay plug-in sets match when they list the same ids with matching (possibly truncated) hashes; key order,

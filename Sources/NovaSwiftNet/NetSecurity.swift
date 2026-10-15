@@ -139,6 +139,7 @@ public enum NetLimits {
 public enum NetValidation {
     public static let maxCoordinate = 1_000_000.0
     public static let maxSpeed = 4_000.0
+    public static let maxCredits = 64, maxLoadoutWeapons = 64
     public static let maxShips = 256, maxShots = 1024, maxBeams = 256, maxEffects = 256
     public static let maxStat = 1_000_000.0
     public static let maxSystemID = 100_000
@@ -180,6 +181,7 @@ public enum NetValidation {
             finite($0.fromX, limit: maxCoordinate) && finite($0.fromY, limit: maxCoordinate)
                 && finite($0.toX, limit: maxCoordinate) && finite($0.toY, limit: maxCoordinate) && finite($0.width, limit: 1_000)
         }
+        s.credits = snap.credits.map { Array($0.prefix(maxCredits)) }
         s.effects = Array(snap.effects.prefix(maxEffects)).filter {
             finite($0.x, limit: maxCoordinate) && finite($0.y, limit: maxCoordinate) && finite($0.radius, limit: 10_000)
         }
@@ -229,6 +231,17 @@ public enum NetValidation {
 
     public static func valid(_ i: InputFrame) -> Bool {
         (i.intent.desiredHeading.map { $0.isFinite && abs($0) <= 1_000 } ?? true) && i.intent.turnScale.isFinite && abs(i.intent.turnScale) <= 10
+            && (i.loadout.map(valid) ?? true)
+    }
+
+    public static func valid(_ l: ShipLoadoutNet) -> Bool {
+        (-1...100_000).contains(l.shipTypeID)
+            && finite(l.maxShield, limit: maxStat) && finite(l.maxArmor, limit: maxStat)
+            && finite(l.shieldRegenPerSec, limit: maxStat) && finite(l.armorRegenPerSec, limit: maxStat)
+            && l.maxShield >= 0 && l.maxArmor >= 0
+            && (l.shield.map { finite($0, limit: maxStat) } ?? true) && (l.armor.map { finite($0, limit: maxStat) } ?? true)
+            && l.weapons.count <= maxLoadoutWeapons
+            && l.weapons.allSatisfy { (0...100_000).contains($0.id) && (1...100).contains($0.count) && $0.ammo >= -1 && $0.ammo <= 1_000_000 }
     }
 }
 

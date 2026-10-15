@@ -1794,22 +1794,65 @@ public final class World {
         return addNPC(ship, arrival: arrival)
     }
 
-    /// Remove the system's real AI/ambient NPCs — everything that isn't a co-op
+    /// Remove the system's real AI/ambient NPCs - everything that isn't a co-op
     /// mirror (`remotePlayer`/`networkMirror`). Called when a **client** starts
     /// mirroring a co-located authority's world, so its own populated cast gives
     /// way to the authority's (which then streams in as `networkMirror` ships).
+    /// The local player's own fleet (hired/captured escorts, fighters) and
+    /// mission ships stay: they're the client's, not part of the ambient cast the
+    /// authority replaces. They remain local-only (the authority doesn't see them).
     /// Silent: no departure events/effects, since these ships aren't leaving the
     /// fiction, they're being replaced by the shared world.
     public func removeAINPCs() {
-        let survivors = npcs.filter { $0.remotePlayer != nil || $0.networkMirror }
+        func keep(_ s: Ship) -> Bool {
+            s.remotePlayer != nil || s.networkMirror || s.missionID != nil || isPlayerFleetMember(s.entityID)
+        }
+        let survivors = npcs.filter(keep)
         guard survivors.count != npcs.count else { return }
-        for gone in npcs where gone.remotePlayer == nil && !gone.networkMirror {
+        for gone in npcs where !keep(gone) {
             clearTarget(gone.entityID)
             stopAllBeamLoops(for: gone)
             remoteIntents[gone.entityID] = nil
         }
         npcs = survivors
         refreshRoster()
+    }
+
+    // MARK: Co-op kill credit
+
+    /// A kill (or disable) a **remote player's** ship earned on the authority, waiting for the sync layer to forward it
+    /// to that player (whose own world never simulated the fight). See `drainRemoteKillCredits`.
+    public struct RemoteKillCredit: Equatable, Sendable {
+        public var peerID: String
+        public var shipTypeID: Int
+        public var government: Int
+        public var missionID: Int?
+        public var strength: Int
+        /// True when the hit only crossed the disable line (a disable penalty, no kill).
+        public var disabled: Bool
+    }
+    /// Credits recorded this step. Only ever appended while a remote player's ship deals the blow, so it stays empty
+    /// (and costs nothing) in single-player.
+    public private(set) var remoteKillCredits: [RemoteKillCredit] = []
+
+    /// Take (and clear) the credits recorded since the last call.
+    public func drainRemoteKillCredits() -> [RemoteKillCredit] {
+        defer { remoteKillCredits.removeAll(keepingCapacity: true) }
+        return remoteKillCredits
+    }
+
+    /// Replay a kill/disable the authority credited to the local player into this world, exactly as a local kill is
+    /// recorded in `despawnDepartedAndDead`: combat rating + legal record through `Diplomacy`, and the "destroy" goal
+    /// event the story layer keys mission objectives off. Call after `step` (it appends to this frame's `events`).
+    public func applyNetworkKillCredit(government: Int, shipStrength: Int, missionID: Int?, disabled: Bool) {
+        if disabled {
+            diplomacy?.recordDisable(of: government, missionShip: missionID != nil)
+            return
+        }
+        diplomacy?.recordKill(of: government, shipStrength: shipStrength, missionShip: missionID != nil)
+        if let mid = missionID {
+            events.append(.missionShipGoalReached(missionID: mid, entityID: -1, goal: .destroy, byPlayer: true))
+        }
     }
 
     /// Co-op: spawn a **visual-only** echo of an authority's in-flight shot so a
@@ -4386,6 +4429,13 @@ public final class World {
                   disablesOnly: Bool = false, impact: Double = 0, impactFrom: Vec2? = nil,
                   keepsAboveDisable: Bool = false, hitPoint: Vec2? = nil,
                   shotTargetID: Int?? = nil) {
+        // Co-op: a client's copy of an authority-owned NPC takes no real damage - the authority simulates the fight and
+        // its snapshots carry the health. The hit still reads on screen (flash/spray), nothing more.
+        if ship.networkMirror {
+            events.append(ship.shield > 0 && !piercing ? .shieldHit(at: hitPoint ?? ship.position, weaponID: weaponID)
+                                                       : .armorHit(at: hitPoint ?? ship.position, weaponID: weaponID))
+            return
+        }
         var shield = shield, armor = armor
         // Difficulty (an enhancement-type setting): scale only the damage the
         // *player* takes; 1.0, the default, is the original.
@@ -4496,6 +4546,17 @@ public final class World {
         let credited = !ship.isPlayer && ship.spobDefenderOf == nil && isCreditedToPlayer(ownerID)
         if credited, !wasDisabled, ship.disabled {
             diplomacy?.recordDisable(of: ship.government, missionShip: ship.missionID != nil)
+        }
+        // Co-op: a remote player's ship landed the blow. Its own world never simulated this ship, so queue the credit
+        // for the sync layer to forward (the local-player path above/below only credits entity 0 and its escorts).
+        if !ship.isPlayerControlled, ship.spobDefenderOf == nil, let peer = self.ship(id: ownerID)?.remotePlayer?.peerID,
+           !isDerelictGovernment(ship.government) {
+            let killed = wasAlive && !ship.isAlive
+            if killed || (!wasDisabled && ship.disabled && ship.isAlive) {
+                remoteKillCredits.append(RemoteKillCredit(
+                    peerID: peer, shipTypeID: ship.shipTypeID, government: ship.government,
+                    missionID: ship.missionID, strength: Int(ship.combatStrength), disabled: !killed))
+            }
         }
         if wasAlive, !ship.isAlive {
             // The killing hit. `despawnDepartedAndDead` finalizes it next pass

@@ -23,8 +23,10 @@ import Crypto
 /// `startPumping()` and never touch it directly. `Transport` methods (`send`, `broadcast`) are safe from
 /// any thread; they only enqueue.
 ///
-/// Limits: ENet 1.3.18 is IPv4 only (a host name is resolved to an IPv4 address); no encryption (the
-/// password is sent as a SHA-256 hash, same as Godot).
+/// Addressing: the vendored ENet is dual-stack (IPv4 stored IPv4-mapped in a 16 byte address, one AF_INET6 socket).
+/// `host` may be an IPv4 or IPv6 literal (bare or `[bracketed]`) or a host name; names and IPv4 literals resolve
+/// through getaddrinfo, so an IPv6-only NAT64 network (Apple App Review) connects through its synthesized address.
+/// Limits: no encryption (the password is sent as a SHA-256 hash, same as Godot).
 public final class ENetTransport: Transport, TransportDelegate {
 
     // MARK: Wire constants (mirror godot/net/NetProto.gd)
@@ -163,7 +165,9 @@ public final class ENetTransport: Transport, TransportDelegate {
     public func connect() throws {
         guard state == .idle else { throw ConnectError.alreadyStarted }
         var address = ENetAddress()
-        guard enet_address_set_host(&address, config.host) == 0 else { throw ConnectError.cannotResolve(config.host) }
+        var hostText = config.host.trimmingCharacters(in: .whitespaces)
+        if hostText.hasPrefix("["), hostText.hasSuffix("]") { hostText = String(hostText.dropFirst().dropLast()) }
+        guard enet_address_set_host(&address, hostText) == 0 else { throw ConnectError.cannotResolve(config.host) }
         address.port = UInt16(clamping: config.port)
         guard let h = enet_host_create(nil, 1, Wire.channelCount, 0, 0),
               let p = enet_host_connect(h, &address, Wire.channelCount, UInt32(localID)) else {
@@ -214,7 +218,7 @@ public final class ENetTransport: Transport, TransportDelegate {
                 if state == .connecting || state == .handshaking {
                     let r = closedReason
                     finish(.closed)
-                    emit(r.isEmpty ? .timedOut("Couldn't reach \(config.host):\(config.port). Check the address, that the server is running, and that UDP \(config.port) is open.") : .rejected(code: "refused", message: r))
+                    emit(r.isEmpty ? .timedOut("Couldn't reach \(IPAddressTools.joinHostPort(config.host, config.port)). Check the address, that the server is running, and that UDP \(config.port) is open.") : .rejected(code: "refused", message: r))
                 } else {
                     let r = closedReason.isEmpty ? "Lost the connection to the server." : closedReason
                     finish(.closed); emit(.disconnected(reason: r))

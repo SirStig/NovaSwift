@@ -18,7 +18,11 @@ extension WorldSnapshot {
                              tick: UInt32, ackInputSeq: UInt32) -> WorldSnapshot {
         var ships: [ShipNetState] = []
         ships.reserveCapacity(world.allShips.count)
-        for ship in world.allShips where ship.isAlive {
+        for ship in world.allShips {
+            // A dead client copy stays in the snapshot as `destroyed` (armor 0) so its owner learns of the death; other
+            // dead ships just drop out as before.
+            guard ship.isAlive || ship.remotePlayer != nil else { continue }
+            let dead = !ship.isAlive
             let playerID: String?
             let control: NetControlSource
             if ship.isPlayer {
@@ -36,8 +40,11 @@ extension WorldSnapshot {
                 government: ship.government, name: ship.name,
                 x: ship.position.x, y: ship.position.y,
                 vx: ship.velocity.x, vy: ship.velocity.y,
-                angle: wireAngle(ship.angle), shield: ship.shield, armor: ship.armor,
-                control: control))
+                angle: wireAngle(ship.angle),
+                // A client copy never reports more than the maxima its owner told us (the client owns those).
+                shield: dead ? 0 : (ship.remotePlayer != nil ? min(ship.shield, ship.maxShield) : ship.shield),
+                armor: dead ? 0 : (ship.remotePlayer != nil ? min(ship.armor, ship.maxArmor) : ship.armor),
+                control: control, destroyed: dead ? true : nil))
         }
         // Live shots, so co-located clients see fire (visual only — damage already
         // rides ship health). Skip any visual echoes we might be holding ourselves.

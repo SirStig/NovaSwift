@@ -83,6 +83,16 @@ func wants_background_sim() -> bool:
 	return players.size() > 1
 
 
+## Docked with other pilots in the session: the shared world keeps ticking (Main.gd calls nova.net_landed_step), so
+## the authority still sees this ship leave space and, if this machine is the authority, the others keep flying.
+func wants_landed_sim() -> bool:
+	if not is_connected_to_session() or transport == null or not transport.bridge_active or nova == null:
+		return false
+	if not nova.has_method("net_landed_step"):
+		return false
+	return players.size() > 1
+
+
 func has_bridge_api() -> bool:
 	return nova != null and nova.has_method("net_begin")
 
@@ -403,9 +413,19 @@ func _on_bridge_event(e: Dictionary) -> void:
 				var pn: String = Proto.clean_player_name(e.get("name", ""), "A player")
 				_toast("%s's plug-ins don't match yours; they were removed." % pn, "warning")
 				_system_line("%s was removed: %s" % [pn, _plugin_mismatch_text(e).replace("Your plug-ins don't match. ", "to match, they must ")])
+				# The session-level kick only removes their presence; drop the ENet link too so no ghost peer lingers.
+				var mm_id: int = int(e.get("id", -1)) if e.get("id", -1) is int else -1
+				if mm_id > 1 and transport != null:
+					transport.kick(mm_id, "Your plug-ins don't match the host's.", false)
 			else:
 				_set_error(_plugin_mismatch_text(e), "plugins", e)
 				_toast("Plug-ins don't match the host's.", "error")
+				# We can't play here: fully disconnect (keeps last_error for the explaining dialog).
+				var keep_msg: String = last_error
+				var keep_code: String = last_error_code
+				var keep_detail: Dictionary = last_error_detail
+				leave()
+				_set_error(keep_msg, keep_code, keep_detail)
 	ui_event.emit({"type": "bridge_" + kind, "event": e})
 
 

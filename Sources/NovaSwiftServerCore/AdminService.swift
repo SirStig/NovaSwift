@@ -245,7 +245,7 @@ public final class AdminService {
         case ("GET", "moderation"): return .json(moderationJSON())
         case ("POST", "allowlist/add"):
             let ip = ((req.json()["ip"] as? String) ?? "").trimmingCharacters(in: .whitespaces)
-            guard NetworkTools.octets(ip) != nil else { return .error("That isn't an IPv4 address (like 203.0.113.7).") }
+            guard NetworkTools.isIP(ip) else { return .error("That isn't an IP address (like 203.0.113.7 or 2001:db8::1; IPv6 covers the whole /64).") }
             server.allow(ip: ip, note: (req.json()["note"] as? String) ?? "", actor: "admin@\(req.remoteIP)")
             return .json(moderationJSON())
         case ("POST", "allowlist/remove"):
@@ -346,7 +346,7 @@ public final class AdminService {
         case ("POST", "bans/add"):
             let b = req.json()
             let ip = ((b["ip"] as? String) ?? "").trimmingCharacters(in: .whitespaces)
-            guard NetworkTools.octets(ip) != nil else { return .error("That isn't an IPv4 address (like 203.0.113.7).") }
+            guard NetworkTools.isIP(ip) else { return .error("That isn't an IP address (like 203.0.113.7 or 2001:db8::1; IPv6 covers the whole /64).") }
             server.ban(ip: ip, note: (b["note"] as? String) ?? "", actor: "admin@\(req.remoteIP)")
             return .json(["ok": true])
         case ("POST", "bans/remove"):

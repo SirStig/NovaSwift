@@ -86,7 +86,7 @@ public final class ModerationCenter {
     private var lastVoteStart: [Int: Double] = [:]
     private var recentLines: [Int: [(text: String, at: Double)]] = [:]
     private var reports: [Int: [(reporter: Int, at: Double)]] = [:]
-    private var invalidReports: [Int: Int] = [:]
+    private var invalidReports: [Int: [(reporter: Int, at: Double)]] = [:]
     public static let voteWindow = 60.0
 
     public init() {}
@@ -194,10 +194,20 @@ public final class ModerationCenter {
         Set((reports[target] ?? []).filter { now - $0.at < 60 }.map(\.reporter)).count
     }
 
-    /// A client noticed invalid data from `target`; true once five such reports have piled up.
-    public func noteInvalidReport(target: Int) -> Bool {
-        invalidReports[target, default: 0] += 1
-        return invalidReports[target]! >= 5
+    /// Distinct reporters needed to act on "invalid data" reports about one player, given how many players are
+    /// online: at least two, half of the others on a small server, never more than four.
+    public static func invalidReportsNeeded(online: Int) -> Int {
+        let others = max(0, online - 1)
+        return max(2, min(4, (others + 1) / 2))
+    }
+
+    /// A client noticed invalid data from `target`. True once enough DISTINCT reporters did so within the last
+    /// minute (one client repeating itself can never get anybody kicked).
+    public func noteInvalidReport(target: Int, reporter: Int, now: Double, online: Int) -> Bool {
+        var list = (invalidReports[target] ?? []).filter { now - $0.at < 60 }
+        if !list.contains(where: { $0.reporter == reporter }) { list.append((reporter, now)) }
+        invalidReports[target] = list
+        return Set(list.map(\.reporter)).count >= Self.invalidReportsNeeded(online: online)
     }
 
     /// Record a non-command report (K_REPORT control packet); returns the number of distinct reporters in the last minute.

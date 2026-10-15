@@ -1,4 +1,5 @@
 import Foundation
+import NovaSwiftENet
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -51,6 +52,13 @@ public enum NetworkTools {
         return "other"
     }
 
+    /// A valid IPv4 or IPv6 address, or an IPv6 `/64` group written `prefix::/64` (how IPv6 bans are stored).
+    public static func isIP(_ text: String) -> Bool {
+        var t = text.trimmingCharacters(in: .whitespaces)
+        if t.hasSuffix("/64") { t.removeLast(3) }
+        return IPAddressTools.isValid(t)
+    }
+
     public static func octets(_ ip: String) -> [Int]? {
         let p = ip.split(separator: ".").compactMap { Int($0) }
         return p.count == 4 && p.allSatisfy({ (0...255).contains($0) }) ? p : nil
@@ -74,7 +82,7 @@ public enum NetworkTools {
         for url in ["https://api.ipify.org", "https://icanhazip.com", "https://ifconfig.me/ip"] {
             if let data = httpGet(URL(string: url)!, timeout: timeout),
                let s = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-               octets(s) != nil { return s }
+               isIP(s) { return IPAddressTools.normalize(s) }
         }
         return nil
     }
@@ -135,7 +143,7 @@ public enum NetworkTools {
         <?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:GetExternalIPAddress xmlns:u="\(service)"></u:GetExternalIPAddress></s:Body></s:Envelope>
         """
         if let r = soap(control, service: service, action: "GetExternalIPAddress", body: ipBody),
-           let ip = tag("NewExternalIPAddress", in: r), octets(ip) != nil { external = ip }
+           let ip = tag("NewExternalIPAddress", in: r), octets(ip) != nil { external = ip }   // UPnP IGD gives the IPv4 WAN address
         let behindNAT = external.map { isPrivate($0) || isCGNAT($0) } ?? false
         if added == ports.count {
             var msg = "Your router agreed to forward UDP \(ports.map(String.init).joined(separator: " and ")) to this computer."
