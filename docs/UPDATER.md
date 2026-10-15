@@ -1,7 +1,10 @@
 # Auto-updater (Godot desktop: Linux x86_64 incl. Steam Deck, Windows x86_64)
 
 Code: `godot/updater/`. Release tooling: `scripts/release-sign.sh`. Self-check: `godot/tests/updater_selfcheck.gd`.
+
 Releases are made by hand on GitHub (`SirStig/NovaSwift`); there is no CI. The Apple app is not touched by any of this.
+
+**Status (2026-10-14).** Signed manifests (`update.json` + `update.json.sig`) are published with GitHub releases, starting with v0.7.0-beta.2. An end-to-end in-app update (an installed build offered, downloaded and installed a newer release) has not yet been verified.
 
 ## What the player sees
 

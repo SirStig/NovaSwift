@@ -125,7 +125,7 @@
               <tr><td><b>Internet with friends</b></td><td><span class="badge ok">Game Center</span></td><td><span class="badge ok">Direct address</span></td><td>Game Center needs no setup. On desktop, the host forwards one UDP port, or everyone uses Tailscale.</td></tr>
               <tr><td><b>Same network</b></td><td><span class="badge ok">Local Wi-Fi</span></td><td><span class="badge ok">LAN browser</span></td><td>Games on your network appear on their own.</td></tr>
               <tr><td><b>Public lobbies</b></td><td><span class="badge ok">Lobby list</span></td><td><span class="badge ok">Server browser</span></td><td>Apple lists open Game Center lobbies through iCloud. Desktop lists community servers.</td></tr>
-              <tr><td><b>Dedicated servers</b></td><td><span class="badge ok">Join by address</span></td><td><span class="badge ok">Yes</span></td><td>Always-on servers run by players, with a web admin panel and no game data needed. <a href="dedicated-server.html">Run your own</a>.</td></tr>
+              <tr><td><b>Dedicated servers</b></td><td><span class="badge warn">Coming</span></td><td><span class="badge ok">Yes</span></td><td>Always-on servers run by players, with a web admin panel and no game data needed. <a href="dedicated-server.html">Run your own</a>.</td></tr>
               <tr><td><b>Cross-play</b></td><td colspan="2"><span class="badge warn">In progress</span></td><td>Apple and desktop players on the same servers. See below.</td></tr>
             </tbody>
           </table>
@@ -171,12 +171,12 @@
         <div class="head">
           <span class="eyebrow">Cross-play</span>
           <h2>Apple and desktop, together. Nearly.</h2>
-          <p>Desktop builds use a different network transport than Game Center, so today Apple players and desktop players can't meet. The bridge is under way: the Apple app is getting the same connection layer as the desktop builds, so it can browse the public server list, join dedicated servers and desktop hosts by address, and later host them too.</p>
+          <p>Desktop builds use a different network transport than Game Center, so today Apple players and desktop players can't meet. The bridge is written: the Apple app's code has the same connection layer as the desktop builds, so it can browse the public server list, join dedicated servers and desktop hosts by address, and host them too. It isn't in a TestFlight build yet, and no Apple-to-desktop game has been played.</p>
         </div>
         <div class="cards">
-          <div class="card"><span class="badge ok">Done</span><h3 style="margin-top:10px">Shared protocol</h3><p>The connection layer is implemented in the shared Swift code and tested against a real desktop dedicated server.</p></div>
-          <div class="card"><span class="badge warn">In progress</span><h3 style="margin-top:10px">Apple server browser</h3><p>Public, LAN and saved servers and Quick Connect in the Apple app, next to Game Center.</p></div>
-          <div class="card"><span class="badge">Next</span><h3 style="margin-top:10px">Apple hosting for everyone</h3><p>Letting a Mac or iPad host a game desktop players can join.</p></div>
+          <div class="card"><span class="badge ok">Done</span><h3 style="margin-top:10px">Shared protocol</h3><p>The connection layer is implemented in the shared Swift code and tested against real desktop servers and a Godot client in loopback tests.</p></div>
+          <div class="card"><span class="badge warn">Coming</span><h3 style="margin-top:10px">Apple server browser</h3><p>Public, LAN and saved servers and Quick Connect in the Apple app, next to Game Center. Written, coming in a future TestFlight build.</p></div>
+          <div class="card"><span class="badge warn">Coming</span><h3 style="margin-top:10px">Apple hosting</h3><p>Letting a Mac or iPad host a game desktop players can join, by direct IP. Written, coming in a future TestFlight build.</p></div>
         </div>
       </div>
     </section>

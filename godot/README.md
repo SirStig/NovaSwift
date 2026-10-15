@@ -25,6 +25,9 @@ godot/
   screens/Spaceport.gd   docked UI: landing, Bar, Mission BBS, Trade Center, Outfitter, Shipyard, Recharge
   screens/StoryScreens.gd story texts, mission offers, Player Info / Mission Info (P / I)
   screens/Interactions.gd  in-flight hail, board/plunder, capture and escort dialogs + Escort Commands panel
+  net/                   multiplayer hub: LAN browser, direct IP, public server browser, trade (Godot ENet)
+  editor/                plug-in editor (early; reachable from the main menu)
+  updater/               signed auto-updater (see ../docs/UPDATER.md)
   audio/TitleMusic.gd    main-menu music (STR# 130 #2 mp3; .mov/missing = silence)
   audio/GameAudio.gd     sound: snd -> AudioStreamWAV cache + 16-voice player pool
   tests/                 headless self-checks (godot --headless -s res://tests/…)
@@ -48,7 +51,7 @@ version matrix in [`../docs/GODOT_LAYER.md`](../docs/GODOT_LAYER.md).
 # 1 · build the native bridge into godot/bin/
 scripts/build-gdextension.sh          # from the repo root (release by default; pass 'debug' for a debug build)
 
-# 2 · open this folder in Godot 4.2+ and press Play (F5),
+# 2 · open this folder in Godot 4.6+ and press Play (F5),
 #     or run headless-less from the CLI:
 godot --path godot
 ```
@@ -140,21 +143,10 @@ milestones in [`../docs/GODOT_LAYER.md`](../docs/GODOT_LAYER.md).
 
 ## Note on the current status
 
-Confirmed on-toolchain 2026-07-18: the bridge builds clean with
-`scripts/build-gdextension.sh` (Swift 6.3) and a headless `godot --path godot`
-run loads real EV Nova data, builds a system, and steps the simulation with no
-errors, on macOS. Linux/Windows are not yet verified locally — CI
-(`.github/workflows/godot-linux-windows.yml`) tracks the core's Linux/Windows
-compilation and the bridge build there.
-
-Until recently that CI could never have gone green: `NovaSwiftKit`'s decoded-
-sprite cache used LZFSE through `NSData.compressed(using:)`, an Apple-only
-Foundation facility, so every Linux and Windows job died before the bridge was
-even reached. That's fixed (`Sources/NovaSwiftKit/SpriteDiskCache.swift` now
-tags each record with its codec and stores raw off Apple) and the workflow is
-back on push/PR. The first green Linux run is what will actually confirm the
-core compiles off Apple end to end — the LZFSE failure masked everything
-downstream of it, so more platform edges may surface behind it.
+v0.7.0-beta.2 (2026-10-14) is released for Linux x86_64 / Steam Deck, Windows x86_64 and macOS arm64, and has been played
+on real hardware (a Windows PC, Linux, a Steam Deck, and multiplayer across two machines). Packages are built locally
+([`../docs/PACKAGING.md`](../docs/PACKAGING.md)); there is no CI for packaging. Open items are tracked in
+[`../docs/GODOT_FIDELITY_GAPS.md`](../docs/GODOT_FIDELITY_GAPS.md).
 
 Missions: the Mission BBS and Bar are on the landing screen (A/Enter selects, **A** key /
 pad **X** accepts a BBS listing); offers also pop on landing and when opening shops.

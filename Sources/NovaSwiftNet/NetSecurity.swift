@@ -154,6 +154,11 @@ public enum NetValidation {
             && s.shipTypeID >= -1 && s.shipTypeID <= 100_000 && s.government >= -1 && s.government <= 100_000
     }
 
+    public static func valid(_ p: ShipPose) -> Bool {
+        finite(p.x, limit: maxCoordinate) && finite(p.y, limit: maxCoordinate)
+            && finite(p.vx, limit: maxSpeed) && finite(p.vy, limit: maxSpeed) && finite(p.angle, limit: 1_000)
+    }
+
     /// A copy of the snapshot with impossible entries removed and lists capped. `knownShipTypes` (when non-nil) drops
     /// ships whose hull isn't in the game data (-1 = unknown stays).
     public static func sanitized(_ snap: WorldSnapshot, knownShipTypes: Set<Int>? = nil) -> WorldSnapshot {

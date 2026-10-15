@@ -129,6 +129,8 @@ byte counters), `LANBeaconService.broadcastBeacons`, and Linux fixes in `UDPDisc
 
 ## Status
 
+Released on GitHub as `server-v0.1.0` (2026-10-14).
+
 Tested: config/auth/HTTP/plug-in/handshake unit tests (36); the real server against the Swift ENet client and two real headless
 Godot clients (`net_e2e_client.gd`: handshake, presence, co-located sync, chat, trade, authority handoff - PASS). Built for Linux
 arm64 and x86_64 in `swift:6.3-jammy`, and macOS arm64. **Windows is untested and probably needs a Winsock port** of the POSIX

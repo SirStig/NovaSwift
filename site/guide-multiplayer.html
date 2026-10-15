@@ -90,7 +90,7 @@
           <li><b>Story:</b> a shared encounter runs the authority's storyline. Your outfitter, shipyard, rank and combat rating still come from your own save.</li>
         </ul>
         <figure><img src="assets/screenshots/multiplayer-browse.webp" width="1800" height="1008" loading="lazy" alt="The Multiplayer browser listing a dedicated server on the local network, with Join and Save buttons." /></figure>
-        <div class="callout"><p><b>Beta.</b> The netcode and sync logic are tested, but multiplayer has seen little play on real networks and hardware so far. Expect rough edges and please report them.</p></div>
+        <div class="callout"><p><b>Beta.</b> The netcode and sync logic are tested, and desktop multiplayer has been played across two real machines, but it's new. Expect rough edges and please report them.</p></div>
 
         <h2 id="stakes">Stakes and rules</h2>
         <p>The host picks the rules when opening the game, and every joiner sees them. They only govern what happens between players while you share a system.</p>
@@ -121,7 +121,7 @@
 <p>The <b>Local</b> tab hosts or joins a named lobby on the same network (Apple's MultipeerConnectivity). Nearby lobbies appear in a list. Separate groups on one network do not mix.</p>
 
         <h2 id="browse">Linux, Steam Deck and Windows: the Multiplayer hub</h2>
-        <p>The Godot app joins games over ENet (UDP), by address, on your LAN, or from a public list. There is no Game Center here. Windows is not released yet, but the hub is the same code. The hub has up to three tabs:</p>
+        <p>The Godot app joins games over ENet (UDP), by address, on your LAN, or from a public list. There is no Game Center here. Windows uses the same code. The hub has up to three tabs:</p>
         <ul>
           <li><b>Browse</b> (the default): one list of every server you can reach. <b>Saved</b> servers are pinned at the top with a filled star, then LAN games and the public directory, merged by address. Each row shows its status, name, address, players, ping and a <b>Join</b> button. Use the search box and filter chips (All, Saved, LAN, Public, Compatible only, Has players, No password, and region) to narrow it down. <b>Refresh</b> re-queries the list.</li>
           <li><b>Host</b>: start your own game (see below).</li>
@@ -164,7 +164,7 @@
         <p><b>Trading</b> lets two players swap credits, cargo and outfits, if the host allows trading. Both sides see the other's offer live; changing either offer clears both confirmations, and the swap happens only when both accept. Each side applies it to its own save. On Apple it starts from the player's Trade button in the lobby roster. On Godot there is a Trade button on the player rows in chat, and the trade window shows what you give next to what you receive. Test it on Safe stakes first.</p>
 
         <h2 id="crossplay">Cross-play: Apple and Godot</h2>
-        <p>Today the Apple app and the Godot app cannot join each other's games. Apple uses Game Center and local Wi-Fi, Godot uses ENet. The groundwork to join Godot hosts and dedicated servers from Apple devices is built and tested at the protocol level, and both apps share the same protocol version and plug-in rules. It is not wired into the Apple app's Multiplayer screens yet, so there is no button for it. We will announce it when it ships.</p>
+        <p>Today the Apple app and the Godot app cannot join each other's games. Apple uses Game Center and local Wi-Fi, Godot uses ENet. The groundwork to join Godot hosts and dedicated servers from Apple devices is written and tested at the protocol level, and both apps share the same protocol version and plug-in rules. The Apple app's server browser and hosting aren't in a TestFlight build yet, and no Apple-to-desktop game has been played. We will announce it when it ships.</p>
 
         <h2 id="trouble">Troubleshooting</h2>
         <div class="table-wrap"><table class="data">

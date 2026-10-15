@@ -2,10 +2,11 @@
 
 Almost everything described here is built and covered by tests (the
 `carryEncounter` rule is declared but not used yet). What hasn't happened is
-verification on real hardware over a real network: the netcode and sync logic are
-proven headlessly (two live `World`s talking over a loopback transport) and the
-app-side wiring compiles, but nobody has played a session end to end on two
-machines. Known gaps are listed at the bottom.
+verification of the Apple side on real hardware: the netcode and sync logic are
+proven headlessly (two live `World`s talking over a loopback transport), and the Godot
+frontend's multiplayer (shipped in v0.7.0-beta.2, 2026-10-14) has been played across two
+real machines. The Apple app's Game Center path and Apple<->Godot cross-play have not been
+played on real devices. Known gaps are listed at the bottom.
 
 ## What multiplayer is
 
@@ -421,10 +422,12 @@ one copy on a second Mac or iPad on the same Wi-Fi — same flow, no env var.
 
 ## What isn't done
 
-- **No real-hardware runtime verification.** Nothing here has been played on two
-  machines or over a real Game Center match. The sync logic is proven headlessly and
-  the app wiring compiles, but the first live session will surface things tests can't.
-  This is the biggest outstanding item.
+- **No real-hardware runtime verification on the Apple side.** The Godot frontend's
+  multiplayer (LAN browser, direct IP, public server browser, DTLS, trade) has been played
+  across two real machines (2026-10-14, beta.2). The Apple app has not been played over a
+  real Game Center match, and no Apple<->Godot session has been played. The sync logic is
+  proven headlessly and the app wiring compiles, but the first live Apple session will
+  surface things tests can't. This is the biggest outstanding item for Apple and cross-play.
 - **`carryEncounter` is declared but never read.** It's a field on `SessionRules` with
   a doc comment and a value in both presets, and nothing in the engine, app, or tests
   ever consults it. It also has no toggle in `HostSetupView`, so a host can't set it
@@ -773,8 +776,8 @@ Hostnames are resolved once and remembered, and at most 60 entries are queried p
 
 ### Cross-play with the Apple app
 
-**Status (2026-10-13).** Apple devices (iPhone, iPad, Mac; Apple TV can join) and Godot players (Linux, Windows,
-Steam Deck, dedicated servers) can now play together over ENet, in both directions.
+**Status (2026-10-14).** The code that lets Apple devices (iPhone, iPad, Mac; Apple TV can join) and Godot players (Linux, Windows,
+Steam Deck, dedicated servers) play together over ENet, in both directions, exists and passes loopback tests. Apple<->Godot play has not yet happened on real devices.
 
 What exists:
 

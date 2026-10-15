@@ -44,11 +44,27 @@ public struct InputFrame: Codable, Equatable, Sendable {
     public var tick: UInt32
     public var seq: UInt32
     public var intent: NetIntent
+    /// The sender's own predicted transform. Turn input is relative, so an authority that only replays inputs keeps
+    /// whatever heading error it started with forever; the pose lets it hold the client's ship where the client
+    /// actually is. Optional so frames from older builds (no pose) still decode.
+    public var pose: ShipPose?
 
-    public init(tick: UInt32, seq: UInt32, intent: NetIntent) {
+    public init(tick: UInt32, seq: UInt32, intent: NetIntent, pose: ShipPose? = nil) {
         self.tick = tick
         self.seq = seq
         self.intent = intent
+        self.pose = pose
+    }
+}
+
+/// A ship's position, velocity and heading (engine convention: radians, 0 = +y, clockwise).
+public struct ShipPose: Codable, Equatable, Sendable {
+    public var x: Double, y: Double
+    public var vx: Double, vy: Double
+    public var angle: Double
+
+    public init(x: Double, y: Double, vx: Double, vy: Double, angle: Double) {
+        self.x = x; self.y = y; self.vx = vx; self.vy = vy; self.angle = angle
     }
 }
 
@@ -204,16 +220,21 @@ public struct WorldSnapshot: Codable, Equatable, Sendable {
     public var beams: [BeamNetState]
     /// One-shot effects (explosions) that fired this frame, replayed once. Defaulted.
     public var effects: [EffectNetState]
+    /// True when the authority holds each client's ship at the pose that client sends in its `InputFrame`. A client
+    /// then stops pulling its own ship toward the echoed state (that echo is a round trip old). Nil from older builds,
+    /// which simulate clients from inputs only, so the client keeps converging toward them.
+    public var clientPosesAuthoritative: Bool?
 
     public init(tick: UInt32, ackInputSeq: UInt32, ships: [ShipNetState],
                 shots: [ProjectileNetState] = [], beams: [BeamNetState] = [],
-                effects: [EffectNetState] = []) {
+                effects: [EffectNetState] = [], clientPosesAuthoritative: Bool? = nil) {
         self.tick = tick
         self.ackInputSeq = ackInputSeq
         self.ships = ships
         self.shots = shots
         self.beams = beams
         self.effects = effects
+        self.clientPosesAuthoritative = clientPosesAuthoritative
     }
 }
 

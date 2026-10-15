@@ -70,7 +70,33 @@
     },
     {
      "name": "Testing on more real devices",
-     "status": "planned"
+     "status": "partial",
+     "where": "Godot builds played across two real machines (2026-10-14); Game Center and Apple-to-desktop sessions not yet played on real devices"
+    },
+    {
+     "name": "LAN browser, direct IP and Quick Connect (desktop)",
+     "status": "done",
+     "where": "godot/net/LanDiscovery.gd, NetTransport.gd, godot/screens/multiplayer/"
+    },
+    {
+     "name": "Public server directory and browser",
+     "status": "done",
+     "where": "godot/net/ServerDirectory.gd; servers.json in SirStig/NovaSwift-Plugins"
+    },
+    {
+     "name": "Optional encryption (DTLS, pinned server keys)",
+     "status": "done",
+     "where": "godot/net/NetCrypto.gd; desktop only, the Apple ENet build has no DTLS"
+    },
+    {
+     "name": "Standalone dedicated server with web admin panel",
+     "status": "done",
+     "where": "Sources/NovaSwiftServer, Sources/NovaSwiftServerCore; released as server-v0.1.0 (Linux, macOS; Windows untested)"
+    },
+    {
+     "name": "Apple to desktop cross-play",
+     "status": "partial",
+     "where": "Sources/NovaSwiftENet, app/NovaSwift/Multiplayer/CrossPlayModel.swift, MultiplayerBrowseViews.swift; loopback-tested, not yet in a TestFlight build or played across devices"
     }
    ]
   },
@@ -745,17 +771,17 @@
     {
      "name": "macOS package (arm64, ad-hoc signed)",
      "status": "done",
-     "where": "scripts/package-macos.sh; built and headless-verified"
+     "where": "scripts/package-macos.sh; released in v0.7.0-beta.2 (not notarised)"
     },
     {
      "name": "Linux x86_64 and Steam Deck package",
-     "status": "partial",
-     "where": "scripts/package-linux-docker.sh; built and headless-verified in containers, not yet run on a real Steam Deck or GPU"
+     "status": "done",
+     "where": "scripts/package-linux.sh; released in v0.7.0-beta.2, played on real Linux hardware and Steam Deck"
     },
     {
      "name": "Windows package",
-     "status": "partial",
-     "where": "scripts/package-windows.ps1 is written; never run, needs a Windows PC with Swift"
+     "status": "done",
+     "where": "scripts/package-windows.ps1; released in v0.7.0-beta.2, played on a real Windows PC (not code-signed)"
     },
     {
      "name": "Release signing tooling",
@@ -765,17 +791,17 @@
     {
      "name": "Auto-updater (signed releases, Skip / Later / Update Now, rollback)",
      "status": "partial",
-     "where": "godot/updater/, docs/UPDATER.md; built, not tested end to end"
+     "where": "godot/updater/, docs/UPDATER.md; signed manifests ship with releases, an installed build updating itself not yet verified end to end"
     },
     {
      "name": "Experimental update channel and return to stable",
      "status": "partial",
-     "where": "godot/updater/UpdateChecker.gd, Settings > Support > Updates; built, not tested end to end"
+     "where": "godot/updater/UpdateChecker.gd, Settings > Support > Updates; not yet verified end to end"
     },
     {
      "name": "Quick hyperjump enhancement in the Godot port",
-     "status": "partial",
-     "where": "Sources/NovaSwiftEngine/QuickHyperjump.swift, godot/screens/HyperjumpFx.gd; written, awaiting build/test"
+     "status": "done",
+     "where": "Sources/NovaSwiftEngine/QuickHyperjump.swift, godot/screens/HyperjumpFx.gd"
     },
     {
      "name": "Performance: release bridge, sprite cache with prewarm, disk cache",
@@ -799,8 +825,8 @@
     },
     {
      "name": "Title music from a .mov file",
-     "status": "partial",
-     "where": "Movies.transcode_audio, godot/audio/TitleMusic.gd; written 2026-10-13, awaiting build/test (needs ffmpeg)"
+     "status": "done",
+     "where": "Movies.transcode_audio, godot/audio/TitleMusic.gd (needs ffmpeg)"
     },
     {
      "name": "About dialog picture",
@@ -834,23 +860,23 @@
     },
     {
      "name": "Key Settings dialog (original DITL 4002)",
-     "status": "partial",
-     "where": "godot/screens/ClassicKeySettings.gd; written 2026-10-13, awaiting build/test"
+     "status": "done",
+     "where": "godot/screens/ClassicKeySettings.gd"
     },
     {
      "name": "Murk fog (per-sprite fade to the system murk colour)",
-     "status": "partial",
-     "where": "bridge projectile_fog, FlightRenderer.fog_shots; written 2026-10-13, awaiting build/test (stars, stellars and hulls were already fogged)"
+     "status": "done",
+     "where": "bridge projectile_fog, FlightRenderer.fog_shots"
     },
     {
-     "name": "LAN and IP:port multiplayer",
-     "status": "planned",
-     "where": "docs/MULTIPLAYER.md"
+     "name": "LAN, direct IP and public-server multiplayer",
+     "status": "done",
+     "where": "godot/net/, godot/screens/multiplayer/; released in v0.7.0-beta.2, played across two machines"
     },
     {
      "name": "Plug-in editor on Linux and Windows",
-     "status": "planned",
-     "where": "macOS only today"
+     "status": "partial",
+     "where": "godot/editor/; in v0.7.0-beta.2, early (undo does not clear the unsaved mark)"
     },
     {
      "name": "HD graphics packs",
@@ -859,8 +885,18 @@
     },
     {
      "name": "Steam Deck build and flight visuals on a real GPU",
-     "status": "planned",
-     "where": "nothing has been run on a Deck or checked on a real GPU"
+     "status": "done",
+     "where": "played on real GPUs on Windows, Linux and Steam Deck (2026-10-14)"
+    },
+    {
+     "name": "Data Setup wizard (import your EV Nova data)",
+     "status": "done",
+     "where": "godot/screens/DataSetup.gd, DataImporter.gd, DataScanner.gd"
+    },
+    {
+     "name": "Controller action wheels",
+     "status": "done",
+     "where": "godot/ActionWheels.gd"
     }
    ]
   },

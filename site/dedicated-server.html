@@ -99,33 +99,33 @@
         <div class="cards" style="margin:var(--s3) 0">
           <div class="platform">
             <header><div><h3>Linux</h3><div class="sub">x86_64 · PCs and VPSes</div></div></header>
-            <div class="actions"><a class="btn btn-ghost" data-asset="server-linux-x64" data-ready="Download" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Not released yet</span></a></div>
+            <div class="actions"><a class="btn btn-ghost" data-asset="server-linux-x64" data-ready="Download" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Open Releases</span></a></div>
             <p class="meta" data-asset-meta="server-linux-x64">NovaSwiftServer-linux-x86_64.tar.gz</p>
           </div>
           <div class="platform">
             <header><div><h3>Linux ARM</h3><div class="sub">arm64 · Raspberry Pi 4/5, Oracle Ampere</div></div></header>
-            <div class="actions"><a class="btn btn-ghost" data-asset="server-linux-arm64" data-ready="Download" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Not released yet</span></a></div>
+            <div class="actions"><a class="btn btn-ghost" data-asset="server-linux-arm64" data-ready="Download" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Open Releases</span></a></div>
             <p class="meta" data-asset-meta="server-linux-arm64">NovaSwiftServer-linux-arm64.tar.gz</p>
           </div>
           <div class="platform">
             <header><div><h3>Windows</h3><div class="sub">x86_64 · double-click to start</div></div></header>
-            <div class="actions"><a class="btn btn-ghost" data-asset="server-windows" data-ready="Download" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Not released yet</span></a></div>
+            <div class="actions"><a class="btn btn-ghost" data-asset="server-windows" data-ready="Download" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Open Releases</span></a></div>
             <p class="meta" data-asset-meta="server-windows">NovaSwiftServer-windows-x86_64.zip</p>
           </div>
           <div class="platform">
             <header><div><h3>macOS</h3><div class="sub">Apple Silicon</div></div></header>
-            <div class="actions"><a class="btn btn-ghost" data-asset="server-macos" data-ready="Download" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Not released yet</span></a></div>
+            <div class="actions"><a class="btn btn-ghost" data-asset="server-macos" data-ready="Download" aria-disabled="true" href="https://github.com/SirStig/NovaSwift/releases" target="_blank" rel="noopener"><span data-label>Open Releases</span></a></div>
             <p class="meta" data-asset-meta="server-macos">NovaSwiftServer-macos-arm64.zip</p>
           </div>
         </div>
-        <div class="callout warn"><p><b>Beta.</b> The server is new: the Linux and macOS builds are tested, the Windows build is untested (it may not run yet), and the buttons above light up when the first <code>server-v…</code> release is published. Docker and the Linux installer also come from that release.</p></div>
+        <div class="callout warn"><p><b>Beta.</b> The server is new (server-v0.1.0): the Linux and macOS builds are tested, the Windows build is untested (it may not run yet). The Linux installer and the Docker files live in the repository under <code>packaging/server/</code>; they have not yet been tried on a fresh VPS, so please report anything that goes wrong.</p></div>
 
         <ul>
           <li><b>No game data.</b> Nothing copyrighted to copy onto a VPS.</li>
           <li><b>Zero setup.</b> It starts with sensible defaults, makes <code>server.cfg</code> next to itself and prints the admin address and a one-time password.</li>
           <li><b>Web admin panel</b> on port <code>53737</code> with a four-step setup wizard, players (kick, ban, message), live settings, plug-ins from the catalog, the public listing helper, a network check and live logs.</li>
           <li><b>Plain-language errors</b>, for example "Port 53735 is already in use. Is another server running?".</li>
-          <li><b>Cross-play.</b> Apple, Linux, Steam Deck and Windows players share the same server.</li>
+          <li><b>Desktop players today.</b> Linux, Steam Deck and Windows players share the same server. Apple joining is written and coming in a future TestFlight build.</li>
         </ul>
 
         <h2 id="where">Where to run it</h2>

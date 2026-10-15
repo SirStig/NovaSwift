@@ -99,7 +99,7 @@ amber ("differs, fix in progress") when it is cited by at least one item above a
 **Checked against the code (2026-10-13), both frontends.** Real gaps, all deferred slices of
 items that are otherwise done, not new items. **Update, later the same day:** the closing-pass sections at the end of this file
 implemented the status lines, the hint chain, Player Info Tab cycling, folding hulls, the targeting details and the `përs`
-quote gates. They are written, not yet built or tested. The list below is the state before that pass:
+quote gates. They were built and tested by the maintainer on 2026-10-14 (beta.2). The list below is the state before that pass:
 
 - About 20 invented status-line sentences that the original never prints in these
   situations (contraband, plunder "Took N credits", siphoned fuel, transferred rounds,
@@ -126,7 +126,7 @@ turning hostile after an assistance request (0x0047e470); `OnShipDone` text supp
 the mission is aborted (0x00443c60); the carrier escort's weapon-1 range (Q1); the order of an
 escort's `chär` Initial Record; a stale `<DL>` slot date after a timed mission; carrier-jump
 recovery beyond Q-OS-04; whether a tractor refusal prints STR# 2002 #36 (0x0044eed5); the
-`përs` HailQuote gates above. Q-OS-04 stays open. **Update 2026-10-13:** the eight decompile questions are answered in the closing pass (six closed with no gap; two real gaps fixed, written, not built: `OnShipDone` auto-abort effects and stale `<DL>` slot dates), and Q-OS-04 is settled there.
+`përs` HailQuote gates above. Q-OS-04 stays open. **Update 2026-10-13:** the eight decompile questions are answered in the closing pass (six closed with no gap; two real gaps fixed, built and tested 2026-10-14: `OnShipDone` auto-abort effects and stale `<DL>` slot dates), and Q-OS-04 is settled there.
 
 ---
 
@@ -1165,8 +1165,8 @@ models, so later batches can rely on them.
   mis-splits; read the parent and fragments together).
 - **Test.** Jumping with a hyperdrive-less escort shows one of STR# 2002 #160–163.
 
-#### OS-06 · Hypergate and wormhole transit — **DONE** (implemented 2026-10-13, awaiting build/test)
-- **Status 2026-10-13.** Implemented in `Sources/NovaSwiftKit/NovaModels.swift` (`NovaGame.wormholeExit`, `SpobRes.hyperLinkSlots`, replaces `wormholeExitCandidates`), `app/NovaSwift/Game/GameContainerView.swift` (`beginWormholeTransport`) and `godot/bridge/Sources/NovaSwiftGodot/NovaWorld.swift`; tests `SpaceObjectGateTests`; awaiting build/test. Stock wormhole HyperLink use is still unmeasured; `isAvailable` (byte +0x44) defaults to true.
+#### OS-06 · Hypergate and wormhole transit — **DONE** (implemented 2026-10-13, built and tested 2026-10-14)
+- **Status 2026-10-13.** Implemented in `Sources/NovaSwiftKit/NovaModels.swift` (`NovaGame.wormholeExit`, `SpobRes.hyperLinkSlots`, replaces `wormholeExitCandidates`), `app/NovaSwift/Game/GameContainerView.swift` (`beginWormholeTransport`) and `godot/bridge/Sources/NovaSwiftGodot/NovaWorld.swift`; tests `SpaceObjectGateTests`; built and tested 2026-10-14. Stock wormhole HyperLink use is still unmeasured; `isAvailable` (byte +0x44) defaults to true.
 - **Still open (wormhole exit draw).** `NovaGame.wormholeExitCandidates` and
   `beginWormholeTransport` (the Apple container and the Godot `NovaWorld` path) do not match
   `Stellar_EnterWormhole` 0x00456ca0. Hypergate arrival routing and the zero-day cost still match.
@@ -2262,8 +2262,8 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Test.** Medical at a Low world with rep < 0 costs trunc(750/1.1) = 681; at a dominated High
   world it costs 1125.
 
-#### EC-04 · Landing access — **DONE** (implemented 2026-10-13, awaiting build/test)
-- **Status 2026-10-13.** Implemented in `Sources/NovaSwiftStory/LandedServices.swift` (`landingClearance` now serves gates, no uninhabited shortcut for gates; `SpobRes.playerMayUseGate` removed), `Sources/NovaSwiftStory/RankPrivilege.swift`, `app/NovaSwift/Game/GameContainerView.swift` + `GameScene.swift`, and the Godot `NovaWorld.swift` Land path; tests `ClosingPassGatesRanksTests`, Godot `fidelity_selfcheck.gd`; awaiting build/test.
+#### EC-04 · Landing access — **DONE** (implemented 2026-10-13, built and tested 2026-10-14)
+- **Status 2026-10-13.** Implemented in `Sources/NovaSwiftStory/LandedServices.swift` (`landingClearance` now serves gates, no uninhabited shortcut for gates; `SpobRes.playerMayUseGate` removed), `Sources/NovaSwiftStory/RankPrivilege.swift`, `app/NovaSwift/Game/GameContainerView.swift` + `GameScene.swift`, and the Godot `NovaWorld.swift` Land path; tests `ClosingPassGatesRanksTests`, Godot `fidelity_selfcheck.gd`; built and tested 2026-10-14.
 - **Still open (gates and wormholes).** The planet ladder in `LandedServices.landingClearance`
   largely matches. `SpobRes.playerMayUseGate` does not, and every wormhole returns true immediately.
   `Stellar_HandleStellarEntryAndExit` 0x00457580 runs the same first-press ladder before both
@@ -2289,8 +2289,8 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Test.** A hypergate with MinStatus 32767 refuses unless a waiver in the ladder applies.
   A wormhole with the same MinStatus uses that ladder. Government below 128 does not open a restricted gate by itself.
 
-#### EC-05 · Landing fee gate — **DONE** (implemented 2026-10-13, awaiting build/test)
-- **Status 2026-10-13.** Implemented in `LandedServices.chargeGateFee` (fee taken at entry even when the hypergate then does nothing, balance clamped at 0) wired from both apps' `handleGateLanding`; the refusal reuses `cannotPayFee`; tests `ClosingPassGatesRanksTests`; awaiting build/test.
+#### EC-05 · Landing fee gate — **DONE** (implemented 2026-10-13, built and tested 2026-10-14)
+- **Status 2026-10-13.** Implemented in `LandedServices.chargeGateFee` (fee taken at entry even when the hypergate then does nothing, balance clamped at 0) wired from both apps' `handleGateLanding`; the refusal reuses `cannotPayFee`; tests `ClosingPassGatesRanksTests`; built and tested 2026-10-14.
 - **Still open (gates).** The planet fee matches. The same block in 0x00457580 runs before the
   hypergate and wormhole calls. A positive fee, a body that is not dominated, and credits below
   the fee refuse entry and clear the selection. Flags2 0x1000 only changes the message to #0x3e.
@@ -2312,8 +2312,8 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Class.** FIX. **Impact** medium-high. **Confidence** high.
 - **Test.** Launch with 10 % armor → 100 %, credits unchanged.
 
-#### EC-07 · Outfit resale at half price — **DONE** (implemented 2026-10-13, awaiting build/test)
-- **Status 2026-10-13.** Implemented in Sources/NovaSwiftStory/PilotEconomy.swift (`sellRefused`), Tests/NovaSwiftStoryTests/ShopVisitFidelityTests.swift; awaiting build/test.
+#### EC-07 · Outfit resale at half price — **DONE** (implemented 2026-10-13, built and tested 2026-10-14)
+- **Status 2026-10-13.** Implemented in Sources/NovaSwiftStory/PilotEconomy.swift (`sellRefused`), Tests/NovaSwiftStoryTests/ShopVisitFidelityTests.swift; built and tested 2026-10-14.
 - **Still open (sell refusals beyond the free-mass sign change).** Half price for units owned
   when the outfitter opened, and a full refund for units bought in the same visit, match.
   `sellOutfitUnit` still completes three sales that 0x0048ea70 refuses outright: a ModType 27
@@ -2342,8 +2342,8 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
   **Impact** high. **Confidence** medium-high (the loader port is tagged 68 %).
 - **Test.** A new Shuttle shows free mass equal to shïp FreeMass.
 
-#### EC-09 · Ship price, trade-in and hire price — **DONE** (implemented 2026-10-13, awaiting build/test)
-- **Status 2026-10-13.** Implemented in Sources/NovaSwiftStory/PlayerState.swift (`stockBank`, `ownedOutfits`), PilotEconomy.swift (`grantHullFittings`, `openOutfitter`), LandedServices.swift, ItemLocking.swift, StoryEngine.swift, app/NovaSwift/Spaceport/SpaceportScreens.swift, godot/bridge NovaWorld.swift (`outfitterOpen`), ShopVisitFidelityTests.swift; old saves have no bank so everything stays owned; awaiting build/test.
+#### EC-09 · Ship price, trade-in and hire price — **DONE** (implemented 2026-10-13, built and tested 2026-10-14)
+- **Status 2026-10-13.** Implemented in Sources/NovaSwiftStory/PlayerState.swift (`stockBank`, `ownedOutfits`), PilotEconomy.swift (`grantHullFittings`, `openOutfitter`), LandedServices.swift, ItemLocking.swift, StoryEngine.swift, app/NovaSwift/Spaceport/SpaceportScreens.swift, godot/bridge NovaWorld.swift (`outfitterOpen`), ShopVisitFidelityTests.swift; old saves have no bank so everything stays owned; built and tested 2026-10-14.
 - **Still open (stock fittings are owned outfits).** Price scaling, the double-scaled trade-in
   and the 10 % hire price match. `PilotEconomy.grantHullFittings` adds the class WeapType and
   AmmoLoad to owned counts immediately, so they enter the 50 % trade-in and Contribute before
@@ -2362,8 +2362,8 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Test.** A new hull's stock weapon is in the bank and absent from owned outfits until the outfitter promotes a leftover.
 - **Functions.** `Outfit_ComputeScaledPurchasePrice` 0x0049d640, `Ship_ComputeTradeInValue` 0x00469100.
 
-#### EC-10 · Rank effects: scope, stacking, revocation — **DONE** (implemented 2026-10-13, awaiting build/test)
-- **Status 2026-10-13.** Implemented in `Sources/NovaSwiftStory/RankPrivilege.swift` (Flags 0x0100/0x0200 spread over `GovtRelations.allied`, derelicts excluded), `WorldPilotLink.seedDiplomacy`, `RadarIFF`, `OriginalMapMarker`, `StellarComm`, `LandedServices.landingClearance` and `app/NovaSwift/Game/GalaxyMapView.swift`; tests `ClosingPassGatesRanksTests`; awaiting build/test.
+#### EC-10 · Rank effects: scope, stacking, revocation — **DONE** (implemented 2026-10-13, built and tested 2026-10-14)
+- **Status 2026-10-13.** Implemented in `Sources/NovaSwiftStory/RankPrivilege.swift` (Flags 0x0100/0x0200 spread over `GovtRelations.allied`, derelicts excluded), `WorldPilotLink.seedDiplomacy`, `RadarIFF`, `OriginalMapMarker`, `StellarComm`, `LandedServices.landingClearance` and `app/NovaSwift/Game/GalaxyMapView.swift`; tests `ClosingPassGatesRanksTests`; built and tested 2026-10-14.
 - **Still open (who the two privilege bits cover).** PriceMod as a product over allied ranks,
   applied to ships, trade-ins and hire and not to commodities or outfits, matches. Crime
   revocation matches. Flags 0x0100 and the consumers of Flags 0x0200 do not.
@@ -2388,8 +2388,8 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Test.** A rank with Flags 0x0100 on government A stops government B when A and B share a class
   slot, and does not stop a derelict government. The same rank's Flags 0x0200 colours B's planets on the map and the radar.
 
-#### EC-11 · Daily stock rolls for outfits and ships — **DONE** (implemented 2026-10-13, awaiting build/test)
-- **Status 2026-10-13.** Implemented in PilotEconomy.swift (`beginShipPurchase`, `buyShip(rolled:)`), SpaceportShops.swift, app/NovaSwift/Game/PilotStore.swift, godot/bridge NovaWorld.swift (`shipyardBuy`), ShopVisitFidelityTests.swift; awaiting build/test.
+#### EC-11 · Daily stock rolls for outfits and ships — **DONE** (implemented 2026-10-13, built and tested 2026-10-14)
+- **Status 2026-10-13.** Implemented in PilotEconomy.swift (`beginShipPurchase`, `buyShip(rolled:)`), SpaceportShops.swift, app/NovaSwift/Game/PilotStore.swift, godot/bridge NovaWorld.swift (`shipyardBuy`), ShopVisitFidelityTests.swift; built and tested 2026-10-14.
 - **Still open (a cancelled ship purchase still redraws BuyRandom).** One roll per item per day,
   shared by every port, and owning a visible outfit zeroing its roll, match. `PilotEconomy.buyShip`
   calls `state.rerollStock` only after a successful buy. 0x00492f30 writes
@@ -2404,8 +2404,8 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Class.** FIX. **Impact** medium. **Confidence** high on the cancel write.
 - **Test.** Open the shipyard and cancel the confirm. That class's BuyRandom has still changed.
 
-#### EC-12 · RequireGovt band — **DONE** (implemented 2026-10-13, awaiting build/test)
-- **Status 2026-10-13.** Implemented in `Sources/NovaSwiftStory/ItemLocking.swift` (`requireBitsEnforced`: a waived scope skips the bit test and allows the buy, alliance via `GovtRelations.allied`; owning one no longer short-circuits `lockState`); shared by both apps; tests `ClosingPassGatesRanksTests`; awaiting build/test.
+#### EC-12 · RequireGovt band — **DONE** (implemented 2026-10-13, built and tested 2026-10-14)
+- **Status 2026-10-13.** Implemented in `Sources/NovaSwiftStory/ItemLocking.swift` (`requireBitsEnforced`: a waived scope skips the bit test and allows the buy, alliance via `GovtRelations.allied`; owning one no longer short-circuits `lockState`); shared by both apps; tests `ClosingPassGatesRanksTests`; built and tested 2026-10-14.
 - **Still open.** The Batch 4 Original paragraph is the inversion of 0x00491950. A skipped mask
   is a failed require in NovaSwift, and already owning one skips the test entirely.
 - **Original.** `NovaLanded_CanBuyOutfit` 0x00491950, while docked and the stellar is not −1.
@@ -2658,8 +2658,8 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Class.** FIX. **Impact** medium (flavour). **Confidence** high.
 - **Test.** A düde with only 0x1000 always gives a trade tip.
 
-#### AI-44 · Hail eligibility — **DONE** (implemented 2026-10-13, awaiting build/test)
-- **Status 2026-10-13.** Implemented in `Sources/NovaSwiftEngine/OriginalAI/OriginalAIComms.swift` (`hailCheck` beeps on `Ship.isCloaked`, the 24/8/16 threshold); tests `OriginalAITests.testHailBeepFollowsTheCloakVisibilityThreshold`; awaiting build/test.
+#### AI-44 · Hail eligibility — **DONE** (implemented 2026-10-13, built and tested 2026-10-14)
+- **Status 2026-10-13.** Implemented in `Sources/NovaSwiftEngine/OriginalAI/OriginalAIComms.swift` (`hailCheck` beeps on `Ship.isCloaked`, the 24/8/16 threshold); tests `OriginalAITests.testHailBeepFollowsTheCloakVisibilityThreshold`; built and tested 2026-10-14.
 - **Still open (cloak threshold).** `OriginalAIComms.hailCheck` beeps when `player.cloakLevel > 0`,
   when the player is dead, or when `playerJump != nil`. 0x00454910 beeps when
   `Ship_IsShipCloakVisibilityThresholdActive` 0x0046c7a0 is set, or the player is destroyed, or
@@ -2714,8 +2714,8 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Test.** One tribble type with 10 t free grows 5 t per 1025 raw frames; a full hold stops
   perishable decay.
 
-#### EC-25 · Planetary bribe — settles Q-EC-06 — **DONE** (implemented 2026-10-13, awaiting build/test)
-- **Status 2026-10-13.** Implemented in `Sources/NovaSwiftStory/FlightComm.swift` (`bribeWaiverStellar` replaces `bribedStellars`), `app/NovaSwift/Game/GameContainerView.swift` + `GameScene.swift` (`bribeWaiverStellar`, `ladderPassedStellar`, the 250 px rewrite in `updateLanding`) and Godot `NovaWorld.swift`/`Flight.swift`; tests `ClosingPassGatesRanksTests`, Godot `fidelity_selfcheck.gd`; awaiting build/test. The +0x4c ship field is not modelled; a hypergate does NOT ignore the payment (the shared ladder waives MinStatus for whichever body is selected, per the Original paragraph).
+#### EC-25 · Planetary bribe — settles Q-EC-06 — **DONE** (implemented 2026-10-13, built and tested 2026-10-14)
+- **Status 2026-10-13.** Implemented in `Sources/NovaSwiftStory/FlightComm.swift` (`bribeWaiverStellar` replaces `bribedStellars`), `app/NovaSwift/Game/GameContainerView.swift` + `GameScene.swift` (`bribeWaiverStellar`, `ladderPassedStellar`, the 250 px rewrite in `updateLanding`) and Godot `NovaWorld.swift`/`Flight.swift`; tests `ClosingPassGatesRanksTests`, Godot `fidelity_selfcheck.gd`; built and tested 2026-10-14. The +0x4c ship field is not modelled; a hypergate does NOT ignore the payment (the shared ladder waives MinStatus for whichever body is selected, per the Original paragraph).
 - **Still open (one approach, not a permit).** The price formula matches. A paid bribe does not
   last until the next system.
 - **Original.** A successful confirm in 0x00480030 sets `DAT_00597a0e` to 0x2ef, `DAT_00597a10`
@@ -2734,8 +2734,8 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Test.** After paying, the next Land press waives MinStatus and, while still on that stellar
   and nearly stopped, docks without the ±250 arm. Entering 250 px, or pressing Land on another body, ends the waiver. A hypergate ignores the payment.
 
-#### EC-26 · Bar gambling — from the coverage map — **DONE** (implemented 2026-10-13, awaiting build/test)
-- **Status 2026-10-13.** Implemented in app/NovaSwift/Story/GamblingView.swift and Spaceport/SpaceportScreens.swift (`BarView` owns the `RaceBet`), godot/bridge NovaWorld.swift (`barOpened`), godot/screens/Spaceport.gd, godot/tests/gameplay_gaps_selfcheck.gd, ShopVisitFidelityTests.swift; awaiting build/test.
+#### EC-26 · Bar gambling — from the coverage map — **DONE** (implemented 2026-10-13, built and tested 2026-10-14)
+- **Status 2026-10-13.** Implemented in app/NovaSwift/Story/GamblingView.swift and Spaceport/SpaceportScreens.swift (`BarView` owns the `RaceBet`), godot/bridge NovaWorld.swift (`barOpened`), godot/screens/Spaceport.gd, godot/tests/gameplay_gaps_selfcheck.gd, ShopVisitFidelityTests.swift; built and tested 2026-10-14.
 - **Still open (the previous winner resets when the bar opens).** The in-visit math matches.
   Q-EC-14 is settled: the modifier cap is `min(credits, 10000)`. STR# 150's "Bet 5000" is a label.
 - **Original.** 0x0047c8e0 sets `DAT_007d17a8` to 0xffff every time the services window opens, so
@@ -2749,8 +2749,8 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Test.** Win on a colour, leave the bar, and re-enter: that colour is not excluded. Stay in the bar and it is.
 - **Functions.** `NovaUi_RunBarGamblingWindow` 0x0047dc50, draw 0x0047e1e0, buttons 0x004a2c30 / 0x004a2de0.
 
-#### EC-27 · Commodity overflow shrinks the six ordinary bins — **DONE** (implemented 2026-10-13, awaiting build/test)
-- **Status 2026-10-13.** Implemented in PilotEconomy.swift (`shrinkCargoToCapacity`, called from `buyShip`, captured-hull swap and outfit sale), ShopVisitFidelityTests.swift; awaiting build/test.
+#### EC-27 · Commodity overflow shrinks the six ordinary bins — **DONE** (implemented 2026-10-13, built and tested 2026-10-14)
+- **Status 2026-10-13.** Implemented in PilotEconomy.swift (`shrinkCargoToCapacity`, called from `buyShip`, captured-hull swap and outfit sale), ShopVisitFidelityTests.swift; built and tested 2026-10-14.
 - **Original.** `Outfit_RecomputeOutfitDerivedState` 0x0046d4b0. When fleet cargo capacity is
   below the cargo-plus-junk total, the six ordinary commodity bins at player +0x7a are scaled by
   capacity/total, using the executable's x87 round-and-correct idiom. Mission cargo and junk are
@@ -2760,8 +2760,8 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Class.** FIX. **Impact** medium. **Confidence** high.
 - **Test.** Capacity 10 against 20 tons of one commodity and 10 tons of junk leaves about 5 tons of that commodity and all 10 tons of junk.
 
-#### EC-28 · Chart, paint, amnesty and Flags 0x0010 last for the visit — **DONE** (implemented 2026-10-13, awaiting build/test)
-- **Status 2026-10-13.** Implemented in PlayerState.swift (visit latches), PilotEconomy.swift (`closeOutfitter`, `beginVisit`, `canBuyOutfit`, `buyShip` paint), MissionLifecycle.swift (`playerLanded`), SpaceportScreens.swift, NovaWorld.swift (`outfitterClose`), godot/screens/Spaceport.gd, OutfitAcquisitionTests.swift, ShopVisitFidelityTests.swift; awaiting build/test.
+#### EC-28 · Chart, paint, amnesty and Flags 0x0010 last for the visit — **DONE** (implemented 2026-10-13, built and tested 2026-10-14)
+- **Status 2026-10-13.** Implemented in PlayerState.swift (visit latches), PilotEconomy.swift (`closeOutfitter`, `beginVisit`, `canBuyOutfit`, `buyShip` paint), MissionLifecycle.swift (`playerLanded`), SpaceportScreens.swift, NovaWorld.swift (`outfitterClose`), godot/screens/Spaceport.gd, OutfitAcquisitionTests.swift, ShopVisitFidelityTests.swift; built and tested 2026-10-14.
 - **Original.** In 0x00491950 a ModType 0x10 chart is refused for the rest of the visit once
   `DAT_007d4c08` is set. ModType 0x15 (clean record) uses `DAT_007d4c09` the same way. During the
   visit the chart is real inventory. The outfitter loop 0x0048ea70 zeroes Flags 0x0010 counts on
@@ -2774,8 +2774,8 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Test.** Buy a chart: it occupies a slot until the outfitter closes, and a second chart is
   refused. Leave and it is gone. Buy a ship and the paint colour clears. A clean-record outfit fires once per visit.
 
-#### OS-08 · Bombs (ModType 47 lethal, 50 nonlethal) — **DONE** (implemented 2026-10-13, awaiting build/test)
-- **Status 2026-10-13.** Implemented in `Sources/NovaSwiftStory/WorldPilotLink.swift` (`HazardOutfits.recompute`, lethal bomb outranks nonlethal), called at purchase/launch/arrival in `GameContainerView` and from `resetFrameState` in Godot `NovaWorld.swift`; tests `ClosingPassGatesRanksTests`; awaiting build/test.
+#### OS-08 · Bombs (ModType 47 lethal, 50 nonlethal) — **DONE** (implemented 2026-10-13, built and tested 2026-10-14)
+- **Status 2026-10-13.** Implemented in `Sources/NovaSwiftStory/WorldPilotLink.swift` (`HazardOutfits.recompute`, lethal bomb outranks nonlethal), called at purchase/launch/arrival in `GameContainerView` and from `resetFrameState` in Godot `NovaWorld.swift`; tests `ClosingPassGatesRanksTests`; built and tested 2026-10-14.
 - **Still open (the fuse is reseeded).** The two blast classes match the shape below. The timer
   is not seeded once at acquisition, and it is not kept across a jump.
 - **Original.** ModType 0x2f (47) is class 1. ModType 0x32 (50) is class 2 only when the class is
@@ -3050,8 +3050,8 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Test.** `F123` leaves the mission listed as failed. A `Q` fired by OnShipDone in flight
   appears immediately; one fired while landed closes the bar and shows at launch.
 
-#### MS-19 · Random cargo quantity — **DONE** (implemented 2026-10-13, awaiting build/test)
-- **Status 2026-10-13.** Implemented in Sources/NovaSwiftStory/MissionOffers.swift (`specialCount`), ShopVisitFidelityTests.swift; awaiting build/test.
+#### MS-19 · Random cargo quantity — **DONE** (implemented 2026-10-13, built and tested 2026-10-14)
+- **Status 2026-10-13.** Implemented in Sources/NovaSwiftStory/MissionOffers.swift (`specialCount`), ShopVisitFidelityTests.swift; built and tested 2026-10-14.
 - **Still open.** The negative formula is `floor`, and a −10 test cannot see it.
 - **Original.** `Mission_ResolveMissionSpecialShipCount` 0x0043d4c0. Its only resolve caller is
   0x0043d240 on `DAT_0077f636`, which 0x0043bbb0 loads from mïsn +0x12 (CargoQty). The ship-count
@@ -3513,8 +3513,8 @@ resources have no effect. Every string fix below reads the resource, never a cop
 - **Test.** Clicking a system two jumps away arms nothing; Shift+clicking it after its neighbour
   builds a 2-hop route; a 32nd hop is refused.
 
-#### UI-06 · Ship and stellar selections are independent; Land uses the selection — ui_rules A3 — **DONE** (implemented 2026-10-13, awaiting build/test)
-- **Status 2026-10-13.** Implemented in `Sources/NovaSwiftEngine/PlayerLanding.swift` (`nearestTravelStellar`, 16 nav slots, gate radius 500 px: the double at 0x00575750 reads 250000.0), `GameScene.selectNearestLandableIfNoneSelected` and Godot `NovaWorld.pressLand`; tests `PlayerLandingNearestTests`; awaiting build/test.
+#### UI-06 · Ship and stellar selections are independent; Land uses the selection — ui_rules A3 — **DONE** (implemented 2026-10-13, built and tested 2026-10-14)
+- **Status 2026-10-13.** Implemented in `Sources/NovaSwiftEngine/PlayerLanding.swift` (`nearestTravelStellar`, 16 nav slots, gate radius 500 px: the double at 0x00575750 reads 250000.0), `GameScene.selectNearestLandableIfNoneSelected` and Godot `NovaWorld.pressLand`; tests `PlayerLandingNearestTests`; built and tested 2026-10-14.
 - **Still open (which body Land picks).** The two selection channels staying independent matches.
   The nearest-land search does not. `forgivingLanding` and `autoLanding` default off and are not this gap.
 - **Original.** With nothing selected, 0x00462db0 searches only the current system's 16 nav slots.
@@ -3534,7 +3534,7 @@ resources have no effect. Every string fix below reads the resource, never a cop
   the fixed radius. A selected far planet is still the one that is landed on.
 
 #### UI-07 · Target cycling and nearest-target commands — ui_rules A4 — **DONE**
-- **Status 2026-10-13: slot order and the AI-state 0x15 filter are implemented, awaiting build/test** (closing pass, section 2 of "folding hulls, targeting"; `PlayerTargetSlotTests`). The paragraphs below that call them missing are historical.
+- **Status 2026-10-13: slot order and the AI-state 0x15 filter are implemented, built and tested 2026-10-14** (closing pass, section 2 of "folding hulls, targeting"; `PlayerTargetSlotTests`). The paragraphs below that call them missing are historical.
 - **Done.** `Engine/PlayerTargeting.swift`: `cyclePlayerTarget(forward:squad:)` in `npcs` (spawn)
   order, no wrap, no range cap, squad-only with Alt+backquote (Q-UI-04); R =
   `selectNearestHostileThreat`, Alt+R = `selectNearestEngaged`. The old cycle is
@@ -3605,7 +3605,7 @@ resources have no effect. Every string fix below reads the resource, never a cop
   "Unexplored System".
 
 #### UI-11 · Status-bar lines, durations and HailQuote broadcasts — ui_rules A10, A15, C5, C7, C8 — **DONE** (hint chain deferred)
-- **Status 2026-10-13: the invented-line replacements, the STR# 2002 #22-31 travel hint chain and the përs HailQuote class gates (0x1000 / 0x2000 / 0x4000) and snd 154 are implemented, awaiting build/test** (closing pass "text, hints, Player Info, quotes, Apple fixes", sections 1, 2 and 4). Not modelled: the broadcaster's "jump state with control mode 4 or 0x0D" skip.
+- **Status 2026-10-13: the invented-line replacements, the STR# 2002 #22-31 travel hint chain and the përs HailQuote class gates (0x1000 / 0x2000 / 0x4000) and snd 154 are implemented, built and tested 2026-10-14** (closing pass "text, hints, Player Info, quotes, Apple fixes", sections 1, 2 and 4). Not modelled: the broadcaster's "jump state with control mode 4 or 0x0D" skip.
 - **Done.** `GameHUDModel.post(_:rawCalls:)` runs on sim time (frozen while paused), empty text and
   Return (`dismissMessage`) clear it, `postIfIdle`; arrival line or buoy after every in-place reload
   (`postArrivalLine`, gate/wormhole variants, #49), launch line or a staged `Q` for 0x1f4
@@ -3648,7 +3648,7 @@ resources have no effect. Every string fix below reads the resource, never a cop
   0xf0 raw calls of sim time; pausing freezes it.
 
 #### UI-13 · Player Info window — ui_rules C2, C4, C9 — **DONE** (Tab cycling, junk count words deferred)
-- **Status 2026-10-13: Tab / Shift-Tab page cycling and the original cargo prose (count words, junk) are implemented, awaiting build/test** (closing pass section 3). The Extras and Honors grouped prose (`similar_to` grouping, `PlayerInfoPages.extras` / `honors`) is in the working tree from a later edit that the closing-pass text does not cover; treat it as unbuilt too.
+- **Status 2026-10-13: Tab / Shift-Tab page cycling and the original cargo prose (count words, junk) are implemented, built and tested 2026-10-14** (closing pass section 3). The Extras and Honors grouped prose (`similar_to` grouping, `PlayerInfoPages.extras` / `honors`) is in the working tree from a later edit that the closing-pass text does not cover; it was built and tested together with the closing pass on 2026-10-14.
 - **Done.** `Story/PlayerInfoPages.swift` (stat grid, daily economy line, cargo / extras by cost with
   trade-in footer / honors by Weight, all STR#-sourced; STR# 138 ratings via
   `OriginalText.combatRating`), drawn by `PlayerInfoView` with live figures from the scene; P opens
@@ -3871,7 +3871,7 @@ Q-FL-12 (oracle: the caller's signed short makes a negative ModType 22 subtract;
 **Quirks kept on purpose.** The original executable is ground truth, including behaviour a
 reimplementation called a bug and "fixed". A `DeathDelay` of 0 or 1 does not leave an immortal
 ghost: NovaSwift uses a 1.8 s death instead, on purpose. Ships with `shän` Flags 0x0002 did not
-fold or unfold for hyperspace or landing (`HullAnim.baseSet`); that was implemented 2026-10-13 (closing pass, folding hulls; written, not built).
+fold or unfold for hyperspace or landing (`HullAnim.baseSet`); that was implemented 2026-10-13 (closing pass, folding hulls; built and tested 2026-10-14).
 Fleet ships are spawned with empty holds.
 
 ## 7. Coverage
@@ -3937,7 +3937,7 @@ default and permadeath scope (FL-03), and the hyperspace fade (FL-04).
 
 ## 2026-10-13 closing pass (folding hulls, targeting, open questions, quick hyperjump)
 
-Written, not built or run: the user builds and tests. Everything below is in shared code first
+Built and tested by the maintainer on 2026-10-14 (shipped in beta.2). Everything below is in shared code first
 (`Sources/`), then wired into the Apple scene and the Godot bridge. Tests are listed per item.
 
 ### 1. Folding hulls (`shän` Flags 0x0002, and 0x0080 "ship unfolds to fire")
@@ -4079,11 +4079,11 @@ docs pass should change them.
 
 ## 2026-10-13 closing pass (text, hints, Player Info, quotes, Apple fixes)
 
-Status key: **WRITTEN, NOT BUILT** — nothing here was compiled or run (the user builds and tests); every Swift file was
-only syntax-parsed (`swiftc -parse`) and every GDScript file parse-checked. Shared code first (`Sources/`), then both
+Status key: every item below is **DONE (built and tested 2026-10-14)**. When written (2026-10-13) the Swift files had only been
+syntax-parsed (`swiftc -parse`) and the GDScript files parse-checked; the maintainer then built and tested both frontends. Shared code first (`Sources/`), then both
 frontends. STR# numbers are 1-based, as `OriginalText.misc(n)`.
 
-### 1. UI-11 invented status lines — WRITTEN, NOT BUILT
+### 1. UI-11 invented status lines — DONE (built and tested 2026-10-14)
 
 New shared text: `Sources/NovaSwiftStory/FlightStatusText.swift` (`extension OriginalText`). Each replaced or removed line,
 with the decompiled call site:
@@ -4124,7 +4124,7 @@ New shared API: `Sources/NovaSwiftStory/FlightStatusText.swift`, `World.broadcas
 `ContrabandScan.scanLines` / `scanPlayer(…scannerLabel:)` / `PlayerScanOutcome.messages` (rewritten), `OriginalText.bombExploded`.
 Apple: `GameScene.onPlayerScanned` is now `(govt, label)`; `GameContainerView.failActiveMissions(where:)` lost its `reason`.
 
-### 2. UI-11 new-pilot travel hint chain (STR# 2002 #22–31) — WRITTEN, NOT BUILT
+### 2. UI-11 new-pilot travel hint chain (STR# 2002 #22–31) — DONE (built and tested 2026-10-14)
 
 `Sources/NovaSwiftStory/TravelHints.swift` (`TravelHintTracker`) is `DAT_007cab1c` and `PlayerTick_FlightTutorialHints`
 (the fragment at 0x00451f8f inside `Ship_HandlePlayerShipCore` 0x0044aa70). Checked once per 60 raw calls while the state is
@@ -4141,7 +4141,7 @@ arrival (0x0044f83f) and a ship reset latch it to 0x7fff. NovaSwift's own `tutor
 **New bridge methods:** `set_hint_key_names(land, map, jump)` (called from `Main.gd _sync_hint_keys`, guarded by `has_method`),
 test seams `debug_travel_hint_state/begin/latch/launch/eval`. New GDScript helper `Controls.first_key_name(action)`.
 
-### 3. UI-13 Player Info — WRITTEN, NOT BUILT
+### 3. UI-13 Player Info — DONE (built and tested 2026-10-14)
 
 Tab / Shift-Tab step General → Cargo → Extras → Honors, wrapping; Enter, Esc and the Player Info key close (dispatch callback
 0x0049a3a0 of `NovaUi_RunPlayerSpecialInteractionWindow` 0x00499c10; the window owns the keyboard, flight is paused behind it).
@@ -4153,7 +4153,7 @@ words for 1–10, digits beyond; junk uses its lower-case name), ", " between, "
 free-space footer (#364, with the ship's own share "(none free in your ship)" / "  (N tons free in your ship)" when the fleet is larger).
 Not changed: the Extras and Honors pages are still one entry per line, not the original's prose with `similar_to` grouping.
 
-### 4. përs HailQuote broadcast gates — WRITTEN, NOT BUILT
+### 4. përs HailQuote broadcast gates — DONE (built and tested 2026-10-14)
 
 `PersQuoteBroadcaster` (0x00433050 l.220–320) already modelled flags 0x0004, 0x0008, 0x0010 (forced, once), 0x0020, 0x0400, 0x0800
 (AI state 2), 0x0080 and the idle / 45 s / 1-in-140 roll. Added: the player-class gates 0x1000 / 0x2000 / 0x4000 (player hull
@@ -4163,7 +4163,7 @@ Godot tick now beeps too). The turns-hostile trigger (`Ship_SetShipHostileToPlay
 path; the ambush (`Mission_TrySpawnMissionShipAmbush` 0x00426dd0) was already in `OriginalSpawning.originalTryAmbush` with snd 154.
 Not modelled: the "ship in a jump state with control mode 4 or 0x0D" skip.
 
-### 5. Apple vs original — WRITTEN, NOT BUILT
+### 5. Apple vs original — DONE (built and tested 2026-10-14)
 
 - (a) Classic status-message rect: `MessageLogView(classicRect:)` — left + 25, right − sidebar − 50, bottom − 5, 30 px tall, 12 pt
   white, no shadow, top-aligned so the pen is at `rect.top + ascent` (`NovaHud_ShowOverlayMessage` 0x0047e2d0, draw 0x004bcd30, rect
@@ -4175,7 +4175,7 @@ Not modelled: the "ship in a jump state with control mode 4 or 0x0D" skip.
 - (d) Ambient `CustSndID` check `>= 128` (0x00491f30) in Apple `GameAudio.startAmbient`, in the Godot bridge `landed_ambient_sound`
   and in `GameAudio.gd start_ambient`. Godot's music level and loop gain already matched (b) and (c).
 
-### 6. Tests — WRITTEN, NOT RUN
+### 6. Tests — DONE (run 2026-10-14)
 
 Swift: `Tests/NovaSwiftStoryTests/FlightStatusTextTests.swift` (scan sentences, plunder, assistance, bomb, count words, the cargo
 page, the whole hint state machine incl. the launch quirk and the 60-call cadence), `Tests/NovaSwiftEngineTests/PersQuoteBroadcasterTests.swift`

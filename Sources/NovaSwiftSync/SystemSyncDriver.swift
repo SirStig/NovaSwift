@@ -206,7 +206,8 @@ public final class SystemSyncDriver {
             onAuthorityPostStep?(session, coLocatedIDs())
         } else {
             inputSeq &+= 1
-            session.sendInput(coordinator.input(from: world.intent, tick: netTick, seq: inputSeq), to: authority)
+            session.sendInput(coordinator.input(from: world.intent, tick: netTick, seq: inputSeq,
+                                                 ship: world.player), to: authority)
             coordinator.flushEffects(into: world)
         }
     }

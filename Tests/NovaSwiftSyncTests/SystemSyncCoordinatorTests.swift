@@ -419,4 +419,50 @@ final class SystemSyncCoordinatorTests: XCTestCase {
         let mirror = world.remotePlayerShips.first!
         XCTAssertEqual(world.remoteIntents[mirror.entityID]?.thrust, true)
     }
+
+    func testAuthorityAdoptsClientPoseSoHeadingCannotDesync() {
+        // The authority spawns a joiner's hull at a guessed heading; the client's sent pose must override it,
+        // otherwise relative turn input keeps that offset forever.
+        let coord = SystemSyncCoordinator(localPlayerID: "A")
+        let world = World(player: Ship(name: "A", stats: combatStats()))
+        coord.syncClients([(id: "B", name: "Bo")], into: world)
+        let pose = ShipPose(x: 120, y: -40, vx: 3, vy: 4, angle: 2.5)
+        coord.receiveInput(InputFrame(tick: 1, seq: 1, intent: NetIntent(), pose: pose), from: "B")
+        coord.applyInputs(to: world)
+        let bo = world.remotePlayerShips.first { $0.remotePlayer?.peerID == "B" }!
+        XCTAssertEqual(bo.angle, 2.5)
+        XCTAssertEqual(bo.position.x, 120); XCTAssertEqual(bo.position.y, -40)
+        XCTAssertEqual(bo.velocity.x, 3); XCTAssertEqual(bo.velocity.y, 4)
+        XCTAssertEqual(coord.snapshot(of: world, tick: 1).clientPosesAuthoritative, true)
+
+        // A non-finite pose is ignored.
+        let bad = ShipPose(x: .nan, y: 0, vx: 0, vy: 0, angle: 0)
+        coord.receiveInput(InputFrame(tick: 2, seq: 2, intent: NetIntent(), pose: bad), from: "B")
+        coord.applyInputs(to: world)
+        XCTAssertEqual(bo.angle, 2.5)
+    }
+
+    func testClientSkipsOwnShipCorrectionWhenAuthorityAdoptsPoses() {
+        // The echo of our own pose is a round trip old; pulling toward it would drag us backwards.
+        let coord = SystemSyncCoordinator(localPlayerID: "me")
+        let world = World(player: Ship(name: "Me", stats: combatStats()))
+        world.player.position = Vec2(0, 0)
+        let own = ShipNetState(id: 0, playerID: "me", shipTypeID: 128, name: "Me",
+                               x: 100, y: 0, vx: 0, vy: 0, angle: 1, shield: 10, armor: 10, control: .remote)
+        coord.apply(WorldSnapshot(tick: 1, ackInputSeq: 0, ships: [own], clientPosesAuthoritative: true),
+                    to: world, authorityPeer: "A")
+        XCTAssertEqual(world.player.position.x, 0)
+
+        // An older authority (no flag) still gets the convergence correction.
+        coord.apply(WorldSnapshot(tick: 2, ackInputSeq: 0, ships: [own]), to: world, authorityPeer: "A")
+        XCTAssertGreaterThan(world.player.position.x, 0)
+    }
+
+    func testInputFrameWithoutPoseStillDecodes() throws {
+        // Frames from builds without the pose field must still decode.
+        let json = #"{"tick":1,"seq":2,"intent":{"turnLeft":true,"turnRight":false,"thrust":false,"reverse":false,"afterburner":false,"firePrimary":false,"fireSecondary":false,"turnScale":1}}"#
+        let frame = try JSONDecoder().decode(InputFrame.self, from: Data(json.utf8))
+        XCTAssertNil(frame.pose)
+        XCTAssertTrue(frame.intent.turnLeft)
+    }
 }

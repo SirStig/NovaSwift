@@ -55,7 +55,7 @@
       <div class="wrap">
         <div class="crumbs"><a href="guides.html">Guides</a> / Steam Deck &amp; Linux</div>
         <h1>Steam Deck &amp; Linux</h1>
-        <p class="lead">The Godot build of NOVA Swift runs on Linux x86_64 and the Steam Deck. It is an experimental beta, and this page is upfront about what has and has not been tested.</p>
+        <p class="lead">The Godot build of NOVA Swift runs on Linux x86_64 and the Steam Deck. It is a beta: it has been played on real Linux hardware and a Steam Deck, but it is new, so this page is upfront about what is still rough.</p>
       </div>
     </header>
 
@@ -93,8 +93,8 @@
         </ol></div>
 
         <h2 id="status">Beta status</h2>
-        <div class="callout warn"><p><b>Not yet run on real Steam Deck hardware.</b> The Linux package was built in a clean Ubuntu 22.04 container and checked headless: it loads, and it reads game data. It has not been run on an actual Steam Deck or with a GPU, so flight visuals, performance and the Game Mode setup below are untested on real hardware. Please report what you find.</p></div>
-        <p>Players supply their own EV Nova data. Nothing ships in the download. The Windows version is not released yet.</p>
+        <div class="callout warn"><p><b>It's a beta.</b> The Linux package has been played on real Linux hardware and on a Steam Deck. It is still new, so expect rough edges, and please report anything odd.</p></div>
+        <p>Players supply their own EV Nova data. Nothing ships in the download.</p>
 
         <h2 id="install">Install</h2>
         <p>The current build is <code data-latest-version>v0.7.0-beta.2</code>. On a Steam Deck, do these steps in Desktop Mode.</p>
@@ -106,7 +106,7 @@
 <span class="k">tar</span> -xzf ~/Downloads/NovaSwift-linux-x86_64.tar.gz -C ~/Games</code></pre></li>
           <li><h3>Run</h3><p>Open the extracted <code>NovaSwift</code> folder and run <code>NovaSwift.sh</code>. The first screen is the Data Setup wizard. See <a href="#data">Import your EV Nova data</a>.</p></li>
         </ol>
-        <p>The package includes the game, its libraries and the Swift runtime. It was built on Ubuntu 22.04 and needs no newer than glibc 2.35, which SteamOS 3 and current distributions exceed. There is a menu-entry file, <code>novaswift.desktop</code>, in the package sources. Copying it to <code>~/.local/share/applications/</code> (after pointing its <code>Exec</code> and <code>Icon</code> lines at absolute paths) is optional and untested on a Deck.</p>
+        <p>The package includes the game, its libraries and the Swift runtime. It was built on Ubuntu 22.04 and needs no newer than glibc 2.35, which SteamOS 3 and current distributions exceed. There is a menu-entry file, <code>novaswift.desktop</code>, in the package sources. Copying it to <code>~/.local/share/applications/</code> (after pointing its <code>Exec</code> and <code>Icon</code> lines at absolute paths) is optional.</p>
 
         <h2 id="game-mode">Add it to Game Mode</h2>
         <ol class="steps">
@@ -162,7 +162,7 @@
           <li>If an update fails, the previous version is restored automatically and the next start tells you why.</li>
           <li>Your pilots, settings and game data live outside the install folder, so updates never touch them.</li>
         </ul>
-        <div class="callout warn"><p>The updater is built but has not yet been tested end to end with a real published release. If it misbehaves, download the new tarball from Releases and extract it over the old folder.</p></div>
+        <div class="callout warn"><p>The updater has not yet been verified end to end on an installed build. If it misbehaves, download the new tarball from Releases and extract it over the old folder.</p></div>
 
         <h2 id="files">File locations</h2>
         <div class="table-wrap"><table class="data">
@@ -177,10 +177,9 @@
 
         <h2 id="limits">Known limits</h2>
         <ul>
-          <li>Not tested on a real Steam Deck or with a real GPU yet. This is the biggest unknown.</li>
-          <li>The Game Mode shortcut and the <code>.desktop</code> menu entry are untested on a Deck.</li>
-          <li>The in-game updater has not been tested end to end.</li>
-          <li>Windows is not released yet.</li>
+          <li>It is a beta. Report anything odd.</li>
+          <li>The in-game updater has not been verified end to end on an installed build yet.</li>
+          <li>Windows has its own beta build: see <a href="guide-getting-started.html#windows">Windows setup</a>.</li>
           <li>HD art packs and live 3D ship models are Apple-only. Plug-ins still work.</li>
           <li>The Godot build is still catching up with the Apple app in places. See the status page for details.</li>
           <li>Multiplayer is available over LAN, by IP address and on dedicated servers. See the <a href="guide-multiplayer.html">Multiplayer guide</a>.</li>
@@ -199,7 +198,7 @@
         <h3>No movies</h3>
         <p>Install ffmpeg as described <a href="#movies">above</a>. Movies are optional.</p>
         <h3>Something looks wrong or crashes</h3>
-        <p>In the game, go to Settings, Data &amp; Advanced, <em>Report a Bug…</em> to build a diagnostics bundle, then open a <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">GitHub issue</a> and attach it. Since nobody has tested a real Deck yet, include your Deck model, SteamOS version and whether you were in Desktop Mode or Game Mode.</p>
+        <p>In the game, go to Settings, Data &amp; Advanced, <em>Report a Bug…</em> to build a diagnostics bundle, then open a <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">GitHub issue</a> and attach it. Include your Deck model, SteamOS version and whether you were in Desktop Mode or Game Mode.</p>
 
         <nav class="next-prev" aria-label="More guides">
           <a href="guide-controls.html"><small>Previous</small><b>Controls &amp; controllers</b></a>

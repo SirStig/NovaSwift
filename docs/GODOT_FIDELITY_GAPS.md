@@ -2,16 +2,16 @@
 
 This file lists behaviour the original game has that the Godot frontend does not yet call. Engine-rule gaps live in [reverse-engineering/FIDELITY_PLAN.md](reverse-engineering/FIDELITY_PLAN.md) and [STATUS.md](STATUS.md). A DONE row here means the Godot path is wired to the shared Swift helper. It does not mean that helper matches the executable.
 
-The fixes for EC-04 and EC-05 (gate and wormhole clearance and the fee), EC-25 (a bribe is one approach), OS-06 (wormhole exit draw), EC-26 (the bar's previous winner resets when the bar opens), EC-09 and EC-28 (outfitter bank promotion and visit-scoped items), EC-10 (rank privileges), OS-08 (bomb fuse reseed) and UI-06 (which body Land picks) are WRITTEN, NOT BUILT (2026-10-13): shared Swift helpers plus the Godot bridge (`NovaWorld.swift`) and `Spaceport.gd`. See each item in [reverse-engineering/FIDELITY_PLAN.md](reverse-engineering/FIDELITY_PLAN.md). Godot follows those helpers.
+The fixes for EC-04 and EC-05 (gate and wormhole clearance and the fee), EC-25 (a bribe is one approach), OS-06 (wormhole exit draw), EC-26 (the bar's previous winner resets when the bar opens), EC-09 and EC-28 (outfitter bank promotion and visit-scoped items), EC-10 (rank privileges), OS-08 (bomb fuse reseed) and UI-06 (which body Land picks) are DONE (written 2026-10-13, built and tested 2026-10-14): shared Swift helpers plus the Godot bridge (`NovaWorld.swift`) and `Spaceport.gd`. See each item in [reverse-engineering/FIDELITY_PLAN.md](reverse-engineering/FIDELITY_PLAN.md). Godot follows those helpers.
 
 This file is the single list of Godot frontend gaps; [STATUS.md](STATUS.md#linux-and-windows) carries the summary table. Status words used in the rows:
 
-* **DONE**: wired, and built and run on macOS (headless self-checks where the package names one).
-* **WRITTEN, NOT BUILT**: the code is in the tree but has not been compiled or run. Treat it as unverified until someone builds it. This applies only to the 2026-10-13 closing work: C1 Key Settings, C5 `.mov` title music, E3 test, F1 shot murk, F2 test, S25 and S26 tests, and S12 (the `quickHyperjump` enhancement in Godot, plus the shared `QuickHyperjump` extraction the Apple scene now calls), and the status-text, travel-hint, Player Info, `përs` quote-gate and ambient `>= 128` changes.
+* **DONE**: wired, built and run (macOS and, since beta.2, Windows, Linux and Steam Deck; headless self-checks where the package names one).
+* The 2026-10-13 closing work (C1 Key Settings, C5 `.mov` title music, E3 test, F1 shot murk, F2 test, S25 and S26 tests, S12 and the shared `QuickHyperjump` extraction, and the status-text, travel-hint, Player Info, `përs` quote-gate and ambient `>= 128` changes) was written on 2026-10-13 and is now **DONE**, built and tested on 2026-10-14 (shipped in v0.7.0-beta.2). The status word WRITTEN, NOT BUILT is obsolete and no row uses it.
 * The earlier written items are now **DONE**, built and tested on macOS by the maintainer (2026-10-13): the hypergate and wormhole entry movies (both apps), D1-D4 (galaxy map borders, mission markers, Tab and backslash cycle), the sound-parity fixes, the ambient loop and the brightness veil (C2, C3, and the rows marked FIXED in the sound table other than S25 and S26), and the About-dialog picture (C6).
 * **PARTIAL / MISSING / OPEN / UNVERIFIED**: as written in the row.
 
-Packages A and B are wired and self-checked. Everything written before the maintainer's test round is now built and run on macOS. The 2026-10-13 closing pass (C1, C5, E3, F1, F2, S12, S25, S26) is WRITTEN, NOT BUILT, each with a headless self-check. Frontend work that is still open: on-GPU shader checks (F3), building and running on a real Steam Deck or Windows PC, and testing the auto-updater end to end. Linux x86_64 and macOS arm64 packages have been built (see [PACKAGING.md](PACKAGING.md)). Nothing else in this file is known to be missing.
+Packages A and B are wired and self-checked. Everything written up to and including the 2026-10-13 closing pass (C1, C5, E3, F1, F2, S12, S25, S26) was built and tested by the maintainer on 2026-10-14. Frontend work that is still open: a shader-by-shader comparison of flight visuals against the original (F3), and testing the auto-updater end to end. v0.7.0-beta.2 (Linux x86_64 / Steam Deck, Windows x86_64, macOS arm64) is released and has been played on real hardware (see [PACKAGING.md](PACKAGING.md)). Nothing else in this file is known to be missing.
 
 ---
 
@@ -35,7 +35,7 @@ already flow through `drain_*_messages`). Tests: extend `godot/tests/gameplay_ga
 | A3 | Pêrs / ship spawn gating and persistence (UI-17, AI-11): pêrs `ActiveOn` NCB, never respawn once defeated, grudges persist; `shïp.AppearOn` gates düde hulls | DONE (2026-10-13, `WorldPilotLink`; see GODOT_LAYER.md "Live-world wiring") | bridge never sets `world.persSpawnEligible`, `world.shipSpawnEligible`, `world.playerPersGrudges`, and ignores `.personGrudge` / `.personDefeated` (Apple `GameContainerView.swift:339-363, 388-393`). Result: defeated named pilots respawn, story-gated pêrs and hulls appear at the wrong time. `debug_pers_defeated` exists but nothing records |
 | A4 | Pirates board YOU and take cargo/credits (AI-29) | DONE (2026-10-13, `WorldPilotLink`; see GODOT_LAYER.md "Live-world wiring") | `.playerBoarded(byShipID:ratio:)` is not handled; need `World.resolvePlayerBoarding` + credit/cargo deduction + beep + mission `Flags 0x8000` fail (Apple `GameContainerView.swift:1976-2002`) |
 | A5 | Stellar defence/garrison and reinforcement state persists across jumps (AI-15/16, EC-16) | DONE (2026-10-13, `WorldPilotLink`; see GODOT_LAYER.md "Live-world wiring") | no `defenseStateProvider` equivalent: `applyDefenseState` (garrisons, `holdReinforcements`, escort category orders restore, `w.pilotName`, `w.missionCargoScanMask`) is never run; `.reinforcementsCalled` not stored; damaged destroyable stellars forget their armor (`stellarStrengthLeft`, `destroyedStellarIDs`). `stellarDestroyed` / `stellarDominated` persistence already works via `FlightComm.apply` |
-| A6 | Bombs (OS-08, ModType 47/50) detonate after a fuse | DONE as wiring; the fuse reseed fix is WRITTEN, NOT BUILT (OS-08, 2026-10-13; see GODOT_LAYER.md "Live-world wiring") | Both frontends call `HazardOutfits`. `HazardOutfits.recompute` now reseeds the fuse as the original does; Godot calls it from `resetFrameState` (plan item OS-08) |
+| A6 | Bombs (OS-08, ModType 47/50) detonate after a fuse | DONE as wiring; the fuse reseed fix is DONE (OS-08, written 2026-10-13, built and tested 2026-10-14; see GODOT_LAYER.md "Live-world wiring") | Both frontends call `HazardOutfits`. `HazardOutfits.recompute` now reseeds the fuse as the original does; Godot calls it from `resetFrameState` (plan item OS-08) |
 | A7 | Strict Play pilot: exact speeds instead of the 1.5x/2/3 non-strict scale (FL-03); per-day world seed | DONE (2026-10-13, `WorldPilotLink`; see GODOT_LAYER.md "Live-world wiring") | bridge leaves `world.strictPlay` false for every pilot and `GameSession.makeWorld` always uses the fixed seed `0x5EED_1234` (Apple passes `currentWorldSeed(systemID:)` from day) so ambient traffic is identical every visit |
 | A8 | Landing/departure bookkeeping the Apple container does at `depart()`: `onMissionAuxShipsArrived` budget decrement, `recordMunitions` on launch, `warnStrandedFighters` | DONE (2026-10-13, `WorldPilotLink`; see GODOT_LAYER.md "Live-world wiring") | `Munitions.record` is called on save only (`NovaWorld.swift:2274`); verify aux-ship budget decrement and the "N fighters abandoned" accounting |
 
@@ -63,12 +63,12 @@ Do not touch `Controls.gd` rebind storage (use `Controls.overrides`).
 
 | # | Original behaviour | Status | Concrete gap |
 |---|---|---|---|
-| C1 | Key Settings dialog (DLOG 4002, the 34-cell key table, "NovaPrefs_ResetKeyBindings" defaults button) | WRITTEN, NOT BUILT (2026-10-13, `screens/ClassicKeySettings.gd`, test `tests/key_settings_selfcheck.gd`) | Preferences' Key Settings button opens it (Preferences hides until it closes). Backdrop PICT 139 (133), 34 cells = DITL items 4-37 in Apple's cell order; click selects, the next key binds and steps on, duplicates allowed until OK (first clashing cell outlined red, OK refused), Cancel/Esc restores a snapshot, Set Default previews the defaults, 1-4 / Caps Lock / F1-F5 are not capturable. Rebinds go through `Controls.overrides` (plain key, Alt chord, Shift chord, bare modifier), OK runs `Prefs.save()` + `Controls.register()`. Autopilot and the two spare cells stay blank (no Godot action). "More keys..." leads to the Controls page (the old `key_settings` signal) |
+| C1 | Key Settings dialog (DLOG 4002, the 34-cell key table, "NovaPrefs_ResetKeyBindings" defaults button) | DONE (built and tested 2026-10-14; written 2026-10-13, `screens/ClassicKeySettings.gd`, test `tests/key_settings_selfcheck.gd`) | Preferences' Key Settings button opens it (Preferences hides until it closes). Backdrop PICT 139 (133), 34 cells = DITL items 4-37 in Apple's cell order; click selects, the next key binds and steps on, duplicates allowed until OK (first clashing cell outlined red, OK refused), Cancel/Esc restores a snapshot, Set Default previews the defaults, 1-4 / Caps Lock / F1-F5 are not capturable. Rebinds go through `Controls.overrides` (plain key, Alt chord, Shift chord, bare modifier), OK runs `Prefs.save()` + `Controls.register()`. Autopilot and the two spare cells stay blank (no Godot action). "More keys..." leads to the Controls page (the old `key_settings` signal) |
 | C2 | Brightness arrows (STR# 139, 0-6) change screen gamma | DONE (built and tested on macOS, 2026-10-13; `ui/BrightnessVeil.gd`, added by `Main.gd`) | black veil below step 3, white (additive) above, gamma = step x 10 + 70 %, as Apple `RootView.brightnessVeil` |
-| C3 | Ambient Sounds: the landed spaceport plays the spöb's `AmbientSound` loop; off = silence (0x00491f30) | DONE (built and tested on macOS, 2026-10-13; `GameAudio.gd` `start_ambient`/`stop_ambient`, bridge `landed_ambient_sound()`). The `>= 128` check is a later edit, written, not built | follows the docked state, honours the Ambient Sounds pref, mute and the Settings sliders; stopped on takeoff and on returning to the menu |
+| C3 | Ambient Sounds: the landed spaceport plays the spöb's `AmbientSound` loop; off = silence (0x00491f30) | DONE (built and tested on macOS, 2026-10-13; `GameAudio.gd` `start_ambient`/`stop_ambient`, bridge `landed_ambient_sound()`). The `>= 128` check is a later edit, built and tested 2026-10-14 | follows the docked state, honours the Ambient Sounds pref, mute and the Settings sliders; stopped on takeoff and on returning to the menu |
 | C4 | Preferences that are stored but have no effect: Share Processor Time (no counterpart needed), Ship Animations (applied via `set_flight_options`), Check For Updates (N/A) | PARTIAL | only document; low value |
 | C6 | About dialog shows the original's picture | DONE (built and tested on macOS, 2026-10-13) | |
-| C5 | Title music from `.mov` (Nova Files names it as `.mov`) | WRITTEN, NOT BUILT (2026-10-13, `Movies.transcode_audio` / `convert_audio_async`, `TitleMusic.gd`; test in `tests/movies_selfcheck.gd`) | Apple hands the `.mov` to AVFoundation, which plays its audio track. Godot extracts the first audio track once with ffmpeg into a cached 16-bit stereo WAV (`<cache>/<key>.music.wav`), in the background, and `TitleMusic` starts it as soon as it is ready (same once-per-visit, 0x30/0x20 level and fade rules as the mp3). No ffmpeg, no audio track, or the menu left first = silence, never an error |
+| C5 | Title music from `.mov` (Nova Files names it as `.mov`) | DONE (built and tested 2026-10-14; written 2026-10-13, `Movies.transcode_audio` / `convert_audio_async`, `TitleMusic.gd`; test in `tests/movies_selfcheck.gd`) | Apple hands the `.mov` to AVFoundation, which plays its audio track. Godot extracts the first audio track once with ffmpeg into a cached 16-bit stereo WAV (`<cache>/<key>.music.wav`), in the background, and `TitleMusic` starts it as soon as it is ready (same once-per-visit, 0x30/0x20 level and fade rules as the mp3). No ffmpeg, no audio track, or the menu left first = silence, never an error |
 
 ### Package D. Galaxy map fidelity (original map window)  [S-M]
 
@@ -94,7 +94,7 @@ movie), `godot/screens/Spaceport.gd` (BBS offer hook, small), `godot/audio/Title
 |---|---|---|---|
 | E1 | Race betting plays `Race 1..4.mov` | DONE (per coordinator, 2026-10-13) | wired via `Movies`/`MoviePlayer`; only re-verify the no-ffmpeg fallback |
 | E2 | Mission-offer `dësc` movies (a mission's offer/completion text carries a movie filename; Apple `MissionBoardView.playMovie`) | DONE (2026-10-13, both apps; see "Plug-in loading gaps" below) | story texts, docking, intro text and acknowledgements play their `dësc` movie |
-| E3 | `playMovies` pref gates all of the above | WRITTEN, NOT BUILT (2026-10-13, audit + `tests/play_movies_gate_selfcheck.gd`) | audited every path: race clips (`BarScreens._movies_on`), offer movies (`StoryScreens._offer_movie`) and everything through `DescMovie._lookup` (docking, story texts, intro text / X-key GIF dësc 20000 / 32766, acknowledgements, hypergate and wormhole entry via `lookup_gate` / `play_gate`) already read `play_movies`; no code change was needed. The test turns it off and asserts every lookup is empty, `play_gate` continues at once, and scans the callers |
+| E3 | `playMovies` pref gates all of the above | DONE (built and tested 2026-10-14; written 2026-10-13, audit + `tests/play_movies_gate_selfcheck.gd`) | audited every path: race clips (`BarScreens._movies_on`), offer movies (`StoryScreens._offer_movie`) and everything through `DescMovie._lookup` (docking, story texts, intro text / X-key GIF dësc 20000 / 32766, acknowledgements, hypergate and wormhole entry via `lookup_gate` / `play_gate`) already read `play_movies`; no code change was needed. The test turns it off and asserts every lookup is empty, `play_gate` continues at once, and scans the callers |
 
 ### Package F. Flight render remainder and on-device verification  [S-M]
 
@@ -103,19 +103,19 @@ no-FX path). Do not touch HUD files.
 
 | # | Original behaviour | Status | Concrete gap |
 |---|---|---|---|
-| F1 | Murk (sÿst.Murk) fog: far objects fade to the murk colour, per-sprite darkening | WRITTEN, NOT BUILT (2026-10-13; test `tests/murk_warp_selfcheck.gd`) | the doc row was stale: stars (`star_tint`, hidden below 0), stellars (`stellar_states` fog) and ship hulls (layer column 14/15, one blend slot with ionize) were already per-sprite. What was missing was shots with their own art (Apple `applyMurk` on projectiles): new bridge `projectile_fog()` (`MurkFog.level` per shot, empty with no murk), `FlightRenderer.fog_shots` + a `fill` layer after the shots layer, `ShotDrawer._fog`. Asteroids, cargo and effects are unfogged in Apple too |
+| F1 | Murk (sÿst.Murk) fog: far objects fade to the murk colour, per-sprite darkening | DONE (built and tested 2026-10-14; written 2026-10-13; test `tests/murk_warp_selfcheck.gd`) | the doc row was stale: stars (`star_tint`, hidden below 0), stellars (`stellar_states` fog) and ship hulls (layer column 14/15, one blend slot with ionize) were already per-sprite. What was missing was shots with their own art (Apple `applyMurk` on projectiles): new bridge `projectile_fog()` (`MurkFog.level` per shot, empty with no murk), `FlightRenderer.fog_shots` + a `fill` layer after the shots layer, `ShotDrawer._fog`. Asteroids, cargo and effects are unfogged in Apple too |
 | F2 | Hyperjump NPC warp-out/warp-in nodes (ships popping in/out of hyperspace) | DONE as verified-equal (2026-10-13; test `tests/murk_warp_selfcheck.gd`) | Apple draws nothing for either: `applyEntrance(.warpIn)` is a no-op (0x0041c710), `warpOutNode` only drops the node (Ship_HandleShip 0x00433050). Godot already matches (`EffectsDrawer` has no warp effect; the ship simply leaves `ship_xf`). Gate emergence / entry (`applyGateFade`: hidden, then white wash over 16 ticks) is layer columns 19 / 20 feeding `ShipDrawer`'s skip and the blend slot. Launch grow-in and landing shrink were already there |
-| F3 | Visual verification of the additive/fill shaders on a real GPU (gl_compatibility) | UNVERIFIED | all flight visuals have only headless/composed-PNG checks (`flight_visuals_selfcheck.gd`) |
+| F3 | Visual check of the additive/fill shaders on a real GPU (gl_compatibility) | PARTIAL | flight visuals have been played on real GPUs (Windows, Linux, Steam Deck) and look right; there has been no shader-by-shader comparison against the original, and `flight_visuals_selfcheck.gd` only composes PNGs headless |
 
 ---
 
 ## Still open as frontend wiring
 
 - C4: a few stored preferences have no Godot counterpart (documented; Share Processor Time and Check For Updates need none).
-- F3 shader output is not checked on a real GPU.
-- Sound S12 and the `quickHyperjump` enhancement: ported to the Godot bridge 2026-10-13 (shared `QuickHyperjump`, `screens/HyperjumpFx.gd`, `audio/GameAudio.gd`); written, not built.
-- Written but not built or tested: see the status words at the top.
-- Packages: macOS arm64 and Linux x86_64 (Steam Deck) archives are built and verified headless in containers; not yet run on a real Deck or with a GPU. The Windows script is written and needs a Windows PC with Swift. Auto-updater ([UPDATER.md](UPDATER.md)): built, not tested end to end.
+- F3: no shader-by-shader comparison against the original (flight visuals themselves have been played on real GPUs).
+- Sound S12 and the `quickHyperjump` enhancement: ported to the Godot bridge 2026-10-13 (shared `QuickHyperjump`, `screens/HyperjumpFx.gd`, `audio/GameAudio.gd`); built and tested 2026-10-14.
+- Everything written on 2026-10-13 was built and tested 2026-10-14; see the status words at the top.
+- Packages: macOS arm64, Linux x86_64 (Steam Deck) and Windows x86_64 archives ship in v0.7.0-beta.2 and have been run on real hardware (Windows PC, Linux, Steam Deck). Linux packages are built on the maintainer's Linux machine, Windows packages on a Windows PC. Auto-updater ([UPDATER.md](UPDATER.md)): signed manifests are published with releases; an in-app update has not been verified end to end.
 
 ## Deferred: ENHANCEMENT gaps (NovaSwift-only; not original)
 
@@ -123,11 +123,11 @@ no-FX path). Do not touch HUD files.
 * HD graphics packs (NSgx/NSbl, `.nsx`), live 3D hulls, chase-camera 3D tilt, `hdGraphics`/`hdDetail`/`modelDetail`/`liveLighting` settings.
 * Camera views key (Look ahead / Ship up / Chase cycle key `O`, zoom `[` `]`): renderer supports them, no keybinding or HUD toast.
 * Autopilot key `A`, `cycleHyperspaceLink` as an enhancement, evasive escort order, `quickHyperjump`, forgiving landing UI toggle,
-  nearest-first targeting toggle: shared rules exist; some are wired through `SettingsPlumbing.gd`; quick hyperjump is wired (written, not built).
+  nearest-first targeting toggle: shared rules exist; some are wired through `SettingsPlumbing.gd`; quick hyperjump is wired (built and tested 2026-10-14).
 * Starfield density, particle density, planet name labels, ship health bars over hulls, CE hyperspace look, sidebar pause menu,
   Story Guide badge placement on BBS/offer/Mission Info rows, FPS counter UI polish.
 * Accessibility: larger HUD, high-contrast HUD, reduce flashing, no-hyperspace-effects, colorblind filter UI for the Classic `ïntf` bar.
-* NovaSwift's own tutorial cards beyond what `Tutorial.gd` and `Hints.gd` already do; loading tips. (The original's travel hint chain, STR# 2002 #22-31, is ported: written, not built.)
+* NovaSwift's own tutorial cards beyond what `Tutorial.gd` and `Hints.gd` already do; loading tips. (The original's travel hint chain, STR# 2002 #22-31, is ported: built and tested 2026-10-14.)
 * Plug-in editor is ported (eight tools, schema inspector, previews, galaxy, story, validation, export, test run). Multiplayer co-op (ENet/Steam), Game Center/iCloud equivalents, Steam Deck pad keyboard polish.
 * Data setup wizard (guided import), managed data dir copy, web import server.
 
@@ -187,7 +187,7 @@ cues as `[{id, priority, onlyWhenSilent, interface, rate, x?, y?}]`). Beeps: 150
 select/back, 153 = beep4 denied, 154 = beep5 incoming. Priorities: beep 1, turret 3, NPC weapon 4, player weapon 5/6, explosion 6, red alert 5,
 airlock/cloak 8, menu 10, klaxxon/chatter 0xF, warp out/shutters 0x32, warp up 32000.
 
-Status key: MATCH (already identical), FIXED (was MISSING/DIFFERENT/EXTRA; the fix is written but **not yet built or run**, and neither has `sound_parity_selfcheck.gd`), OPEN (not changed, reason given).
+Status key: MATCH (already identical), FIXED (was MISSING/DIFFERENT/EXTRA; the fixes were written 2026-10-13 and built and tested 2026-10-14, as was `sound_parity_selfcheck.gd`), OPEN (not changed, reason given).
 
 | # | Site (Apple call / original function) | snd, priority, rules | Godot | Status |
 |---|---|---|---|---|
@@ -202,7 +202,7 @@ Status key: MATCH (already identical), FIXED (was MISSING/DIFFERENT/EXTRA; the f
 | S9 | Klaxxon while the death timer runs | snd 371, priority 0xF, only when silent, stopped when it ends | `tickSoundAlarms` | MATCH |
 | S10 | Warp up (`startWarpUp`/`stopWarpUp`), Caps Lock 2x | snd 128 (129 under 2x), priority 32000, rate = hull multiplier, only when silent, cut at 350/multiplier | `tickSoundAlarms` + `pitch_scale` | MATCH |
 | S11 | Warp out: jump arrival, collapsed field, gate arrival | snd 130, priority 0x32, only when silent | `advanceHyperjump` / `completeHyperjump` / gate | MATCH |
-| S12 | `quickHyperjump` enhancement charge loop (`startHyperspaceCharge`) | snd 128 looped, cut on commit | ported 2026-10-13: shared `QuickHyperjump` (the Apple `stepJump` logic moved out), bridge `begin_hyperjump` flies it when the pref is on, `hyperspace_charge_loop_sound()` returns 128 while the maneuver runs, `GameAudio.gd` has a dedicated looping `HyperspaceCharge` player cut at the commit and by `stop_all` | FIXED (2026-10-13; WRITTEN, NOT BUILT; `closing_pass_selfcheck.gd`, `QuickHyperjumpTests`) |
+| S12 | `quickHyperjump` enhancement charge loop (`startHyperspaceCharge`) | snd 128 looped, cut on commit | ported 2026-10-13: shared `QuickHyperjump` (the Apple `stepJump` logic moved out), bridge `begin_hyperjump` flies it when the pref is on, `hyperspace_charge_loop_sound()` returns 128 while the maneuver runs, `GameAudio.gd` has a dedicated looping `HyperspaceCharge` player cut at the commit and by `stop_all` | FIXED (2026-10-13; built and tested 2026-10-14; `closing_pass_selfcheck.gd`, `QuickHyperjumpTests`) |
 | S13 | Escort/combat chatter | hail bank snd, priority 0xF, interface volume, holds next line until it ends | bridge `chatterEnd` | MATCH |
 | S14 | Mission `PlaySound` operation (`AppGameServices.playSound`) | priority 1, centred, effects level only | `NovaWorld` services hook | MATCH |
 | S15 | Touchdown (`.shipLanded` entity 0, paid assistance) | snd 390, priority 8, once; launch is silent | `touchDown` queues `SoundCues.docking` once; `launch()` queues nothing | MATCH |
@@ -241,21 +241,21 @@ Status key: MATCH (already identical), FIXED (was MISSING/DIFFERENT/EXTRA; the f
 | S48 | 16-voice list, first 8 audible, priority/volume insertion, same-sound guards, stop by id | | `SoundVoiceBoard` (shared with `GameAudioEngine`'s `VoiceList`) | MATCH |
 | S49 | Purchases / sells / trades / mission accept / hire: no sound in the original | | none after S31-S33 | MATCH |
 
-Counts (49 rows): 30 MATCH, 19 FIXED, 0 OPEN. S12, S25 and S26 are FIXED but written, not built. Fixed by original category: MISSING 5 (S5 S16 S43 S44 S46), DIFFERENT 6 (S30 S39 S40 S41 S42 S45),
+Counts (49 rows): 30 MATCH, 19 FIXED, 0 OPEN. S12, S25 and S26 are FIXED but built and tested 2026-10-14. Fixed by original category: MISSING 5 (S5 S16 S43 S44 S46), DIFFERENT 6 (S30 S39 S40 S41 S42 S45),
 EXTRA 5 groups (S31 S32 S33 = 17 explicit call sites removed; S34 S35 = two dialog defaults).
 
-### Apple vs original (findings; items 1, 2, 4 and 5 were fixed 2026-10-13, written, not built; summarised in [STATUS.md](STATUS.md) under Known gaps)
+### Apple vs original (findings; items 1, 2, 4 and 5 were fixed 2026-10-13, built and tested 2026-10-14; summarised in [STATUS.md](STATUS.md) under Known gaps)
 
 1. **Music is scaled by the sound-volume step twice** in Apple: the main mixer already applies `masterVolume x step/8` and `GameAudio.musicGains`
    then sets the track to `step x 0x20/256` (= step/8) again, so the track plays at (step/8)². The original applies it once. Godot plays the
-   original level. **Fixed 2026-10-13 (written, not built):** the step level moved to the effects bus (`GameAudio.applyVolumes`), so only the music node's gain scales by the step.
+   original level. **Fixed 2026-10-13 (built and tested 2026-10-14):** the step level moved to the effects bus (`GameAudio.applyVolumes`), so only the music node's gain scales by the step.
 2. **Spaceport ambient / quickHyperjump charge loops are scaled by the Effects slider twice** (`playLoop(volume: sfxVolume)` on a bus that is
-   already `sfxVolume`). The original plays them at the global volume. Godot applies master x effects once. **Fixed 2026-10-13 (written, not built):** the loops now play at volume 1 on the effects bus.
+   already `sfxVolume`). The original plays them at the global volume. Godot applies master x effects once. **Fixed 2026-10-13 (built and tested 2026-10-14):** the loops now play at volume 1 on the effects bus.
 3. **Ambient loop flag**: the original's landed loop only re-allocates its voice from the 0x00491f30 tick when spöb Flags2 bit 0x0010 ("Loop
    ambient sound") is *clear* (`Audio_AllocateVoiceSlot(&DAT_00591ab4)` on event 5); Apple always loops. The exact retrigger cadence of event 5 was
    not traced, so both frontends loop gaplessly.
-4. Classic status-message rectangle: Apple draws it 16/8 px in from the corner with a 14 pt shadow; the original is left + 25, bottom - 5, 30 px high, 12 pt white, no shadow. Godot's Classic HUD follows the original (GODOT_LAYER.md, "Message position"). **Fixed in Apple 2026-10-13 (written, not built):** `MessageLogView(classicRect:)`, used when the authentic HUD is active.
-5. Apple's ambient check is `soundID >= 0`; the original loads it only when `CustSndID >= 128` and the pref is on. No shipped spöb has 0-127. **Fixed 2026-10-13 (written, not built):** `>= 128` in Apple `startAmbient` and in the Godot bridge and `GameAudio.gd`.
+4. Classic status-message rectangle: Apple draws it 16/8 px in from the corner with a 14 pt shadow; the original is left + 25, bottom - 5, 30 px high, 12 pt white, no shadow. Godot's Classic HUD follows the original (GODOT_LAYER.md, "Message position"). **Fixed in Apple 2026-10-13 (built and tested 2026-10-14):** `MessageLogView(classicRect:)`, used when the authentic HUD is active.
+5. Apple's ambient check is `soundID >= 0`; the original loads it only when `CustSndID >= 128` and the pref is on. No shipped spöb has 0-127. **Fixed 2026-10-13 (built and tested 2026-10-14):** `>= 128` in Apple `startAmbient` and in the Godot bridge and `GameAudio.gd`.
 6. Apple's `.launch` event exists but is never played; the original launch is silent too (verified: `Stellar_RunDockAndLaunchSequence`
    sounds only the uninhabited snd 151).
 7. Mission-computer, news, plunder, hail and flight-key beeps match their decomp call sites (see the table); no Apple deviation found there.
@@ -266,7 +266,7 @@ EXTRA 5 groups (S31 S32 S33 = 17 explicit call sites removed; S34 S35 = two dial
 `godot/ui/classic/{ClassicDialog,ClassicMainMenu}.gd`, new `godot/ui/BrightnessVeil.gd`, bridge `NovaWorld.swift` (player death bursts, uninhabited
 landing beep, menu priorities, `landed_ambient_sound`, `debug_pending_sounds`, `debug_drain_sounds`) and `Audio.swift`. No `app/` or `Sources/` file changed.
 
-### Code touched by the 2026-10-13 gap pass (WRITTEN, NOT BUILT: nothing here was compiled or run)
+### Code touched by the 2026-10-13 gap pass (built and tested 2026-10-14)
 
 New: `godot/screens/ClassicKeySettings.gd`, tests `godot/tests/{key_settings,play_movies_gate,murk_warp}_selfcheck.gd`.
 GDScript: `screens/ClassicPreferences.gd` (opens the new window), `Movies.gd` (audio-only extraction), `audio/TitleMusic.gd` (`.mov` tracks),

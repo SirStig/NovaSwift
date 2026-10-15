@@ -65,7 +65,7 @@
     <div class="wrap">
       <div class="head">
         <h2>Every function in the original, one square each.</h2>
-        <p>Green: compared with NovaSwift and matching, some after a fix. Teal: done differently on purpose, like saves and controls. Amber: found to differ, fix in progress (none at present). Hover or tap a square for its name, address and status. All 179 plan items are done; the last 16 were finished on 2026-10-13 and are still being built and tested. The list is in <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/STATUS.md" target="_blank" rel="noopener">STATUS.md</a>.</p>
+        <p>Green: compared with NovaSwift and matching, some after a fix. Teal: done differently on purpose, like saves and controls. Amber: found to differ, fix in progress (none at present). Hover or tap a square for its name, address and status. All 179 plan items are done, built and tested. The list is in <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/STATUS.md" target="_blank" rel="noopener">STATUS.md</a>.</p>
       </div>
       <div class="grid-card">
         <div id="grid-exe" class="grid-exe"><p class="grid-note">Loading…</p></div>
@@ -87,29 +87,31 @@
     <div class="wrap">
       <div class="head">
         <h2>Linux and Windows (Godot frontend).</h2>
-        <p>It runs the same Swift engine as the Apple app, so open fidelity items apply to both. Rows marked done were built and run on macOS. The macOS and Linux packages build and run headless in containers; nothing has run on a real Steam Deck, a Windows PC or a GPU yet. Source: <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/GODOT_FIDELITY_GAPS.md" target="_blank" rel="noopener">GODOT_FIDELITY_GAPS.md</a>.</p>
+        <p>It runs the same Swift engine as the Apple app, so open fidelity items apply to both. Version 0.7.0-beta.2 is out for Linux, Steam Deck, Windows and macOS (arm64), and has been played on real hardware on each. Source: <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/GODOT_FIDELITY_GAPS.md" target="_blank" rel="noopener">GODOT_FIDELITY_GAPS.md</a>.</p>
       </div>
       <div class="grid-card">
         <table class="status-table">
           <thead><tr><th>Subsystem</th><th>State</th></tr></thead>
           <tbody>
-            <tr><td>Flight, HUD, radar, targeting, landing, spaceport, story runtime, pilots, gamepad</td><td>Done, run on macOS</td></tr>
-            <tr><td>Live-world wiring (combat rating, scooping, spawn gating, pirates boarding, bombs, Strict Play)</td><td>Done, self-checked</td></tr>
-            <tr><td>Status line, messages, HUD icons</td><td>Done, self-checked</td></tr>
-            <tr><td>Controls, targeting checklist, performance</td><td>Done</td></tr>
+            <tr><td>Flight, HUD, radar, targeting, landing, spaceport, story runtime, pilots, gamepad</td><td>Done</td></tr>
+            <tr><td>Live-world wiring (combat rating, scooping, spawn gating, pirates boarding, bombs, Strict Play)</td><td>Done</td></tr>
+            <tr><td>Status line, messages, HUD icons, original status-line text, travel hints</td><td>Done</td></tr>
+            <tr><td>Controls, targeting checklist, action wheels, performance</td><td>Done</td></tr>
+            <tr><td>Data Setup wizard</td><td>Done</td></tr>
             <tr><td>Plug-ins: all 13 catalog plug-ins load</td><td>Done</td></tr>
             <tr><td>Total-conversion add-ons, <i>dësc</i> movies, intro and GIF, fonts, race movies</td><td>Done, in both apps</td></tr>
-            <tr><td>Hypergate and wormhole entry movies</td><td>Done, built and run on macOS</td></tr>
-            <tr><td>Galaxy map borders, mission markers, Tab and backslash cycle</td><td>Done, built and run on macOS</td></tr>
-            <tr><td>Sound-parity fixes, ambient loop, brightness</td><td>Done, built and run on macOS</td></tr>
-            <tr><td>About-dialog picture</td><td>Done, built and run on macOS</td></tr>
-            <tr><td>Key Settings dialog, title music from a .mov, shot murk fog, movie-pref audit, map sounds</td><td>Written, not yet built or tested</td></tr>
-            <tr><td>Quick hyperjump and its charge sound, original status-line text, travel hints, Player Info Tab cycling</td><td>Written, not yet built or tested</td></tr>
-            <tr><td>macOS arm64 package</td><td>Built, checked headless</td></tr>
-            <tr><td>Linux x86_64 and Steam Deck package</td><td>Built and checked headless in containers; not run on a real Deck</td></tr>
-            <tr><td>Windows package</td><td>Script written, never run (needs a Windows PC)</td></tr>
-            <tr><td>Auto-updater, experimental channel, release signing</td><td>Built, not tested end to end</td></tr>
-            <tr><td>Flight visuals on a real GPU</td><td>Not verified</td></tr>
+            <tr><td>Hypergate and wormhole entry movies</td><td>Done, in both apps</td></tr>
+            <tr><td>Galaxy map borders, mission markers, Tab and backslash cycle</td><td>Done</td></tr>
+            <tr><td>Sound parity, ambient loop, brightness, About picture</td><td>Done</td></tr>
+            <tr><td>Key Settings dialog, title music from a .mov, shot murk fog, quick hyperjump, Player Info Tab cycling</td><td>Done, built and tested</td></tr>
+            <tr><td>Multiplayer: LAN, direct IP, public servers, encryption, trade</td><td>Released, played across two machines</td></tr>
+            <tr><td>Cross-play with the Apple app</td><td>Written and tested in loopback; Apple side not yet in TestFlight</td></tr>
+            <tr><td>Plug-in editor</td><td>In the beta, early</td></tr>
+            <tr><td>Linux x86_64 and Steam Deck package</td><td>Released, played on real hardware</td></tr>
+            <tr><td>Windows package</td><td>Released, played on a real Windows PC</td></tr>
+            <tr><td>macOS arm64 package</td><td>Released</td></tr>
+            <tr><td>Auto-updater, experimental channel, release signing</td><td>Signed manifests published; in-app update not yet verified end to end</td></tr>
+            <tr><td>HD graphics packs</td><td>Not started</td></tr>
           </tbody>
         </table>
       </div>

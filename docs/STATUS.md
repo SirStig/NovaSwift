@@ -12,17 +12,16 @@ storylines through, board and capture ships, dominate planets, hire escorts, and
 die with the original's consequences. Plug-ins and total conversions load in the
 original's order.
 
-Gameplay has been checked against the original executable, system by system.
-After a later re-read, 16 of the plan's 179 items were reopened; all 16 are now implemented in code and awaiting build and test (see below).
-Original behaviour is the default. The Linux/Windows frontend plays through on
-macOS and is partway done; its status table is under
-[Linux and Windows](#linux-and-windows). The auto-updater and the packaging
-scripts are summarised there too.
+The Godot frontend for Linux, Steam Deck and Windows is in public beta:
+v0.7.0-beta.2 was released on 2026-10-14 for Linux x86_64 / Steam Deck, Windows
+x86_64 and macOS arm64, and has been played on real hardware on all three. It
+runs the same engine, so it plays the same game. Its status table is under
+[Linux and Windows](#linux-and-windows), with the packaging, the auto-updater and
+the dedicated server.
 
-Two labels recur below. **Built and tested** means the maintainer compiled it and
-played it on macOS. **Written, not yet built** means the code is in the tree and was
-only syntax-checked: the closing passes of 2026-10-13 (listed under "A few done
-items") are in that state.
+Gameplay has been checked against the original executable, system by system. All
+179 plan items are done, built and tested, including the 16 that a later re-read
+reopened. Original behaviour is the default.
 
 Where each kind of fact lives: plan items and open questions in
 [FIDELITY_PLAN.md](reverse-engineering/FIDELITY_PLAN.md); frontend gaps in the
@@ -45,7 +44,10 @@ generator, thrust and top speed, the control-bit test and set interpreters), the
 original routine was run on its own in an emulator and NovaSwift was tested
 against its output.
 
-The plan has 179 items in eight areas, and all 179 are done. A later read of the executable had reopened 16 items whose heading said done (and added EC-27 and EC-28); all 16 were implemented in both apps on 2026-10-13 and are marked **DONE** (awaiting build/test) while the maintainer builds and tests them.
+The plan has 179 items in eight areas, and all 179 are done. A later read of the
+executable reopened 16 items whose heading said done (and added EC-27 and
+EC-28). All 16 were implemented in both apps on 2026-10-13 and built and tested
+by the maintainer on 2026-10-14; they ship in v0.7.0-beta.2.
 
 | Area | Items | Open |
 |---|---:|---:|
@@ -58,9 +60,8 @@ The plan has 179 items in eight areas, and all 179 are done. A later read of the
 | Player-facing rules: map, targeting, HUD, keys, saving (UI) | 18 | 0 |
 | Data loading (LD) | 2 | 0 |
 
-Completed 2026-10-13 (awaiting build and test): OS-06, EC-04, EC-05, EC-07, EC-09, EC-10, EC-11, EC-12, EC-25, EC-26, OS-08, AI-44, UI-06, MS-19, EC-27, EC-28. Each has a "Status 2026-10-13" line saying what was implemented; the "Still open" paragraph under it describes the gap that code was written to close. An older Done paragraph under the same heading is historical.
-
-Implemented 2026-10-13, awaiting build and test (written in code, not compiled or run):
+The 16 items finished on 2026-10-13 (each has a "Status 2026-10-13" line in the
+plan; the "Still open" paragraph under it describes the gap that was closed):
 
 - OS-06: wormhole exit draw (`NovaGame.wormholeExit`, `SpobRes.hyperLinkSlots`). Stock wormhole HyperLink use is still unmeasured.
 - EC-04: landing clearance now serves hypergates and wormholes; the invented gate permission helper is gone.
@@ -79,12 +80,10 @@ Implemented 2026-10-13, awaiting build and test (written in code, not compiled o
 - MS-19: random cargo quantity uses the original's `floor` for negative values.
 - UI-06: Land with no selection picks the nearest travel stellar the way the original does (16 nav slots, gate radius 500 px).
 
-These 16 headings now read **DONE** (implemented 2026-10-13, awaiting build/test), and the grid has been regenerated from them: 671 of 671 portable gameplay functions are green or teal. If a build or test shows one of these fixes does not hold, its heading goes back to **OPEN** and the grid is regenerated.
-
-A few done items left a small piece for later. These are the same on the Apple
-app and the Godot frontend, because both call the shared engine. The closing passes
-of 2026-10-13 wrote all of the following, **written, not yet built or tested**
-(details at the end of the plan, "2026-10-13 closing pass"):
+The closing passes of 2026-10-13 also finished the small pieces some done items
+had left behind. Both apps get them, because both call the shared engine. All of
+this is built and tested (details at the end of the plan, "2026-10-13 closing
+pass"):
 
 - UI-11: the invented status-line sentences were replaced with the original's
   STR# 2002 text or removed (contraband scan and fine, plunder, siphoned fuel,
@@ -92,13 +91,15 @@ of 2026-10-13 wrote all of the following, **written, not yet built or tested**
   wormhole prompt, "Your ship has been destroyed"), and the new-pilot travel hint
   chain (STR# 2002 #22-31) was added. The `përs` HailQuote broadcast got its
   player-class gates (flags 0x1000 / 0x2000 / 0x4000) and the announcement beep.
-- UI-13: Tab / Shift-Tab page cycling in Player Info and the original cargo
-  sentence with count words. Extras and Honors prose with `similar_to` grouping is
-  in the working tree from a later edit (`PlayerInfoPages.swift`), also not built.
+- UI-13: Tab / Shift-Tab page cycling in Player Info, the original cargo sentence
+  with count words, and the Extras and Honors prose with `similar_to` grouping
+  (`PlayerInfoPages.swift`).
 - UI-07: target cycling follows slot order (a freed slot is reused) and skips ships
   in AI state 0x15.
 - Folding hulls (`shän` Flags 0x0002 and 0x0080): fold and unfold for takeoff,
   arrival, jump and the stop box, and the 0x0080 "unfolds to fire" rule.
+- Disabled-hull visuals: `shän` Flags 0x0010 pauses the animation, 0x0020 freezes
+  the alt layer.
 - The eight decompile questions: six closed with no gap; two real gaps fixed (the
   `OnShipDone` auto-abort effects, and stale `<DL>` slot dates).
 - Apple fixes: Classic status-message rectangle, music and ambient loops no longer
@@ -106,14 +107,11 @@ of 2026-10-13 wrote all of the following, **written, not yet built or tested**
 
 Still deferred:
 
-- UI-15: the map's Tab/backslash cycle was built and tested, but it is written from
+- UI-15: the map's Tab/backslash cycle is built and tested, but it is written from
   an inference. The two handlers sit inside the 0x004a3aa0 loop and are not
   decompiled on their own.
 - AI-12: holding a mission ship at a gate.
 - FL-23: the jump-engage countdown and the cannot-jump message auto-clear.
-- Disabled-hull visuals (shän Flags 0x0010 pauses the animation, 0x0020 freezes the alt
-  layer) and the Player Info Extras/Honors prose: written 2026-10-13, awaiting build/test
-  (see "2026-10-13 leftovers" at the end of the plan).
 
 Not gaps, checked against the code on 2026-10-13: Caps Lock 2× mode
 (`GameSpeedRules`, `CapsLockState`, matches the frame loop at 0x00417600; nothing
@@ -147,7 +145,7 @@ One square per function in the EV Nova CE executable, grouped by subsystem.
 | Outline | Gameplay code whose role is still unknown. |
 | Dark grey | Nothing to port: C runtime, QuickTime, image and audio libraries, networking, blitters, Windows glue, the shareware nag, plus drawing and debug plumbing found during checking. |
 
-The grid was regenerated on 2026-10-13 after the 16 reopened items were implemented and their headings marked **DONE** (awaiting build/test). Rule, reproducible with
+The grid was regenerated on 2026-10-13 after the 16 reopened items were implemented and their headings marked **DONE**. Rule, reproducible with
 `python3 scripts/reopen-progress.py`: a function that was green, is cited by at
 least one plan item, and is cited by no item marked **DONE** is amber. An open
 item is one whose heading is not **DONE** in the plan; there are none at present. Functions confirmed
@@ -157,13 +155,11 @@ by the line-by-line comparison (no citing item) stay green.
 0 blue, 2,515 dark grey. Of the 697 gameplay functions, 519 are green, 24 teal
 (NovaSwift's own save format, input layer, frame loop, and SwiftUI lists and
 dialogs), 0 amber, and 154 drawing or debug plumbing: 671 of 671 portable functions.
-All 179 plan items are marked **DONE**. The 16 completed on 2026-10-13 (listed above),
-and the other 2026-10-13 closing-pass work, are implemented but not yet built and tested
-by the maintainer; the grid shows them as done on that basis.
+All 179 plan items are marked **DONE**, and all of them are built and tested.
 
 ## Original bugs and quirks
 
-The original executable is ground truth, including behaviour a reimplementation called a bug and changed. NovaSwift keeps those quirks. A `DeathDelay` of 0 or 1 does not leave an immortal ghost: NovaSwift uses a 1.8 s death instead, on purpose. Ships with `shän` Flags 0x0002 fold and unfold (written 2026-10-13, not yet built); landing needs no extra unfold. Fleet ships are spawned with empty holds. The kept quirks and the still-open questions are in §6 of [FIDELITY_PLAN.md](reverse-engineering/FIDELITY_PLAN.md).
+The original executable is ground truth, including behaviour a reimplementation called a bug and changed. NovaSwift keeps those quirks. A `DeathDelay` of 0 or 1 does not leave an immortal ghost: NovaSwift uses a 1.8 s death instead, on purpose. Ships with `shän` Flags 0x0002 fold and unfold; landing needs no extra unfold. Fleet ships are spawned with empty holds. The kept quirks and the still-open questions are in §6 of [FIDELITY_PLAN.md](reverse-engineering/FIDELITY_PLAN.md).
 
 That is a measure of how much code has been compared, not a promise that the
 game plays identically or is bug-free. A comparison can miss timing, ordering
@@ -210,22 +206,27 @@ costing a day.
 
 ## Beyond the original
 
-![NovaSwift's own features](branding/feature-blocks.svg?v=c70227e9)
+![NovaSwift's own features](branding/feature-blocks.svg?v=f9a924e3)
 
 NovaSwift's own features, one square per task: green done, amber partly done,
 outline planned. Currently 165 done, 25 partly done, 28 planned. The list is kept
 by hand in `site/assets/features.json`, with a pointer to the code for each
 task. After editing it, run `python3 scripts/render-progress.py` to redraw
-[feature-blocks.svg](branding/feature-blocks.svg?v=c70227e9) and the summary graphic.
+[feature-blocks.svg](branding/feature-blocks.svg?v=f9a924e3) and the summary graphic.
 
 Partly done, in short: the public online lobby list and iCloud game-data upload
 need the CloudKit schema promoted to Production; multiplayer host migration
 rebuilds the world rather than handing over; the `carryEncounter` session rule
-is not used yet; no plug-ins ship inside the app; the Godot port's Linux build is only headless-verified, its Windows package script has never run and its auto-updater is untested end to end (table below); the Godot port's Key Settings dialog, `.mov` title music, shot murk fog, quick hyperjump and the S26 map rule are written but not yet built, and its LAN multiplayer, plug-in editor and HD packs are planned. Live 3D hulls are written but not yet checked on real devices. Multiplayer has not yet
-been played end to end on two real devices. The plug-in importer can't open
-StuffIt archives that use the newer compression methods, and most catalog
-entries have no icon yet. Classic Mac pilot import still needs testing against
-more real pilots. Smooth rotation only applies to HD ships.
+is not used yet; Apple-to-desktop cross-play is written and loopback-tested but
+not yet in a TestFlight build; no plug-ins ship inside the app; the Godot port's
+auto-updater has not yet updated an installed build end to end, its plug-in
+editor is early, and it has no HD packs yet. Live 3D hulls are written but not
+yet checked on real devices. Desktop multiplayer has been played across two
+machines; Game Center sessions have not yet been played on two real devices. The
+plug-in importer can't open StuffIt archives that use the newer compression
+methods, and most catalog entries have no icon yet. Classic Mac pilot import
+still needs testing against more real pilots. Smooth rotation only applies to HD
+ships.
 
 HD graphics and 3D models work in game: HD sprite sheets, 3D models rendered
 into every frame (with engine glow, running lights and weapon flash), HD
@@ -242,9 +243,12 @@ None of these change the game's rules:
 - Touch controls; complete controller support — remapping, an on-screen cursor that reaches every screen, sheet, dialog and alert (Ⓑ back, d-pad snapping, right-stick scrolling), DualSense adaptive triggers ([CONTROLS.md](CONTROLS.md)).
 - Apple TV build with a 10-foot UI ([TVOS.md](TVOS.md)).
 - iCloud sync of imported game data ([ICLOUD_SYNC.md](ICLOUD_SYNC.md)).
-- Plug-in store and manager.
-- Co-op multiplayer over local Wi-Fi or Game Center, with host-set rules
-  ([MULTIPLAYER.md](MULTIPLAYER.md)).
+- Plug-in store and manager, and a plug-in editor (full on macOS, early on Linux and Windows).
+- Co-op multiplayer with host-set rules: Game Center and local Wi-Fi on Apple
+  devices; LAN, direct IP, a public server browser and optional encryption on
+  Linux, Steam Deck and Windows ([MULTIPLAYER.md](MULTIPLAYER.md)).
+- A standalone dedicated server with a web admin panel that needs no game data
+  ([DEDICATED_SERVER.md](DEDICATED_SERVER.md)).
 - HD graphics and 3D models from plug-ins, drawn in place of the original
   sprites with the original hit-boxes, frames and exit points
   ([HD_PIPELINE.md](HD_PIPELINE.md)). Off by default.
@@ -255,39 +259,44 @@ None of these change the game's rules:
 
 ## Linux and Windows
 
-The Godot frontend ([GODOT_LAYER.md](GODOT_LAYER.md)) runs the same engine and calls the same Swift helpers as the Apple app, so wherever a helper still differs from the executable, the open plan items apply on both frontends. The fixes for EC-04, EC-05, EC-25, OS-06, EC-26, OS-08 and UI-06 are written in both apps and in the Godot bridge, awaiting build and test. This section is only about frontend wiring. The row-by-row list is [GODOT_FIDELITY_GAPS.md](GODOT_FIDELITY_GAPS.md).
+The Godot frontend ([GODOT_LAYER.md](GODOT_LAYER.md)) runs the same engine and calls the same Swift helpers as the Apple app, so the fidelity work above applies to both frontends. This section is only about frontend wiring and distribution. The row-by-row list is [GODOT_FIDELITY_GAPS.md](GODOT_FIDELITY_GAPS.md).
 
-Packaging (local, no CI; see [PACKAGING.md](PACKAGING.md)): the macOS arm64 app is exported, ad-hoc signed and loads the extension headless. The Linux x86_64 / Steam Deck tarball is built in a `swift:6.3-jammy` container (`scripts/package-linux-docker.sh`), needs glibc 2.35 at most, resolves every library, and in a clean Ubuntu 22.04 container the exported binary loads the extension and parses the game data headless. It has not been run on a real Steam Deck or with a GPU. The Windows package script (`scripts/package-windows.ps1`) is written but has not been run: it needs a Windows PC with the Swift toolchain. No flight visual has been checked on a real GPU on any of these. The local container runtime is Colima (vz with Rosetta); there is no GitHub CI.
+Releases: v0.7.0-beta.2 (2026-10-14) on [GitHub Releases](https://github.com/SirStig/NovaSwift/releases) ships `NovaSwift-linux-x86_64.tar.gz` (Linux and Steam Deck), `NovaSwift-windows-x86_64.zip` (not code-signed) and `NovaSwift-macos-arm64.zip` (not notarised), with a signed `update.json`. The maintainer has played it on a real Windows PC, on Linux hardware and on a Steam Deck, and played multiplayer across two machines.
 
-Auto-updater ([UPDATER.md](UPDATER.md), `godot/updater/`): built. A signing key has been generated (the public key is in `godot/updater/`, the private key is outside the repository) and `scripts/release-sign.sh` signs release manifests. It offers Skip This Version / Later / Update Now, has a stable and an experimental channel (Settings ▸ Support ▸ Updates), and can return to stable from an experimental build. It has not been tested end to end: no signed release has been published and installed yet. It does not touch the Apple app.
+Packaging is local, with no CI ([PACKAGING.md](PACKAGING.md)): the Linux package is built on a Linux machine, the Windows package on a Windows PC with the Swift toolchain (`scripts/package-windows.ps1`), and the macOS package on the Mac.
+
+Auto-updater ([UPDATER.md](UPDATER.md), `godot/updater/`): releases carry a manifest signed with `scripts/release-sign.sh` (the public key is in `godot/updater/`, the private key is outside the repository). It offers Skip This Version / Later / Update Now, has a stable and an experimental channel (Settings ▸ Support ▸ Updates), and can return to stable from an experimental build. An installed build updating itself has not yet been verified end to end. It does not touch the Apple app.
+
+Dedicated server ([DEDICATED_SERVER.md](DEDICATED_SERVER.md)): released as server-v0.1.0 for Linux and macOS. The Windows server is untested.
 
 | Subsystem | State |
 |---|---|
-| Flight, HUD, radar, targeting, landing, spaceport, story runtime, pilots, gamepad | Done, run on macOS |
-| Live-world wiring (combat rating, scooping, përs spawn gating, pirates boarding the player, defence persistence, bombs, Strict Play) | Done and self-checked (package A) |
-| Gate and wormhole clearance, fee and exit draw, bribe waiver, bar gambling reset, outfitter bank and visit-scoped items, nearest-stellar Land, bomb fuse, rank privileges (OS-06, EC-04, EC-05, EC-09, EC-10, EC-25, EC-26, EC-28, OS-08, UI-06) | Written 2026-10-13, not yet built or run (`godot/tests/fidelity_selfcheck.gd`, `gameplay_gaps_selfcheck.gd`) |
-| Status line, messages, HUD icons | Done and self-checked (package B) |
-| Controls and targeting checklist, performance (release bridge, sprite cache and prewarm, asteroid layout) | Done |
+| Flight, HUD, radar, targeting, landing, spaceport, story runtime, pilots, gamepad | Done |
+| Live-world wiring (combat rating, scooping, përs spawn gating, pirates boarding the player, defence persistence, bombs, Strict Play) | Done |
+| Gate and wormhole clearance, fee and exit draw, bribe waiver, bar gambling reset, outfitter bank and visit-scoped items, nearest-stellar Land, bomb fuse, rank privileges (OS-06, EC-04, EC-05, EC-09, EC-10, EC-25, EC-26, EC-28, OS-08, UI-06) | Done, built and tested |
+| Status line, messages, HUD icons, original status-line text, travel hint chain, `përs` quote gates | Done |
+| Controls and targeting checklist, controller action wheels, performance (release bridge, sprite cache and prewarm, asteroid layout) | Done |
+| Data Setup wizard (import your own EV Nova data) | Done |
 | Plug-ins: all 13 catalog plug-ins load with the same counts as the shared merge and pass `scripts/plugins-check.sh` | Done |
 | Total-conversion add-on lists, `dësc` movies, intro movie and GIF, total-conversion fonts, bar race movies | Done, in both apps |
-| Hypergate and wormhole entry movies | Done, built and run on macOS (both apps) |
-| Galaxy map: borders, mission markers, Tab and backslash link cycle | Done, built and run on macOS. The cycle is an inference (handlers not decompiled) |
-| Sound-parity fixes, spaceport ambient loop, brightness veil | Done, built and run on macOS |
-| About-dialog picture | Done, built and run on macOS |
-| Key Settings dialog (DITL 4002), title music from a `.mov`, shot murk fog, `playMovies` gate audit, NPC warp-effect check, map link-cycle and silent-J sounds (S25, S26) | Written 2026-10-13, not yet built or run (self-checks in `godot/tests/`) |
-| Quick hyperjump enhancement and its charge loop (S12), original status-line text, travel hint chain, Player Info Tab cycling, `përs` quote gates | Written 2026-10-13, not yet built or run (`closing_pass_selfcheck.gd`, `status_text_closing_selfcheck.gd`) |
-| macOS arm64 package | Built and verified headless |
-| Linux x86_64 / Steam Deck package | Built and verified headless in containers; not run on a real Deck or GPU |
-| Windows package | Script written, never run (needs a Windows PC with Swift) |
-| Auto-updater, experimental channel, release signing | Built; not tested end to end |
-| Flight visuals on a real GPU | Not verified |
+| Hypergate and wormhole entry movies | Done, in both apps |
+| Galaxy map: borders, mission markers, Tab and backslash link cycle | Done. The cycle is an inference (handlers not decompiled) |
+| Sound parity, spaceport ambient loop, brightness veil, About-dialog picture | Done |
+| Key Settings dialog (DITL 4002), title music from a `.mov`, shot murk fog, `playMovies` gate audit, NPC warp effect, map link-cycle and silent-J sounds (S25, S26) | Done, built and tested |
+| Quick hyperjump enhancement and its charge loop (S12), Player Info Tab cycling | Done, built and tested |
+| Multiplayer: LAN browser, direct IP, public server browser, optional DTLS, trade | Released in beta.2, played across two machines |
+| Apple-to-desktop cross-play | Written on both sides and loopback-tested; the Apple side is not yet in a TestFlight build |
+| Plug-in editor (`godot/editor/`) | In beta.2, early (undo does not clear the unsaved mark) |
+| macOS arm64 package | Released |
+| Linux x86_64 / Steam Deck package | Released, played on real hardware |
+| Windows x86_64 package | Released, played on a real Windows PC |
+| Auto-updater, experimental channel, release signing | Signed manifests published; in-app update not yet verified end to end |
+| HD graphics packs | Not started (NovaSwiftHD is Apple-only) |
 
 ## Known gaps
 
-- The 16 plan items completed 2026-10-13 (listed above): implemented, awaiting the maintainer's build and test. EC-09 adds a `stockBank` field to the pilot save (old saves still load).
-- The deferred pieces listed above (UI-15's map cycling inference, AI-12, FL-23) and the closing-pass work that is written but not yet built.
+- The deferred pieces listed above: UI-15's map cycling inference, AI-12, FL-23.
 - Open questions in §6 of the fidelity plan.
-- Apple app, found against the decompile and fixed 2026-10-13 (written, not yet built): the Classic status-message rectangle, title music scaled by the volume step twice, the ambient and quick-hyperjump loops scaled by the Effects slider twice, and the ambient check (`>= 128`). The newest total-conversion and gate-movie edits were built and tested on macOS.
 - Mission BBS and offer windows lack the original's map, Player Info and
   text-scroll keys.
 - Presentation defaults that differ from the original (ship bar position,
@@ -295,5 +304,7 @@ Auto-updater ([UPDATER.md](UPDATER.md), `godot/updater/`): built. A signing key 
   decision.
 - Two cosmetic `cölr` fields have no target: `menuFont`/`menuFontSize` (our main
   menu labels are PICT art) and `progressBar` (our loading bar reflows).
+- Linux, Steam Deck and Windows: the auto-updater has not yet updated an
+  installed build end to end, and there are no HD packs.
 
 Bugs go in the [issue tracker](https://github.com/SirStig/NovaSwift/issues).

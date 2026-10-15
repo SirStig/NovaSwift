@@ -5,7 +5,7 @@
 NOVA Swift is a reimplementation of the Escape Velocity Nova engine (Ambrosia
 Software, 2002), written in Swift from a reverse-engineered reading of the
 original executable. It runs natively on macOS, iPadOS, iOS and tvOS, with a
-Godot frontend for Linux, Steam Deck and Windows (experimental beta).
+Godot frontend for Linux, Steam Deck and Windows (public beta).
 
 It is not an emulator or a wrapper. The engine reads the game data from your
 own copy of EV Nova and plays it. No game data is included.
@@ -53,7 +53,7 @@ The function-by-function view is in [docs/STATUS.md](docs/STATUS.md) and on the
 <details>
 <summary>Features beyond the original, and parts of the original that aren't needed</summary>
 
-![NovaSwift's own features](docs/branding/features-summary.svg?v=77cbf046)
+![NovaSwift's own features](docs/branding/features-summary.svg?v=fc6fbd12)
 
 ![Parts of the original NovaSwift doesn't need](docs/branding/not-needed-summary.svg?v=0f518ead)
 
@@ -106,9 +106,12 @@ Sources/
   NovaSwiftKit/          Resource parsing, typed decoders, sprite/PICT codecs, plug-in editing
   NovaSwiftEngine/       Simulation: flight, combat, AI, spawning, diplomacy
   NovaSwiftStory/        Missions, crön events, NCB scripting, pilots, economy
-  NovaSwiftNet/          Multiplayer transports (Game Center, local Wi-Fi), sessions
+  NovaSwiftNet/          Multiplayer transports (Game Center, local Wi-Fi), sessions, cross-play protocol
+  NovaSwiftENet/         ENet client, host and LAN discovery (cross-play with the Godot builds)
   NovaSwiftSync/         Multiplayer world-state sync
+  NovaSwiftHD/           HD sprites, 3D models and HD packs
   NovaSwiftPluginStore/  Plug-in catalog, download and install
+  NovaSwiftServer/       Standalone dedicated server (+ NovaSwiftServerCore)
   novaswift-extract/     Command-line inspector and test harness
 Tests/                   Unit tests per library
 app/NovaSwift/           SwiftUI/SpriteKit app, including the Plug-in Editor

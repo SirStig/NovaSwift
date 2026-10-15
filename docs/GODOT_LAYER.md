@@ -3,14 +3,14 @@
 **In progress.** The frontend plays a pilot from the main menu through flight,
 landing, the spaceport, missions, the map and saving. Verified on-toolchain (macOS,
 Swift 6.3 + Godot 4.7): the bridge builds, headless self-checks load real EV Nova
-data and step the simulation, and all 13 catalog plug-ins load. The macOS arm64 and Linux x86_64 (Steam Deck) packages
-have been built and verified headless (see [PACKAGING.md](PACKAGING.md)); nothing has run on a real Steam Deck,
-Windows PC or GPU, and flight visuals have not been checked on a real GPU. The galaxy map, gate movies, sound
-parity and brightness work was built and tested on macOS on 2026-10-13. The 2026-10-13 closing pass (Key Settings,
-`.mov` title music, shot murk, quick hyperjump, status text and travel hints, Player Info) is written but not yet
-built or tested; each such section below says so.
+data and step the simulation, and all 13 catalog plug-ins load. v0.7.0-beta.2 (2026-10-14) ships macOS arm64, Linux x86_64
+(Steam Deck) and Windows x86_64 packages (see [PACKAGING.md](PACKAGING.md)). The maintainer has played the Windows build on a
+Windows PC, the Linux build on Linux hardware and a Steam Deck, and multiplayer across two machines, so flight visuals have run
+on real GPUs; there has been no shader-by-shader comparison against the original. The galaxy map, gate movies, sound
+parity and brightness work was built and tested on 2026-10-13, and the 2026-10-13 closing pass (Key Settings,
+`.mov` title music, shot murk, quick hyperjump, status text and travel hints, Player Info) on 2026-10-14.
 
-This file describes how the layer is built. What is done, written-but-untested and
+This file describes how the layer is built. What is done and
 open is tracked in [GODOT_FIDELITY_GAPS.md](GODOT_FIDELITY_GAPS.md), summarised in
 [STATUS.md](STATUS.md#linux-and-windows). Where this file and those disagree, they win.
 
@@ -335,9 +335,9 @@ NovaWorld's `// MARK: Flight travel` (state in `Flight.swift`) mirrors what the 
 - **Selected stellar**: 1–4 (`select_nav_stellar`), N clears, a new selection disarms the
   armed jump and H re-arms it (`StarMapRoute.selectHyperspace`), the Nav panel readout
   (`nav_readout`: STR# 2002 #342–346), a bracket on the selected body. Hail-stellar and Land
-  use it. When nothing is selected, Land falls back to the nearest body the Swift helper treats as approachable. That pick is `PlayerLanding.nearestTravelStellar` (UI-06): WRITTEN, NOT BUILT (2026-10-13), 16 nav slots and a 500 px gate radius as in the original.
-- **Landing** (`press_land`, UI-08): the Godot path calls the same helpers as the Apple app. First press requests through `LandedServices.landingClearance` / `refusalMessage`, then the clearance line on reaching ±250 px; second press lands inside the square envelope (`PlayerLanding`). The fee is charged on touchdown. The fixes that bring those helpers in line with the executable are WRITTEN, NOT BUILT (2026-10-13): the clearance ladder and the fee also cover hypergates and wormholes (EC-04, EC-05), and a paid bribe is one approach, not a lasting permit (EC-25; the waiver applies to a selected hypergate). `FlightComm.bribeWaiverStellar` is the Swift value the helper reads (it replaces `bribedStellars`).
-- **Gates** (`press_land` on a gate): a wormhole draws its exit with `NovaGame.wormholeExit` (OS-06); a hypergate goes through `LandedServices.landingClearance`, the fee is charged by `chargeGateFee` before the map opens (EC-04, EC-05, EC-25), then the map opens in gate mode. These replace `wormholeExitCandidates` and `SpobRes.playerMayUseGate`; WRITTEN, NOT BUILT (2026-10-13). Arrival routing after a hypergate the pilot is allowed to use still follows the shared gate path: no fuel, no days, the far gate emits the ship on its emergence angle (`World.placePlayerEmergingFromGate`) with the wing coming out of it.
+  use it. When nothing is selected, Land falls back to the nearest body the Swift helper treats as approachable. That pick is `PlayerLanding.nearestTravelStellar` (UI-06): DONE (built and tested 2026-10-14), 16 nav slots and a 500 px gate radius as in the original.
+- **Landing** (`press_land`, UI-08): the Godot path calls the same helpers as the Apple app. First press requests through `LandedServices.landingClearance` / `refusalMessage`, then the clearance line on reaching ±250 px; second press lands inside the square envelope (`PlayerLanding`). The fee is charged on touchdown. The fixes that bring those helpers in line with the executable are DONE (built and tested 2026-10-14): the clearance ladder and the fee also cover hypergates and wormholes (EC-04, EC-05), and a paid bribe is one approach, not a lasting permit (EC-25; the waiver applies to a selected hypergate). `FlightComm.bribeWaiverStellar` is the Swift value the helper reads (it replaces `bribedStellars`).
+- **Gates** (`press_land` on a gate): a wormhole draws its exit with `NovaGame.wormholeExit` (OS-06); a hypergate goes through `LandedServices.landingClearance`, the fee is charged by `chargeGateFee` before the map opens (EC-04, EC-05, EC-25), then the map opens in gate mode. These replace `wormholeExitCandidates` and `SpobRes.playerMayUseGate`; DONE (built and tested 2026-10-14). Arrival routing after a hypergate the pilot is allowed to use still follows the shared gate path: no fuel, no days, the far gate emits the ship on its emergence angle (`World.placePlayerEmergingFromGate`) with the wing coming out of it.
 - **Map**: nebula art (`nav_nebulae` + `pict_rgba`, active explored ones, additive), Find
   (`nav_find` = `StarMapFind`), gate spokes (opt-in), `nav_map_closed` re-syncs the route.
 - **Escorts across jumps**: `FlightEscorts.carryThroughJump` / `respawn` — disabled escorts
@@ -391,7 +391,7 @@ allowed to run — the workflow is back on push/PR now that it can pass.
 Godot **export templates** turn `godot/` + the platform library into shippable
 `.x86_64` (Linux) and `.exe` (Windows) builds; wiring the export presets into CD
 is described in [`PACKAGING.md`](PACKAGING.md) (presets, `scripts/package-macos.sh`,
-`scripts/package-linux-docker.sh`, `scripts/package-windows.ps1`, Steam Deck setup). The in-game auto-updater
+`scripts/package-linux.sh`, `scripts/package-windows.ps1`, Steam Deck setup). The in-game auto-updater
 (`godot/updater/`, signed releases, stable and experimental channels) is in [`UPDATER.md`](UPDATER.md); it is built
 and not yet tested end to end.
 
@@ -494,8 +494,8 @@ and not yet tested end to end.
    the Apple app now calls; `HyperjumpCommit.apply` takes optional services.
    Headless checks: `tests/story_selfcheck.gd` (accept a BBS delivery, jump, land,
    pay + text, calendar advance) and `tests/story_menu_check.gd` (offer modal
-   owns input, BBS/bar/info focus). Gambling, hire escort, jettison and in-flight `pêrs` offers are wired through the same helpers as the Apple app. The gambling reset fix (the previous winner resets when the bar opens, `barOpened`) is WRITTEN, NOT BUILT (EC-26, 2026-10-13). The outfitter bank promotion and visit-scoped items (`outfitterOpen` / `outfitterClose`, EC-09, EC-28) are likewise WRITTEN, NOT BUILT. Mission-offer `dësc` movies are wired (see "Total-conversion add-ons").
-6. **Packaging** — Godot export presets and local package scripts: macOS arm64 and Linux x86_64 built and verified headless; Windows script written, not run; auto-updater built, not tested end to end.
+   owns input, BBS/bar/info focus). Gambling, hire escort, jettison and in-flight `pêrs` offers are wired through the same helpers as the Apple app. The gambling reset fix (the previous winner resets when the bar opens, `barOpened`) is DONE (EC-26, built and tested 2026-10-14). The outfitter bank promotion and visit-scoped items (`outfitterOpen` / `outfitterClose`, EC-09, EC-28) are likewise DONE (built and tested 2026-10-14). Mission-offer `dësc` movies are wired (see "Total-conversion add-ons").
+6. **Packaging** — Godot export presets and local package scripts: macOS arm64, Linux x86_64 and Windows x86_64 packages ship in v0.7.0-beta.2 and have been run on real hardware; auto-updater built, signed manifests published, not yet tested end to end.
 
 ## Non-goals
 
@@ -702,7 +702,7 @@ game data) opens `screens/ClassicPreferences.gd`: DLOG/DITL 4003 through `Classi
 `Prefs [classic]` (Apple defaults: volume 5, brightness 3, all on but update checks). Live effects: the volume
 arrows are the master volume in 1/8 steps (snd 154), Intro Music gates the title music; the other flags are stored
 only (the Godot renderer has no counterpart yet). Key Settings opens the original's key table
-(`screens/ClassicKeySettings.gd`, DLOG/DITL 4002 over backdrop PICT 139/133; WRITTEN, NOT BUILT): 34 cells = DITL items 4-37
+(`screens/ClassicKeySettings.gd`, DLOG/DITL 4002 over backdrop PICT 139/133; built and tested 2026-10-14): 34 cells = DITL items 4-37
 in the Apple cell order (`ClassicKeySettings.CELLS`), a click selects, the next key press binds that cell's `Controls` action
 (plain key, Alt chord, Shift chord or a bare modifier, written to `Controls.overrides`) and the selection steps on; duplicates are
 allowed while editing and OK is refused with the first clashing cell outlined red; Cancel / Esc restores the overrides snapshot, Set

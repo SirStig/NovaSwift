@@ -47,6 +47,9 @@ public final class SystemSyncCoordinator {
     /// `seq` seen from it so stale/out-of-order unreliable frames are dropped.
     private var latestInput: [String: NetIntent] = [:]
     private var highestSeq: [String: UInt32] = [:]
+    /// Authority side: each client's newest reported pose, applied once to its ship on the next `applyInputs` (between
+    /// frames the ship simulates from that client's intent).
+    private var pendingPose: [String: ShipPose] = [:]
     /// Authority side: client playerID → local entity id of the mirror ship we
     /// inject for that co-located client and simulate from its inputs.
     private var clientShipID: [String: Int] = [:]
@@ -62,6 +65,7 @@ public final class SystemSyncCoordinator {
         npcMirrorIDByAuthorityID.removeAll()
         latestInput.removeAll()
         highestSeq.removeAll()
+        pendingPose.removeAll()
         clientShipID.removeAll()
         pendingEffects.removeAll()
     }
@@ -74,6 +78,7 @@ public final class SystemSyncCoordinator {
         npcMirrorIDByAuthorityID.removeAll()
         latestInput.removeAll()
         highestSeq.removeAll()
+        pendingPose.removeAll()
         clientShipID.removeAll()
         pendingEffects.removeAll()
     }
@@ -150,6 +155,7 @@ public final class SystemSyncCoordinator {
             clientShipID[clientID] = nil
             latestInput[clientID] = nil
             highestSeq[clientID] = nil
+            pendingPose[clientID] = nil
             removed.append(localID)
         }
         return (injected, removed)
@@ -162,32 +168,51 @@ public final class SystemSyncCoordinator {
         if let seen = highestSeq[client], frame.seq <= seen { return }
         highestSeq[client] = frame.seq
         latestInput[client] = frame.intent
+        if let pose = frame.pose, NetValidation.valid(pose) { pendingPose[client] = pose }
     }
 
     /// Publish each client's freshest input into `world.remoteIntents`, keyed by the
-    /// mirror ship whose `remotePlayer.peerID` is that client. Call **before**
-    /// `world.step`. A client with no ship yet (not injected) is skipped; a ship
-    /// with no fresh input keeps coasting (handled in the engine as an empty intent).
+    /// mirror ship whose `remotePlayer.peerID` is that client, and move the ship to the
+    /// pose the client last reported. Call **before** `world.step`. A client with no ship
+    /// yet (not injected) is skipped; a ship with no fresh input keeps coasting (handled
+    /// in the engine as an empty intent).
+    ///
+    /// The client owns its own movement: replaying only its relative turn/thrust keys
+    /// from a hull we spawned at a guessed heading keeps that heading error forever (the
+    /// friend's ship shows rotated, and pulling the client toward our copy bends its
+    /// thrust and stops its jump brake from settling).
     public func applyInputs(to world: World) {
-        guard !latestInput.isEmpty else { return }
+        guard !latestInput.isEmpty || !pendingPose.isEmpty else { return }
         for ship in world.remotePlayerShips {
-            guard let peer = ship.remotePlayer?.peerID,
-                  let intent = latestInput[peer] else { continue }
-            world.remoteIntents[ship.entityID] = intent.engineIntent
+            guard let peer = ship.remotePlayer?.peerID else { continue }
+            if let pose = pendingPose.removeValue(forKey: peer) {
+                ship.position = Vec2(pose.x, pose.y)
+                ship.velocity = Vec2(pose.vx, pose.vy)
+                ship.angle = pose.angle
+            }
+            if let intent = latestInput[peer] {
+                world.remoteIntents[ship.entityID] = intent.engineIntent
+            }
         }
     }
 
     /// Build the snapshot to broadcast to clients. Call **after** `world.step`.
     public func snapshot(of world: World, tick: UInt32, ackInputSeq: UInt32 = 0) -> WorldSnapshot {
-        WorldSnapshot.build(from: world, localPlayerID: localPlayerID,
-                            tick: tick, ackInputSeq: ackInputSeq)
+        var snap = WorldSnapshot.build(from: world, localPlayerID: localPlayerID,
+                                       tick: tick, ackInputSeq: ackInputSeq)
+        snap.clientPosesAuthoritative = true
+        return snap
     }
 
     // MARK: - Client side
 
-    /// This frame's input to send to the authority (from the local player's intent).
-    public func input(from intent: ControlIntent, tick: UInt32, seq: UInt32) -> InputFrame {
-        InputFrame(tick: tick, seq: seq, intent: NetIntent(intent))
+    /// This frame's input to send to the authority (from the local player's intent),
+    /// carrying our ship's predicted pose when given.
+    public func input(from intent: ControlIntent, tick: UInt32, seq: UInt32, ship: Ship? = nil) -> InputFrame {
+        let pose = ship.map {
+            ShipPose(x: $0.position.x, y: $0.position.y, vx: $0.velocity.x, vy: $0.velocity.y, angle: $0.angle)
+        }
+        return InputFrame(tick: tick, seq: seq, intent: NetIntent(intent), pose: pose)
     }
 
     /// Reconcile a received snapshot into the local `World` — the shared co-op
@@ -233,7 +258,11 @@ public final class SystemSyncCoordinator {
                 // when death isn't real it can't kill us.
                 world.player.shield = max(0, min(state.shield, world.player.maxShield))
                 world.player.armor = max(deathReal ? 0 : 1, min(state.armor, world.player.maxArmor))
-                reconcileOwnShip(world.player, authoritative: state)
+                // An authority that adopts our sent pose echoes it back a round trip late: converging toward
+                // that would drag us backwards. Only older, input-replaying authorities need the correction.
+                if snapshot.clientPosesAuthoritative != true {
+                    reconcileOwnShip(world.player, authoritative: state)
+                }
                 continue
             }
             if let owner = state.playerID {

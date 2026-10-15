@@ -7,14 +7,11 @@ What's next, roughly in order. For what already works, see
 
 ### Close out the fidelity plan
 
-[FIDELITY_PLAN.md](reverse-engineering/FIDELITY_PLAN.md) has 179 items. All 179 are done. The last 16, reopened after a later read of the executable, were finished on 2026-10-13: OS-06, EC-04, EC-05, EC-07, EC-09, EC-10, EC-11, EC-12, EC-25, EC-26, OS-08, AI-44, UI-06, MS-19, EC-27, EC-28. They are implemented in both apps and marked **DONE** (awaiting build/test); the grid has been regenerated to 671 of 671. What's left:
+[FIDELITY_PLAN.md](reverse-engineering/FIDELITY_PLAN.md) has 179 items. All 179 are done, built and tested, including the 16 reopened after a later read of the executable and the 2026-10-13 closing pass; the grid reads 671 of 671. What's left:
 
-- Build and test those 16 items; any that fail go back to **OPEN** and the grid is regenerated. [STATUS.md](STATUS.md) lists them. EC-09 adds a `stockBank` pilot-save field.
-- Build and test the closing-pass work that is written but not yet built (status-line
-  sentences and hint chain, Player Info Tab cycling, target-cycling order and
-  AI-state filter, folding hulls, `përs` quote gates, the Apple-app fixes listed
-  in STATUS.md), then the pieces still deferred there (gate hold for mission
-  ships, jump-engage countdown).
+- The pieces still deferred in [STATUS.md](STATUS.md): the gate hold for mission
+  ships (AI-12), the jump-engage countdown (FL-23), and decompiling the map's
+  Tab/backslash handlers to confirm the UI-15 inference.
 - The plan's open questions: run the remaining routines in the emulator
   (perishable cargo decay, the legal-record flood split, outfitter cancel and
   the day flag, bar re-offer timing) and the static reads (engine glow states,
@@ -68,12 +65,11 @@ Left:
 
 ### Godot frontend for Linux and Windows
 
-The frontend calls the shared engine and plays through on macOS. Built and tested on macOS: gate movies, map borders and markers, sound parity, brightness, About picture. Packages: macOS arm64 and Linux x86_64 (Steam Deck) are built and verified headless in containers; the Windows script is written and needs a Windows PC with Swift. The auto-updater ([UPDATER.md](UPDATER.md)) is built and not yet tested end to end. What remains, in order: build and test the 2026-10-13 closing pass (status-line text and travel hints, Player Info cycling, quick hyperjump in Godot, Key Settings, `.mov` title music, shot murk fog, folding hulls), run the packages on a real Steam Deck and a Windows PC, test the updater with a signed experimental release, and check flight visuals on a real GPU. The row-by-row list is [GODOT_FIDELITY_GAPS.md](GODOT_FIDELITY_GAPS.md). It does not block the Apple builds. The state table is in [STATUS.md](STATUS.md#linux-and-windows); the design is in [GODOT_LAYER.md](GODOT_LAYER.md).
+In public beta: v0.7.0-beta.2 (2026-10-14) ships for Linux x86_64 / Steam Deck, Windows x86_64 and macOS arm64, and has been played on real hardware on all three. What remains: verify the auto-updater by updating an installed build from a signed release, finish the early desktop plug-in editor, bring HD graphics packs to the desktop build, and keep fixing what testers report. The row-by-row list is [GODOT_FIDELITY_GAPS.md](GODOT_FIDELITY_GAPS.md). The state table is in [STATUS.md](STATUS.md#linux-and-windows); the design is in [GODOT_LAYER.md](GODOT_LAYER.md).
 
 ### Multiplayer
 
-Wider device testing, finer PvP options, and handing authority over when the
-host drops. See [MULTIPLAYER.md](MULTIPLAYER.md).
+Desktop multiplayer (LAN, direct IP, public servers, the dedicated server) is released and has been played across two machines. Next: ship Apple-to-desktop cross-play in a TestFlight build and play a real cross-play session, play Game Center sessions on real devices, promote the CloudKit schema for the public lobby list, finer PvP options, and handing authority over when the host drops without rebuilding the world. See [MULTIPLAYER.md](MULTIPLAYER.md).
 
 ### Plug-in toolkit
 
