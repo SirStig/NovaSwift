@@ -109,8 +109,8 @@ exported in the `.pck`. After building, sign and publish the manifest with
    Y use this folder). Copy your EV Nova folder or the Windows `.zip` onto the Deck first (USB/SD card under
    `/run/media/...`, or download to `~/Downloads`), then pick it in the wizard's *Browse…*; it is copied to
    `~/.local/share/NovaSwift/data` for you.
-3. Steam -> Games -> **Add a Non-Steam Game** -> Browse -> select
-   `NovaSwift.sh` (or `NovaSwift.x86_64`). No `steam_appid.txt` and no Steam
+3. Steam -> Games -> **Add a Non-Steam Game** -> tick **NOVA Swift** in the list (it appears after the
+   first launch), or Browse -> select `NovaSwift.sh`. No `steam_appid.txt` and no Steam
    API are needed; it runs fine outside Steam too.
 4. Controller: in the game's Controller settings choose the **Gamepad**
    template (Steam Input then presents a plain XInput pad, which is what the
@@ -120,8 +120,9 @@ exported in the `.pck`. After building, sign and publish the manifest with
 5. Display: the Deck screen is 1280x800 (16:10). The project is 1280x720 base
    with `expand` stretch, so the extra height is used rather than letterboxed.
    Run fullscreen (Settings -> Video) in Game Mode.
-6. Optional: copy `novaswift.desktop` to `~/.local/share/applications/` (edit
-   `Exec`/`Icon` to absolute paths) for a menu entry.
+6. Menu entry: `NovaSwift.sh` writes `novaswift.desktop` (absolute paths) into the game folder and
+   `~/.local/share/applications/` on each launch, and rewrites it if the folder moves. The shipped
+   `.desktop` only works from Desktop Mode until then (its `%k` is not expanded by Steam).
 
 Saves/settings: `~/.local/share/godot/app_userdata/NOVA Swift (Godot)/`.
 
