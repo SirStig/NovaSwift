@@ -14,7 +14,7 @@ public enum CrossPlayProtocol {
     /// The app's release string (`godot/project.godot` `config/version`). Informational: sent in HELLO and
     /// beacons so the UI can say "different version", never gates a join. A unit test keeps it equal to the Godot
     /// project's so a release bumps both.
-    public static let appVersion = "1.0.0-beta.1"
+    public static let appVersion = "1.0.0-beta.2"
     /// Alias of `version` (older name).
     public static let wireProtocol = version
     public static let defaultPort = 53735
