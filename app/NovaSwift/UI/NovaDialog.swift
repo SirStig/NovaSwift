@@ -358,7 +358,10 @@ private let novaDialogBackTitles: Set<String> = [
 
 /// A dialog footer button (authentic three-slice when data is present).
 struct NovaDialogButton: Identifiable {
-    let id = UUID()
+    /// Stable across re-renders: a fresh `UUID()` per construction made
+    /// `ForEach` rebuild every footer button whenever the parent re-rendered,
+    /// so a mouse click (down and up on the *same* button) could never land.
+    var id: String { title }
     let title: String
     var isDefault = false
     var enabled = true
