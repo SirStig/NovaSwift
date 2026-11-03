@@ -69,6 +69,12 @@ enum BugReport {
             files.append("diagnostics.txt")
         }
 
+        // The previous run's uncaught exception, if it died in one.
+        if let crash = CrashDiagnostics.previousReport() {
+            try Data(crash.utf8).write(to: staging.appendingPathComponent("previous-exception.txt"))
+            files.append("previous-exception.txt")
+        }
+
         let log = await ConsoleLogStore.snapshot()
         try Data(BugReportText.log(log.map { ($0.date, $0.text) }).utf8)
             .write(to: staging.appendingPathComponent("console.log"))

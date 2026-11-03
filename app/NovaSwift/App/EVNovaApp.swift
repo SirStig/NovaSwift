@@ -8,6 +8,7 @@ struct NovaSwiftApp: App {
 
     init() {
         HangWatchdog.shared.start()
+        CrashDiagnostics.install()
     }
 
     var body: some Scene {
@@ -19,6 +20,18 @@ struct NovaSwiftApp: App {
                 #endif
                 .preferredColorScheme(.dark)
         }
+        #if os(macOS) && DEBUG
+        .commands {
+            // Layout crash hunt: usable from any screen (launcher, menus,
+            // editor), not just the in-game console's `winstress`.
+            CommandMenu("Debug") {
+                Button("Toggle Window Stress (60 s)") {
+                    if WindowStress.isRunning { WindowStress.stop() } else { WindowStress.start(seconds: 60) }
+                }
+                .keyboardShortcut("w", modifiers: [.control, .option, .command])
+            }
+        }
+        #endif
         #if !os(tvOS)
         // Keep the standard title bar on macOS so the window's close / minimize /
         // zoom controls live in the title bar and never overlay the game or HUD.

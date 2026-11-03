@@ -233,6 +233,16 @@ struct DevToolsPane: View {
                     }
                 }
             }
+            #if os(macOS)
+            Text("Window stress: random resizes, zooms and full-screen toggles (layout crash hunt).")
+                .font(.system(size: 11 * devFontScale))
+                .foregroundStyle(.white.opacity(0.55))
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+                commandChip("Window stress 30 s", "winstress 30", symbol: "arrow.up.left.and.arrow.down.right")
+                commandChip("Stop", "winstress stop", symbol: "stop.fill", tint: devConsoleRed)
+            }
+            #endif
         }
     }
 

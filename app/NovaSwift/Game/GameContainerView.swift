@@ -4365,7 +4365,19 @@ struct GameContainerView: View {
             }
         })
 
-        console.register(.init(name: "clearnpcs", summary: "Remove every NPC from the live system.", usage: "clearnpcs") { _ in
+        #if os(macOS)
+        console.register(.init(name: "winstress", summary: "Hammer the window with random resizes / zooms / full-screen toggles (layout crash hunt).", usage: "winstress [seconds|stop]") { args in
+            if args.first?.lowercased() == "stop" {
+                WindowStress.stop()
+                return "Window stress stopped."
+            }
+            let seconds = args.first.flatMap(Double.init) ?? 30
+            WindowStress.start(seconds: seconds)
+            return "Window stress running for \(Int(seconds)) s. Use 'winstress stop' to end it."
+        })
+        #endif
+
+        console.register(.init(name: "clearnpcs",summary: "Remove every NPC from the live system.", usage: "clearnpcs") { _ in
             let n = debug.scene?.debugClearAllNPCs() ?? 0
             return "Cleared \(n) ship\(n == 1 ? "" : "s")."
         })

@@ -33,6 +33,15 @@ final class HangWatchdog: @unchecked Sendable {
         shared.lock.unlock()
     }
 
+    /// The most recent breadcrumb and how long ago it was dropped, for crash
+    /// diagnostics (`CrashDiagnostics`) to say what the app was last doing.
+    static var lastBreadcrumb: (text: String, ageMs: Int) {
+        shared.lock.lock()
+        defer { shared.lock.unlock() }
+        let age = (ProcessInfo.processInfo.systemUptime - shared.breadcrumbAt) * 1000
+        return (shared.breadcrumb, Int(age))
+    }
+
     func start() {
         lock.lock()
         defer { lock.unlock() }
