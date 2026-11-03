@@ -329,8 +329,23 @@ const MENU_PICT_TOP := 0x118
 class _Readout extends Control:
 	var menu
 	var data := {}
+	var _os := 0.0
+
+	## The canvas is scaled to fit the window; hand-drawn text gets that scale as font oversampling
+	## (draw_string doesn't pick up oversampling_with_scale) and redraws when it changes.
+	func _ready() -> void:
+		set_notify_transform(true)
+
+	func _notification(what: int) -> void:
+		if what == NOTIFICATION_TRANSFORM_CHANGED and not is_equal_approx(_scale_now(), _os):
+			queue_redraw()
+
+	func _scale_now() -> float:
+		var k := snappedf(get_screen_transform().get_scale().x, 0.01)
+		return 0.0 if is_equal_approx(k, 1.0) else k
 
 	func _draw() -> void:
+		_os = _scale_now()
 		var pal: Dictionary = menu.layout
 		var font: Font = Theme_.font_for(str(pal.get("font", "Geneva")))
 		var fs := int(pal.get("fontSize", 9))
@@ -340,12 +355,12 @@ class _Readout extends Control:
 		var cy := DESIGN.y / 2.0
 		for line in data.get("lines", []):
 			draw_string(font, Vector2(cx + float(line["dx"]), cy + float(line["baseline"])), str(line["text"]),
-				HORIZONTAL_ALIGNMENT_LEFT, -1, fs, dim if bool(line["label"]) else bright)
+				HORIZONTAL_ALIGNMENT_LEFT, -1, fs, dim if bool(line["label"]) else bright, 3, 0, 0, _os)
 		var centred := str(data.get("centred", ""))
 		# "No Pilot File Loaded" waits for the bottom shutter to land.
 		if centred != "" and menu._strip_settled(2):
 			var w := font.get_string_size(centred, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-			draw_string(font, Vector2(cx - w / 2.0, cy + 0x136), centred, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, dim)
+			draw_string(font, Vector2(cx - w / 2.0, cy + 0x136), centred, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, dim, 3, 0, 0, _os)
 
 
 # --- input ----------------------------------------------------------------------------------

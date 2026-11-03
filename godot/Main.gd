@@ -415,6 +415,7 @@ func _process(delta: float) -> void:
 		_flight.set_active(false)
 		if not _spaceport.is_open():
 			_spaceport.open()   # screens/Spaceport.gd owns input while docked
+		_spaceport.set_reserved_right(_classic_bar_width())
 		_flight.prewarm_step(4.0)   # warm the launch system's art while docked (off-thread decode, budgeted upload)
 		var ns: Node = get_node_or_null("/root/NetService")
 		if ns != null and ns.has_method("wants_landed_sim") and ns.wants_landed_sim():
@@ -751,7 +752,7 @@ func _sync_classic_hud() -> bool:
 		var hud = AuthenticHUD.new()
 		hud.setup(nova)
 		if hud.is_ready():
-			hud.active = func(): return not _shell.in_menu() and not nova.is_landed()
+			hud.active = func(): return not _shell.in_menu()   # stays up while landed, beside the spaceport
 			_classic_hud = CanvasLayer.new()
 			_classic_hud.layer = 5
 			_classic_hud.add_child(hud)
@@ -916,6 +917,13 @@ func _shadow_string(font: Font, pos: Vector2, text: String, size: int, col: Colo
 	draw_string(font, pos + Vector2(0, 1), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(0, 0, 0, 0.9 * col.a))
 	draw_string(font, pos + Vector2(1, 2), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(0, 0, 0, 0.45 * col.a))
 	draw_string(font, pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
+
+
+## Width of the Classic status bar on the right of the window; 0 when it isn't showing.
+func _classic_bar_width() -> float:
+	if not _classic_hud_on or _classic_hud == null or not _classic_hud.get_child(0).visible:
+		return 0.0
+	return _classic_hud.get_child(0).bar_width(get_viewport().get_visible_rect().size)
 
 
 ## The Classic message rect for a `vp` window (AuthenticHUD.message_rect); Rect2() outside Classic.

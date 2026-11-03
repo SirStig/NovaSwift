@@ -105,6 +105,14 @@ func is_open() -> bool:
 	return visible
 
 
+## Keep `w` px on the right clear for the Classic status bar: the original never hides the ship's
+## readout (credits, cargo, fuel, shields) behind the landing screen. Apple: SpaceportView is framed
+## to the play width beside AuthenticHUDView. 0 = full window.
+func set_reserved_right(w: float) -> void:
+	if not is_equal_approx(_root.offset_right, -w):
+		_root.offset_right = -w
+
+
 ## True when the docked UI is drawn in the Classic (original EV Nova) presentation.
 func _classic() -> bool:
 	return ClassicTheme.classic("dialogs")
