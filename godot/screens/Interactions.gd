@@ -34,7 +34,8 @@ var _focus_key := ""
 var _tex := {}                    # PICT id / sprite key -> Texture2D (or null)
 var _hud: PanelContainer          # the Escort Commands panel (never blocks input)
 var _hud_box: VBoxContainer
-var _esc_group := -1              # Escorts window: -1 all, else EscortType
+var _hud_key := ""                # what _hud_box currently shows, to skip no-op rebuilds
+var _esc_group := -1             # Escorts window: -1 all, else EscortType
 var _esc_sel := -1                # Escorts window: selected roster record
 var _name_edit: LineEdit
 var _capture := {}
@@ -487,14 +488,21 @@ func _refresh_escort_panel() -> void:
 	if not nova.escort_panel_open():
 		_hud.visible = false
 		return
-	var st := _json(nova.escort_panel_state())
+	var raw: String = nova.escort_panel_state()
+	var st := _json(raw)
 	if st.is_empty():
 		_hud.visible = false
 		return
+	var classic := _classic()
+	# Called every frame: only rebuild the rows when what they show has changed.
+	var key: String = "%s|%s" % [classic, raw]
+	if key == _hud_key:
+		_hud.visible = true
+		return
+	_hud_key = key
 	for c in _hud_box.get_children():
 		_hud_box.remove_child(c)
 		c.queue_free()
-	var classic := _classic()
 	_style_hud(classic)
 	if classic:
 		# Ui_DrawTargetCategoryPanel: black box, grey border, white title, green selected row.

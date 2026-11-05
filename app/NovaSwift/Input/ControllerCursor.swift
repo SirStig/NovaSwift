@@ -104,12 +104,18 @@ final class CursorTargets: ObservableObject {
     // MARK: Hosts, layers, suspension
 
     func pushHost(_ id: UUID) {
+        guard hostStack.last != id else { return }
         hostStack.removeAll { $0 == id }
         hostStack.append(id)
     }
 
+    /// Guarded because mutating a `@Published` array publishes even when nothing
+    /// changes, and `forget` calls this for every freed `CursorRegistration`, not
+    /// just hosts. Unguarded, a button rebuilt by a re-render freed a registration,
+    /// which re-rendered everything observing this registry, in a self-sustaining
+    /// loop that ate mouse clicks.
     func popHost(_ id: UUID) {
-        guard id != Self.rootHost else { return }
+        guard id != Self.rootHost, hostStack.contains(id) else { return }
         hostStack.removeAll { $0 == id }
     }
 

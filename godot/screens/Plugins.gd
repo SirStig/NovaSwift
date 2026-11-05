@@ -1927,8 +1927,10 @@ func _process(delta: float) -> void:
 			working = true
 	_refresh_label.visible = bool(cat.refreshing)
 	if cat.busy or cat.refreshing or working:
-		# Refresh progress / catalog arrival, unless the player is typing.
-		if (tab == "Browse" or detail_id != "") and not (get_viewport().gui_get_focus_owner() is LineEdit):
+		# Refresh progress / catalog arrival, unless the player is typing or mid-click:
+		# rebuilding between press and release frees the button and loses the click.
+		var mid_click: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or Input.is_action_pressed("ui_accept")
+		if (tab == "Browse" or detail_id != "") and not mid_click and not (get_viewport().gui_get_focus_owner() is LineEdit):
 			var pos := _scroll.scroll_vertical
 			var f := get_viewport().gui_get_focus_owner()
 			var focus_key := ""

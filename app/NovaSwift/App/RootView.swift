@@ -1,5 +1,20 @@
 import SwiftUI
 
+/// The pad keyboard when no sheet is up. Its own view so that only this observes
+/// `CursorTargets`: on `RootView` every hover change re-rendered the whole app.
+private struct RootPadKeyboardLayer: View {
+    @EnvironmentObject private var model: AppModel
+    @ObservedObject private var registry = CursorTargets.shared
+
+    var body: some View {
+        if let request = model.padKeyboard, registry.activeHost == CursorTargets.rootHost {
+            PadKeyboardView(request: request)
+                .id(request.id)
+                .transition(.opacity)
+        }
+    }
+}
+
 /// Routes between the launcher and the running game.
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
@@ -7,8 +22,6 @@ struct RootView: View {
     /// Data is loaded but the authentic menu's art wouldn't decode — show the
     /// modern menu rather than an endless loading screen.
     @State private var menuArtFailed = false
-    /// Which cursor host is on top (root vs. a presented sheet).
-    @ObservedObject private var cursorRegistry = CursorTargets.shared
     #if os(tvOS)
     /// Drives the controller-required gate: shows/hides live with pairing.
     @ObservedObject private var padState = PadState.shared
@@ -147,12 +160,8 @@ struct RootView: View {
 
             // Only while no sheet is up — a sheet's `.cursorHost()` shows the
             // keyboard inside itself, where its text field is.
-            if let request = model.padKeyboard, cursorRegistry.activeHost == CursorTargets.rootHost {
-                PadKeyboardView(request: request)
-                    .id(request.id)
-                    .zIndex(48)
-                    .transition(.opacity)
-            }
+            RootPadKeyboardLayer()
+                .zIndex(48)
 
             // The controller-driven UI cursor, above everything so it can
             // click into any screen. Inert without a pad, during flight, and

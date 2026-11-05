@@ -1691,6 +1691,10 @@ static func _signature(n: Node, out: PackedStringArray) -> void:
 
 
 func _refresh_dynamic() -> void:
+	# Rebuilding between press and release frees the button and loses the click.
+	# The 1 s tick picks up whatever this skips.
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or Input.is_action_pressed("ui_accept"):
+		return
 	for k in _dyns.keys():
 		var dyn: VBoxContainer = _dyns[k] as VBoxContainer
 		if dyn == null or not is_instance_valid(dyn):

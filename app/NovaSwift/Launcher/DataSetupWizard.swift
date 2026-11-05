@@ -340,7 +340,7 @@ struct DataSetupWizard: View {
     /// (Back / Close) sits beside it at its natural width.
     private func phoneFooter(_ buttons: [NovaDialogButton]) -> some View {
         HStack(spacing: 12) {
-            ForEach(buttons) { b in
+            ForEach(Array(buttons.enumerated()), id: \.offset) { _, b in
                 phoneButton(b, fills: b.isDefault || buttons.count == 1)
             }
         }

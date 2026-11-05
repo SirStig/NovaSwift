@@ -110,7 +110,10 @@ struct NovaDialog<Content: View>: View {
             // Footer buttons live on the panel art's own grey control strip.
             HStack(spacing: 10) {
                 Spacer()
-                ForEach(buttons) { b in
+                // Keyed by position: stable across re-renders, so a click's
+                // mouse-down and mouse-up land on the same button, and unique
+                // even if a plug-in's labels give two buttons the same title.
+                ForEach(Array(buttons.enumerated()), id: \.offset) { _, b in
                     // Both faces register their own cursor target (NovaButton
                     // internally; the pill via CursorButton) — no outer
                     // registration, or Ⓐ would have two overlapping targets.
@@ -357,11 +360,7 @@ private let novaDialogBackTitles: Set<String> = [
 ]
 
 /// A dialog footer button (authentic three-slice when data is present).
-struct NovaDialogButton: Identifiable {
-    /// Stable across re-renders: a fresh `UUID()` per construction made
-    /// `ForEach` rebuild every footer button whenever the parent re-rendered,
-    /// so a mouse click (down and up on the *same* button) could never land.
-    var id: String { title }
+struct NovaDialogButton {
     let title: String
     var isDefault = false
     var enabled = true
