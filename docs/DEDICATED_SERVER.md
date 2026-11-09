@@ -112,8 +112,10 @@ data or ask a friend. Tailscale/ZeroTier tip is shown on the page.
 
 The server checks GitHub releases tagged `server-v<version>` (every 12 h; Settings toggle) and shows a notice with the link. "Install
 update" (or the opt-in `auto_update`) installs a release only if it carries a valid signature (`server-update.json` + `.sig`, the same RSA key as
-the game updater) and the download matches the signed checksum; it replaces the program file and takes effect after a restart. A sandboxed
-service install has a read-only program file: upgrade it by running the installer again.
+the game updater) and the download matches the signed checksum; it replaces the program file (and any sidecar runtime libs /
+helper scripts that ship next to it in the archive) and takes effect after a restart. Linux packages stay
+`--static-swift-stdlib` for now so older betas can still self-update to a single binary. A sandboxed service install has a
+read-only program file: upgrade it by running the installer again (the installer also copies any `*.so` sidecars).
 
 ## Building
 

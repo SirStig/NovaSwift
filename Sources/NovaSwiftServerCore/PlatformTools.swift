@@ -374,6 +374,8 @@ public final class UpdateChecker {
             return (false, "The update didn't contain the server program.")
         }
         let exe = PlatformTools.executableURL
+        let installDir = exe.deletingLastPathComponent()
+        let payloadRoot = newBinary.deletingLastPathComponent()
         let staged = exe.appendingPathExtension("new")
         do {
             try? FileManager.default.removeItem(at: staged)
@@ -387,10 +389,44 @@ public final class UpdateChecker {
             try FileManager.default.moveItem(at: exe, to: old)
             try FileManager.default.moveItem(at: staged, to: exe)
             #endif
+            // Also refresh any sidecar runtime libs / helper scripts that ship next to the
+            // binary (same layout as a fresh unpack). Static-stdlib builds have none today;
+            // this keeps auto-update correct if a later release bundles shared libraries.
+            Self.installServerSidecars(from: payloadRoot, into: installDir, skipping: binaryName)
         } catch {
             return (false, "Couldn't replace the program file (\(error.localizedDescription)). Download the update by hand.")
         }
         log.info("Updated the server program to \(i.latest ?? "?"). Restart the server to run it.")
         return (true, "Updated to \(i.latest ?? "the new version"). Restart the server to start using it.")
+    }
+
+    /// Copy release sidecars (Swift runtime `.so`/`.dll`, helper scripts, README) into the
+    /// install directory. Never touches `data/`, logs, or config — only files that live next
+    /// to the program in the signed archive.
+    static func installServerSidecars(from payloadRoot: URL, into installDir: URL, skipping binaryName: String) {
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(at: payloadRoot, includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey], options: [.skipsHiddenFiles]) else { return }
+        let skipNames: Set<String> = [
+            binaryName, "data", "logs", "cache", "plugins", "Pilots", "pilots",
+            "server.cfg", "user",
+        ]
+        for item in items {
+            let name = item.lastPathComponent
+            if skipNames.contains(name) { continue }
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: item.path, isDirectory: &isDir), !isDir.boolValue else { continue }
+            let dest = installDir.appendingPathComponent(name)
+            do {
+                if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
+                try fm.copyItem(at: item, to: dest)
+                #if !os(Windows)
+                if name.hasSuffix(".sh") || name.hasSuffix(".so") || name.contains(".so.") {
+                    try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dest.path)
+                }
+                #endif
+            } catch {
+                // Best-effort: the binary itself already replaced successfully.
+            }
+        }
     }
 }

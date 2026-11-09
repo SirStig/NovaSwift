@@ -5,7 +5,7 @@
 $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
 $out = "dist\server"; New-Item -ItemType Directory -Force $out | Out-Null
-swift build -c release --product novaswift-server --scratch-path .build-server-windows
+swift build -c release --product novaswift-server -Xswiftc -Osize --scratch-path .build-server-windows
 if ($LASTEXITCODE -ne 0) { throw "swift build failed" }
 $stage = Join-Path $out "stage-windows"
 Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue

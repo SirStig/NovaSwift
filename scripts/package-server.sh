@@ -43,7 +43,11 @@ linux() {
   echo "==> Linux $arch ($platform) in $IMAGE"
   docker run --rm --platform "$platform" -v "$PWD":/src -w /src "$IMAGE" bash -c "
     set -e
-    swift build -c release --product novaswift-server --static-swift-stdlib --scratch-path /src/.build-server-$arch
+    # Keep --static-swift-stdlib so a single binary still self-updates from older
+    # server builds (the updater replaces NovaSwiftServer; sidecars are optional).
+    # -Osize trims a bit of .text on top of strip; ICU still dominates (~35 MB).
+    swift build -c release --product novaswift-server --static-swift-stdlib \
+      -Xswiftc -Osize --scratch-path /src/.build-server-$arch
     cp /src/.build-server-$arch/release/novaswift-server /src/.build-server-$arch/NovaSwiftServer
     strip /src/.build-server-$arch/NovaSwiftServer || true"
   local d="$OUT/stage-linux-$arch"
@@ -56,7 +60,7 @@ linux() {
 
 macos() {
   echo "==> macOS arm64 (host)"
-  swift build -c release --product novaswift-server --scratch-path .build-server-macos
+  swift build -c release --product novaswift-server -Xswiftc -Osize --scratch-path .build-server-macos
   local d="$OUT/stage-macos"
   stage "$d" .build-server-macos/release/novaswift-server "packaging/server/macos/Start Server.command" packaging/server/macos/com.novaswift.server.plist
   command -v xattr >/dev/null && xattr -rc "$d" 2>/dev/null || true
