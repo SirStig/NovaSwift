@@ -147,9 +147,17 @@ mkdir -p "$DIR/data"
 systemctl stop "$SERVICE" 2>/dev/null || true
 # The program and scripts belong to root (a compromised service can't rewrite them); only data/ is the service's.
 install -o root -g root -m 0755 "$BIN" "$DIR/NovaSwiftServer"
-for f in uninstall.sh README.txt; do
+for f in uninstall.sh README.txt docker-compose.yml Dockerfile install-server.sh; do
   src="$(find "$TMP" -type f -name "$f" | head -1)"; [ -n "$src" ] && install -o root -g root -m 0755 "$src" "$DIR/$f" || true
 done
+# Sidecar Swift runtime libs (present only if a release ships a dynamic-stdlib build).
+PAYLOAD_DIR="$(dirname "$BIN")"
+shopt -s nullglob
+for so in "$PAYLOAD_DIR"/*.so "$PAYLOAD_DIR"/*.so.*; do
+  [ -f "$so" ] || continue
+  install -o root -g root -m 0755 "$so" "$DIR/$(basename "$so")"
+done
+shopt -u nullglob
 chown root:root "$DIR"; chmod 755 "$DIR"
 chown -R "$USER_NAME":"$USER_NAME" "$DIR/data"; chmod 700 "$DIR/data"
 

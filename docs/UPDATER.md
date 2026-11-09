@@ -4,6 +4,12 @@ Code: `godot/updater/`. Release tooling: `scripts/release-sign.sh`. Self-check: 
 
 Releases are made by hand on GitHub (`SirStig/NovaSwift`); there is no CI. The Apple app is not touched by any of this.
 
+Archive **size can shrink** between betas without breaking updates: the installer only requires the platform's
+`required` filenames (`NovaSwift.sh` + `NovaSwift.x86_64` + `NovaSwift.pck` on Linux; `NovaSwift.exe` +
+`NovaSwift.pck` on Windows). Stripped `.so`/`.dylib`/`.dll` contents, a thinner Godot host binary, and a
+smaller `.pck` are all fine — the signed manifest records the new whole-archive SHA-256. See
+[PACKAGING.md](PACKAGING.md#release-size-budget-engine-only--no-ev-nova-data).
+
 **Status (2026-10-14).** Signed manifests (`update.json` + `update.json.sig`) are published with GitHub releases, starting with v0.7.0-beta.2. An end-to-end in-app update (an installed build offered, downloaded and installed a newer release) has not yet been verified.
 
 ## What the player sees

@@ -23,7 +23,35 @@ fi
 
 rm -rf "$OUT"; mkdir -p "$OUT/app"
 "$GODOT" --headless --path godot --import >/dev/null 2>&1 || true
+CUSTOM_MACOS_TEMPLATE="${CUSTOM_MACOS_TEMPLATE:-godot/export_templates/macos_template.app}"
+PRESETS_BAK=""
+restore_presets() {
+  if [ -n "${PRESETS_BAK:-}" ] && [ -f "$PRESETS_BAK" ]; then
+    mv -f "$PRESETS_BAK" godot/export_presets.cfg
+    PRESETS_BAK=""
+  fi
+}
+trap restore_presets EXIT
+if [ -d "$CUSTOM_MACOS_TEMPLATE" ]; then
+  echo "→ using thin custom macOS template: $CUSTOM_MACOS_TEMPLATE"
+  PRESETS_BAK="$(mktemp)"
+  cp godot/export_presets.cfg "$PRESETS_BAK"
+  python3 - "$CUSTOM_MACOS_TEMPLATE" <<'PY'
+import pathlib, re, sys
+tpl = pathlib.Path(sys.argv[1]).resolve().as_posix()
+cfg = pathlib.Path("godot/export_presets.cfg")
+text = cfg.read_text()
+text2, n = re.subn(
+    r'(?m)^(\[preset\.2\.options\][\s\S]*?)^custom_template/release=.*$',
+    r'\1custom_template/release="' + tpl + '"',
+    text, count=1)
+if n != 1:
+    raise SystemExit("failed to patch macOS custom_template/release in export_presets.cfg")
+cfg.write_text(text2)
+PY
+fi
 "$GODOT" --headless --path godot --export-release macOS "$PWD/$OUT/NovaSwift.zip" 2>&1 | grep -E "ERROR" && exit 1 || true
+restore_presets
 ditto -x -k "$OUT/NovaSwift.zip" "$OUT/app"
 APP="$(ls -d "$OUT"/app/*.app)"
 # Godot embeds dylibs in Contents/Frameworks and signs the bundle ad hoc itself (entitlements from the
@@ -39,11 +67,24 @@ codesign --force --sign - --preserve-metadata=entitlements,flags,runtime "$APP"
 codesign --verify --deep --strict "$APP"
 for l in libNovaSwiftGodot libSwiftGodot; do [ -f "$APP/Contents/Frameworks/$l.dylib" ] || { echo "error: $l.dylib not embedded" >&2; exit 1; }; done
 
+# Strip debug symbols from the GDExtension dylibs (keep the Godot host as exported).
+echo "→ stripping Frameworks dylibs"
+for dylib in "$APP/Contents/Frameworks/"*.dylib; do
+  [ -f "$dylib" ] || continue
+  strip -x "$dylib" 2>/dev/null || true
+done
+# Re-seal after strip (ffmpeg was already signed above; strip breaks dylib seals).
+codesign --force --sign - --preserve-metadata=entitlements,flags,runtime "$APP"
+codesign --verify --deep --strict "$APP"
+
 echo "→ headless smoke test (extension must load)"
 LOG="$(NOVA_DATA_DIR="${NOVA_DATA_DIR:-$PWD/data/base}" "$APP/Contents/MacOS/"* --headless --quit-after 120 2>&1 || true)"
 echo "$LOG" | head -8
 echo "$LOG" | grep -qE "SCRIPT ERROR|Can't open dynamic library|Parse Error" && { echo "error: smoke test failed" >&2; exit 1; }
 echo "$LOG" | grep -q "loaded data" || echo "warn: no 'loaded data' line (is NOVA_DATA_DIR set to real data?)"
+
+echo "→ package component sizes"
+du -h "$APP/Contents/MacOS/"* "$APP/Contents/Frameworks/"*.dylib "$APP/Contents/Resources/"*.pck 2>/dev/null | sort -hr | head -20 || true
 
 ditto -c -k --keepParent "$APP" "$OUT/NovaSwift-macos-arm64.zip"
 echo "✓ $OUT/NovaSwift-macos-arm64.zip ($(du -h "$OUT/NovaSwift-macos-arm64.zip" | cut -f1)); app $(du -sh "$APP" | cut -f1)"
