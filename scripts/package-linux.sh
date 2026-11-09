@@ -95,25 +95,70 @@ for so in "$BIN"/*.so*; do
   fi
 done
 
+# Drop debug symbols from bridge + Swift runtime. Godot's export binary is already
+# stripped; these .so files were shipping unstripped and dominated archive size.
+echo "→ stripping shipped shared libraries"
+if command -v strip >/dev/null 2>&1; then
+  for so in "$BIN"/*.so*; do
+    strip --strip-unneeded "$so" 2>/dev/null || strip -S "$so" 2>/dev/null || true
+  done
+fi
+
 if [ "$LIBS_ONLY" -eq 1 ]; then
   echo "✓ Linux libs ready in $BIN (export + assemble: rerun with --skip-build --skip-export after exporting)"
   exit 0
 fi
 
 # --- 3. Godot export ---------------------------------------------------------
+# Prefer a maintained thin custom template when present (scripts/build-godot-template.sh).
+CUSTOM_LINUX_TEMPLATE="${CUSTOM_LINUX_TEMPLATE:-godot/export_templates/linux_release.x86_64}"
+PRESETS_BAK=""
+restore_presets() {
+  if [ -n "${PRESETS_BAK:-}" ] && [ -f "$PRESETS_BAK" ]; then
+    mv -f "$PRESETS_BAK" godot/export_presets.cfg
+    PRESETS_BAK=""
+  fi
+}
+trap restore_presets EXIT
 if [ "$SKIP_EXPORT" -eq 0 ]; then
   command -v "$GODOT" >/dev/null 2>&1 || [ -x "$GODOT" ] || { echo "error: godot not found ($GODOT)" >&2; exit 1; }
   rm -rf "$OUT"; mkdir -p "$OUT"
   echo "→ importing project (first run builds .godot/)"
   "$GODOT" --headless --path godot --import >/dev/null 2>&1 || true   # import exits noisily on a clean tree
+  if [ -x "$CUSTOM_LINUX_TEMPLATE" ]; then
+    echo "→ using thin custom Linux template: $CUSTOM_LINUX_TEMPLATE"
+    PRESETS_BAK="$(mktemp)"
+    cp godot/export_presets.cfg "$PRESETS_BAK"
+    python3 - "$CUSTOM_LINUX_TEMPLATE" <<'PY'
+import pathlib, re, sys
+tpl = pathlib.Path(sys.argv[1]).resolve().as_posix()
+cfg = pathlib.Path("godot/export_presets.cfg")
+text = cfg.read_text()
+text2, n = re.subn(
+    r'(?m)^(\[preset\.0\.options\][\s\S]*?)^custom_template/release=.*$',
+    r'\1custom_template/release="' + tpl + '"',
+    text, count=1)
+if n != 1:
+    raise SystemExit("failed to patch Linux custom_template/release in export_presets.cfg")
+cfg.write_text(text2)
+PY
+  fi
   echo "→ exporting 'Linux' preset"
   "$GODOT" --headless --path godot --export-release "Linux" "$PWD/$OUT/NovaSwift.x86_64"
   [ -x "$OUT/NovaSwift.x86_64" ] || { echo "error: export produced no executable" >&2; exit 1; }
+  restore_presets
 fi
 
 # --- 4. assemble -------------------------------------------------------------
 echo "→ assembling $OUT"
 cp -f "$BIN"/*.so* "$OUT/"
+# Re-strip after copy in case anything was refreshed by the export step.
+if command -v strip >/dev/null 2>&1; then
+  for so in "$OUT"/*.so*; do
+    strip --strip-unneeded "$so" 2>/dev/null || strip -S "$so" 2>/dev/null || true
+  done
+  strip --strip-unneeded "$OUT/NovaSwift.x86_64" 2>/dev/null || true
+fi
 install -m 755 packaging/linux/NovaSwift.sh "$OUT/NovaSwift.sh"
 install -m 644 packaging/linux/novaswift.desktop "$OUT/novaswift.desktop"
 cp -f godot/icon.png "$OUT/novaswift.png"
@@ -147,6 +192,11 @@ if [ -n "${maxglibc:-}" ] && [ "$(printf '%s\n2.38\n' "$maxglibc" | sort -V | ta
   echo "error: needs glibc $maxglibc > 2.38 (SteamOS 3) — build on an older distro" >&2; bad=1
 fi
 [ "$bad" -eq 0 ] || exit 1
+# Size report (helps catch regressions before signing a release).
+echo "→ package component sizes"
+du -h "$OUT"/NovaSwift.x86_64 "$OUT"/libSwiftGodot.so "$OUT"/libNovaSwiftGodot.so "$OUT"/lib_FoundationICU.so* "$OUT"/ffmpeg "$OUT"/NovaSwift.pck 2>/dev/null | sort -hr || true
+so_total="$(du -cb "$OUT"/*.so* 2>/dev/null | tail -1 | awk '{print $1}')"
+echo "  all .so total: $(( so_total / 1024 / 1024 )) MB"
 
 mkdir -p "$(dirname "$ARCHIVE")"
 # No macOS metadata in the archive: COPYFILE_DISABLE drops ._* files; --no-xattrs/--no-mac-metadata (bsdtar) drop the

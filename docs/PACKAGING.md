@@ -153,6 +153,58 @@ tiny decode-only ffmpeg (~3.3–3.7 MB) beside the executable, so nothing has to
   `PATH`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`. With none found, movies are skipped
   exactly as with the original's "QuickTime Movies" preference off.
 
+## Release size budget (engine only — no EV Nova data)
+
+Players never download Swift, Godot templates, or ffmpeg separately: everything needed to run is inside the
+signed archive. The auto-updater replaces files by name (`NovaSwift.sh` / `NovaSwift.x86_64` / `NovaSwift.pck`
+on Linux; `NovaSwift.exe` / `NovaSwift.pck` on Windows) and leaves the player's `data/` alone, so a smaller
+beta.3 archive is a drop-in update as long as those names stay put.
+
+### What dominates the Godot archives (v1.0.0-beta.2 reference)
+
+| Piece | Linux (unpacked) | Notes |
+|---|---:|---|
+| Stock Godot export binary | ~71 MB | Cut further with a thin custom template (below) |
+| `libSwiftGodot.so` | ~69 MB unstripped → ~20 MB stripped | Packaging now strips |
+| `libNovaSwiftGodot.so` | ~51 MB unstripped → ~16 MB stripped | Packaging now strips |
+| Swift runtime + ICU | ~77 MB | Dynamic runtime + `$ORIGIN` (required; do **not** use `-static-stdlib`) |
+| curl / TLS stack from FoundationNetworking | ~16 MB | Pulled in by `ldd` on Linux |
+| `.pck` + mini-ffmpeg | ~8 MB | Branding PNGs compressed; ffmpeg stays bundled |
+
+macOS is smaller (~46 MB zip) because it uses the system Swift runtime and only embeds the two GDExtension
+dylibs (also stripped by `package-macos.sh`). Windows mirrors Linux but previously copied **every** Swift
+runtime DLL; packaging now walks dependents and skips tooling DLLs (`swiftRemoteMirror`, Onone, …).
+
+### Packaging size controls (already wired)
+
+1. **`strip` on all shipped Swift / GDExtension libs** in `package-linux.sh`, `package-macos.sh`, and
+   `package-windows.ps1` (when `llvm-strip`/`strip` exists). The Godot host was already stripped.
+2. **Windows runtime DLL filter** — dependency walk from `NovaSwiftGodot.dll` / `SwiftGodot.dll` plus a
+   core Foundation/ICU allow-list; no more `Copy-Item "$rtBin\*.dll"`.
+3. **Optional thin Godot export templates** — `scripts/build-godot-template.sh [linux|windows|macos|all]`
+   builds optimize=size templates with 3D/Jolt/XR/CSG/… modules off into `godot/export_templates/`
+   (git-ignored). Packaging scripts use them automatically when present; otherwise the official 4.7.2
+   templates remain the fallback. Layout for the updater is unchanged.
+4. **Component size echo** at the end of `package-linux.sh` / `package-macos.sh` so regressions show up
+   before `release-sign.sh`.
+
+### Dedicated server (~25 MB Linux gz)
+
+Still `--static-swift-stdlib` + `strip` so a single file self-updates from older betas (the in-app updater
+replaces `NovaSwiftServer`, and now also refreshes any sidecar libs/scripts next to it). ~half of the
+uncompressed binary is ICU. Dynamic-stdlib is deliberately **not** flipped yet: an older server binary
+would install only the new executable and then fail to start. Installer / self-update are ready for
+sidecars when that cut is safe. Release builds pass `-Osize`.
+
+### Apple native app (TestFlight / App Store)
+
+Not produced by these scripts (Xcode Archive). Size levers in `app/NovaSwift.xcodeproj`:
+
+- `ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO` so tvOS top-shelf (~10 MB) is not forced into
+  every iOS/mac slice (App Thinning keeps the right idiom).
+- Release: `DEPLOYMENT_POSTPROCESSING`, `STRIP_INSTALLED_PRODUCT`, `STRIP_SWIFT_SYMBOLS`, thin LTO.
+- Compressed launch/menu PNGs; removed unused `NovaSwiftDialogFrame` asset.
+
 ## Status / caveats
 
 - v1.0.0-beta.1 (2026-10-14; also v0.7.0-beta.2 before it) ships all three: macOS arm64 (built and ad-hoc signed locally), Linux x86_64 (built with
