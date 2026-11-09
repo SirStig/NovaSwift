@@ -341,6 +341,15 @@ func _on_tab(i: int) -> void:
 func _apply_tab() -> void:
 	kb.visible = tab == 0
 	pad.visible = tab == 1
+	# Hidden tabs must not keep polling Input / redrawing every frame (Steam Deck stutter).
+	if kb.has_method("set_live"):
+		kb.set_live(tab == 0)
+	else:
+		kb.set_process(tab == 0)
+	if pad.has_method("set_live"):
+		pad.set_live(tab == 1)
+	else:
+		pad.set_process(tab == 1)
 	_body.visible = tab != 2
 	_opts_row.visible = tab != 2
 	_wheels_page.visible = tab == 2

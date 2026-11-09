@@ -237,6 +237,7 @@ func _process(delta: float) -> void:
 		_seed_position()
 	_sync_os_mouse(active)
 	var target_alpha := 1.0 if active else 0.0
+	var prev_alpha := _alpha
 	_alpha = move_toward(_alpha, target_alpha, delta * 8.0)
 	if not active:
 		ClassicTheme.set_pad_hover(null)
@@ -244,9 +245,12 @@ func _process(delta: float) -> void:
 		if _a_held:
 			_a_held = false
 			_send_button(MOUSE_BUTTON_LEFT, false)
+		var prev_p := _press
 		_press = move_toward(_press, 0.0, delta * 8.0)
-		_pointer.visible = _alpha > 0.01
-		if _pointer.visible:
+		var show := _alpha > 0.01
+		var vis_changed := _pointer.visible != show
+		_pointer.visible = show
+		if show and (vis_changed or not is_equal_approx(prev_p, _press) or not is_equal_approx(prev_alpha, _alpha)):
 			_pointer.queue_redraw()
 		return
 
@@ -294,11 +298,16 @@ func _process(delta: float) -> void:
 	else:
 		_scroll_acc = Vector2.ZERO
 
+	var prev_press := _press
+	var prev_hover := _hover_anim
 	_press = move_toward(_press, 1.0 if _a_held else 0.0, delta * (14.0 if _a_held else 7.0))
 	_hover_anim = move_toward(_hover_anim, 1.0 if _over_clickable else 0.0, delta * 9.0)
+	var pos_changed := _pointer.position != _pos or not _pointer.visible
 	_pointer.visible = true
 	_pointer.position = _pos
-	_pointer.queue_redraw()
+	# Only redraw the pointer when it actually moved or its press/hover animation ticked.
+	if pos_changed or not is_equal_approx(prev_press, _press) or not is_equal_approx(prev_hover, _hover_anim):
+		_pointer.queue_redraw()
 
 
 ## Only one pointer on screen: the OS mouse pointer is hidden while the pad cursor is up, and shown again the

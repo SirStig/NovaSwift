@@ -35,6 +35,9 @@ var _hover_id: Variant = null
 var _live: Dictionary = {}
 var _s := 1.0                       # px per mm
 var _origin := Vector2.ZERO
+var _live_on := true
+var _poll_acc := 0.0
+const LIVE_HZ := 20.0               # joy poll + pulse redraws; full Art.draw every frame was Deck-heavy
 
 
 class Hit extends Control:
@@ -61,6 +64,12 @@ class Hit extends Control:
 func _ready() -> void:
 	resized.connect(_layout)
 	set_style(Model.pad_style())
+	set_live(is_visible_in_tree())
+
+
+func set_live(on: bool) -> void:
+	_live_on = on
+	set_process(on)
 
 
 func set_style(s: String) -> void:
@@ -339,10 +348,15 @@ func _draw() -> void:
 				draw_string(f2, Vector2(x0, ly + 24.0), "Stick: " + role, align, wmax, 10, Color(1, 1, 1, 0.34))
 
 
-func _process(_delta: float) -> void:
-	if not is_visible_in_tree():
+func _process(delta: float) -> void:
+	if not _live_on or not is_visible_in_tree():
 		return
+	_poll_acc += delta
+	if _poll_acc < 1.0 / LIVE_HZ:
+		return
+	_poll_acc = 0.0
 	var devs := Input.get_connected_joypads()
+	# Pulse anim needs a steady redraw cadence; otherwise only redraw when a press state flips.
 	var changed_any := not _pulse.is_empty()
 	for id in hits:
 		var on := false
