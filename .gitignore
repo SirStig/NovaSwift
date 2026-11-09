@@ -61,3 +61,7 @@ packaging/out/
 
 # scripts/build-mini-ffmpeg.sh source/object cache
 .ffmpeg-build/
+
+# Thin custom Godot export templates (scripts/build-godot-template.sh) and Godot sources.
+.godot-src/
+godot/export_templates/
