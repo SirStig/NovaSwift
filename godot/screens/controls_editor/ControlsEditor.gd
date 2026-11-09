@@ -76,9 +76,27 @@ func setup() -> void:
 	layer = 80
 	group = "Flight"
 	_build()
-	_refresh_all()
-	var first: Control = (_tab_seg.get_meta("buttons") as Array)[0]
+	# Open on the scheme the player is actually using (pad / Steam Deck → Controller).
+	var open_tab := preferred_open_tab()
+	if open_tab != 0:
+		set_tab(open_tab)
+	else:
+		_refresh_all()
+	var first: Control = (_tab_seg.get_meta("buttons") as Array)[open_tab]
 	first.grab_focus.call_deferred()
+
+
+## 0 = Keyboard, 1 = Controller. Uses the input device the player is driving the UI with
+## (PadCursor), then Steam Deck / a connected pad with no competing keyboard focus.
+static func preferred_open_tab() -> int:
+	if OS.get_environment("SteamDeck") == "1":
+		return 1
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree != null:
+		var pc: Node = tree.root.get_node_or_null("PadCursor")
+		if pc != null and bool(pc.get("last_was_pad")) and Controls.pad_connected():
+			return 1
+	return 0
 
 
 # --- construction ----------------------------------------------------------------------------

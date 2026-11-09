@@ -231,6 +231,8 @@ func _run() -> void:
 	_check("pad capture", ed.capture_event(jb) and Controls.effective("fire_primary").buttons == [JOY_BUTTON_RIGHT_SHOULDER])
 	ed._reset_now()
 	_check("reset restores defaults", Controls.effective("land").keys == [KEY_L])
+	var pref_tab: int = Editor.preferred_open_tab()
+	_check("preferred_open_tab is Keyboard or Controller", pref_tab == 0 or pref_tab == 1)
 	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://_ce_selfcheck.cfg"))
 	print("controls editor selfcheck: ", "PASS" if ok else "FAIL")
 	quit(0 if ok else 1)

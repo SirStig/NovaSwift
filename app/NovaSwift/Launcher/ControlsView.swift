@@ -22,7 +22,7 @@ struct ControlsView: View {
     /// Bumped on controller connect/disconnect so the pad tab re-renders with
     /// the live controller's name and per-vendor button labels.
     @State private var padGeneration = 0
-    @State private var tab: EditorTab = .keyboard
+    @State private var tab: EditorTab = Self.preferredOpenTab()
     /// Key Settings edits a shadow copy (0x00734bc8): OK commits it, Cancel
     /// discards it, Reset only previews the defaults (0x0048b280).
     @State private var draft: KeyBindings?
@@ -45,6 +45,19 @@ struct ControlsView: View {
         case touch = "Touch"
         #endif
         var id: String { rawValue }
+    }
+
+    /// Open on the scheme the player is driving the UI with (active gamepad → Controller).
+    private static func preferredOpenTab() -> EditorTab {
+        if GCController.active?.extendedGamepad != nil { return .controller }
+        if GCController.controllers.contains(where: { $0.extendedGamepad != nil }) { return .controller }
+        #if os(tvOS)
+        return .controller
+        #elseif os(iOS)
+        return .touch
+        #else
+        return .keyboard
+        #endif
     }
 
     var body: some View {
