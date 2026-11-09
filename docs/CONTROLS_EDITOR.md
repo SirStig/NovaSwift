@@ -16,7 +16,9 @@ unchanged — the editor is a new *view* over the existing models:
 ## Screen shape
 
 Top: a 3-way tab — **Keyboard · Controller · Touch** (Touch only on iOS/iPadOS).
-Every tab has a right/bottom **action list** (grouped by category, search field,
+The editor opens on the scheme the player is actually using: Steam Deck / last pad-driven
+UI input / an active gamepad → **Controller**; otherwise Keyboard (Touch on iPhone/iPad with
+no pad). Every tab has a right/bottom **action list** (grouped by category, search field,
 each row shows its current binding chip; unbound rows dimmed; conflicting rows red)
 and a big **rendered device** that fills the rest.
 

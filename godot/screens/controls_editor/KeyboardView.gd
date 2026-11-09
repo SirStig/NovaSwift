@@ -42,11 +42,24 @@ class KeyCap extends Control:
 	var sel := false
 	var hot := false                # the physical key is down right now
 	var hovered := false
+	# Reused StyleBoxFlats — T.box() every redraw allocated ~N caps × overlays and stuttered on Deck.
+	var _sb_base := StyleBoxFlat.new()
+	var _sb_face := StyleBoxFlat.new()
+	var _sb_overlay := StyleBoxFlat.new()
 
 	func _init() -> void:
 		focus_mode = Control.FOCUS_ALL
 		clip_contents = true        # nothing a cap draws can ever leave its own cell
 		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		for sb in [_sb_base, _sb_face, _sb_overlay]:
+			sb.anti_aliasing = true
+
+	func _paint_sb(sb: StyleBoxFlat, bg: Color, radius: int, border := Color(0, 0, 0, 0), bw := 0) -> StyleBoxFlat:
+		sb.bg_color = bg
+		sb.set_corner_radius_all(radius)
+		sb.border_color = border
+		sb.set_border_width_all(bw)
+		return sb
 
 	func _notification(what: int) -> void:
 		if what == NOTIFICATION_MOUSE_ENTER:
@@ -89,10 +102,10 @@ class KeyCap extends Control:
 		var faces: Array = []
 		for r in rects:
 			var cell: Rect2 = (r as Rect2).grow(-gap)
-			draw_style_box(T.box(base_col, rad), cell)
+			draw_style_box(_paint_sb(_sb_base, base_col, rad), cell)
 			var face := Rect2(cell.position + Vector2(unit * 0.03, unit * 0.03), cell.size - Vector2(unit * 0.06, unit * 0.11))
 			faces.append(face)
-			draw_style_box(T.box(face_col, rad, face_col.lightened(0.25), 1), face)
+			draw_style_box(_paint_sb(_sb_face, face_col, rad, face_col.lightened(0.25), 1), face)
 		var f: Rect2 = faces[0]
 		if locked:
 			var x := f.position.x - f.size.y
@@ -137,23 +150,35 @@ class KeyCap extends Control:
 		for fc in faces:
 			var fr: Rect2 = fc
 			if hot:
-				draw_style_box(T.box(Color(1, 0.85, 0.4, 0.35), rad), fr)
+				draw_style_box(_paint_sb(_sb_overlay, Color(1, 0.85, 0.4, 0.35), rad), fr)
 			if hl:
-				draw_style_box(T.box(Color(0, 0, 0, 0), rad, AMBER, 2), fr)
+				draw_style_box(_paint_sb(_sb_overlay, Color(0, 0, 0, 0), rad, AMBER, 2), fr)
 			if sel:
-				draw_style_box(T.box(Color(1, 0.7, 0.28, 0.16), rad, AMBER, 3), fr)
+				draw_style_box(_paint_sb(_sb_overlay, Color(1, 0.7, 0.28, 0.16), rad, AMBER, 3), fr)
 			if pulse:
 				var pa := 0.5 + 0.5 * sin(float(Time.get_ticks_msec()) / 160.0)
-				draw_style_box(T.box(Color(1, 0.7, 0.28, 0.10 + 0.25 * pa), rad, Color(1, 0.8, 0.4, 0.4 + 0.6 * pa), 3), fr)
+				draw_style_box(_paint_sb(_sb_overlay, Color(1, 0.7, 0.28, 0.10 + 0.25 * pa), rad,
+					Color(1, 0.8, 0.4, 0.4 + 0.6 * pa), 3), fr)
 			if has_focus():
-				draw_style_box(T.box(Color(1, 1, 1, 0.06), rad, Color(1, 1, 1, 0.95), 2), fr)
+				draw_style_box(_paint_sb(_sb_overlay, Color(1, 1, 1, 0.06), rad, Color(1, 1, 1, 0.95), 2), fr)
 			elif hovered and not hl:
-				draw_style_box(T.box(Color(1, 1, 1, 0.07), rad, Color(1, 1, 1, 0.5), 1), fr)
+				draw_style_box(_paint_sb(_sb_overlay, Color(1, 1, 1, 0.07), rad, Color(1, 1, 1, 0.5), 1), fr)
+
+
+var _live := true
+var _poll_acc := 0.0
+const LIVE_HZ := 20.0               # live-press / pulse refresh; was every render frame
 
 
 func _ready() -> void:
 	resized.connect(_layout)
 	set_layout(Model.preset())
+	set_live(is_visible_in_tree())
+
+
+func set_live(on: bool) -> void:
+	_live = on
+	set_process(on)
 
 
 func set_layout(p: String) -> void:
@@ -263,9 +288,13 @@ func has_code(code: int) -> bool:
 	return cap_for(code) != null
 
 
-func _process(_delta: float) -> void:
-	if not is_visible_in_tree():
+func _process(delta: float) -> void:
+	if not _live or not is_visible_in_tree():
 		return
+	_poll_acc += delta
+	if _poll_acc < 1.0 / LIVE_HZ:
+		return
+	_poll_acc = 0.0
 	for cap in caps:
 		var down: bool = cap.code >= 0 and Input.is_physical_key_pressed(cap.code as Key)
 		if down != cap.hot:
