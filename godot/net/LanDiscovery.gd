@@ -205,7 +205,7 @@ func _drain(sock: PacketPeerUDP, take_beacons: bool) -> void:
 				if qk == Proto.Q_LEGACY:
 					reply = Proto.legacy_reply()   # tiny "upgrade" notice: a bare query is an amplification vector
 				elif qk == Proto.Q_CERT:
-					reply = Proto.encode_cert_reply(_info(), mini(pkt.size(), 1400))   # Godot-only 1300-byte request: the cert reply never exceeds it
+					reply = Proto.encode_cert_reply(_info(), mini(pkt.size(), Proto.CERT_REPLY_MAX))   # never more than the request
 				else:
 					reply = Proto.encode_status_reply(_info(), Proto.query_reply_cap(pkt.size()))
 				if not reply.is_empty():

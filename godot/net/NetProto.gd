@@ -539,7 +539,11 @@ const Q_V2 := 2
 ## Godot-only extension (version byte 3, QUERY_CERT_SIZE bytes): asks an encrypted server for its DTLS certificate, which
 ## does not fit the 1200-byte reply budget next to the status fields. Other implementations just drop it.
 const Q_CERT := 3
-const QUERY_CERT_SIZE := 1300
+## 1450 bytes: a reply may never exceed its request (anti-amplification), and a reply carrying an RSA-2048 certificate
+## is about 1,280 bytes before any server name. The original 1300 left room for a name of only about 10 characters.
+## Still one packet on a 1500-byte MTU (1472 bytes of UDP payload).
+const QUERY_CERT_SIZE := 1450
+const CERT_REPLY_MAX := 1450
 
 
 ## The 1200-byte v2 request every client sends.
@@ -580,11 +584,12 @@ static func build_cert_query() -> PackedByteArray:
 	return b
 
 
-## NSB1 reply carrying only what a client needs to pin the key: {name, port, proto, dtls, fp, cert}.
+## NSB1 reply carrying only what a client needs to pin the key: {port, proto, dtls, fp, cert}. No name: the client
+## already has it from the status reply, and the bytes are needed for the certificate.
 static func encode_cert_reply(info: Dictionary, cap: int) -> PackedByteArray:
 	if not bool(info.get("dtls", false)):
 		return PackedByteArray()
-	var d: Dictionary = {"name": clean_name(str(info.get("name", "NovaSwift")), "NovaSwift", MAX_SERVER_NAME), "port": int(info.get("port", DEFAULT_PORT)),
+	var d: Dictionary = {"port": int(info.get("port", DEFAULT_PORT)),
 		"proto": PROTO, "dtls": true, "fp": str(info.get("fp", "")), "cert": str(info.get("cert", ""))}
 	var b: PackedByteArray = BEACON_MAGIC.to_utf8_buffer()
 	b.append_array(JSON.stringify(d).to_utf8_buffer())
