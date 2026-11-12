@@ -350,6 +350,8 @@ func _open_offer() -> void:
 	var title_row := HBoxContainer.new()
 	box.add_child(title_row)
 	var title_l := _lbl(str(o.get("title", "")), 22, COL_AMBER, title_row)
+	# A wrapping Label reports ~0 minimum width: without expand the row gave it 1 px (one letter per line).
+	title_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var _bo = StoryGuide.make_badge(nova, int(o.get("id", -1)), self)
 	if _bo != null:
 		title_row.add_child(_bo)
