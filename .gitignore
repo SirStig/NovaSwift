@@ -65,3 +65,9 @@ packaging/out/
 # Thin custom Godot export templates (scripts/build-godot-template.sh) and Godot sources.
 .godot-src/
 godot/export_templates/
+
+# --- Built / bundled native libraries (scripts/build-gdextension.sh, scripts/package-linux.sh) ---
+# These are build outputs, copied from the build machine. Never commit them: a prebuilt library in the tree
+# can't be reviewed, and copies fall behind security updates (OpenSSL, libcurl).
+godot/bin/*
+!godot/bin/README.md
