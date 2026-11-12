@@ -32,6 +32,15 @@ func _frames(n := 3) -> void:
 		await process_frame
 
 
+## Bars roll random mission offers; with no story layer in this test one would sit pending and block
+## the screen under it. Decline whatever is waiting.
+func _drain() -> void:
+	while nova.offer_pending():
+		nova.offer_decline()
+	while nova.story_text_pending():
+		nova.story_text_dismiss()
+
+
 func _key(action: String) -> void:
 	var e := InputEventAction.new()
 	e.action = action
@@ -264,8 +273,10 @@ func _run() -> void:
 	await _frames()
 	_ok(sp._overlay != null and sp._overlay.find_child("color_0", true, false) != null, "Gamble chooser (PICT 8529) opens")
 	Compose.compose(sp._root, VIEW, OUT + "classic_gamble.png")
+	_drain()
 	_key("ui_cancel")
 	await _frames()
+	_drain()
 	_key("ui_cancel")
 	await _frames()
 	_ok(sp._screen == "hub", "back at the landing screen")
@@ -384,6 +395,7 @@ func _comm_and_story() -> void:
 	_ok(ss._info != null and root.gui_get_focus_owner() is BaseButton, "Player Info (DITL 1017) opens with a focused tab")
 	Compose.compose(ss, VIEW, OUT + "classic_playerinfo.png")
 	ss.close_info()
+	_drain()
 	ss.open_info("missions")
 	await _frames()
 	_ok(ss._info != null, "Mission Info (DITL 1012) opens")
