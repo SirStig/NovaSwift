@@ -30,8 +30,9 @@ func _init() -> void:
 	var id := ""
 	var found := false
 	# The start system is random and the board small: try fresh pilots until one's
-	# board holds a mission reachable in a few jumps.
-	for attempt in 8:
+	# board holds a mission reachable in a few jumps. About one board in five does (a Shuttle's 3 jumps of fuel,
+	# 10 t hold), so 8 tries failed ~17 % of runs (0.8^8); 30 bring that under 0.1 %.
+	for attempt in 30:
 		if id != "":
 			nova.pilot_delete(dir, id)
 		id = nova.pilot_create(dir, int(scen[0].id), "Story Tester", true, "", "")
