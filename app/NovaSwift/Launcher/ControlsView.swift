@@ -50,7 +50,7 @@ struct ControlsView: View {
     /// Open on the scheme the player is driving the UI with (active gamepad → Controller).
     private static func preferredOpenTab() -> EditorTab {
         if GCController.active?.extendedGamepad != nil { return .controller }
-        if GCController.controllers.contains(where: { $0.extendedGamepad != nil }) { return .controller }
+        if GCController.controllers().contains(where: { $0.extendedGamepad != nil }) { return .controller }
         #if os(tvOS)
         return .controller
         #elseif os(iOS)
