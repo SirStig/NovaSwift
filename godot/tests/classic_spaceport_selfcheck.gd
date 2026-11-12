@@ -14,7 +14,7 @@ const Interactions = preload("res://screens/Interactions.gd")
 const StoryScreens = preload("res://screens/StoryScreens.gd")
 const Compose = preload("res://tests/UiCompose.gd")
 
-const OUT := "/private/tmp/claude-504/-Users-joshuakac1-Projects-EV-NOVA/6adade1c-9674-407a-b6fb-4f119b38cb13/scratchpad/"
+const OUT := "user://"   # screenshots land in the Godot user data folder
 const VIEW := Vector2i(1280, 720)
 
 var nova

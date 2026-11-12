@@ -12,7 +12,7 @@ const PilotMenu = preload("res://screens/PilotMenu.gd")
 const GalaxyMap = preload("res://screens/GalaxyMap.gd")
 const AuthenticHUD = preload("res://ui/classic/AuthenticHUD.gd")
 
-const OUT := "/private/tmp/claude-504/-Users-joshuakac1-Projects-EV-NOVA/6adade1c-9674-407a-b6fb-4f119b38cb13/scratchpad/"
+const OUT := "user://"   # screenshots land in the Godot user data folder
 
 var _fails := 0
 var nova
