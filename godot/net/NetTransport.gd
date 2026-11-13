@@ -111,6 +111,7 @@ var dtls_creds: Dictionary = {}
 var _probe: PacketPeerUDP = null
 var _probe_t0: float = 0.0
 var _probe_legacy_sent: bool = false
+var _probe_small_sent: bool = false   # the smaller certificate query went out (see QUERY_CERT_SMALL_SIZE)
 var _probe_stage: int = 0
 var _probe_info: Dictionary = {}
 var _join_opts: Dictionary = {}
@@ -220,8 +221,12 @@ func _poll_probe() -> void:
 		_probe_info = info
 		_probe_stage = 1
 		_probe_t0 = _clock
+		_probe_small_sent = false
 		_probe.put_packet(Proto.build_cert_query())
 		return
+	if info.is_empty() and _probe_stage == 1 and not _probe_small_sent and _clock - _probe_t0 > PROBE_TIMEOUT / 2.0:
+		_probe_small_sent = true   # the big query or its reply may not fit this path's MTU: ask again, smaller
+		_probe.put_packet(Proto.build_cert_query(Proto.QUERY_CERT_SMALL_SIZE))
 	if info.is_empty() and _probe_stage == 0 and not _probe_legacy_sent and _clock - _probe_t0 > PROBE_TIMEOUT / 2.0:
 		_probe_legacy_sent = true   # an older server only answers the bare 4-byte query
 		_probe.put_packet(Proto.QUERY_MAGIC.to_utf8_buffer())
@@ -245,7 +250,7 @@ func _start_client(host_name: String, host_port: int, info: Dictionary) -> int:
 		# This address was encrypted when the player first joined and now claims not to be. The plain status reply is
 		# unauthenticated, so a man in the middle could say this to strip DTLS: refuse unless the player accepts it.
 		if not bool(_join_opts.get("accept_new_key", false)):
-			_fail_client("key_changed", "%s used an encrypted connection when you joined before, but now says it is NOT encrypted. This can mean the server's settings changed - or that someone is intercepting the connection. Only continue if you expected it." % address,
+			_fail_client("encryption_off", "%s used an encrypted connection when you joined before, but now says it is NOT encrypted. This can mean the server's settings changed - or that someone is intercepting the connection. Only continue if you expected it." % address,
 				{"host": host_name, "port": host_port, "old_fp": str(pinned.get("fp", "")), "new_fp": "", "pem": ""})
 			return OK
 		NetPrefs.forget_key(host_name, host_port)   # the player accepted the change: stop expecting encryption here
@@ -465,8 +470,8 @@ func _fail_client(kind: String, message: String, detail: Dictionary = {}) -> voi
 	peers.clear()
 	if kind == "timeout" and not was_connected:
 		_emit({"type": "timeout", "message": message})
-	elif kind == "key_changed" or kind == "error":
-		_emit({"type": "rejected" if kind == "key_changed" else "error", "code": kind, "message": message, "detail": detail, "address": address})
+	elif kind == "key_changed" or kind == "encryption_off" or kind == "error":
+		_emit({"type": "error" if kind == "error" else "rejected", "code": kind, "message": message, "detail": detail, "address": address})
 	else:
 		_emit({"type": "disconnected", "reason": message})
 

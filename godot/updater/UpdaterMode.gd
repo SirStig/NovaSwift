@@ -72,8 +72,15 @@ static func pid_alive(pid: int) -> bool:
 	if pid <= 0:
 		return false
 	if OS.get_name() == "Windows":
+		# System tools by absolute path, not whatever comes first on PATH.
+		var root: String = OS.get_environment("SystemRoot")
+		if root == "":
+			root = "C:\\Windows"
+		var tasklist: String = root.path_join("System32").path_join("tasklist.exe")
+		if not FileAccess.file_exists(tasklist):
+			return false
 		var out: Array = []
-		if OS.execute("tasklist", ["/FI", "PID eq %d" % pid, "/NH", "/FO", "CSV"], out, true) != 0:
+		if OS.execute(tasklist, ["/FI", "PID eq %d" % pid, "/NH", "/FO", "CSV"], out, true) != 0:
 			return false
 		return str(out[0] if out.size() > 0 else "").contains(",\"%d\"" % pid)
 	var stat: String = "/proc/%d/stat" % pid
@@ -85,8 +92,15 @@ static func pid_alive(pid: int) -> bool:
 		return true
 	if DirAccess.dir_exists_absolute("/proc"):
 		return false                  # procfs exists but has no such pid
+	var kill_bin: String = ""
+	for candidate: String in ["/bin/kill", "/usr/bin/kill"]:
+		if FileAccess.file_exists(candidate):
+			kill_bin = candidate
+			break
+	if kill_bin == "":
+		return false
 	var sink: Array = []
-	return OS.execute("kill", ["-0", str(pid)], sink, true) == 0
+	return OS.execute(kill_bin, ["-0", str(pid)], sink, true) == 0
 
 
 ## Copy the running game into user://update/run and start it in updater mode. {ok, error, pid}.

@@ -124,7 +124,7 @@ func _run() -> void:
 	for e in events:
 		if str((e as Dictionary).get("type", "")) == "rejected":
 			down = e
-	_check("a pinned server turning unencrypted is refused", str(down.get("code", "")) == "key_changed" and not _has("connected"))
+	_check("a pinned server turning unencrypted is refused", str(down.get("code", "")) == "encryption_off" and not _has("connected"))
 	_check("... and the pin is kept", str(NetPrefs.trusted_key("127.0.0.1", PORT).get("fp", "")) == str(c2["fp"]))
 	cl = _client({"accept_new_key": true})
 	await _pump(6.0, [cl], func() -> bool: return _has("connected"))

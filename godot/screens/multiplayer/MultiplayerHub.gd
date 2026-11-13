@@ -686,9 +686,10 @@ func _render_banner() -> void:
 		var hint: String = _error_hint(_svc.last_error_code)
 		if hint != "":
 			_t(col2, hint, 12, "regular", T.SECONDARY, true)
-		if _svc.last_error_code == "key_changed":
+		if _svc.last_error_code == "key_changed" or _svc.last_error_code == "encryption_off":
 			var kd: Dictionary = _svc.last_error_detail
-			var trust: Button = _btn(h2, "Trust new key and join", func() -> void:
+			var trust_label: String = "Join without encryption" if _svc.last_error_code == "encryption_off" else "Trust new key and join"
+			var trust: Button = _btn(h2, trust_label, func() -> void:
 				var j: Dictionary = _svc._pending_join
 				_svc.last_error = ""
 				_svc.last_error_code = ""
@@ -716,12 +717,14 @@ static func _error_title(code: String) -> String:
 		"disconnected": return "Disconnected"
 		"bad_request": return "Refused"
 		"key_changed": return "Server key changed"
+		"encryption_off": return "Server is no longer encrypted"
 	return "Multiplayer problem"
 
 
 static func _error_hint(code: String) -> String:
 	match code:
 		"key_changed": return "If you didn't expect this, don't continue and ask the server's owner whether they regenerated the key."
+		"encryption_off": return "If you didn't expect this, don't continue and ask the server's owner whether they turned encryption off. Joining without encryption means other people on the network can read and change your traffic."
 		"timeout": return "Check the address, that the server is running, and that its UDP port (default 53735) is allowed through the firewall / forwarded on the router."
 		"plugins": return "Change plug-ins from the main menu's Plug-ins screen so your enabled set matches the host's, then rejoin."
 		"version": return "Everyone must run the same NovaSwift version."

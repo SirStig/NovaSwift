@@ -544,6 +544,9 @@ const Q_CERT := 3
 ## Still one packet on a 1500-byte MTU (1472 bytes of UDP payload).
 const QUERY_CERT_SIZE := 1450
 const CERT_REPLY_MAX := 1450
+## Retry size when the 1450-byte query (or its reply) gets no answer: links with a smaller MTU (VPNs, some tunnels)
+## drop the big packets. The name-less reply still fits for an RSA-2048 certificate.
+const QUERY_CERT_SMALL_SIZE := 1300
 
 
 ## The 1200-byte v2 request every client sends.
@@ -577,9 +580,9 @@ static func query_kind(pkt: PackedByteArray) -> int:
 
 
 ## The DTLS-certificate request (see Q_CERT).
-static func build_cert_query() -> PackedByteArray:
+static func build_cert_query(size: int = QUERY_CERT_SIZE) -> PackedByteArray:
 	var b: PackedByteArray = build_query()
-	b.resize(QUERY_CERT_SIZE)
+	b.resize(size)
 	b[4] = 0x03
 	return b
 

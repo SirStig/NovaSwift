@@ -202,6 +202,10 @@ func _test_plugin_gate() -> void:
 	_ok(not cert_reply.is_empty() and cert_reply.size() <= Proto.build_cert_query().size(),
 		"cert reply fits a real certificate with a %d-character name (%d bytes)" % [Proto.MAX_SERVER_NAME, cert_reply.size()])
 	_ok(str(Proto.decode_beacon(cert_reply).get("cert", "")) == str(real["pem"]), "cert reply carries the whole certificate")
+	var small_q: PackedByteArray = Proto.build_cert_query(Proto.QUERY_CERT_SMALL_SIZE)
+	var small_reply: PackedByteArray = Proto.encode_cert_reply(long_info, small_q.size())
+	_ok(Proto.query_kind(small_q) == Proto.Q_CERT and not small_reply.is_empty() and small_reply.size() <= small_q.size(),
+		"the smaller retry query (%d bytes) still gets the certificate (%d bytes)" % [small_q.size(), small_reply.size()])
 	var plain: Dictionary = Proto.decode_beacon(Proto.encode_beacon({"name": "s", "port": 1, "plugin_wire": w, "dtls": true, "fp": "f", "cert": "C"}, false))
 	_ok((plain["plugins"] as Array).is_empty() and str(plain["cert"]) == "" and str(plain["sig"]) == "s", "beacon: the LAN broadcast carries only the signature, no list or certificate")
 	var m_a: String = "{\"signature\":\"1\",\"plugins\":[{\"id\":\"a\",\"name\":\"A\",\"contentHash\":\"h\"}],\"cosmetic\":[]}"
