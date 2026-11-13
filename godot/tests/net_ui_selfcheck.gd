@@ -194,6 +194,14 @@ func _test_plugin_gate() -> void:
 	_ok((w["plugins"] as Array).size() == 2 and str(w["plugins"][0]["hash"]).length() <= 16, "plugins: the wire form carries short hashes")
 	var beacon: Dictionary = Proto.decode_beacon(Proto.encode_beacon({"name": "s", "port": 1, "plugin_wire": w, "dtls": true, "fp": "f", "cert": "C"}, true))
 	_ok(int((beacon["plugins"] as Array).size()) == 2 and bool(beacon["dtls"]) and str(beacon["cert"]) == "C" and str(beacon["sig"]) == "s" and int(beacon["proto"]) == Proto.PROTO, "beacon: status reply carries plug-ins, key and protocol")
+	# A real RSA-2048 certificate and the longest server name fit the certificate reply, and the reply never exceeds the
+	# request.
+	var real: Dictionary = (load("res://net/NetCrypto.gd") as GDScript).server_credentials("user://net_ui_cert.key", "user://net_ui_cert.crt")
+	var long_info: Dictionary = {"name": "N".repeat(Proto.MAX_SERVER_NAME), "port": 53735, "dtls": true, "fp": real["fp"], "cert": real["pem"]}
+	var cert_reply: PackedByteArray = Proto.encode_cert_reply(long_info, Proto.QUERY_CERT_SIZE)
+	_ok(not cert_reply.is_empty() and cert_reply.size() <= Proto.build_cert_query().size(),
+		"cert reply fits a real certificate with a %d-character name (%d bytes)" % [Proto.MAX_SERVER_NAME, cert_reply.size()])
+	_ok(str(Proto.decode_beacon(cert_reply).get("cert", "")) == str(real["pem"]), "cert reply carries the whole certificate")
 	var plain: Dictionary = Proto.decode_beacon(Proto.encode_beacon({"name": "s", "port": 1, "plugin_wire": w, "dtls": true, "fp": "f", "cert": "C"}, false))
 	_ok((plain["plugins"] as Array).is_empty() and str(plain["cert"]) == "" and str(plain["sig"]) == "s", "beacon: the LAN broadcast carries only the signature, no list or certificate")
 	var m_a: String = "{\"signature\":\"1\",\"plugins\":[{\"id\":\"a\",\"name\":\"A\",\"contentHash\":\"h\"}],\"cosmetic\":[]}"

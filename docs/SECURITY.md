@@ -25,7 +25,7 @@ Per source IP: token bucket, burst 5, refill 2/s; the table is capped at 4096 so
 rather than evicting). Clients (Swift `ServerStatusQuery`, Godot `LanDiscovery`) send the 1200-byte request and, if
 nothing came back after a third of the timeout, the bare query once (for servers older than this change). The protocol
 number (`CrossPlayProtocol.version`) is **not** bumped: ENet gameplay is unchanged. Godot only: a version-3 request
-(1300 bytes) asks a DTLS server for its certificate. Tests: `SecurityTests` (Net), `SecurityTests.testStatusQueryRulesOnTheWire`,
+(1450 bytes) asks a DTLS server for its certificate; the reply leaves out the server name so the certificate fits. Tests: `SecurityTests` (Net), `SecurityTests.testStatusQueryRulesOnTheWire`,
 `godot/tests/net_security_selfcheck.gd`.
 
 ## 2. Connection and flood limits (ENet host)
