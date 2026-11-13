@@ -896,7 +896,7 @@ private struct TVWebImportPanel: View {
                     .padding(.horizontal, 8)
                     .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
             } else if server.isRunning {
-                Text("Receiver running on port \(String(WebImportServer.port)) — this Apple TV's address is in Settings → Network.")
+                Text("Receiver running: open http://<this Apple TV's address>:\(String(WebImportServer.port))/?k=\(server.accessCode) (the address is in Settings → Network).")
                     .novaFont(.caption).foregroundStyle(.secondary)
             } else {
                 Text("Starting the Wi-Fi receiver…")

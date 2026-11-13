@@ -47,6 +47,23 @@ final class WebImportServer: ObservableObject {
 
     static let port: UInt16 = 8017
 
+    /// A fresh code per `start()`, shown on screen as part of the address
+    /// (`/?k=CODE`). Every request must carry it, so another device on the
+    /// network can't push files while the import screen is open. Checked from
+    /// the request line, before any body is read.
+    @Published private(set) var accessCode = WebImportServer.makeAccessCode()
+    /// Wrong or missing codes this session; past the limit every request is
+    /// dropped until the screen is reopened (no brute-forcing the code).
+    private var failedAttempts = 0
+    private static let maxFailedAttempts = 20
+
+    /// 6 characters from an alphabet without look-alikes (0/O, 1/I/L): ~30 bits.
+    nonisolated static func makeAccessCode() -> String {
+        let alphabet = Array("ABCDEFGHJKMNPQRSTUVWXYZ23456789")
+        var rng = SystemRandomNumberGenerator()
+        return String((0..<6).map { _ in alphabet[Int(rng.next(upperBound: UInt64(alphabet.count)))] })
+    }
+
     /// Everything an EV Nova install legitimately ships that the importer
     /// knows what to do with (resource files, soundtrack, fonts, videos) —
     /// plus .zip, which unpacks into the same set (the whole game folder in
@@ -62,6 +79,10 @@ final class WebImportServer: ObservableObject {
     }
 
     func start() {
+        if !wantsRunning {
+            accessCode = Self.makeAccessCode()
+            failedAttempts = 0
+        }
         wantsRunning = true
         startListener()
     }
@@ -85,7 +106,7 @@ final class WebImportServer: ObservableObject {
                     case .ready:
                         self.isRunning = true
                         let host = Self.localIPv4Address()
-                        self.displayAddress = host.map { "http://\($0):\(Self.port)" }
+                        self.displayAddress = host.map { "http://\($0):\(Self.port)/?k=\(self.accessCode)" }
                     case .failed(let error):
                         // Usually "address in use": the previous listener's
                         // socket hasn't been released yet. Drop this one and
@@ -165,9 +186,23 @@ final class WebImportServer: ObservableObject {
                    // chunk or two — no need to search beyond it.
                    let headerEnd = buffer.range(of: Data("\r\n\r\n".utf8),
                                                 in: 0..<min(buffer.count, 1 << 16)) {
-                    expectedTotal = headerEnd.upperBound + Self.contentLength(inHeader: buffer[..<headerEnd.lowerBound])
+                    let head = buffer[..<headerEnd.lowerBound]
+                    guard self.isAuthorized(head) else {
+                        // Only a WRONG code counts toward the lock-out: a browser's own favicon / touch-icon
+                        // requests carry none, and must not lock out the player (or let a neighbour do so).
+                        if Self.carriesCode(head) { self.failedAttempts += 1 }
+                        if self.failedAttempts > Self.maxFailedAttempts { connection.cancel(); return }
+                        self.send(status: "403 Forbidden",
+                                  body: "Open the full address shown on screen, including ?k=…", on: connection)
+                        return
+                    }
+                    expectedTotal = headerEnd.upperBound + Self.contentLength(inHeader: head)
                 }
 
+                if expectedTotal == nil, buffer.count > 1 << 16 {
+                    connection.cancel()   // no header within 64 KB: never buffer an unchecked request
+                    return
+                }
                 if let total = expectedTotal, buffer.count >= total {
                     if let request = HTTPRequest(raw: buffer) {
                         self.route(request, on: connection)
@@ -184,6 +219,27 @@ final class WebImportServer: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Whether the request line has a `k=` at all (right or wrong).
+    private static func carriesCode(_ head: Data) -> Bool {
+        guard let text = String(data: head.prefix(4096), encoding: .utf8),
+              let line = text.components(separatedBy: "\r\n").first else { return false }
+        return line.contains("?k=") || line.contains("&k=")
+    }
+
+    /// Whether the request line carries this session's access code (`k=`).
+    private func isAuthorized(_ head: Data) -> Bool {
+        guard failedAttempts <= Self.maxFailedAttempts,
+              let text = String(data: head.prefix(4096), encoding: .utf8),
+              let requestLine = text.components(separatedBy: "\r\n").first else { return false }
+        let parts = requestLine.split(separator: " ")
+        guard parts.count >= 2, let q = parts[1].firstIndex(of: "?") else { return false }
+        for pair in parts[1][parts[1].index(after: q)...].split(separator: "&") {
+            let kv = pair.split(separator: "=", maxSplits: 1)
+            if kv.count == 2, kv[0] == "k" { return kv[1].uppercased() == accessCode }
+        }
+        return false
     }
 
     /// Content-Length from a raw header block (0 when absent).
@@ -419,6 +475,7 @@ final class WebImportServer: ObservableObject {
     <div id="skipped"></div>
     </div>
     <script>
+    const accessCode = new URLSearchParams(location.search).get('k') || '';
     const drop = document.getElementById('drop'), log = document.getElementById('log'),
           verdict = document.getElementById('verdict'), bar = document.getElementById('bar'),
           barwrap = document.getElementById('barwrap'),
@@ -473,7 +530,7 @@ final class WebImportServer: ObservableObject {
       return { li, st };
     }
     async function post(f) {
-      const r = await fetch('/upload?name=' + encodeURIComponent(f.name), { method:'POST', body:f });
+      const r = await fetch('/upload?k=' + encodeURIComponent(accessCode) + '&name=' + encodeURIComponent(f.name), { method:'POST', body:f });
       return r.ok ? 'ok' : (r.status === 415 ? 'skip' : 'fail');
     }
     let busy = false;
@@ -526,7 +583,7 @@ final class WebImportServer: ObservableObject {
       }
       setVerdict('Checking the data on your Apple TV…', '');
       try {
-        const r = await fetch('/done', { method:'POST' });
+        const r = await fetch('/done?k=' + encodeURIComponent(accessCode), { method:'POST' });
         const text = await r.text();
         setVerdict(text, text.startsWith('✓') ? 'good' : 'warn');
       } catch {
