@@ -82,7 +82,7 @@ runs the same `World.step` as the Apple build.
 
 Prebuilt Godot packages are on
 [GitHub Releases](https://github.com/SirStig/NovaSwift/releases). The current
-build is 1.0.0-beta.1.
+build is 1.0.0-beta.3.
 
 - `NovaSwift-linux-x86_64.tar.gz`: Linux x86_64 and Steam Deck.
 - `NovaSwift-macos-arm64.zip`: macOS on Apple silicon, for testing. On a Mac,
