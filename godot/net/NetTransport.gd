@@ -297,10 +297,22 @@ func close(reason: String = "", announce: bool = true) -> void:
 		state = "idle"
 		return
 	if mode == "server":
+		var told: int = 0
 		for id in peers.keys():
 			if bool((peers[id] as Dictionary).get("ready", false)):
 				_send_control(int(id), Proto.K_KICK, {"reason": "The host closed the game."})
-		peer.poll()
+				told += 1
+		# Deliver the goodbyes before the host goes away. A client that only sees the connection vanish takes it for a
+		# crash (the Apple client then tries to reconnect), and ENet throws away a client's unread packets when the disconnect
+		# arrives in the same batch. So keep the host serviced for 250 ms first (only when players are connected).
+		if told > 0:
+			for i in 25:
+				peer.poll()
+				if peer.host != null:
+					peer.host.flush()
+				OS.delay_msec(10)
+		else:
+			peer.poll()
 	_end_bridge()
 	peer.close()
 	peer = null
