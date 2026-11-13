@@ -531,7 +531,7 @@ public struct ServerError: Error, LocalizedError, Equatable {
 
 public enum ServerVersion {
     /// The server program's own version (release tag `server-v<version>`).
-    public static let current = "1.0.0-beta.1"
+    public static let current = "1.0.0-beta.2"
     public static let releasesAPI = URL(string: "https://api.github.com/repos/SirStig/NovaSwift/releases?per_page=30")!
     public static let releasesPage = URL(string: "https://github.com/SirStig/NovaSwift/releases")!
     public static let tagPrefix = "server-v"
