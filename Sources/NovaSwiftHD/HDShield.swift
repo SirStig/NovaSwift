@@ -1,3 +1,4 @@
+#if canImport(CoreGraphics)
 import Foundation
 import CoreGraphics
 
@@ -106,3 +107,4 @@ public enum HDShield {
         return t * t * (3 - 2 * t)
     }
 }
+#endif

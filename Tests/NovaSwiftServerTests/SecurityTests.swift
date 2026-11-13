@@ -115,9 +115,14 @@ final class SecurityTests: XCTestCase {
     // MARK: NSQ1 on the wire
 
     private func rawUDP(_ port: Int, _ payload: Data, wait: Double = 0.4) -> Data? {
-        let fd = socket(AF_INET, Int32(SOCK_DGRAM), 0)
+        #if os(Linux)
+        let sockDgram = Int32(SOCK_DGRAM.rawValue)   // an enum on Glibc
+        #else
+        let sockDgram = Int32(SOCK_DGRAM)
+        #endif
+        let fd = socket(AF_INET, sockDgram, 0)
         defer { close(fd) }
-        var tv = timeval(tv_sec: 0, tv_usec: Int32(wait * 1_000_000))
+        var tv = timeval(tv_sec: 0, tv_usec: .init(wait * 1_000_000))   // Int32 on Darwin, Int on Linux
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         var a = sockaddr_in(); a.sin_family = sa_family_t(AF_INET); a.sin_port = UInt16(port).bigEndian; a.sin_addr.s_addr = UInt32(0x7f000001).bigEndian
         _ = payload.withUnsafeBytes { b in withUnsafePointer(to: &a) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sendto(fd, b.baseAddress, b.count, 0, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } } }

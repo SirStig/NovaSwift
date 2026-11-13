@@ -1,3 +1,4 @@
+#if canImport(SceneKit) && canImport(Metal) && canImport(CoreGraphics)
 import Foundation
 import NovaSwiftKit
 import NovaSwiftHD
@@ -103,3 +104,4 @@ enum Preview {
         try? HDAtlas.encodePNG(image)?.write(to: url)
     }
 }
+#endif

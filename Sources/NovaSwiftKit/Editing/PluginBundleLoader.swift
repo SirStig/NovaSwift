@@ -116,10 +116,26 @@ public struct PluginSavePlan: Sendable {
             throw error
         }
         for s in staged {
-            if fm.fileExists(atPath: s.dest.path) { _ = try fm.replaceItemAt(s.dest, withItemAt: s.tmp) }
+            if fm.fileExists(atPath: s.dest.path) { try Self.replace(s.dest, with: s.tmp) }
             else { try fm.moveItem(at: s.tmp, to: s.dest) }
         }
         return staged.map(\.dest)
+    }
+
+    /// Swap `tmp` in for `dest`. `replaceItemAt` is atomic on Apple platforms; swift-corelibs-foundation's
+    /// version can lose the destination and fails on non-empty directories, so elsewhere the original is
+    /// moved aside first and put back if the swap fails.
+    private static func replace(_ dest: URL, with tmp: URL) throws {
+        let fm = FileManager.default
+        #if canImport(Darwin)
+        _ = try fm.replaceItemAt(dest, withItemAt: tmp)
+        #else
+        let backup = tempURL(for: dest)
+        try fm.moveItem(at: dest, to: backup)
+        do { try fm.moveItem(at: tmp, to: dest) }
+        catch { try? fm.moveItem(at: backup, to: dest); throw error }
+        try? fm.removeItem(at: backup)
+        #endif
     }
 
     private static func tempURL(for dest: URL) -> URL {

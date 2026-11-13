@@ -1,3 +1,4 @@
+#if canImport(SceneKit) && canImport(Metal)
 // novaswift-hd — build, bake, compare and benchmark NovaSwift graphics packs
 // (HD sprites and 3D models; see docs/HD_PIPELINE.md).
 import Foundation
@@ -654,3 +655,4 @@ case "shared":
 default:
     usage()
 }
+#endif
