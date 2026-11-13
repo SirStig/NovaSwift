@@ -544,6 +544,23 @@ final class SecurityTests: XCTestCase {
         XCTAssertTrue(r.message.contains("not signed"), r.message)
     }
 
+    // MARK: UPnP
+
+    func testUPnPOnlyFollowsURLsOnTheLocalRouter() {
+        XCTAssertTrue(NetworkTools.isRouterURL(URL(string: "http://192.168.1.1:5000/rootDesc.xml")!))
+        XCTAssertTrue(NetworkTools.isRouterURL(URL(string: "http://10.0.0.1/igd.xml")!))
+        for bad in ["http://8.8.8.8/desc.xml", "file:///etc/passwd", "https://192.168.1.1/desc.xml",
+                    "http://router.example.com/desc.xml", "http://127.0.0.1:53737/api/shutdown"] {
+            XCTAssertFalse(NetworkTools.isRouterURL(URL(string: bad)!), bad)
+        }
+        let base = URL(string: "http://192.168.1.1:5000/rootDesc.xml")!
+        let service = "urn:schemas-upnp-org:service:WANIPConnection:1"
+        let elsewhere = "<serviceType>\(service)</serviceType><controlURL>http://203.0.113.7/ctl</controlURL>"
+        XCTAssertNil(NetworkTools.findWANService(xml: elsewhere, base: base))
+        let relative = "<serviceType>\(service)</serviceType><controlURL>/ctl/IPConn</controlURL>"
+        XCTAssertEqual(NetworkTools.findWANService(xml: relative, base: base)?.control.absoluteString, "http://192.168.1.1:5000/ctl/IPConn")
+    }
+
     // MARK: Packaging
 
     func testSystemdUnitIsHardened() throws {

@@ -131,6 +131,7 @@ public final class ServerApp {
         effectiveAdminBind = bind
         let h = HTTPServer(bind: bind, port: cfg.adminPort) { [admin] req in admin.handle(req) }
         h.uploadPaths = ["/api/plugins/upload"]
+        h.preflightUpload = { [admin] req in admin.preflightUpload(req) }
         h.tempDirectory = store.paths.cacheDir
         do { try h.start() } catch HTTPServer.StartError.inUse(let p) {
             throw ServerError("Port \(p) (the admin panel) is already in use - is another NovaSwift server running? Stop it, or start this one with --admin-port <another number>.")

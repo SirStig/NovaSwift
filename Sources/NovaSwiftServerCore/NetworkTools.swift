@@ -96,7 +96,16 @@ public enum NetworkTools {
 
     /// One long-lived session. On Linux, deallocating a URLSession (swift-corelibs-foundation) can trip
     /// "_MultiHandle deallocated with non-zero retain count" and abort the process, so never make one per request.
-    private static let session = URLSession(configuration: .ephemeral)
+    private static let session = URLSession(configuration: .ephemeral, delegate: NoRedirects(), delegateQueue: nil)
+
+    /// UPnP descriptions and SOAP calls go to whatever a LAN device names; a redirect could point them at
+    /// localhost or the internet after `isRouterURL` approved the first hop, so redirects are never followed.
+    private final class NoRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+            completionHandler(nil)
+        }
+    }
 
     static func send(_ req: URLRequest, timeout: TimeInterval) -> Data? {
         let sem = DispatchSemaphore(value: 0)
@@ -172,11 +181,18 @@ public enum NetworkTools {
                 let text = String(decoding: buf[0..<n], as: UTF8.self)
                 for line in text.components(separatedBy: "\r\n") where line.lowercased().hasPrefix("location:") {
                     let v = line.dropFirst("location:".count).trimmingCharacters(in: .whitespaces)
-                    if let u = URL(string: v) { return u }
+                    if let u = URL(string: v), isRouterURL(u) { return u }
                 }
             }
         }
         return nil
+    }
+
+    /// Any device on the LAN can answer the SSDP search, and the server then fetches the URL it names. Only follow plain
+    /// http:// URLs at a private IPv4 address (where a home router lives), never a public host or a local file.
+    static func isRouterURL(_ u: URL) -> Bool {
+        guard u.scheme?.lowercased() == "http", let host = u.host, octets(host) != nil else { return false }
+        return isPrivate(host)
     }
 
     static func findWANService(xml: String, base: URL) -> (service: String, control: URL)? {
@@ -186,7 +202,8 @@ public enum NetworkTools {
             let rest = xml[r.upperBound...]
             if let ctl = tag("controlURL", in: String(rest)) {
                 let url = ctl.hasPrefix("http") ? URL(string: ctl) : URL(string: ctl, relativeTo: base)?.absoluteURL
-                if let url { return (type, url) }
+                // The control URL must stay on the router that described it.
+                if let url, url.host == base.host, isRouterURL(url) { return (type, url) }
             }
         }
         return nil

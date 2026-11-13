@@ -92,6 +92,9 @@ public final class HTTPServer {
     /// Largest body accepted for paths in `uploadPaths` (spooled to disk).
     public var maxUploadBody = 600 * 1024 * 1024
     public var uploadPaths: Set<String> = []
+    /// Asked once the head of an upload has arrived, before any of its body is read: return a response to refuse it
+    /// (not signed in, cross-site...), so nobody can make the server spool hundreds of MB without logging in.
+    public var preflightUpload: ((HTTPRequest) -> HTTPResponse?)?
     public var tempDirectory = FileManager.default.temporaryDirectory
 
     public init(bind: String, port: Int, handler: @escaping Handler) {
@@ -195,6 +198,7 @@ public final class HTTPServer {
         var already = buf[headerEnd!.upperBound...]
         if length <= 0 { return .success(req) }
         let isUpload = uploadPaths.contains(path)
+        if isUpload, let refused = preflightUpload?(req) { return .failure(refused) }
         if length > (isUpload ? maxUploadBody : maxMemoryBody) {
             return .failure(HTTPResponse.error(isUpload ? "That file is too big (limit \(maxUploadBody / 1_000_000) MB)." : "Request too large.", status: 413))
         }

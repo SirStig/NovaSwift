@@ -241,6 +241,14 @@ func _start_client(host_name: String, host_port: int, info: Dictionary) -> int:
 	var tls: TLSOptions = null
 	var pinned: Dictionary = NetPrefs.trusted_key(host_name, host_port)
 	var server_dtls: bool = bool(info.get("dtls", false)) or (info.is_empty() and not pinned.is_empty())
+	if not pinned.is_empty() and not server_dtls:
+		# This address was encrypted when the player first joined and now claims not to be. The plain status reply is
+		# unauthenticated, so a man in the middle could say this to strip DTLS: refuse unless the player accepts it.
+		if not bool(_join_opts.get("accept_new_key", false)):
+			_fail_client("key_changed", "%s used an encrypted connection when you joined before, but now says it is NOT encrypted. This can mean the server's settings changed - or that someone is intercepting the connection. Only continue if you expected it." % address,
+				{"host": host_name, "port": host_port, "old_fp": str(pinned.get("fp", "")), "new_fp": "", "pem": ""})
+			return OK
+		NetPrefs.forget_key(host_name, host_port)   # the player accepted the change: stop expecting encryption here
 	if server_dtls:
 		var pem: String = str(info.get("cert", ""))
 		if pem == "" and not pinned.is_empty():

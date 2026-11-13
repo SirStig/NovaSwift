@@ -51,6 +51,15 @@ public final class AdminService {
         return Self.secured(route(req))
     }
 
+    /// The checks a large upload must pass before the HTTP server reads its body: the same host/origin guard, the
+    /// `X-NS-Admin` header and a signed-in session that `handle` would apply once the body had arrived.
+    public func preflightUpload(_ req: HTTPRequest) -> HTTPResponse? {
+        if let refused = guardRequest(req) { return Self.secured(refused) }
+        if req.headers["x-ns-admin"] == nil { return Self.secured(.error("Missing X-NS-Admin header.", status: 403)) }
+        if !isAuthed(req) { return Self.secured(.error("Sign in first.", status: 401)) }
+        return nil
+    }
+
     /// Security headers on every response. The panel loads one script and one stylesheet from itself and talks only
     /// to itself, so the policy can be strict.
     static func secured(_ r: HTTPResponse) -> HTTPResponse {

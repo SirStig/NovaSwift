@@ -173,6 +173,10 @@ public final class ENetTransport: Transport, TransportDelegate {
               let p = enet_host_connect(h, &address, Wire.channelCount, UInt32(localID)) else {
             throw ConnectError.enetFailure
         }
+        // Same hard limits the host applies (ENetHostTransport): a hostile server must not be able to make the
+        // client reassemble ENet's default 32 MB packets or buffer 32 MB per peer.
+        h.pointee.maximumPacketSize = NetLimits.maxPacket
+        h.pointee.maximumWaitingData = 4 * 1024 * 1024
         host = h; peer = p
         state = .connecting
         clock = 0; stateSince = 0; lastRx = 0; nextPing = 0

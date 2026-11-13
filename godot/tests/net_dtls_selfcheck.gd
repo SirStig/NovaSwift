@@ -109,6 +109,31 @@ func _run() -> void:
 	cl.close("")
 	await _pump(0.5, [])
 
+	# Downgrade: the address whose key is pinned now says it is NOT encrypted (settings change, or someone in the
+	# middle stripping DTLS from the unauthenticated status reply). Refused until the player accepts it.
+	srv.close("", false)
+	srv = Transport.new()
+	var perr: int = srv.host(null, {"port": PORT, "max_players": 4, "name": "plain-test", "display_name": "[Server]", "has_local_player": false})
+	_check("plain server starts", perr == OK and not srv.encrypted)
+	lan.start_announcing(func() -> Dictionary:
+		return {"name": "plain-test", "players": 0, "max": 4, "port": PORT, "dtls": false, "dedicated": true}, PORT)
+	await _pump(0.5, [])
+	cl = _client({})
+	await _pump(6.0, [cl], func() -> bool: return _has("rejected") or _has("connected"))
+	var down: Dictionary = {}
+	for e in events:
+		if str((e as Dictionary).get("type", "")) == "rejected":
+			down = e
+	_check("a pinned server turning unencrypted is refused", str(down.get("code", "")) == "key_changed" and not _has("connected"))
+	_check("... and the pin is kept", str(NetPrefs.trusted_key("127.0.0.1", PORT).get("fp", "")) == str(c2["fp"]))
+	cl = _client({"accept_new_key": true})
+	await _pump(6.0, [cl], func() -> bool: return _has("connected"))
+	_check("accepting it connects unencrypted and forgets the pin", _has("connected") and NetPrefs.trusted_key("127.0.0.1", PORT).is_empty())
+	cl.close("")
+	await _pump(0.5, [])
+	_start_server(c2)
+	await _pump(0.5, [])
+
 	# A plain client (skips the status probe, like the Swift ENet client) against the DTLS-only server.
 	NetPrefs.forget_key("127.0.0.1", PORT)
 	cl = _client({"skip_probe": true})
