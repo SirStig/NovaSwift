@@ -29,9 +29,9 @@ let package = Package(
         // name — but only if `name:` is passed explicitly here too.
         .package(name: "NovaSwift", path: "../.."),
         // SwiftGodot — the maintained Swift binding for Godot 4 GDExtensions.
-        // Pinned to a branch because SwiftGodot tracks Godot releases on `main`;
-        // pin to a tagged version once the frontend stabilises.
-        .package(url: "https://github.com/migueldeicaza/SwiftGodot", branch: "main"),
+        // SwiftGodot tracks Godot releases on `main`, so this is a reviewed
+        // commit of `main` (matches Package.resolved). Bump it on purpose.
+        .package(url: "https://github.com/migueldeicaza/SwiftGodot", revision: "be57caa3e81b9ac510bc7cc2e277003c706ab0a5"),
     ],
     targets: [
         .target(
