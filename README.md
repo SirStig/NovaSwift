@@ -12,7 +12,7 @@ own copy of EV Nova and plays it. No game data is included.
 
 [Website](https://sirstig.github.io/NovaSwift/) ·
 [Download](https://sirstig.github.io/NovaSwift/download.html) ·
-[TestFlight beta](https://testflight.apple.com/join/3FBzwwq1) ·
+[TestFlight beta](https://testflight.apple.com/join/Q7Nj7fGE) ·
 [Releases](https://github.com/SirStig/NovaSwift/releases) ·
 [Plug-in catalog](https://github.com/SirStig/NovaSwift-Plugins) ·
 [Issues](https://github.com/SirStig/NovaSwift/issues)
