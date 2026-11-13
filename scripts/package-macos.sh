@@ -72,8 +72,9 @@ echo "→ stripping Frameworks dylibs"
 for dylib in "$APP/Contents/Frameworks/"*.dylib; do
   [ -f "$dylib" ] || continue
   strip -x "$dylib" 2>/dev/null || true
+  codesign --force --sign - "$dylib"   # strip breaks the dylib's own signature: re-sign it before sealing the app
 done
-# Re-seal after strip (ffmpeg was already signed above; strip breaks dylib seals).
+# Re-seal after strip (ffmpeg was already signed above).
 codesign --force --sign - --preserve-metadata=entitlements,flags,runtime "$APP"
 codesign --verify --deep --strict "$APP"
 
