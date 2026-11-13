@@ -3,14 +3,15 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/SirStig/NovaSwift/main/packaging/server/install-server.sh | sudo bash
 #
-# What it does: downloads the right release for this CPU (checking its signature when the release has one), installs it
+# What it does: downloads the right release for this CPU (refusing it unless its signature checks out), installs it
 # to /opt/novaswift-server, creates a no-login `novaswiftd` system user, installs a sandboxed systemd service that starts
 # at boot and always restarts, opens the game ports in ufw when ufw is active, and prints the admin password.
 # The admin panel listens on 127.0.0.1 only (reach it through an SSH tunnel). Re-running the installer upgrades the
 # program and keeps your settings, plug-ins and admin password.
 #
 # Options (after `bash -s --`):  --version X.Y.Z   --dir PATH   --admin-public   --no-firewall   --uninstall
-#   --admin-public  listen for the admin panel on all addresses (plain HTTP!). Not recommended on the internet.
+#   --admin-public    listen for the admin panel on all addresses (plain HTTP!). Not recommended on the internet.
+#   --allow-unsigned  install an archive whose signature can't be checked (an old release, a local file). Root runs it.
 # Env: NOVASWIFT_SERVER_URL=<url or file path of a .tar.gz>  to install a specific archive (testing, offline).
 set -euo pipefail
 
@@ -22,6 +23,7 @@ VERSION=""
 ADMIN_PUBLIC=0
 FIREWALL=1
 UNINSTALL=0
+ALLOW_UNSIGNED="${NOVASWIFT_ALLOW_UNSIGNED:-0}"
 
 say()  { printf '\033[1;33m==>\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -34,7 +36,8 @@ while [ $# -gt 0 ]; do
     --admin-public) ADMIN_PUBLIC=1; shift ;;
     --no-firewall) FIREWALL=0; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    --allow-unsigned) ALLOW_UNSIGNED=1; shift ;;
+    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
 done
@@ -95,20 +98,23 @@ case "$SRC" in
   http*) curl -fL --progress-bar -o "$TMP/server.tar.gz" "$SRC" || die "download failed." ;;
   *) cp "$SRC" "$TMP/server.tar.gz" ;;
 esac
-# Verify the release when it is signed: server-update.json (+ .sig) is signed with the NovaSwift release key; it names the
-# archive's SHA-256. A bad signature or checksum stops the install. Releases made before signing existed are accepted
-# with a warning (the download is still HTTPS from github.com).
+# Verify the release: server-update.json (+ .sig) is signed with the NovaSwift release key; it names the archive's
+# SHA-256. This script runs as root, so anything that can't be verified (no openssl, no signature file, an archive that
+# isn't a GitHub release) stops the install unless --allow-unsigned (or NOVASWIFT_ALLOW_UNSIGNED=1) says otherwise.
 verify_release() {
-  command -v openssl >/dev/null || { say "openssl not found: skipping the signature check"; return 0; }
+  if [ "$ALLOW_UNSIGNED" = 1 ]; then
+    say "WARNING: --allow-unsigned: installing $SRC without checking its signature."
+    return 0
+  fi
+  command -v openssl >/dev/null || die "openssl is needed to check the release signature (install it, e.g. apt install openssl). To install without the check, re-run with --allow-unsigned."
   case "$SRC" in
     https://github.com/*/releases/download/*) ;;
-    *) say "Not a GitHub release URL: skipping the signature check"; return 0 ;;
+    *) die "$SRC isn't a GitHub release, so its signature can't be checked. Re-run with --allow-unsigned only if you trust this file." ;;
   esac
   base="${SRC%/*}"
   if ! curl -fsSL -o "$TMP/server-update.json" "$base/server-update.json" 2>/dev/null \
      || ! curl -fsSL -o "$TMP/server-update.json.sig" "$base/server-update.json.sig" 2>/dev/null; then
-    say "WARNING: this release has no signature file; installing it without a signature check."
-    return 0
+    die "this release has no signature file (releases from before signing existed). Re-run with --allow-unsigned to install it anyway, or pick a newer --version."
   fi
   cat > "$TMP/pub.pem" <<'PEM'
 -----BEGIN PUBLIC KEY-----
@@ -133,7 +139,7 @@ PEM
   [ -n "$want" ] && [ "$want" = "$have" ] || die "the download doesn't match the signed checksum. Refusing to install."
   say "Signature and checksum verified."
 }
-case "$SRC" in http*) verify_release ;; esac
+verify_release
 tar -xzf "$TMP/server.tar.gz" -C "$TMP"
 BIN="$(find "$TMP" -type f -name NovaSwiftServer | head -1)"
 [ -n "$BIN" ] || die "the archive didn't contain NovaSwiftServer."
