@@ -1,6 +1,9 @@
 import XCTest
 @testable import NovaSwiftENet
 import NovaSwiftNet
+#if canImport(FoundationNetworking)
+import FoundationNetworking   // HTTPURLResponse / URLSession on Linux and Windows
+#endif
 
 /// The Apple host (`ENetHostTransport`) against the Apple client (`ENetTransport`) over real loopback ENet sockets,
 /// plus beacon / status-query round trips. The wire format is the Godot one; `testGodotClientJoinsSwiftHost`

@@ -1,6 +1,9 @@
 import XCTest
 import Foundation
 @testable import NovaSwiftServerCore
+#if canImport(FoundationNetworking)
+import FoundationNetworking   // HTTPURLResponse / URLSession on Linux and Windows
+#endif
 
 final class AdminTests: XCTestCase {
     func req(_ method: String, _ path: String, body: [String: Any]? = nil, cookie: String? = nil, admin: Bool = true, ip: String = "127.0.0.1", query: [String: String] = [:]) -> HTTPRequest {
