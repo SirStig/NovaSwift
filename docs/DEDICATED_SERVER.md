@@ -24,7 +24,7 @@ You manage it from a web admin panel (`http://localhost:53737`). The first run s
 1. Create the VM. In the **provider firewall** allow `udp:53735-53736` from anywhere. Leave 53737 closed.
 2. `curl -fsSL https://raw.githubusercontent.com/SirStig/NovaSwift/main/packaging/server/install-server.sh | sudo bash`
    (x86_64 and arm64; creates a no-login `novaswiftd` service account, `/opt/novaswift-server`, a systemd unit with `Restart=always`, opens the
-   ports in ufw when active, prints the URL and password). Flags: `--version X.Y.Z`, `--admin-public`, `--no-firewall`, `--uninstall`, `--allow-unsigned`. The service runs sandboxed (see
+   ports in ufw when active, prints the URL and password). Flags: `--version X.Y.Z`, `--admin-public`, `--no-firewall`, `--uninstall`, `--allow-unsigned`, `--allow-downgrade` (it refuses to replace a newer installed version otherwise). The service runs sandboxed (see
    SECURITY.md). The installer refuses a release whose signature it can't check (no `openssl`, no `.sig`, or an archive that isn't a
    GitHub release, such as `NOVASWIFT_SERVER_URL`) unless you pass `--allow-unsigned`.
 3. `ssh -L 53737:localhost:53737 you@vps`, then open `http://localhost:53737` and finish the wizard.

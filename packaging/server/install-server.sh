@@ -12,6 +12,7 @@
 # Options (after `bash -s --`):  --version X.Y.Z   --dir PATH   --admin-public   --no-firewall   --uninstall
 #   --admin-public    listen for the admin panel on all addresses (plain HTTP!). Not recommended on the internet.
 #   --allow-unsigned  install an archive whose signature can't be checked (an old release, a local file). Root runs it.
+#   --allow-downgrade install a release older than the one already installed (older releases may have known problems).
 # Env: NOVASWIFT_SERVER_URL=<url or file path of a .tar.gz>  to install a specific archive (testing, offline).
 set -euo pipefail
 
@@ -24,6 +25,7 @@ ADMIN_PUBLIC=0
 FIREWALL=1
 UNINSTALL=0
 ALLOW_UNSIGNED="${NOVASWIFT_ALLOW_UNSIGNED:-0}"
+ALLOW_DOWNGRADE=0
 
 say()  { printf '\033[1;33m==>\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -37,7 +39,8 @@ while [ $# -gt 0 ]; do
     --no-firewall) FIREWALL=0; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --allow-unsigned) ALLOW_UNSIGNED=1; shift ;;
-    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    --allow-downgrade) ALLOW_DOWNGRADE=1; shift ;;
+    -h|--help) awk 'NR > 1 && /^set -euo/ {exit} NR > 1' "$0"; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
 done
@@ -137,9 +140,39 @@ PEM
   want="$(awk -v k="\"linux-$ARCH\":" '$1==k {f=1} f && /"sha256"/ {gsub(/[",]/, "", $2); print $2; exit}' "$TMP/server-update.json")"
   have="$(openssl dgst -sha256 "$TMP/server.tar.gz" | awk '{print $NF}')"
   [ -n "$want" ] && [ "$want" = "$have" ] || die "the download doesn't match the signed checksum. Refusing to install."
-  say "Signature and checksum verified."
+  # The signed manifest names its version: it must be the release that was asked for.
+  SIGNED_VERSION="$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' "$TMP/server-update.json" | tail -1)"
+  [ -n "$SIGNED_VERSION" ] || die "the signed release file has no version. Refusing to install."
+  if [ -n "$VERSION" ] && [ "$SIGNED_VERSION" != "${VERSION#v}" ]; then
+    die "you asked for $VERSION but the signed release file is for $SIGNED_VERSION. Refusing to install."
+  fi
+  say "Signature and checksum verified (version $SIGNED_VERSION)."
 }
+
+# ver_lt A B: is version A older than B? Numbers compare as numbers; 1.0.0-beta.1 is older than 1.0.0.
+ver_lt() {
+  local a_core="${1%%-*}" b_core="${2%%-*}" a_pre="" b_pre=""
+  [ "$1" != "$a_core" ] && a_pre="${1#*-}"
+  [ "$2" != "$b_core" ] && b_pre="${2#*-}"
+  if [ "$a_core" != "$b_core" ]; then
+    [ "$(printf '%s\n%s\n' "$a_core" "$b_core" | sort -V | head -1)" = "$a_core" ]; return
+  fi
+  [ "$a_pre" = "$b_pre" ] && return 1
+  [ -z "$a_pre" ] && return 1      # a final release is newer than its pre-releases
+  [ -z "$b_pre" ] && return 0
+  [ "$(printf '%s\n%s\n' "$a_pre" "$b_pre" | sort -V | head -1)" = "$a_pre" ]
+}
+
+SIGNED_VERSION=""
 verify_release
+# Don't silently roll an existing install back to an older (possibly vulnerable) release.
+if [ -n "$SIGNED_VERSION" ] && [ -x "$DIR/NovaSwiftServer" ]; then
+  INSTALLED="$("$DIR/NovaSwiftServer" --version 2>/dev/null | sed -n 's/^NovaSwift Dedicated Server \([^ ]*\).*/\1/p' | head -1)" || INSTALLED=""
+  if [ -n "$INSTALLED" ] && ver_lt "$SIGNED_VERSION" "$INSTALLED"; then
+    [ "$ALLOW_DOWNGRADE" = 1 ] || die "version $INSTALLED is installed and $SIGNED_VERSION is older. Older releases may have known security problems; re-run with --allow-downgrade if you really want it."
+    say "WARNING: --allow-downgrade: replacing $INSTALLED with the older $SIGNED_VERSION."
+  fi
+fi
 tar -xzf "$TMP/server.tar.gz" -C "$TMP"
 BIN="$(find "$TMP" -type f -name NovaSwiftServer | head -1)"
 [ -n "$BIN" ] || die "the archive didn't contain NovaSwiftServer."
