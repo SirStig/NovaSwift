@@ -1584,8 +1584,11 @@ func _render_detail() -> void:
 			_svg(oh, "pl.wifi.slash", 14, T.SECONDARY)
 			_t(oh, "You're offline. Connect to download.", 13, "regular", T.SECONDARY)
 	NC.hspacer(actions)
-	if str(e.homepage) != "":
-		var hp := _btn(actions, "Website", func(): OS.shell_open(str(e.homepage)), 0, "bordered", "pl.compass")
+	# The homepage comes from the remote catalog: only ever hand the OS a web link (a file: or custom-scheme URL would
+	# open or run something local).
+	var homepage := str(e.homepage)
+	if homepage.begins_with("https://") or homepage.begins_with("http://"):
+		var hp := _btn(actions, "Website", func(): OS.shell_open(homepage), 0, "bordered", "pl.compass")
 		hp.custom_minimum_size.y = 38
 		hp.tooltip_text = str(e.homepage)
 	if tr.has("error") and not bool(tr.get("working", true)):

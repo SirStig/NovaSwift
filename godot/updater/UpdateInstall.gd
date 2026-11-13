@@ -160,8 +160,16 @@ static func _extract_zip(archive: String, dest: String) -> Dictionary:
 static func _extract_tar(archive: String, dest: String) -> Dictionary:
 	if OS.get_name() == "Windows":
 		return {"ok": false, "error": "tar archives are not used on Windows."}
+	# Run the system tar by absolute path, not whatever "tar" comes first on PATH.
+	var tar_bin := ""
+	for candidate in ["/usr/bin/tar", "/bin/tar"]:
+		if FileAccess.file_exists(candidate):
+			tar_bin = candidate
+			break
+	if tar_bin == "":
+		return {"ok": false, "error": "Unpacking the update needs tar (/usr/bin/tar), which wasn't found."}
 	var out: Array = []
-	var code: int = OS.execute("tar", ["-xzf", archive, "-C", dest, "--no-same-owner"], out, true)
+	var code: int = OS.execute(tar_bin, ["-xzf", archive, "-C", dest, "--no-same-owner"], out, true)
 	if code != 0:
 		return {"ok": false, "error": "Unpacking the update failed (tar exit code %d)." % code}
 	# GNU tar already refuses ".." members and strips leading "/"; verify nothing escaped by walking dest.
