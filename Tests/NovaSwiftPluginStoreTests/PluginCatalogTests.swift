@@ -77,6 +77,29 @@ final class PluginCatalogTests: XCTestCase {
         XCTAssertNotNil(second.remoteError)
     }
 
+    func testMergeBorrowsOnlyMatchingChecksums() {
+        let sameFile = PluginCatalogEntry(id: "a", name: "A", author: "x", version: "1.0", summary: "s",
+                                          downloadURLs: [URL(string: "https://example.com/a.zip")!],
+                                          sha256: "abc", sizeBytes: 10)
+        let remoteA = PluginCatalogEntry(id: "a", name: "A (remote)", author: "x", version: "1.0", summary: "s",
+                                         downloadURLs: [URL(string: "https://example.com/a.zip")!], sizeBytes: 10)
+        let remoteNewFile = PluginCatalogEntry(id: "b", name: "B", author: "x", version: "2.0", summary: "s",
+                                               downloadURLs: [URL(string: "https://example.com/b2.zip")!], sizeBytes: 20)
+        let bundledOldB = PluginCatalogEntry(id: "b", name: "B", author: "x", version: "1.0", summary: "s",
+                                             downloadURLs: [URL(string: "https://example.com/b1.zip")!],
+                                             sha256: "old", sizeBytes: 19)
+        let merged = PluginCatalogProvider.merge(remote: PluginCatalogDocument(plugins: [remoteA, remoteNewFile]),
+                                                 bundled: PluginCatalogDocument(plugins: [sameFile, bundledOldB, entry("bundled-only")]))
+        XCTAssertEqual(merged.plugins.map(\.id), ["a", "b"], "the online catalog decides what is listed")
+        XCTAssertEqual(merged.plugins[0].name, "A (remote)")
+        XCTAssertEqual(merged.plugins[0].sha256, "abc", "same URL and size: the bundled checksum applies")
+        XCTAssertNil(merged.plugins[1].sha256, "a different file must not get the old checksum")
+    }
+
+    func testEveryBundledEntryHasAChecksum() {
+        for e in PluginCatalog.all { XCTAssertEqual(e.sha256?.count, 64, e.id) }
+    }
+
     func testFallsBackToBundledWithoutCache() async {
         let p = PluginCatalogProvider(cacheFile: tmp().appendingPathComponent("none.json"),
                                       bundled: PluginCatalogDocument(plugins: [entry("bundled")])) { _ in

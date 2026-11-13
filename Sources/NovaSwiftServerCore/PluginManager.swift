@@ -35,7 +35,7 @@ public final class PluginManager {
     }
 
     /// Largest plug-in download the server accepts (the biggest total conversions are a few hundred MB).
-    public static let maxDownloadBytes: Int64 = 800 * 1_000_000
+    public static let maxDownloadBytes: Int64 = PluginDownloader.maxCatalogDownloadBytes
     public let pluginsDir: URL
     private let cacheDir: URL
     private let log: ServerLog

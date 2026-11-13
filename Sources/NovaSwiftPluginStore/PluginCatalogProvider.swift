@@ -81,6 +81,20 @@ public struct PluginCatalogProvider: Sendable {
         return doc
     }
 
+    /// The online catalog as it is, except that a remote entry with no checksum borrows the bundled one when both
+    /// point at the same file (same first URL and size), so downloads can still be verified.
+    public static func merge(remote: PluginCatalogDocument, bundled: PluginCatalogDocument) -> PluginCatalogDocument {
+        let byID = Dictionary(bundled.plugins.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var out = remote
+        for i in out.plugins.indices where out.plugins[i].sha256 == nil {
+            if let b = byID[out.plugins[i].id], let sha = b.sha256,
+               b.downloadURLs.first == out.plugins[i].downloadURLs.first, b.sizeBytes == out.plugins[i].sizeBytes {
+                out.plugins[i].sha256 = sha
+            }
+        }
+        return out
+    }
+
     /// The catalog saved by the last successful download, if readable.
     public func cached() -> PluginCatalogDocument? {
         guard let data = try? Data(contentsOf: cacheFile) else { return nil }
@@ -89,7 +103,7 @@ public struct PluginCatalogProvider: Sendable {
 
     /// Fast path for startup: whatever we can show right now without network.
     public func offline(error: String? = nil) -> PluginCatalogResult {
-        if let doc = cached() { return PluginCatalogResult(document: doc, source: .cache, remoteError: error) }
+        if let doc = cached() { return PluginCatalogResult(document: Self.merge(remote: doc, bundled: bundled), source: .cache, remoteError: error) }
         return PluginCatalogResult(document: bundled, source: .bundled, remoteError: error)
     }
 
@@ -100,7 +114,7 @@ public struct PluginCatalogProvider: Sendable {
             try? FileManager.default.createDirectory(at: cacheFile.deletingLastPathComponent(),
                                                      withIntermediateDirectories: true)
             try? data.write(to: cacheFile, options: .atomic)
-            return PluginCatalogResult(document: doc, source: .remote, remoteError: nil)
+            return PluginCatalogResult(document: Self.merge(remote: doc, bundled: bundled), source: .remote, remoteError: nil)
         } catch {
             return offline(error: error.localizedDescription)
         }

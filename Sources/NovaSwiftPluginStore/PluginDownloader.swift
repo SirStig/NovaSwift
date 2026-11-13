@@ -38,6 +38,9 @@ public enum PluginDownloader {
     /// the GitHub-Pages/LFS-backed host) an LFS pointer stub rather than the
     /// real archive — same guard `scripts/fetch-plugins.sh` uses.
     public static let minimumValidBytes = 1000
+    /// Largest catalog download the clients accept (the biggest classic total
+    /// conversions are ~400 MB). Matches the dedicated server's cap.
+    public static let maxCatalogDownloadBytes: Int64 = 800 * 1_000_000
 
     /// Downloads `url` to a new temp file via a `URLSessionDownloadTask`,
     /// reporting fractional progress (0...1, or `nil` if the server didn't

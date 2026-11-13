@@ -7,7 +7,10 @@ public enum PluginInstallPipeline {
                                            _ progress: @escaping @Sendable (Double?) -> Void) async throws -> (file: URL, name: String)
 
     public static let networkDownload: Download = { urls, sha, progress in
-        try await PluginDownloader.download(from: urls, sha256: sha, onProgress: progress)
+        // Catalog downloads come from third-party hosts: HTTPS only, and stop at the size cap.
+        try await PluginDownloader.download(from: urls, sha256: sha, httpsOnly: true,
+                                            maxBytes: PluginDownloader.maxCatalogDownloadBytes,
+                                            onProgress: progress)
     }
 
     /// Installs (or updates, replacing the old folder) `entry` under `root`.

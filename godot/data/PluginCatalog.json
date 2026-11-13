@@ -17,6 +17,7 @@
       "downloadURLs": [
         "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/The_Frozen_Heart.zip"
       ],
+      "sha256": "ce16afd8be849f47f48d99e31961a52476397a1bdc710319d0aaef0a3eca5c7c",
       "sizeBytes": 12952692,
       "homepageURL": "https://github.com/andrews05/evstuff",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -40,6 +41,7 @@
       "downloadURLs": [
         "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/Femme_Fatale.zip"
       ],
+      "sha256": "9a6d76af32e790806b655cda7f9b75f58fb7ca1a9416b46b85eb1298443f1285",
       "sizeBytes": 10078167,
       "homepageURL": "https://github.com/andrews05/evstuff",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -62,6 +64,7 @@
       "downloadURLs": [
         "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/Polycon_EV.zip"
       ],
+      "sha256": "a89d4e3a3658d979cf3a812ebb66b8a3f058f4f309996f45632cde1b08d89b33",
       "sizeBytes": 29104056,
       "homepageURL": "https://github.com/andrews05/evstuff",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -85,6 +88,7 @@
       "downloadURLs": [
         "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/EV_Classic_for_Nova.zip"
       ],
+      "sha256": "e827e2a0a5d0fab0481e31b1e9078add0da4df46235706b89e1511fe0b0c7d3d",
       "sizeBytes": 7599355,
       "homepageURL": "https://github.com/andrews05/evstuff",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -108,6 +112,7 @@
       "downloadURLs": [
         "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/EV_Override_for_Nova.zip"
       ],
+      "sha256": "3711e120e84b1227d0452b4f7d366839bd64afc887d64251701c5f5b704f035a",
       "sizeBytes": 9292633,
       "homepageURL": "https://github.com/andrews05/evstuff",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -131,6 +136,7 @@
       "downloadURLs": [
         "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/rEV_1.1.zip"
       ],
+      "sha256": "4f22b9cf6f65c02579d1c1b039e412deb9743bffffaa560ca9709903f5cb96ae",
       "sizeBytes": 28727401,
       "homepageURL": "https://github.com/andrews05/evstuff",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -156,6 +162,7 @@
       "downloadURLs": [
         "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/Cold_Fusion_for_Nova_1.0.1.zip"
       ],
+      "sha256": "bbc0ebf9ec7d01d0a978e4bf3bc57eba45b63f9ad04872c8be489024fec9a8a7",
       "sizeBytes": 10144766,
       "homepageURL": "https://github.com/andrews05/evstuff",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -181,6 +188,7 @@
       "downloadURLs": [
         "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/EVO_Facelift_1.0.7.zip"
       ],
+      "sha256": "aea87f980ffddf849490d5100e6b3ae4cd1a651f70aab7cc31f7904972c2fea2",
       "sizeBytes": 22146103,
       "homepageURL": "https://github.com/andrews05/evstuff",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -206,6 +214,7 @@
       "downloadURLs": [
         "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/EVO_Extras.zip"
       ],
+      "sha256": "7579121755f6638d41cb69fc270d6a1d41befcff7fb6b23d4c36dbb29920038e",
       "sizeBytes": 989672,
       "homepageURL": "https://github.com/andrews05/evstuff",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -231,6 +240,7 @@
       "downloadURLs": [
         "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/Shields.zip"
       ],
+      "sha256": "2e7ea1397f58be8fbafd07c4bc7fa65774ef232613db24007ee6e65a1f2e22ba",
       "sizeBytes": 306398,
       "homepageURL": "https://github.com/andrews05/evstuff",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -255,6 +265,7 @@
       "downloadURLs": [
         "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/Collision_Damage.zip"
       ],
+      "sha256": "cc09e282cf4f2def101a92e5ad972623acac0f3b28940c58a2e49ddae7638475",
       "sizeBytes": 1220,
       "homepageURL": "https://github.com/andrews05/evstuff",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -279,6 +290,7 @@
       "downloadURLs": [
         "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/Dodge_That.zip"
       ],
+      "sha256": "24430d354f3b6b91e9b52359c41e758d59bc71d59d66958288de3b5b06501b22",
       "sizeBytes": 86132,
       "homepageURL": "https://github.com/andrews05/evstuff",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -303,6 +315,7 @@
       "downloadURLs": [
         "https://download.escape-velocity.games/ARPIA2.zip"
       ],
+      "sha256": "4f51e4ab7c655a4fd2446387ba9735d585d82e101396e02612ffe7870d2795d2",
       "sizeBytes": 39026861,
       "homepageURL": "https://download.escape-velocity.games/",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -327,6 +340,7 @@
       "downloadURLs": [
         "https://download.escape-velocity.games/White%20Dwarf%20-%20Beta%201.3.zip"
       ],
+      "sha256": "8704e5daabb94a825dd85116737688919865e0eff52f65cdca04aa98fabbff7e",
       "sizeBytes": 399293632,
       "homepageURL": "https://download.escape-velocity.games/",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -351,6 +365,7 @@
       "downloadURLs": [
         "https://download.escape-velocity.games/Brave%20New%20Void.zip"
       ],
+      "sha256": "a17c3ea0dbc9b6cfe2af588c484b4146c54e40d83dd1d345cd31521362fbc76b",
       "sizeBytes": 237149000,
       "homepageURL": "https://download.escape-velocity.games/",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -375,6 +390,7 @@
       "downloadURLs": [
         "https://download.escape-velocity.games/Starfleet%20Adventures.zip"
       ],
+      "sha256": "30aa05380caa7eaba04ddf79def8bce2c95f9c4d402fe22a5a7d88c3cbb54f57",
       "sizeBytes": 114638116,
       "homepageURL": "https://download.escape-velocity.games/",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -398,6 +414,7 @@
       "downloadURLs": [
         "https://download.escape-velocity.games/Ashen%20Galaxy.zip"
       ],
+      "sha256": "d194c8c4a00ddd9243abf5893ebe8f982917850dfd7cf0e77b11bd4b2f5f25f3",
       "sizeBytes": 51245408,
       "homepageURL": "https://download.escape-velocity.games/",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -420,6 +437,7 @@
       "downloadURLs": [
         "https://download.escape-velocity.games/Brotherhood%20of%20the%20Kestrel.zip"
       ],
+      "sha256": "bb68988dd7794bcfaf69df99920d15e2812a221d3a0c20182c3186a1412e8610",
       "sizeBytes": 66198300,
       "homepageURL": "https://download.escape-velocity.games/",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -443,6 +461,7 @@
       "downloadURLs": [
         "https://download.escape-velocity.games/Acheron%201.1.zip"
       ],
+      "sha256": "4385ea4be9b455531776d7a066d5014511eb91afaae6020daaae6074134820af",
       "sizeBytes": 18286745,
       "homepageURL": "https://download.escape-velocity.games/",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -466,6 +485,7 @@
       "downloadURLs": [
         "https://download.escape-velocity.games/Realm%20of%20Prey.zip"
       ],
+      "sha256": "14e3aeef00ac893c54b7c85b14ca83850454853059a666430938a6f1c0ed3bea",
       "sizeBytes": 31982456,
       "homepageURL": "https://download.escape-velocity.games/",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -489,6 +509,7 @@
       "downloadURLs": [
         "https://download.escape-velocity.games/Pale.zip"
       ],
+      "sha256": "e646d1f9c44d07abceb361b7361594cb6459655fcc0313cb4baaa1bcaff7148d",
       "sizeBytes": 11412593,
       "homepageURL": "https://download.escape-velocity.games/",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -514,6 +535,7 @@
       "downloadURLs": [
         "https://download.escape-velocity.games/Reign%20of%20the%20UE.zip"
       ],
+      "sha256": "1b531e2d2f34e311e837c8660b19f4e24bf719c25b62eeac6d389aa62402fdae",
       "sizeBytes": 13774344,
       "homepageURL": "https://download.escape-velocity.games/",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
@@ -539,6 +561,7 @@
       "downloadURLs": [
         "https://download.escape-velocity.games/EV%20Game%20Expander%20for%20Nova%201.1.zip"
       ],
+      "sha256": "167c576778ea8dad873885a64b2821eaeafd05a6c76b8b5eb5426174d4e076df",
       "sizeBytes": 18982459,
       "homepageURL": "https://download.escape-velocity.games/",
       "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",

@@ -43,7 +43,7 @@ public struct PluginCatalogEntry: Codable, Identifiable, Hashable, Sendable {
     /// Direct file URLs, tried in order (mirrors/fallbacks).
     public let downloadURLs: [URL]
     /// Hex SHA-256 of the downloaded file, when known. Checked after download.
-    public let sha256: String?
+    public var sha256: String?
     public let sizeBytes: Int64?
     public let homepageURL: URL?
     public let sourceURL: URL?
