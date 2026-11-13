@@ -37,11 +37,12 @@ enum StuffIt {
         return nil
     }
 
-    static func extract(_ all: [UInt8], at base: Int = 0) throws -> [MacFile] {
+    /// `budget`: the most all the forks may unpack to (see `MacBytes.maxUnpackedBytes`).
+    static func extract(_ all: [UInt8], at base: Int = 0, budget: Int = MacBytes.maxUnpackedBytes) throws -> [MacFile] {
         let b = base == 0 ? all : Array(all[base...])
         switch kind(b) {
-        case .classic: return try classic(b)
-        case .v5: return try version5(b)
+        case .classic: return try classic(b, budget: budget)
+        case .v5: return try version5(b, budget: budget)
         case .x: throw MacArchiveError.stuffItX
         case nil: throw MacArchiveError.unrecognized
         }
@@ -55,7 +56,7 @@ enum StuffIt {
     private static func decodeFork(_ f: Fork, _ b: [UInt8], budget: inout Int) throws -> [UInt8] {
         if f.length == 0 { return [] }
         if f.encrypted { throw MacArchiveError.encrypted }
-        guard f.length > 0, f.length <= budget else { throw MacArchiveError.corrupt("it would unpack to more than \(MacBytes.maxUnpackedBytes >> 20) MB") }
+        guard f.length > 0, f.length <= budget else { throw MacBytes.tooBig() }
         budget -= f.length
         guard f.offset >= 0, f.offset + f.packed <= b.count else { throw MacArchiveError.corrupt("fork runs past end of file") }
         let out = try StuffItCodecs.decode(method: f.method, b[f.offset..<f.offset + f.packed], outLen: f.length)
@@ -65,13 +66,13 @@ enum StuffIt {
 
     // MARK: Classic
 
-    private static func classic(_ b: [UInt8]) throws -> [MacFile] {
+    private static func classic(_ b: [UInt8], budget initialBudget: Int) throws -> [MacFile] {
         let total = MacBytes.u32(b, 6)
         let end = (total >= 22 && total <= b.count) ? total : b.count
         var pos = 22
         var stack: [String] = []
         var out: [MacFile] = []
-        var budget = MacBytes.maxUnpackedBytes
+        var budget = initialBudget
         while pos + 112 <= end {
             let rm = Int(b[pos]), dm = Int(b[pos + 1])
             let nlen = min(Int(b[pos + 2]), 63)
@@ -100,10 +101,10 @@ enum StuffIt {
 
     // MARK: StuffIt 5
 
-    private static func version5(_ b: [UInt8]) throws -> [MacFile] {
+    private static func version5(_ b: [UInt8], budget initialBudget: Int) throws -> [MacFile] {
         guard b.count >= 100 else { throw MacArchiveError.corrupt("StuffIt 5 header too short") }
         var out: [MacFile] = []
-        var budget = MacBytes.maxUnpackedBytes
+        var budget = initialBudget
         var seen = Set<Int>()
         // Members form linked lists (via the "next" offset); a folder's contents
         // are a separate list starting at its "first entry" offset.

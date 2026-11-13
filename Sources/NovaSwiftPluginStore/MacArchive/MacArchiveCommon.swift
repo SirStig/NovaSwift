@@ -40,9 +40,19 @@ public struct MacFile: Equatable, Sendable {
 }
 
 enum MacBytes {
-    /// Most a single archive may unpack to in memory (StuffIt forks, BinHex
-    /// runs). Classic plug-ins are far smaller; this only stops bombs.
+    /// Most one archive may unpack to in memory (StuffIt forks, BinHex runs),
+    /// counting every archive nested inside it. Classic plug-ins are far
+    /// smaller; this only stops bombs. iPhone, iPad and Apple TV get less
+    /// memory before the system ends the app, so they get a lower limit.
+    #if os(iOS) || os(tvOS) || os(visionOS) || os(watchOS)
+    static let maxUnpackedBytes = 512 << 20
+    #else
     static let maxUnpackedBytes = 1 << 30
+    #endif
+
+    static func tooBig() -> MacArchiveError {
+        MacArchiveError.corrupt("it would unpack to more than \(maxUnpackedBytes >> 20) MB")
+    }
 
     static func u16(_ b: [UInt8], _ o: Int) -> Int { Int(b[o]) << 8 | Int(b[o + 1]) }
     static func u32(_ b: [UInt8], _ o: Int) -> Int {
@@ -74,13 +84,13 @@ enum MacBytes {
     }
 
     /// The 0x90-marker run-length scheme shared by BinHex and StuffIt method 1.
-    static func rleDecode(_ src: ArraySlice<UInt8>, limit: Int? = nil) throws -> [UInt8] {
+    static func rleDecode(_ src: ArraySlice<UInt8>, limit: Int? = nil, cap: Int = maxUnpackedBytes) throws -> [UInt8] {
         var out: [UInt8] = []
         out.reserveCapacity(limit ?? src.count)
         var i = src.startIndex
         while i < src.endIndex {
             if let limit, out.count >= limit { break }
-            if out.count > maxUnpackedBytes { throw MacArchiveError.corrupt("it would unpack to more than \(maxUnpackedBytes >> 20) MB") }
+            if out.count > cap { throw tooBig() }
             let c = src[i]; i += 1
             if c != 0x90 { out.append(c); continue }
             guard i < src.endIndex else { throw MacArchiveError.corrupt("truncated run") }

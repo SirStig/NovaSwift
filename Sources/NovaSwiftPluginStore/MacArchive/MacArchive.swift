@@ -21,28 +21,33 @@ public enum MacArchive {
 
     /// Fully unwraps `data` into a flat list of files and folders.
     public static func extract(_ data: Data, name: String? = nil) throws -> [MacFile] {
-        try expand([UInt8](data), isSea: (name as NSString?)?.pathExtension.lowercased() == "sea", depth: 0)
+        try expand([UInt8](data), isSea: (name as NSString?)?.pathExtension.lowercased() == "sea", depth: 0,
+                   budget: MacBytes.maxUnpackedBytes)
     }
 
-    private static func expand(_ b: [UInt8], isSea: Bool, depth: Int) throws -> [MacFile] {
+    /// `budget` is shared down the nesting: a wrapper's output stays in memory
+    /// while the archive inside it is opened, so it counts against the same limit.
+    private static func expand(_ b: [UInt8], isSea: Bool, depth: Int, budget: Int) throws -> [MacFile] {
         guard depth < 5 else { throw MacArchiveError.corrupt("archives nested too deeply") }
-        if StuffIt.kind(b) != nil { return try StuffIt.extract(b) }
-        if BinHex.bodyStart(b) != nil { return try unwrap(try BinHex.decode(b), isSea: isSea, depth: depth) }
-        if let f = MacBinary.decode(b) { return try unwrap(f, isSea: isSea, depth: depth) }
-        if isSea, let at = StuffIt.findEmbedded(b) { return try StuffIt.extract(b, at: at) }
+        if StuffIt.kind(b) != nil { return try StuffIt.extract(b, budget: budget) }
+        if BinHex.bodyStart(b) != nil { return try unwrap(try BinHex.decode(b, budget: budget), isSea: isSea, depth: depth, budget: budget) }
+        if let f = MacBinary.decode(b) { return try unwrap(f, isSea: isSea, depth: depth, budget: budget) }
+        if isSea, let at = StuffIt.findEmbedded(b) { return try StuffIt.extract(b, at: at, budget: budget) }
         throw MacArchiveError.unrecognized
     }
 
     /// A wrapper (BinHex/MacBinary) yielded one file: if that file is itself an
     /// archive, open it; otherwise it is the payload.
-    private static func unwrap(_ f: MacFile, isSea: Bool, depth: Int) throws -> [MacFile] {
+    private static func unwrap(_ f: MacFile, isSea: Bool, depth: Int, budget: Int) throws -> [MacFile] {
         let sea = isSea || f.fileType == "APPL" || (f.name as NSString).pathExtension.lowercased() == "sea"
+        let left = budget - f.data.count - f.rsrc.count
+        guard left >= 0 else { throw MacBytes.tooBig() }
         if StuffIt.kind(f.data) != nil || BinHex.bodyStart(Array(f.data.prefix(8192))) != nil
             || (f.rsrc.isEmpty && MacBinary.decode(f.data) != nil) {
-            return try expand(f.data, isSea: false, depth: depth + 1)
+            return try expand(f.data, isSea: false, depth: depth + 1, budget: left)
         }
-        if sea, let at = StuffIt.findEmbedded(f.data) { return try StuffIt.extract(f.data, at: at) }
-        if sea, let at = StuffIt.findEmbedded(f.rsrc) { return try StuffIt.extract(f.rsrc, at: at) }
+        if sea, let at = StuffIt.findEmbedded(f.data) { return try StuffIt.extract(f.data, at: at, budget: left) }
+        if sea, let at = StuffIt.findEmbedded(f.rsrc) { return try StuffIt.extract(f.rsrc, at: at, budget: left) }
         return [f]
     }
 

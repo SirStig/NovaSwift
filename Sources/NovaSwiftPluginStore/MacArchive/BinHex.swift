@@ -37,7 +37,8 @@ enum BinHex {
         return nil
     }
 
-    static func decode(_ b: [UInt8]) throws -> MacFile {
+    /// `budget`: the most the decoded file may take (see `MacBytes.maxUnpackedBytes`).
+    static func decode(_ b: [UInt8], budget: Int = MacBytes.maxUnpackedBytes) throws -> MacFile {
         guard let start = bodyStart(b) else { throw MacArchiveError.unrecognized }
         var raw: [UInt8] = []
         raw.reserveCapacity(b.count * 3 / 4)
@@ -54,7 +55,7 @@ enum BinHex {
             if nbits >= 8 { nbits -= 8; raw.append(UInt8((acc >> nbits) & 0xFF)); acc &= (1 << nbits) - 1 }
         }
         guard terminated else { throw MacArchiveError.corrupt("BinHex data is truncated") }
-        let d = try MacBytes.rleDecode(raw[...])
+        let d = try MacBytes.rleDecode(raw[...], cap: budget)
         guard d.count > 21 else { throw MacArchiveError.corrupt("BinHex header too short") }
         let nlen = Int(d[0])
         let h = 1 + nlen + 1   // after name + version byte

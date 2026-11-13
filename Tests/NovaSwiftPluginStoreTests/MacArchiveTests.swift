@@ -152,4 +152,18 @@ final class MacArchiveTests: XCTestCase {
             XCTAssertTrue(why.contains("unpack"), why)
         }
     }
+
+    func testUnpackBudgetIsSharedAndEnforced() throws {
+        let sit = StuffIt.buildClassic([(name: "A", rsrcMethod: 0, rsrc: [9, 9], rsrcPacked: [9, 9],
+                                         dataMethod: 0, data: [1, 2, 3], dataPacked: [1, 2, 3])])
+        XCTAssertNoThrow(try StuffIt.extract(sit, budget: 5), "both forks fit exactly")
+        XCTAssertThrowsError(try StuffIt.extract(sit, budget: 4), "the forks together are over budget")
+        // A wrapper's output counts against the same budget as the archive inside it.
+        let hqx = BinHex.encode(MacFile(name: "A.sit", fileType: "SIT!", creator: "SIT!", data: sit), name: "A.sit")
+        XCTAssertThrowsError(try BinHex.decode(hqx, budget: 16)) { error in
+            guard case .corrupt(let why)? = error as? MacArchiveError else { return XCTFail("\(error)") }
+            XCTAssertTrue(why.contains("unpack"), why)
+        }
+        XCTAssertNoThrow(try BinHex.decode(hqx))
+    }
 }
