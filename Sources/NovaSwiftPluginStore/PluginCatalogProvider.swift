@@ -6,12 +6,14 @@ import FoundationNetworking
 public enum PluginCatalogError: Error, LocalizedError, Equatable {
     case unsupportedSchema(Int)
     case duplicateIDs([String])
+    case unsafeIDs([String])
     case badStatus(Int)
 
     public var errorDescription: String? {
         switch self {
         case .unsupportedSchema(let v): return "The catalog uses format version \(v); update NovaSwift to read it."
         case .duplicateIDs(let ids): return "The catalog lists the same plug-in twice: \(ids.joined(separator: ", "))."
+        case .unsafeIDs(let ids): return "The catalog has plug-in ids that aren't valid folder names: \(ids.joined(separator: ", "))."
         case .badStatus(let code): return "The catalog server answered HTTP \(code)."
         }
     }
@@ -74,6 +76,8 @@ public struct PluginCatalogProvider: Sendable {
         var seen = Set<String>(), dupes = Set<String>()
         for p in doc.plugins where !seen.insert(p.id).inserted { dupes.insert(p.id) }
         if !dupes.isEmpty { throw PluginCatalogError.duplicateIDs(dupes.sorted()) }
+        let unsafe = doc.plugins.map(\.id).filter { !PluginInstaller.isSafeID($0) }
+        if !unsafe.isEmpty { throw PluginCatalogError.unsafeIDs(unsafe.sorted()) }
         return doc
     }
 

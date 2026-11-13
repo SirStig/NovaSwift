@@ -88,4 +88,29 @@ final class PluginInstallerTests: XCTestCase {
         let ok = try pythonZip("z.writestr('Folder/a.rez', b'x'*100)")
         XCTAssertNoThrow(try PluginInstaller.validateZip(at: ok))
     }
+
+    func testUnsafeIDsAreRefusedAndNothingOutsideTheRootIsTouched() throws {
+        let parent = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let destRoot = parent.appendingPathComponent("plugins", isDirectory: true)
+        let victim = parent.appendingPathComponent("victim", isDirectory: true)
+        try FileManager.default.createDirectory(at: victim, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: parent) }
+
+        var unsafe = ["", ".", "..", "../victim", "a/b", "a\\b", "bad\nname"]
+        #if os(Windows)
+        unsafe.append("C:x")   // drive-relative path; harmless (and allowed) on POSIX
+        #endif
+        for id in unsafe {
+            XCTAssertFalse(PluginInstaller.isSafeID(id), id)
+            let zipURL = try makeFixtureZip()
+            XCTAssertThrowsError(try PluginInstaller.install(archiveAt: zipURL, id: id, into: destRoot), id)
+            XCTAssertThrowsError(try PluginInstaller.delete(id: id, from: destRoot, prebundled: false), id)
+            XCTAssertFalse(PluginInstaller.isInstalled(id: id, in: destRoot), id)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: victim.path))
+        for id in ["shields", "arpia2", "EV Classic for Nova", "rev.v2"] { XCTAssertTrue(PluginInstaller.isSafeID(id), id) }
+        #if !os(Windows)
+        XCTAssertTrue(PluginInstaller.isSafeID("Kirk: Part 2"), "a Finder name with \"/\" is stored with \":\"")
+        #endif
+    }
 }

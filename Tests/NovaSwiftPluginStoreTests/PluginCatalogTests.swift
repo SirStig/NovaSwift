@@ -49,6 +49,13 @@ final class PluginCatalogTests: XCTestCase {
         }
     }
 
+    func testRejectsIDsThatAreNotPlainFolderNames() {
+        let bad = PluginCatalogDocument(plugins: [entry("ok"), entry("../../escape"), entry("a/b")])
+        XCTAssertThrowsError(try PluginCatalogProvider.decode(json(bad))) {
+            XCTAssertEqual($0 as? PluginCatalogError, .unsafeIDs(["../../escape", "a/b"]))
+        }
+    }
+
     // MARK: fallback + caching
 
     func testRemoteSuccessIsCachedThenUsedOffline() async throws {

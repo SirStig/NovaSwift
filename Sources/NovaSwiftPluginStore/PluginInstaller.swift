@@ -10,6 +10,7 @@ public enum PluginInstallError: Error, LocalizedError {
     case checksumMismatch
     case macArchive(String)
     case unsafeArchive(String)
+    case unsafeID(String)
 
     public var errorDescription: String? {
         switch self {
@@ -17,6 +18,7 @@ public enum PluginInstallError: Error, LocalizedError {
         case .prebundledCannotBeDeleted: return "Prebundled plug-ins can be disabled but not deleted."
         case .macArchive(let why): return why
         case .unsafeArchive(let why): return "This archive was refused: \(why)"
+        case .unsafeID(let id): return "The plug-in id \"\(id)\" can't be used as a folder name, so it was refused."
         case .checksumMismatch: return "The download doesn't match the checksum in the catalog, so it was discarded."
         }
     }
@@ -59,6 +61,7 @@ public enum PluginInstaller {
     public static func install(archiveAt zipURL: URL, id: String, into destRoot: URL,
                                originalName: String? = nil,
                                version: String? = nil, sha256: String? = nil) throws -> URL {
+        guard isSafeID(id) else { throw PluginInstallError.unsafeID(id) }
         let fm = FileManager.default
         try fm.createDirectory(at: destRoot, withIntermediateDirectories: true)
 
@@ -173,14 +176,30 @@ public enum PluginInstaller {
     /// `destRoot`, so this also acts as a sanity check on the caller.
     public static func delete(id: String, from destRoot: URL, prebundled: Bool) throws {
         guard !prebundled else { throw PluginInstallError.prebundledCannotBeDeleted }
+        guard isSafeID(id) else { throw PluginInstallError.unsafeID(id) }
         let dir = destRoot.appendingPathComponent(id, isDirectory: true)
         if FileManager.default.fileExists(atPath: dir.path) {
             try FileManager.default.removeItem(at: dir)
         }
     }
 
+    /// Whether `id` is safe to use as one folder name directly under the
+    /// install root. Catalog ids come from a remote JSON file and become the
+    /// folder that `install` empties and `delete` removes, so an id holding a
+    /// path separator or `..` could reach outside the plug-ins folder.
+    public static func isSafeID(_ id: String) -> Bool {
+        guard !id.isEmpty, id.count <= 128, id != ".", id != ".." else { return false }
+        #if os(Windows)
+        let colonIsUnsafe = true    // drive-relative paths and NTFS streams
+        #else
+        let colonIsUnsafe = false   // a Finder name shown with "/" is stored with ":"; harmless on POSIX
+        #endif
+        return !id.unicodeScalars.contains { $0 == "/" || $0 == "\\" || ($0 == ":" && colonIsUnsafe) || $0.value < 0x20 || $0.value == 0x7F }
+    }
+
     /// Whether catalog entry `id` already has an installed folder under `destRoot`.
     public static func isInstalled(id: String, in destRoot: URL) -> Bool {
+        guard isSafeID(id) else { return false }
         var isDir: ObjCBool = false
         let path = destRoot.appendingPathComponent(id, isDirectory: true).path
         return FileManager.default.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
