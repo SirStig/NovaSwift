@@ -314,7 +314,7 @@ public final class UpdateChecker {
         let sem = DispatchSemaphore(value: 0)
         var result: Data?
         Task(priority: .utility) {   // not the main thread's high priority: libdispatch would try to raise worker priority (EACCES log noise)
-            if let f = try? await PluginDownloader.download(from: url, maxBytes: maxBytes) {
+            if let f = try? await PluginDownloader.download(from: url, maxBytes: maxBytes, httpsOnly: true) {
                 result = try? Data(contentsOf: f); try? FileManager.default.removeItem(at: f)
             }
             sem.signal()

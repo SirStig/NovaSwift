@@ -16,6 +16,7 @@ public enum PluginDownloadError: Error, LocalizedError {
     case noURL
     case tooLarge(Int64)
     case insecureURL
+    case insecureRedirect
 
     public var errorDescription: String? {
         switch self {
@@ -26,6 +27,7 @@ public enum PluginDownloadError: Error, LocalizedError {
         case .noURL: return "This catalog entry has no download link."
         case .tooLarge(let cap): return "The download is bigger than the \(cap / 1_000_000) MB limit, so it was stopped."
         case .insecureURL: return "Plug-ins are only downloaded over HTTPS."
+        case .insecureRedirect: return "The download link redirected to a non-HTTPS address, so it was stopped."
         }
     }
 }
@@ -49,10 +51,12 @@ public enum PluginDownloader {
     public static func download(
         from url: URL,
         maxBytes: Int64? = nil,
+        httpsOnly: Bool = false,
         onProgress: @escaping @Sendable (Double?) -> Void = { _ in }
     ) async throws -> URL {
         let delegate = DownloadDelegate(onProgress: onProgress)
         delegate.maxBytes = maxBytes
+        delegate.httpsOnly = httpsOnly
         let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
 
@@ -66,6 +70,8 @@ public enum PluginDownloader {
         let onProgress: @Sendable (Double?) -> Void
         var continuation: CheckedContinuation<URL, Error>?
         var maxBytes: Int64?
+        var httpsOnly = false
+        var refusedRedirect = false
 
         init(onProgress: @escaping @Sendable (Double?) -> Void) { self.onProgress = onProgress }
 
@@ -81,10 +87,30 @@ public enum PluginDownloader {
                 ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite) : nil)
         }
 
+        // An HTTPS link must not be able to hand the download to plain HTTP,
+        // where it could be swapped in transit (ATS already stops this on Apple
+        // platforms; the Godot builds and the server rely on this check).
+        func urlSession(_ session: URLSession, task: URLSessionTask,
+                        willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest,
+                        completionHandler: @escaping (URLRequest?) -> Void) {
+            if httpsOnly, request.url?.scheme?.lowercased() != "https" {
+                refusedRedirect = true
+                task.cancel()
+                completionHandler(nil)
+                return
+            }
+            completionHandler(request)
+        }
+
         func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
                          didFinishDownloadingTo location: URL) {
             guard let continuation else { return }
             self.continuation = nil
+            if refusedRedirect {
+                continuation.resume(throwing: PluginDownloadError.insecureRedirect)
+                return
+            }
             if let http = downloadTask.response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                 continuation.resume(throwing: PluginDownloadError.badStatus(http.statusCode))
                 return
@@ -113,7 +139,13 @@ public enum PluginDownloader {
         }
 
         func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-            guard let error, let continuation else { return }
+            guard let continuation else { return }
+            if refusedRedirect {
+                self.continuation = nil
+                continuation.resume(throwing: PluginDownloadError.insecureRedirect)
+                return
+            }
+            guard let error else { return }
             self.continuation = nil
             continuation.resume(throwing: error)
         }
@@ -141,7 +173,7 @@ public enum PluginDownloader {
         for url in urls {
             do {
                 if httpsOnly, url.scheme?.lowercased() != "https" { throw PluginDownloadError.insecureURL }
-                let file = try await download(from: url, maxBytes: maxBytes, onProgress: onProgress)
+                let file = try await download(from: url, maxBytes: maxBytes, httpsOnly: httpsOnly, onProgress: onProgress)
                 if let maxBytes, let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int64) ?? nil, size > maxBytes {
                     try? FileManager.default.removeItem(at: file)
                     throw PluginDownloadError.tooLarge(maxBytes)

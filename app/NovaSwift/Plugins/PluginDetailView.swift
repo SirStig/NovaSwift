@@ -254,10 +254,10 @@ struct PluginDetailView: View {
 
     @ViewBuilder private var links: some View {
         #if !os(tvOS)
-        if let url = entry.homepageURL {
+        if let url = PluginCatalogEntry.webLink(entry.homepageURL) {
             Button { openURL(url) } label: { Label("Website", systemImage: "safari") }.novaBorderedButton()
         }
-        if let url = entry.sourceURL {
+        if let url = PluginCatalogEntry.webLink(entry.sourceURL) {
             Button { openURL(url) } label: { Label("Source", systemImage: "chevron.left.forwardslash.chevron.right") }
                 .novaBorderedButton()
         }

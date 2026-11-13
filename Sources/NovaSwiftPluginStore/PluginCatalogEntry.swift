@@ -91,14 +91,23 @@ public struct PluginCatalogEntry: Codable, Identifiable, Hashable, Sendable {
         downloadURLs = try c.decodeIfPresent([URL].self, forKey: .downloadURLs) ?? []
         sha256 = try c.decodeIfPresent(String.self, forKey: .sha256)
         sizeBytes = try c.decodeIfPresent(Int64.self, forKey: .sizeBytes)
-        homepageURL = try c.decodeIfPresent(URL.self, forKey: .homepageURL)
-        sourceURL = try c.decodeIfPresent(URL.self, forKey: .sourceURL)
+        // The catalog is remote and unsigned: keep only web links, so a "Website"
+        // or "Source" button can never open file:, javascript: or an app scheme.
+        homepageURL = Self.webLink(try c.decodeIfPresent(URL.self, forKey: .homepageURL))
+        sourceURL = Self.webLink(try c.decodeIfPresent(URL.self, forKey: .sourceURL))
         license = try c.decodeIfPresent(String.self, forKey: .license)
         minNovaSwiftVersion = try c.decodeIfPresent(String.self, forKey: .minNovaSwiftVersion)
         dependencies = try c.decodeIfPresent([String].self, forKey: .dependencies) ?? []
         addedDate = try c.decodeIfPresent(String.self, forKey: .addedDate)
         updatedDate = try c.decodeIfPresent(String.self, forKey: .updatedDate)
         popularity = try c.decodeIfPresent(Int.self, forKey: .popularity) ?? 0
+    }
+
+    /// `url` if it is an http(s) link with a host, else nil.
+    public static func webLink(_ url: URL?) -> URL? {
+        guard let url, let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http",
+              let host = url.host, !host.isEmpty else { return nil }
+        return url
     }
 
     /// Category, derived from the flags and tags; used for the placeholder icon.

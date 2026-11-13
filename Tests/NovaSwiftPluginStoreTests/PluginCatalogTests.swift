@@ -49,6 +49,16 @@ final class PluginCatalogTests: XCTestCase {
         }
     }
 
+    func testOnlyWebLinksSurviveDecoding() throws {
+        let raw = #"{"schemaVersion":1,"plugins":[{"id":"a","name":"A","author":"x","summary":"s","homepageURL":"javascript:alert(1)","sourceURL":"file:///etc/passwd"},{"id":"b","name":"B","author":"x","summary":"s","homepageURL":"https://example.com/b","sourceURL":"http://example.com/src"},{"id":"c","name":"C","author":"x","summary":"s","homepageURL":"x-apple-reminderkit://open","sourceURL":"https:relative"}]}"#
+        let doc = try PluginCatalogProvider.decode(Data(raw.utf8))
+        let by = Dictionary(uniqueKeysWithValues: doc.plugins.map { ($0.id, $0) })
+        XCTAssertNil(by["a"]?.homepageURL); XCTAssertNil(by["a"]?.sourceURL)
+        XCTAssertEqual(by["b"]?.homepageURL?.absoluteString, "https://example.com/b")
+        XCTAssertEqual(by["b"]?.sourceURL?.absoluteString, "http://example.com/src")
+        XCTAssertNil(by["c"]?.homepageURL); XCTAssertNil(by["c"]?.sourceURL, "no host")
+    }
+
     func testRejectsIDsThatAreNotPlainFolderNames() {
         let bad = PluginCatalogDocument(plugins: [entry("ok"), entry("../../escape"), entry("a/b")])
         XCTAssertThrowsError(try PluginCatalogProvider.decode(json(bad))) {
