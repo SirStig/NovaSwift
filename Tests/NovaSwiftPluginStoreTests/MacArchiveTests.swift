@@ -140,4 +140,16 @@ final class MacArchiveTests: XCTestCase {
                                          dataMethod: 13, data: [1, 2, 3], dataPacked: [9, 9, 9])])
         XCTAssertThrowsError(try MacArchive.extract(Data(sit))) { XCTAssertEqual($0 as? MacArchiveError, .unsupportedMethod(13)) }
     }
+
+    func testHeaderClaimingAHugeForkIsRefusedBeforeAllocating() throws {
+        var sit = StuffIt.buildClassic([(name: "Bomb", rsrcMethod: 0, rsrc: [], rsrcPacked: [],
+                                         dataMethod: 0, data: [1, 2, 3], dataPacked: [1, 2, 3])])
+        // First entry header starts at 22; its data-fork length is at +88. Claim 2 GB.
+        let at = 22 + 88
+        sit[at] = 0x7F; sit[at + 1] = 0xFF; sit[at + 2] = 0xFF; sit[at + 3] = 0xFF
+        XCTAssertThrowsError(try MacArchive.extract(Data(sit))) { error in
+            guard case .corrupt(let why)? = error as? MacArchiveError else { return XCTFail("\(error)") }
+            XCTAssertTrue(why.contains("unpack"), why)
+        }
+    }
 }

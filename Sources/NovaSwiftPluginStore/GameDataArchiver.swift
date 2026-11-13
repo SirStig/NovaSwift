@@ -47,6 +47,9 @@ public enum GameDataArchiver {
     @discardableResult
     public static func unzip(archive: URL, into destDir: URL) throws -> Int {
         let fm = FileManager()
+        // Same checks as plug-in archives: no paths leaving the folder, no
+        // symlinks, no zip bombs. Done before the old data is removed.
+        try PluginInstaller.validateZip(at: archive)
         if fm.fileExists(atPath: destDir.path) { try fm.removeItem(at: destDir) }
         try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
         do {
@@ -63,6 +66,7 @@ public enum GameDataArchiver {
     /// the import paths that accept a .zip (a zipped "Nova Files" folder or
     /// the Windows build's download) instead of a live folder.
     public static func unzipToTemporary(archive: URL) throws -> URL {
+        try PluginInstaller.validateZip(at: archive)
         let fm = FileManager()
         let dest = fm.temporaryDirectory
             .appendingPathComponent("novaswift-unzip-\(UUID().uuidString)", isDirectory: true)

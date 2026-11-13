@@ -40,6 +40,10 @@ public struct MacFile: Equatable, Sendable {
 }
 
 enum MacBytes {
+    /// Most a single archive may unpack to in memory (StuffIt forks, BinHex
+    /// runs). Classic plug-ins are far smaller; this only stops bombs.
+    static let maxUnpackedBytes = 1 << 30
+
     static func u16(_ b: [UInt8], _ o: Int) -> Int { Int(b[o]) << 8 | Int(b[o + 1]) }
     static func u32(_ b: [UInt8], _ o: Int) -> Int {
         Int(b[o]) << 24 | Int(b[o + 1]) << 16 | Int(b[o + 2]) << 8 | Int(b[o + 3])
@@ -76,6 +80,7 @@ enum MacBytes {
         var i = src.startIndex
         while i < src.endIndex {
             if let limit, out.count >= limit { break }
+            if out.count > maxUnpackedBytes { throw MacArchiveError.corrupt("it would unpack to more than \(maxUnpackedBytes >> 20) MB") }
             let c = src[i]; i += 1
             if c != 0x90 { out.append(c); continue }
             guard i < src.endIndex else { throw MacArchiveError.corrupt("truncated run") }

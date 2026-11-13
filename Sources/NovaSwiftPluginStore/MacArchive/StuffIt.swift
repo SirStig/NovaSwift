@@ -49,9 +49,14 @@ enum StuffIt {
 
     // MARK: Fork decoding
 
-    private static func decodeFork(_ f: Fork, _ b: [UInt8]) throws -> [UInt8] {
+    /// `budget` is what the whole archive may still unpack to: every codec
+    /// allocates the length the header claims, so a few bytes of header could
+    /// otherwise ask for gigabytes.
+    private static func decodeFork(_ f: Fork, _ b: [UInt8], budget: inout Int) throws -> [UInt8] {
         if f.length == 0 { return [] }
         if f.encrypted { throw MacArchiveError.encrypted }
+        guard f.length > 0, f.length <= budget else { throw MacArchiveError.corrupt("it would unpack to more than \(MacBytes.maxUnpackedBytes >> 20) MB") }
+        budget -= f.length
         guard f.offset >= 0, f.offset + f.packed <= b.count else { throw MacArchiveError.corrupt("fork runs past end of file") }
         let out = try StuffItCodecs.decode(method: f.method, b[f.offset..<f.offset + f.packed], outLen: f.length)
         guard MacBytes.crc16(out) == f.crc else { throw MacArchiveError.corrupt("checksum mismatch") }
@@ -66,6 +71,7 @@ enum StuffIt {
         var pos = 22
         var stack: [String] = []
         var out: [MacFile] = []
+        var budget = MacBytes.maxUnpackedBytes
         while pos + 112 <= end {
             let rm = Int(b[pos]), dm = Int(b[pos + 1])
             let nlen = min(Int(b[pos + 2]), 63)
@@ -85,7 +91,7 @@ enum StuffIt {
                             crc: dCRC, encrypted: dm & 0x10 != 0)
             out.append(MacFile(folders: stack, name: name,
                                fileType: MacBytes.fourCC(b, pos + 66), creator: MacBytes.fourCC(b, pos + 70),
-                               data: try decodeFork(data, b), rsrc: try decodeFork(rsrc, b)))
+                               data: try decodeFork(data, b, budget: &budget), rsrc: try decodeFork(rsrc, b, budget: &budget)))
             pos = dataStart + rPacked + dPacked
         }
         guard !out.isEmpty else { throw MacArchiveError.corrupt("no entries") }
@@ -97,6 +103,7 @@ enum StuffIt {
     private static func version5(_ b: [UInt8]) throws -> [MacFile] {
         guard b.count >= 100 else { throw MacArchiveError.corrupt("StuffIt 5 header too short") }
         var out: [MacFile] = []
+        var budget = MacBytes.maxUnpackedBytes
         var seen = Set<Int>()
         // Members form linked lists (via the "next" offset); a folder's contents
         // are a separate list starting at its "first entry" offset.
@@ -151,7 +158,7 @@ enum StuffIt {
                     let rsrcFork = Fork(method: rMethod, length: rLen, offset: q, packed: rPacked, crc: rCRC, encrypted: encrypted)
                     let dataFork = Fork(method: dMethod, length: dLen, offset: q + rPacked, packed: dPacked, crc: dCRC, encrypted: encrypted)
                     out.append(MacFile(folders: folders, name: name, fileType: type, creator: creator,
-                                       data: try decodeFork(dataFork, b), rsrc: try decodeFork(rsrcFork, b)))
+                                       data: try decodeFork(dataFork, b, budget: &budget), rsrc: try decodeFork(rsrcFork, b, budget: &budget)))
                 }
                 pos = next; n += 1
             }
