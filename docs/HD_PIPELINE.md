@@ -203,7 +203,7 @@ File paths are relative to the `.nsx` folder and must stay inside it.
 | `bake.atmosphere` | model | planets: rim-glow colour `[r, g, b]`. Also switches to a single-sun light |
 | `bake.spin` | model | reserved for live 3D drawing (degrees per second); ignored for now |
 
-**Live 3D.** Settings → Graphics → *Ships with 3D models*: `Sprites` (baked frames, default) or `Full live 3D`. A live hull (`LiveHull`, NovaSwiftHD) is an `SK3DNode` running the same `ModelStage` the baker uses, set up the same way: camera, pitch, lights and orientation, plus the bake's fit and light level (`ModelBaker.calibrateLive`, cached with the bakes as `live-v1`). It also runs the same effect pass, so glow layers with a classic overlay stay dark on the model and keep drawing as their baked sheets on top. It turns to the ship's interpolated heading every frame and eases into the bank. Only hulls whose sheets bank (shän banking sets) roll, and hulks fly level. Models with `live: false` stay sprites.
+**Live 3D.** Settings → Graphics → *Ships with 3D models*: `Sprites` (baked frames, default) or `Full live 3D`. A live hull (`LiveHull`, NovaSwiftHD) is an `SK3DNode` running the same `ModelStage` the baker uses, set up the same way: camera, pitch, lights and orientation, plus the bake's fit and light level (`ModelBaker.calibrateLive`, cached with the bakes as `live-v5`). It also runs the same effect pass, so glow layers with a classic overlay stay dark on the model and keep drawing as their baked sheets on top. It turns to the ship's interpolated heading every frame and eases into the bank. Only hulls whose sheets bank (shän banking sets) roll, and hulks fly level. Models with `live: false` stay sprites.
 
 Cost control, aimed at phones and older Macs:
 - **Budget.** `LiveHullBudget` (NovaSwiftKit) caps how many hulls draw live at once. The ceiling depends on the device: 2–6 on phones, tablets and TV by memory; 2 on Intel Macs with integrated GPUs and 6 with discrete; 10 on Apple silicon with 8 GB; 24 above that. The cap then follows the frame rate actually achieved: a slow second sheds a quarter of the live hulls, and three steady seconds earn one back. Ships past the cap draw their sprites. The player claims a slot first. Off-screen ships give theirs back, and at most two hulls are built per frame.
@@ -223,6 +223,14 @@ Cost control, aimed at phones and older Macs:
 4. Check it: `novaswift-hd preview <Nova Files> <your plug-ins folder> <out>`
    resolves the pack exactly as the game does, reports anything it rejects,
    and writes classic-vs-HD comparison sheets.
+   For live 3D on Linux, Windows and Steam Deck, also run
+   `scripts/hd-pack-check.sh <your pack.nsx> [out]` from the repo (needs Godot
+   and a GPU; it opens a small window). It builds every hull the way the Godot
+   game does and reports, per model: whether it loads, its triangle count,
+   whether its triangles face outward, and the light match it settled on. A
+   match at its limit (0.6× or 3×) means the model is far brighter or darker
+   than the classic art: give that model a `bake.exposure`. It also writes
+   contact sheets of each hull in 3D over its classic sprite.
 5. In the game, turn on Settings → Graphics → *HD graphics from plug-ins*.
    The developer console's `hd` command shows what was found and loaded.
 
@@ -259,9 +267,12 @@ in the background and is logged as built on demand (see below).
   content hash (remembered per file path, size and date, so a model isn't
   re-hashed for each). The cache version is part of every key.
 - **Brightness.** A model is lit to match its classic art: a few headings are
-  rendered and the lights scaled so the mid and upper-mid tones match the
-  classic frames (planets keep their single-sun look; a descriptor's
-  `bake.exposure` overrides it).
+  rendered and the lights scaled (0.6× to 3×) so the mid and upper-mid tones
+  match the classic frames (planets keep their single-sun look; a descriptor's
+  `bake.exposure` overrides it). The Godot frontend runs the same match in its
+  own renderer (`flight/LiveHulls.gd`), so a pack looks the same on every
+  platform. Until 2026-11-14 the match measured an empty scene and always
+  settled on 1; packs tuned before then may look different now.
 - **Shipyard portraits** of model hulls are drawn over the gradient of the
   hull's original shipyard picture, so the government colours still read.
 - **Watching it.** Every five seconds of play the app logs one `Perf` line

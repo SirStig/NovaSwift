@@ -36,13 +36,10 @@ const KEY_LIGHT := Vector3(-0.75, 0.85, 0.65)
 const FIT_POINT_BUDGET := 20000           # vertices sampled when fitting a model to its classic footprint
 const BUILDS_PER_FRAME := 2               # GameScene.liveBuildsPerFrame
 const PENDING_RETRY := 0.5                # GameScene.syncLiveHull: ask again for a model still loading
-# HDAssetPipeline.matchBrightness: passes, and the clamp on the total. Apple clamps at 3x; Godot's
-# Compatibility renderer has no reflections without a sky background, so a metal hull can need more.
-# Scaling a hull's albedo brightens its diffuse and metal reflectance but not its plain specular, so
-# a dark hull converges more slowly than Apple's light scaling: two more passes.
-const MATCH_PASSES := 5
-const MATCH_MIN := 0.5
-const MATCH_MAX := 8.0
+# HDAssetPipeline.matchBrightness: passes, and the clamp on the total light scale.
+const MATCH_PASSES := 2
+const MATCH_MIN := 0.6
+const MATCH_MAX := 3.0
 const MATCH_FRAMES := 2                   # frames between asking for a render and reading it back
 const LAYERS := ["engine", "lights", "weapons"]
 # Render layers: 1-16 are light rigs (a light lights a hull sharing its bit), 17-20 the four z bands
@@ -754,6 +751,7 @@ func _match_step() -> void:
 	if absf(k - 1.0) < 0.04 or int(_match["pass"]) >= MATCH_PASSES:
 		if absf(k - 1.0) >= 0.04 and _match_root.get_child_count() > 0:
 			_scale_light(_match_root.get_child(_match_root.get_child_count() - 1), k)
+			_match["total"] = total * k
 		_finish_match()
 		return
 	# The copies share the template's meshes (Node.duplicate), so scaling one scales the template too.
@@ -868,8 +866,10 @@ static func _percentile(hist: PackedInt32Array, total: int, q: float) -> float:
 func _finish_match() -> void:
 	var type := int(_match["type"])
 	var tpl = _matching.get(type)
+	var total := float(_match["total"])
 	_end_match()
 	if tpl != null:
+		(tpl as Dictionary)["light"] = total   # what matching settled on (the pack check reports it)
 		_publish(type, tpl)
 
 

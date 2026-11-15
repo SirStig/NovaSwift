@@ -144,6 +144,10 @@ public final class ModelBaker {
     /// as bright as the one it replaces.
     @discardableResult
     private func matchBrightness(stage: ModelStage, layout: BakeLayout, classic: SpriteSheet, scale s: Double) -> Double {
+        // Both callers measure before anything else has put the stage in front of the renderer:
+        // without this every snapshot was of no scene, and the match always settled on 1.
+        renderer.scene = stage.scene
+        renderer.pointOfView = stage.camera
         let n = layout.framesPerSet
         let samples = Array(Set((0..<8).map { $0 * n / 8 })).filter { $0 < layout.frameCount && $0 < classic.frameCount }.sorted()
         guard let target = ClassicFootprint.tones(of: classic, frames: samples), target.mid > 0.02 else { return 1 }
@@ -558,6 +562,12 @@ public enum HDAssetPipeline {
         return image
     }
 
+    /// Marks the bakes of a model that is light-matched to its classic art (no pack exposure, not a
+    /// planet): the match used to measure an empty scene, so bakes cached before the fix are stale.
+    static func matchedPart(_ d: GraphicsEnhancement) -> String {
+        d.kind == .model && d.bake?.exposure == nil && d.bake?.atmosphere == nil ? "matched-" : ""
+    }
+
     /// A model's live-drawing calibration (`ModelBaker.calibrateLive`),
     /// cached with the bakes so a warm start renders nothing.
     /// `model`: the already loaded model, if the caller has one (it's cloned,
@@ -580,7 +590,7 @@ public enum HDAssetPipeline {
     /// Where a model's live fit is cached.
     public static func liveCacheKey(for e: ResolvedGraphicsEnhancement, layout: BakeLayout) -> String? {
         guard let content = e.source.contentKey() else { return nil }
-        return HDBakeCache.key(contentKey: content, descriptor: e.descriptor, layout: layout, scale: 1, part: "live-v4")
+        return HDBakeCache.key(contentKey: content, descriptor: e.descriptor, layout: layout, scale: 1, part: "live-v5")   // v5: light match measures the model
     }
 
     /// Just the hull/sprite atlas (no effect layers).
@@ -606,7 +616,7 @@ public enum HDAssetPipeline {
         let content = e.source.contentKey()
         let key = content.map {
             HDBakeCache.key(contentKey: $0, descriptor: e.descriptor, layout: layout, scale: hull.pixelScale,
-                            part: "shield-v1-" + color.map { String(format: "%.3f", $0) }.joined(separator: ","))
+                            part: matchedPart(e.descriptor) + "shield-v1-" + color.map { String(format: "%.3f", $0) }.joined(separator: ","))
         }
         if let cache, let key, let hit = cache.load(key, layout: layout, scale: hull.pixelScale) { return hit }
         guard let made = HDShield.make(from: hull, frames: n, color: color) else { return nil }
@@ -649,7 +659,7 @@ public enum HDAssetPipeline {
             // Which overlays were produced last time is part of what's cached:
             // a manifest per hull lists them, so a warm load never re-renders.
             let hullKey = HDBakeCache.key(contentKey: content, descriptor: e.descriptor, layout: layout,
-                                          scale: scale, part: "hull+" + overlays.map { "\($0.target.layer.rawValue)\($0.target.frameWidth)x\($0.target.frameHeight)x\($0.target.frameCount)" }.joined(separator: ","))
+                                          scale: scale, part: matchedPart(e.descriptor) + "hull+" + overlays.map { "\($0.target.layer.rawValue)\($0.target.frameWidth)x\($0.target.frameHeight)x\($0.target.frameCount)" }.joined(separator: ","))
             if let cache, let hull = cache.load(hullKey, layout: layout, scale: scale), let made = cache.loadList(hullKey) {
                 var out = [e.spriteID: hull]
                 for o in overlays where made.contains(o.target.layer.rawValue) {

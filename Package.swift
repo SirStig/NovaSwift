@@ -119,6 +119,11 @@ let package = Package(
             path: "Sources/novaswift-hd"
         ),
         .testTarget(
+            name: "NovaSwiftHDTests",
+            dependencies: ["NovaSwiftHD", "NovaSwiftKit"],
+            path: "Tests/NovaSwiftHDTests"
+        ),
+        .testTarget(
             name: "NovaSwiftKitTests",
             dependencies: ["NovaSwiftKit"],
             path: "Tests/NovaSwiftKitTests"
