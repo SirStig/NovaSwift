@@ -79,6 +79,11 @@ func process_hotkeys() -> void:
 		log_message.emit(m)
 
 
+## Map opened over the docked BBS or an offer (0x0043c470 / 0x00442510); see GalaxyMap.open_docked.
+func open_docked(system_id: int) -> void:
+	_map.open_docked(system_id)
+
+
 # Landing on a hypergate the pilot may use: the map in gate mode (pick a destination).
 func open_gate_picker() -> void:
 	_map.open_gate()

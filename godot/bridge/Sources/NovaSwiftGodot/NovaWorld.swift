@@ -4176,6 +4176,14 @@ class NovaWorld: Node2D {
         return ok
     }
 
+    /// The system the docked map command selects (0x0043c470 action 6,
+    /// 0x00442510 action 4): the pending offer's travel system when mïsn
+    /// Flags 0x0100 says so, otherwise -1.
+    @Callable(autoSnakeCase: true) func missionMapPreselect() -> Int {
+        guard let offer = storyState.services.pendingOffer, let engine = storyEngine() else { return -1 }
+        return engine.offerHighlightSystem(for: offer.mission) ?? -1
+    }
+
     /// Leaving the board.
     @Callable(autoSnakeCase: true) func bbsClose() {
         storyState.services.pendingOffer = nil

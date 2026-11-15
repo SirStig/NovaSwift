@@ -18,6 +18,8 @@ extends CanvasLayer
 ## The player chose Leave / pressed back on the landing screen. Main performs
 ## the actual nova.launch().
 signal launch_requested
+## Map / Player Info / Mission Info pressed on the Mission BBS (0x00440c90).
+signal command_window(kind: String)
 
 const BarScreens = preload("res://screens/BarScreens.gd")   # Hire Escort, Gamble
 const StoryGuide = preload("res://screens/StoryGuide.gd")
@@ -172,6 +174,8 @@ func close() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not visible or _nova.story_blocks_flight():
 		return   # a story text / offer dialog above owns input
+	if get_tree().get_first_node_in_group("docked_overlay") != null:
+		return   # Player Info or the starmap opened from the BBS owns input (StoryScreens.DOCKED_GROUP)
 	if event.is_action_pressed("ui_cancel") or (_screen == "hub" and not _overlay and event.is_action_pressed("launch")):
 		if _overlay_back.is_valid():
 			_overlay_back.call()
@@ -200,7 +204,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			if event.is_action_pressed("ship_info"):
 				_ship_info()
 		"bbs":
-			if event.is_action_pressed("bbs_accept"):
+			if event.is_action_pressed("galaxy_map"):
+				command_window.emit("map")
+				get_viewport().set_input_as_handled()
+			elif event.is_action_pressed("player_info"):
+				command_window.emit("player")
+				get_viewport().set_input_as_handled()
+			elif event.is_action_pressed("mission_info"):
+				command_window.emit("missions")
+				get_viewport().set_input_as_handled()
+			elif event.is_action_pressed("bbs_accept"):
 				_bbs_accept()
 
 

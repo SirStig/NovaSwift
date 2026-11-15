@@ -42,6 +42,172 @@ enum MissionOfferKey {
     }
 }
 
+/// The live flight chart, so a map opened from a docked window plots into the
+/// same route the launch will fly. Nil in a host that has no chart of its own.
+private struct FlightNavKey: EnvironmentKey {
+    static let defaultValue: NavigationModel? = nil
+}
+
+extension EnvironmentValues {
+    var flightNav: NavigationModel? {
+        get { self[FlightNavKey.self] }
+        set { self[FlightNavKey.self] = newValue }
+    }
+}
+
+/// A window the mission BBS (0x0043c470) and the offer dialog (0x00442510)
+/// open over themselves: the starmap, Player Info, and Mission Info.
+enum LandedNested: Identifiable, Equatable {
+    case map(Int?)
+    case playerInfo
+    case missionInfo
+
+    var id: String {
+        switch self {
+        case .map(let system): return "map-\(system ?? -1)"
+        case .playerInfo: return "player"
+        case .missionInfo: return "missions"
+        }
+    }
+}
+
+/// Offer-window text scroll (0x00447170 / 0x00499270): Up/Down 10 px,
+/// Page Up/Down 250 px, Home/End a jump the view clamps to an end.
+@MainActor
+func offerTextScrollDelta(_ press: KeyPress) -> CGFloat? {
+    switch press.key {
+    case .upArrow: return -10
+    case .downArrow: return 10
+    case .pageUp: return -250
+    case .pageDown: return 250
+    case .home: return -1_000_000
+    case .end: return 1_000_000
+    default: return nil
+    }
+}
+
+/// Map, then Player Info, then Mission Info (0x00440c90 / 0x00447170). The
+/// mission-info command is consumed even when no visible mission exists; the
+/// window simply does not open (0x0043c470 action 10).
+@MainActor
+func dockedWindowKey(_ press: KeyPress, bindings: KeyBindings, preselect: Int?,
+                     game: NovaGame, pilot: PilotStore) -> (nested: LandedNested?, consumed: Bool) {
+    let token = KeyToken.from(press)
+    guard !token.isEmpty else { return (nil, false) }
+    let map = bindings.token(for: .galaxyMap)
+    let player = bindings.token(for: .playerInfo)
+    let mission = bindings.token(for: .missionInfo)
+    if !map.isEmpty, token == map { return (.map(preselect), true) }
+    if !player.isEmpty, token == player { return (.playerInfo, true) }
+    if !mission.isEmpty, token == mission {
+        let visible = pilot.state.activeMissions.contains { game.mission($0.missionID)?.invisible != true }
+        return (visible ? .missionInfo : nil, true)
+    }
+    return (nil, false)
+}
+
+/// Pixel scroller for an offer's briefing. The closure is installed from the
+/// scroll view's body so it sees the latest offset.
+final class BriefingScroller {
+    var apply: ((CGFloat) -> Void)?
+    func scroll(by delta: CGFloat) { apply?(delta) }
+}
+
+struct BriefingPane<Content: View>: View {
+    let scroller: BriefingScroller
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        if #available(iOS 18.0, tvOS 18.0, macOS 15.0, *) {
+            BriefingPaneModern(scroller: scroller, content: content)
+        } else {
+            ScrollView(showsIndicators: false) { content() }.cursorScrollable()
+        }
+    }
+}
+
+@available(iOS 18.0, tvOS 18.0, macOS 15.0, *)
+private struct BriefingPaneModern<Content: View>: View {
+    let scroller: BriefingScroller
+    @ViewBuilder var content: () -> Content
+    @State private var position = ScrollPosition()
+    @State private var offset: CGFloat = 0
+    @State private var minY: CGFloat = 0
+    @State private var maxY: CGFloat = 0
+
+    private struct Metrics: Equatable {
+        var offset: CGFloat
+        var minY: CGFloat
+        var maxY: CGFloat
+    }
+
+    var body: some View {
+        let _ = {
+            scroller.apply = { delta in
+                let y = min(max(offset + delta, minY), maxY)
+                position.scrollTo(point: CGPoint(x: 0, y: y))
+                offset = y
+            }
+        }()
+        ScrollView(showsIndicators: false) { content() }
+            .scrollPosition($position)
+            .onScrollGeometryChange(for: Metrics.self) { geo in
+                let top = -geo.contentInsets.top
+                return Metrics(
+                    offset: geo.contentOffset.y,
+                    minY: top,
+                    maxY: max(top, geo.contentSize.height + geo.contentInsets.bottom - geo.containerSize.height))
+            } action: { _, m in
+                offset = m.offset
+                minY = m.minY
+                maxY = m.maxY
+            }
+    }
+}
+
+/// The starmap, Player Info, or Mission Info drawn over a docked mission window.
+struct LandedWindowCover: View {
+    let kind: LandedNested
+    let graphics: SpaceportGraphics
+    @ObservedObject var pilot: PilotStore
+    @ObservedObject var nav: NavigationModel
+    var fullscreenMap: Bool
+    var closeToken: String
+    var onClose: () -> Void
+
+    private var game: NovaGame { graphics.game }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.55).ignoresSafeArea()
+            switch kind {
+            case .map(let system):
+                GalaxyMapView(nav: nav, pilot: pilot, onJump: {}, onClose: onClose,
+                              fullscreen: fullscreenMap,
+                              destinationPreview: system.map { id in
+                                  .init(systemID: id, label: game.system(id)?.displayName ?? "")
+                              })
+            case .playerInfo:
+                PlayerInfoView(graphics: graphics, pilot: pilot, onJettison: jettisonCargo,
+                               onDone: onClose, closeToken: closeToken)
+            case .missionInfo:
+                MissionInfoView(graphics: graphics, game: game, pilot: pilot, onClose: onClose)
+            }
+        }
+        .cursorCancel(onClose)
+        .cursorModal()
+    }
+
+    /// Player Info's Jettison Cargo while docked (0x0041f330). No pods are
+    /// drawn; the hold syncs onto the ship at launch.
+    private func jettisonCargo() {
+        let engine = StoryEngine(game: game, player: pilot.state)
+        _ = engine.jettisonCargo(docked: true)
+        pilot.state = engine.player
+        pilot.save()
+    }
+}
+
 /// A list of real `mïsn` offers at one `MissionOfferLocation`, shared by the
 /// Mission BBS and Bar screens (`AvailLoc` 0 and 1 respectively — the two
 /// locations the Bible/repo docs call out as the common case). Backed by the
@@ -137,13 +303,15 @@ struct MissionBoardView: View {
                                       onSelect: { present($0) },
                                       onAccept: { accept(offer) }, onDecline: { decline(offer) },
                                       storylineTag: tag, onOpenStoryline: tag.map { t in { openStoryline(t.key) } },
-                                      onShowDestination: showDestinationAction(for: offer))
+                                      onShowDestination: showDestinationAction(for: offer),
+                                      mapPreselect: engine?.offerHighlightSystem(for: offer.mission))
                 case .bar:
                     MissionSingleDialog(graphics: graphics, offer: offer, offered: offered,
                                         onPage: { present($0) },
                                         onAccept: { accept(offer) }, onDecline: { decline(offer) },
                                         storylineTag: tag, onOpenStoryline: tag.map { t in { openStoryline(t.key) } },
-                                        onShowDestination: showDestinationAction(for: offer))
+                                        onShowDestination: showDestinationAction(for: offer),
+                                        mapPreselect: engine?.offerHighlightSystem(for: offer.mission))
                 // persShip/mainSpaceport/tradeCenter/shipyard/outfitter/unknown: no dedicated
                 // authentic sheet yet (this view only ever gets instantiated at .missionComputer
                 // or .bar today) — fall back to the mission-computer style so an offer is never
@@ -154,7 +322,8 @@ struct MissionBoardView: View {
                                       onSelect: { present($0) },
                                       onAccept: { accept(offer) }, onDecline: { decline(offer) },
                                       storylineTag: tag, onOpenStoryline: tag.map { t in { openStoryline(t.key) } },
-                                      onShowDestination: showDestinationAction(for: offer))
+                                      onShowDestination: showDestinationAction(for: offer),
+                                      mapPreselect: engine?.offerHighlightSystem(for: offer.mission))
                 }
             }
             }
@@ -337,6 +506,15 @@ private struct MissionInfoSheet: View {
     /// Opens the galaxy map on this job's destination. Nil when the mission has
     /// nowhere to send the player.
     var onShowDestination: (() -> Void)? = nil
+    /// System the starmap selects when the map command is pressed (Flags 0x0100).
+    var mapPreselect: Int? = nil
+
+    @EnvironmentObject private var appModel: AppModel
+    @Environment(\.flightNav) private var flightNav
+    @StateObject private var localNav = NavigationModel(game: nil, startSystemID: 128)
+    @State private var nested: LandedNested?
+    @State private var briefingScroll = BriefingScroller()
+    private var mapNav: NavigationModel { flightNav ?? localNav }
 
     /// PICT #8517 "Mission Info" — 471×155, matches the DLOG bounds exactly.
     private static let pictID = 8517
@@ -369,10 +547,9 @@ private struct MissionInfoSheet: View {
                     offersList(list.size).ditlPlace(space, d, list)
                     // item 3: (218,26)-(460,117) 242x91 — briefing text
                     let brief = d.rect(3, top: 26, left: 218, bottom: 117, right: 460)
-                    ScrollView(showsIndicators: false) {
+                    BriefingPane(scroller: briefingScroll) {
                         NovaText(offer.briefingText, size: 10, width: brief.width, align: .leading)
                     }
-                    .cursorScrollable()
                     .frame(width: brief.width, height: brief.height)
                     .ditlPlace(space, d, brief)
                     // item 4: (57,125)-(156,150) 99x25 — refuse
@@ -395,6 +572,7 @@ private struct MissionInfoSheet: View {
         // Ⓑ refuses, when the offer can be refused.
         .cursorCancel(offer.canRefuse ? onDecline : nil)
         .missionWindowKeys { press in
+            if consumeDockedKey(press) { return true }
             switch MissionOfferKey.resolve(press, acceptLabel: offer.acceptButton,
                                            refuseLabel: offer.refuseButton, canRefuse: offer.canRefuse) {
             case .accept: onAccept(); return true
@@ -402,6 +580,30 @@ private struct MissionInfoSheet: View {
             case nil: return false
             }
         }
+        .sheet(item: $nested) { kind in
+            LandedWindowCover(kind: kind, graphics: graphics, pilot: appModel.pilot, nav: mapNav,
+                              fullscreenMap: appModel.settings.fullscreenGalaxyMap,
+                              closeToken: appModel.bindings.token(for: .playerInfo),
+                              onClose: { nested = nil })
+                .cursorHost()
+        }
+    }
+
+    private func consumeDockedKey(_ press: KeyPress) -> Bool {
+        let hit = dockedWindowKey(press, bindings: appModel.bindings, preselect: mapPreselect,
+                                  game: graphics.game, pilot: appModel.pilot)
+        if let kind = hit.nested { present(kind) }
+        if hit.consumed { return true }
+        if let delta = offerTextScrollDelta(press) {
+            briefingScroll.scroll(by: delta)
+            return true
+        }
+        return false
+    }
+
+    private func present(_ kind: LandedNested) {
+        if flightNav == nil { localNav.configure(game: graphics.game, startSystemID: appModel.pilot.state.currentSystem) }
+        nested = kind
     }
 
     private func offersList(_ size: CGSize) -> some View {
@@ -476,8 +678,15 @@ struct MissionSingleDialog: View {
     /// Opens the galaxy map on this job's destination. Nil when the mission has
     /// nowhere to send the player.
     var onShowDestination: (() -> Void)? = nil
+    /// System the starmap selects when the map command is pressed (Flags 0x0100).
+    var mapPreselect: Int? = nil
 
     @EnvironmentObject private var model: AppModel
+    @Environment(\.flightNav) private var flightNav
+    @StateObject private var localNav = NavigationModel(game: nil, startSystemID: 128)
+    @State private var nested: LandedNested?
+    @State private var briefingScroll = BriefingScroller()
+    private var mapNav: NavigationModel { flightNav ?? localNav }
     /// Set while the briefing's `dësc` movie (`offer's` `MissionOffer.mission`
     /// → `game.desc(offerTextID)?.movieFilename`) is playing full-screen over
     /// the dialog — dismissed by Skip or when the clip ends/fails, same pattern
@@ -512,6 +721,23 @@ struct MissionSingleDialog: View {
     /// The button action waiting for an after-text movie to finish.
     @State private var afterMovie: (() -> Void)?
 
+    private func consumeDockedKey(_ press: KeyPress) -> Bool {
+        let hit = dockedWindowKey(press, bindings: model.bindings, preselect: mapPreselect,
+                                  game: graphics.game, pilot: model.pilot)
+        if let kind = hit.nested { present(kind) }
+        if hit.consumed { return true }
+        if let delta = offerTextScrollDelta(press) {
+            briefingScroll.scroll(by: delta)
+            return true
+        }
+        return false
+    }
+
+    private func present(_ kind: LandedNested) {
+        if flightNav == nil { localNav.configure(game: graphics.game, startSystemID: model.pilot.state.currentSystem) }
+        nested = kind
+    }
+
     /// Run a button's action — after the dësc movie when it plays after the
     /// text (0x00442510).
     private func finish(_ action: @escaping () -> Void) {
@@ -540,12 +766,20 @@ struct MissionSingleDialog: View {
         .cursorCancel(offer.canRefuse ? { finish(onDecline) } : nil)
         .missionWindowKeys { press in
             guard moviePlayer == nil, movieGIF == nil else { return false }
+            if consumeDockedKey(press) { return true }
             switch MissionOfferKey.resolve(press, acceptLabel: offer.acceptButton,
                                            refuseLabel: offer.refuseButton, canRefuse: offer.canRefuse) {
             case .accept: finish(onAccept); return true
             case .refuse: finish(onDecline); return true
             case nil: return false
             }
+        }
+        .sheet(item: $nested) { kind in
+            LandedWindowCover(kind: kind, graphics: graphics, pilot: model.pilot, nav: mapNav,
+                              fullscreenMap: model.settings.fullscreenGalaxyMap,
+                              closeToken: model.bindings.token(for: .playerInfo),
+                              onClose: { nested = nil })
+                .cursorHost()
         }
         // The offer's dësc movie plays by itself before the text, unless its
         // Flags put it after (0x00442510).
@@ -613,7 +847,7 @@ struct MissionSingleDialog: View {
                     let d = ditl
                     // item 2: (12,9)-(427,276) 415x267 — briefing pane
                     let pane = d.rect(2, top: 9, left: 12, bottom: 276, right: 427)
-                    ScrollView(showsIndicators: false) {
+                    BriefingPane(scroller: briefingScroll) {
                         VStack(alignment: .leading, spacing: 5) {
                             HStack(spacing: 6) {
                                 NovaText(offer.title, size: 11, width: max(0, pane.width - 47),
@@ -638,7 +872,6 @@ struct MissionSingleDialog: View {
                         }
                         .padding(.top, 2).padding(.leading, 2)
                     }
-                    .cursorScrollable()
                     .frame(width: pane.width, height: pane.height)
                     .ditlPlace(space, d, pane)
 

@@ -1117,6 +1117,7 @@ struct GameContainerView: View {
                     // Covers the hail/flight HUD: Ⓑ = Decline, like closing the dialog.
                     .cursorCancel { declineFlightMissionOffer(offer) }
                     .cursorModal()
+                    .environment(\.flightNav, nav)
                 }
 
                 if let game = host.game {
@@ -1190,7 +1191,7 @@ struct GameContainerView: View {
                         SpaceportView(graphics: graphics, galaxy: galaxy, spob: spob,
                                       pilot: model.pilot, onDepart: depart,
                                       onLiveSync: { syncHUDFromPilotState() },
-                                      showHints: model.settings.tutorialHints)
+                                      showHints: model.settings.tutorialHints, nav: nav)
                             .frame(width: playWidth, height: geo.size.height)
                             .position(x: playWidth / 2, y: geo.size.height / 2)
                     }

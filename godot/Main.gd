@@ -201,6 +201,7 @@ func _ready_game() -> void:
 	add_child(_spaceport)
 	_spaceport.setup(nova)
 	_spaceport.launch_requested.connect(_on_launch)
+	_spaceport.command_window.connect(_on_docked_command)
 
 	_story = StoryScreens.new()   # after the spaceport: its dialogs sit above and take input first
 	add_child(_story)
@@ -209,6 +210,7 @@ func _ready_game() -> void:
 	_story.screen_closed.connect(_suppress_held)
 	_story.close_spaceport_screen.connect(_spaceport.story_close_screen)
 	_story.forced_launch.connect(_on_launch)
+	_story.command_window.connect(_on_docked_command)
 	get_viewport().size_changed.connect(_sync_story_view)
 	_sync_story_view()
 
@@ -498,6 +500,22 @@ func _cursor_state(flying: bool) -> void:
 	pc.set_suppressed("flight", flying)
 	pc.set_suppressed("map", _nav != null and _nav.blocks_flight() and not _nav.map_pad_outside())
 	pc.set_suppressed("intro", _shell != null and _shell.intro != null)
+
+
+## Map, Player Info, or Mission Info from the docked BBS or an offer dialog.
+func _on_docked_command(kind: String) -> void:
+	match kind:
+		"map":
+			var id := -1
+			if nova.has_method("mission_map_preselect"):
+				id = int(nova.mission_map_preselect())
+			_nav.open_docked(id)
+		"player":
+			_story.open_info("general")
+		"missions":
+			var rows = JSON.parse_string(nova.mission_list())
+			if rows is Array and not rows.is_empty():
+				_story.open_info("missions")
 
 
 func _on_launch() -> void:

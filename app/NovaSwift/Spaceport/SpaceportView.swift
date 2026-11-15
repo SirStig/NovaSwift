@@ -21,6 +21,9 @@ struct SpaceportView: View {
     /// Whether the "Tutorial hints" setting is on — gates the one-time contextual
     /// hints (the welcome-to-the-spaceport banner, the Mission BBS how-to, …).
     var showHints: Bool = false
+    /// The flight chart. A map opened from the BBS or an offer plots into this
+    /// route. Nil builds a chart just for the window.
+    var nav: NavigationModel? = nil
 
     @EnvironmentObject private var appModel: AppModel
 
@@ -95,7 +98,8 @@ struct SpaceportView: View {
                                         onPage: { _ in },
                                         onAccept: { acceptOffer(offer) }, onDecline: { declineOffer(offer) },
                                         storylineTag: storylineTag(for: offer.mission.id),
-                                        onOpenStoryline: storylineTag(for: offer.mission.id).map { t in { openStoryline(t.key) } })
+                                        onOpenStoryline: storylineTag(for: offer.mission.id).map { t in { openStoryline(t.key) } },
+                                        mapPreselect: engine?.offerHighlightSystem(for: offer.mission))
                         .transition(.opacity)
                 }
                 // Stacks over everything: only the offer is live, Ⓑ declines it.
@@ -150,6 +154,7 @@ struct SpaceportView: View {
             shopPoll += 1
         }
         .task(id: shopPoll) { await pollShopOffers() }
+        .environment(\.flightNav, nav)
     }
 
     /// The shops keep offering while open (0x0048d190, 0x004903c0,
@@ -509,6 +514,10 @@ struct MissionBBSView: View {
     /// left to offer.
     var onReopen: (() -> Void)? = nil
 
+    @EnvironmentObject private var appModel: AppModel
+    @Environment(\.flightNav) private var flightNav
+    @StateObject private var localNav = NavigationModel(game: nil, startSystemID: 128)
+    @State private var nested: LandedNested?
     @StateObject private var services = AppGameServices()
     @State private var engine: StoryEngine?
     @State private var offered: [MissionRes] = []
@@ -575,6 +584,14 @@ struct MissionBBSView: View {
         .overlay { StoryTextOverlay(services: services) }
         .cursorCancel(onDone)
         .missionWindowKeys(bbsKey)
+        .sheet(item: $nested) { kind in
+            LandedWindowCover(kind: kind, graphics: graphics, pilot: pilot,
+                              nav: flightNav ?? localNav,
+                              fullscreenMap: appModel.settings.fullscreenGalaxyMap,
+                              closeToken: appModel.bindings.token(for: .playerInfo),
+                              onClose: { nested = nil })
+                .cursorHost()
+        }
         .gameHint(GameHints.missionBBS, active: showHints, dismissed: $hintDismissed)
         .animation(.easeInOut(duration: 0.25), value: hintDismissed)
         .onAppear(perform: buildEngine)
@@ -587,11 +604,23 @@ struct MissionBBSView: View {
         if let onReopen { onReopen() } else { onDone() }
     }
 
-    /// 0x00440c90: Return, Esc and `l` leave; `a` accepts the selection; Tab and
-    /// Down step to the next listing (wrapping to the first), Up to the previous
-    /// (wrapping to the last).
+    /// 0x00440c90: the map, Player Info and Mission Info commands, then Return,
+    /// Esc and `l` leave; `a` accepts the selection; Tab and Down step to the
+    /// next listing (wrapping to the first), Up to the previous (wrapping to
+    /// the last).
     private func bbsKey(_ press: KeyPress) -> Bool {
         guard services.storyText == nil else { return false }
+        let preselect = services.pendingOffer.flatMap { engine?.offerHighlightSystem(for: $0.mission) }
+        let hit = dockedWindowKey(press, bindings: appModel.bindings, preselect: preselect,
+                                  game: game, pilot: pilot)
+        if let kind = hit.nested {
+            if flightNav == nil {
+                let here = game.systems().first { $0.spobs.contains(spob.id) }?.id ?? pilot.state.currentSystem
+                localNav.configure(game: game, startSystemID: here)
+            }
+            nested = kind
+        }
+        if hit.consumed { return true }
         switch press.key {
         case .return, .escape: onDone(); return true
         case .tab, .downArrow: step(1); return true

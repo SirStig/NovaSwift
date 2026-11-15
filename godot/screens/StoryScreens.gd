@@ -24,10 +24,15 @@ signal screen_closed
 signal close_spaceport_screen
 ## A `Q` fired while landed bounced the pilot into space.
 signal forced_launch
+## The map command while an offer dialog is up (0x00442510 action 4).
+signal command_window(kind: String)
 
 const StoryGuide = preload("res://screens/StoryGuide.gd")
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
 const CD = preload("res://ui/classic/ClassicDialog.gd")
+## Shared with GalaxyMap.gd / Spaceport.gd: a window drawn over the docked screens (Player Info, the docked map)
+## that owns the keyboard while it is up.
+const DOCKED_GROUP := "docked_overlay"
 const CS = preload("res://ui/classic/ClassicScreen.gd")
 const Prefs = preload("res://Prefs.gd")
 const Movies = preload("res://Movies.gd")
@@ -197,10 +202,14 @@ func _process(_delta: float) -> void:
 # While a modal is up it owns navigation: up/down never wander to whatever is
 # under it, left/right step between its buttons, cancel is its own.
 func _input(event: InputEvent) -> void:
+	# The docked starmap is up over this offer (0x00442510 action 4): it owns the keyboard, so Return / Esc / the
+	# map key never accept, refuse or reopen underneath it. (Player Info joins the same group, hence `_info == null`.)
+	if _info == null and get_tree().get_first_node_in_group(DOCKED_GROUP) != null:
+		return
 	# Player Info (0x00499c10, dispatch callback 0x0049a3a0): Tab steps to the next page, Shift-Tab the
 	# previous (wrapping through the four), Enter closes. The window owns the keyboard while it is up -- flight
 	# is paused behind it (`blocks_flight`) -- and this runs before GUI focus navigation would eat the Tab.
-	if _info != null and _modal == null and _info_tab != "missions" and event is InputEventKey:
+	if _info != null and _info_tab != "missions" and event is InputEventKey:
 		var ke: InputEventKey = event as InputEventKey
 		if ke.pressed and not ke.echo:
 			if ke.keycode == KEY_TAB:
@@ -211,7 +220,11 @@ func _input(event: InputEvent) -> void:
 				close_info()
 				get_viewport().set_input_as_handled()
 				return
+	if _info != null:
+		return
 	if _modal == null:
+		return
+	if _modal_kind == "offer" and _offer_command(event):
 		return
 	if event.is_action_pressed("ui_up") or event.is_action_pressed("ui_down"):
 		get_viewport().set_input_as_handled()
@@ -232,12 +245,67 @@ func _input(event: InputEvent) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if _info == null or _modal != null:
+	if _info == null:
 		return
 	if event.is_action_pressed("ui_cancel") or event.is_action_pressed("player_info") \
 			or event.is_action_pressed("mission_info"):
 		close_info()
 		get_viewport().set_input_as_handled()
+
+
+## 0x00442510 actions 4/5/7, then the briefing scroll (0x00447170): 10 px, 250 px, or an end.
+func _offer_command(event: InputEvent) -> bool:
+	if event.is_action_pressed("galaxy_map"):
+		command_window.emit("map")
+		get_viewport().set_input_as_handled()
+		return true
+	if event.is_action_pressed("player_info"):
+		open_info("general")
+		get_viewport().set_input_as_handled()
+		return true
+	if event.is_action_pressed("mission_info"):
+		var rows = JSON.parse_string(nova.mission_list())
+		if rows is Array and not rows.is_empty():
+			open_info("missions")
+		get_viewport().set_input_as_handled()
+		return true
+	if event is InputEventKey:
+		var ke: InputEventKey = event as InputEventKey
+		if ke.pressed:
+			var delta := 0
+			match ke.keycode:
+				KEY_UP:
+					delta = -10
+				KEY_DOWN:
+					delta = 10
+				KEY_PAGEUP:
+					delta = -250
+				KEY_PAGEDOWN:
+					delta = 250
+				KEY_HOME:
+					delta = -1000000
+				KEY_END:
+					delta = 1000000
+			if delta != 0:
+				_scroll_offer(delta)
+				get_viewport().set_input_as_handled()
+				return true
+	return false
+
+
+func _scroll_offer(delta: int) -> void:
+	if _offer_scroll == null or not is_instance_valid(_offer_scroll):
+		return
+	var bar := _offer_scroll.get_v_scroll_bar()
+	var limit := int(bar.max_value - bar.page)
+	if limit < 0:
+		limit = 0
+	var at := _offer_scroll.scroll_vertical
+	if delta < 0 and at <= 0:
+		return
+	if delta > 0 and at >= limit:
+		return
+	_offer_scroll.scroll_vertical = clampi(at + delta, 0, limit)
 
 
 ## Never two dialogs: whatever modal host is still parented here (a tracked one being replaced, or an orphan whose
@@ -262,6 +330,7 @@ func _open_modal(box: VBoxContainer, kind: String, buttons: Array, cancel: Calla
 
 
 func _close_modal() -> void:
+	_offer_scroll = null
 	_free_modal_hosts()
 	_modal_buttons = []
 	_modal_cancel = Callable()
@@ -358,7 +427,8 @@ func _open_offer() -> void:
 	var pic := _picture(int(o.get("pict", -1)), 140)
 	if pic != null:
 		box.add_child(pic)
-	box.add_child(_scroll(str(o.get("text", "")), 210))
+	var offer_sc := _scroll(str(o.get("text", "")), 210)
+	box.add_child(offer_sc)
 	if str(o.get("destination", "")) != "":
 		_lbl("Destination: %s" % o.destination, 14, COL_DIM, box)
 	var row := HBoxContainer.new()
@@ -375,6 +445,7 @@ func _open_offer() -> void:
 	yes.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	buttons.append(yes)
 	_open_modal(box, "offer", buttons, cancel)
+	_offer_scroll = offer_sc
 	_focus(yes)
 
 
@@ -452,8 +523,9 @@ func process_hotkeys() -> void:
 
 
 func open_info(tab: String) -> void:
-	if _info != null or _modal != null:
+	if _info != null:
 		return
+	# An offer stays up underneath (0x00442510 actions 5 and 7).
 	_info_tab = tab
 	_info_msg = ""
 	_labels = _json(nova.story_labels())
@@ -482,6 +554,7 @@ func _build_info(focus_tab := true) -> void:
 		old.queue_free()
 	var box := _dialog_root(820)
 	_info = box.get_meta("root")
+	_info.add_to_group(DOCKED_GROUP)
 	if not was_open:
 		nova.sound_beep(2)
 	var data = _json(nova.player_info())
@@ -768,6 +841,7 @@ func _open_offer_classic(o: Dictionary) -> void:
 	sc.get_v_scroll_bar().modulate = Color(1, 1, 1, 0)
 	sc.add_child(content)
 	d.add_child(sc)
+	_offer_scroll = sc
 	var buttons := []
 	var cancel := Callable()
 	var yes: TextureButton
@@ -810,6 +884,7 @@ func _build_info_classic(focus_tab: bool) -> void:
 		d = _player_info_dialog(data)
 	d.beep = false
 	_info = CD.modal(self, d, 0.55)
+	_info.add_to_group(DOCKED_GROUP)
 	if focus_tab:
 		var target: Control = d.find_child("btn_" + (_info_focus if _info_focus != "" else focus_key), true, false)
 		if target == null:
@@ -818,6 +893,7 @@ func _build_info_classic(focus_tab: bool) -> void:
 
 
 var _info_focus := ""
+var _offer_scroll: ScrollContainer
 
 
 func _player_info_dialog(data: Dictionary) -> Control:

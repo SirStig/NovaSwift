@@ -1008,7 +1008,8 @@ struct BarView: View {
                                         onPage: { _ in },
                                         onAccept: { accept(offer) }, onDecline: { decline(offer) },
                                         storylineTag: storylineTag(for: offer.mission.id),
-                                        onOpenStoryline: storylineTag(for: offer.mission.id).map { t in { openStoryline(t.key) } })
+                                        onOpenStoryline: storylineTag(for: offer.mission.id).map { t in { openStoryline(t.key) } },
+                                        mapPreselect: engine?.offerHighlightSystem(for: offer.mission))
                 }
                 // Covers the bar: only the offer is live, Ⓑ declines it.
                 .cursorCancel { decline(offer) }

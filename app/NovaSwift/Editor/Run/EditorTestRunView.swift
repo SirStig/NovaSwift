@@ -266,7 +266,7 @@ private struct GameArea: View {
                 SpaceportView(graphics: graphics, galaxy: galaxy, spob: spob, pilot: session.pilot,
                               onDepart: { session.takeOff() },
                               onLiveSync: { session.syncHUDFromPilotState() },
-                              showHints: false)
+                              showHints: false, nav: nav)
                     .frame(width: playWidth, height: geo.size.height)
                     .position(x: playWidth / 2, y: geo.size.height / 2)
             }
@@ -324,6 +324,7 @@ private struct GameArea: View {
                                     onDecline: { session.declinePersOffer(offer) })
                     .transition(.opacity)
             }
+            .environment(\.flightNav, nav)
         }
         if let story = services.storyText {
             ZStack {

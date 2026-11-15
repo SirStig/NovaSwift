@@ -75,9 +75,11 @@ final class EditingDocumentTests: XCTestCase {
         XCTAssertEqual(notified[0], [ResourceKey(ship, 200)])
         XCTAssertTrue(d.undo())
         XCTAssertEqual(d.layerResource(ship, 200)?.name, "A")
+        XCTAssertTrue(d.isDirty)
         XCTAssertTrue(d.canRedo)
         XCTAssertTrue(d.undo())
         XCTAssertNil(d.layerResource(ship, 200))
+        XCTAssertFalse(d.isDirty, "undoing back to the saved document clears the unsaved mark")
         XCTAssertFalse(d.undo())
         XCTAssertTrue(d.redo()); XCTAssertTrue(d.redo())
         XCTAssertEqual(d.layerResource(ship, 200)?.name, "B")
@@ -203,8 +205,8 @@ final class EditingDocumentTests: XCTestCase {
             XCTAssertEqual(back.layerResource(ship, 128)?.data, d.layerResource(ship, 128)?.data)
             XCTAssertEqual(DescRecord(back.layerResource(NovaType.desc, id)!.data).text, "Hello")
             d.setValue(.int(1), field: "speed", of: ship, 128)
-            d.undo()   // dirty again
-            XCTAssertTrue(d.isDirty)
+            d.undo()   // back to the bytes just saved
+            XCTAssertFalse(d.isDirty, "undoing the only edit since the save clears the unsaved mark")
         }
 
         // Full export is explicit and includes the base.

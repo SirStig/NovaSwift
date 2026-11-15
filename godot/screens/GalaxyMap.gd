@@ -228,10 +228,48 @@ func open_gate() -> void:
 	_canvas.queue_redraw()
 
 
+## Over the docked BBS or an offer (0x0043c470 action 6 / 0x00442510 action 4): above the spaceport (40) and the
+## story dialogs (60), modal like the original's starmap. It takes the keyboard focus so Return and the arrows never
+## reach the window underneath, joins DOCKED_GROUP so that window's own key handlers stand down, and has no jump.
+const DOCKED_GROUP := "docked_overlay"   # same name as StoryScreens.DOCKED_GROUP
+var _docked := false
+var _docked_focus: Control = null
+
+
+func open_docked(system_id: int) -> void:
+	if visible:
+		return
+	open()
+	if not visible:
+		return
+	_docked = true
+	layer = 70
+	add_to_group(DOCKED_GROUP)
+	_docked_focus = get_viewport().gui_get_focus_owner()
+	if _docked_focus != null:
+		_docked_focus.release_focus()
+	select_system(system_id)
+
+
+## Select a system without plotting (the BBS / offer map command's preselect).
+func select_system(id: int) -> void:
+	if id >= 0 and _info.has(id):
+		_selected = id
+		if _canvas != null:
+			_canvas.queue_redraw()
+
+
 func close() -> void:
 	if not visible:
 		return
 	visible = false
+	if _docked:
+		_docked = false
+		layer = 10
+		remove_from_group(DOCKED_GROUP)
+		if _docked_focus != null and is_instance_valid(_docked_focus) and _docked_focus.is_inside_tree():
+			_docked_focus.grab_focus()
+		_docked_focus = null
 	_pad_outside = false
 	if not _gate.is_empty():
 		nova.gate_picker_cancel()
@@ -402,7 +440,7 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		close()
 		return
-	if event.is_action_pressed("hyperjump") and _gate.is_empty():
+	if event.is_action_pressed("hyperjump") and _gate.is_empty() and not _docked:
 		get_viewport().set_input_as_handled()
 		close()
 		jump_requested.emit()

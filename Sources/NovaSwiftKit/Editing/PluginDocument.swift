@@ -143,9 +143,21 @@ public final class PluginDocument {
     // MARK: Change tracking
 
     /// Increments on every change, undo and redo (and metadata edit).
+    /// Monotonic, so an in-flight save can tell whether the document moved.
     public private(set) var changeCount = 0
     private var savedChangeCount = 0
-    public var isDirty: Bool { changeCount != savedChangeCount }
+    /// Content identity. Undo and redo restore the identity of that step, so
+    /// undoing back to the saved document clears the unsaved mark. Ids only
+    /// climb (`nextRevision`); a restored id is never issued again.
+    private var revision = 0
+    private var nextRevision = 0
+    private var savedRevision = 0
+    public var isDirty: Bool { revision != savedRevision }
+
+    private func advanceRevision() {
+        nextRevision &+= 1
+        revision = nextRevision
+    }
     /// Called after every layer change with the affected keys (also for undo/redo).
     public var onChange: ((Set<ResourceKey>) -> Void)?
 
@@ -160,7 +172,14 @@ public final class PluginDocument {
         /// Source-file reassignments (`setSourceFile`); "" = no source.
         var srcBefore: [ResourceKey: String] = [:]
         var srcAfter: [ResourceKey: String] = [:]
+        /// `revision` before this step and after it. Undo returns to `revBefore`
+        /// only when nothing outside the undo stack (metadata) has moved `revision`
+        /// past `revAfter`.
+        var revBefore: Int = 0
+        var revAfter: Int = 0
     }
+    /// `revision` at `beginGroup`, applied to the one undo step the group becomes.
+    private var groupRevBefore = 0
     private var undoStack: [Entry] = []
     private var redoStack: [Entry] = []
     private var groupDepth = 0
@@ -183,6 +202,7 @@ public final class PluginDocument {
 
     private func metadataChanged() {
         changeCount += 1
+        advanceRevision()
         // The editor metadata lives in the primary file only, so that file needs rewriting.
         if let p = primaryFile { modifiedSources.insert(p) }
     }
@@ -421,7 +441,11 @@ public final class PluginDocument {
     /// Everything between `beginGroup` and the matching `endGroup` becomes one
     /// undo step (nest freely).
     public func beginGroup(_ label: String) {
-        if groupDepth == 0 { groupEntry = Entry(label: label, before: [:], after: [:], coalesce: nil) }
+        if groupDepth == 0 {
+            groupRevBefore = revision
+            groupEntry = Entry(label: label, before: [:], after: [:], coalesce: nil,
+                               revBefore: revision, revAfter: revision)
+        }
         groupDepth += 1
     }
 
@@ -429,9 +453,13 @@ public final class PluginDocument {
         guard groupDepth > 0 else { return }
         groupDepth -= 1
         guard groupDepth == 0 else { return }
-        if let entry = groupEntry {
+        if var entry = groupEntry {
             groupEntry = nil
-            if !entry.before.isEmpty || !entry.srcBefore.isEmpty { pushUndo(entry) }
+            if !entry.before.isEmpty || !entry.srcBefore.isEmpty {
+                entry.revBefore = groupRevBefore
+                entry.revAfter = revision
+                pushUndo(entry)
+            }
         }
         flushPendingGroupChange()
     }
@@ -454,7 +482,9 @@ public final class PluginDocument {
     @discardableResult
     public func undo() -> Bool {
         guard groupDepth == 0, let entry = undoStack.popLast() else { return false }
+        let jumped = revision != entry.revAfter
         restore(entry.before, sources: entry.srcBefore)
+        if jumped { advanceRevision() } else { revision = entry.revBefore }
         redoStack.append(entry)
         return true
     }
@@ -462,7 +492,9 @@ public final class PluginDocument {
     @discardableResult
     public func redo() -> Bool {
         guard groupDepth == 0, let entry = redoStack.popLast() else { return false }
+        let jumped = revision != entry.revBefore
         restore(entry.after, sources: entry.srcAfter)
+        if jumped { advanceRevision() } else { revision = entry.revAfter }
         undoStack.append(entry)
         return true
     }
@@ -480,7 +512,7 @@ public final class PluginDocument {
             if let old = sourceMap[k] { modifiedSources.insert(old) }
             if s.isEmpty { sourceMap[k] = nil } else { sourceMap[k] = s; modifiedSources.insert(s) }
         }
-        changed(Set(slots.keys).union(sources.keys))
+        changed(Set(slots.keys).union(sources.keys), bumpRevision: false)
     }
 
     // MARK: Core mutation
@@ -507,11 +539,16 @@ public final class PluginDocument {
                 last.after = after
                 undoStack[undoStack.count - 1] = last
             } else {
-                pushUndo(Entry(label: label, before: before, after: after, coalesce: coalesce))
+                pushUndo(Entry(label: label, before: before, after: after, coalesce: coalesce,
+                               revBefore: revision, revAfter: revision))
             }
         }
         if groupDepth > 0 { redoStack.removeAll() }
         changed(Set(keys))
+        if groupDepth == 0, var last = undoStack.last {
+            last.revAfter = revision
+            undoStack[undoStack.count - 1] = last
+        }
     }
 
     private func pushUndo(_ e: Entry) {
@@ -520,8 +557,9 @@ public final class PluginDocument {
         if undoStack.count > undoLimit { undoStack.removeFirst(undoStack.count - undoLimit) }
     }
 
-    private func changed(_ keys: Set<ResourceKey>) {
+    private func changed(_ keys: Set<ResourceKey>, bumpRevision: Bool = true) {
         changeCount += 1
+        if bumpRevision { advanceRevision() }
         trackSources(keys)
         if cachedEffective != nil {
             for k in keys {
@@ -617,13 +655,18 @@ public final class PluginDocument {
             groupEntry = g
         } else {
             var e = Entry(label: "Move \(key) to \((file as NSString).lastPathComponent)",
-                          before: [:], after: [:], coalesce: nil)
+                          before: [:], after: [:], coalesce: nil,
+                          revBefore: revision, revAfter: revision)
             e.srcBefore = [key: old ?? ""]
             e.srcAfter = [key: file]
             pushUndo(e)
         }
         if groupDepth > 0 { redoStack.removeAll() }
         changed([key])
+        if groupDepth == 0, var last = undoStack.last {
+            last.revAfter = revision
+            undoStack[undoStack.count - 1] = last
+        }
         return true
     }
 
@@ -732,7 +775,10 @@ public final class PluginDocument {
 
     /// Mark a `makeSavePlan` result as written: the document is clean again unless it changed since.
     public func didSave(_ plan: PluginSavePlan) {
-        if changeCount == plan.changeCount { modifiedSources.subtract(plan.writtenKeys) }
+        if changeCount == plan.changeCount {
+            modifiedSources.subtract(plan.writtenKeys)
+            savedRevision = revision
+        }
         savedChangeCount = plan.changeCount
     }
 
@@ -906,11 +952,15 @@ public final class PluginDocument {
     public func save(to url: URL, format: PluginFormat, includeBase: Bool = false, embedMetadata: Bool = true) throws {
         try exportData(format: format, includeBase: includeBase, embedMetadata: embedMetadata).write(to: url, options: .atomic)
         savedChangeCount = changeCount
+        savedRevision = revision
     }
 
     /// Mark the document clean as of `count` (an `ExportJob.changeCount`) after an off-main save
     /// succeeded; edits made while it was writing keep the document dirty.
-    public func markSaved(atChangeCount count: Int) { savedChangeCount = count }
+    public func markSaved(atChangeCount count: Int) {
+        if changeCount == count { savedRevision = revision }
+        savedChangeCount = count
+    }
 
     /// Load a plug-in file (`.rez`, classic fork, `.ndat`) as the layer over `base`.
     public static func open(url: URL, base: ResourceCollection = ResourceCollection()) throws -> PluginDocument {
