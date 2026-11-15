@@ -20,24 +20,33 @@ struct PilotGroupDetailView: View {
     @State private var renameDraft = ""
     @State private var showRename = false
     @State private var pendingDeleteSlot: PilotSave?
+    @State private var editingSlotID: UUID?
 
-    private var pilotName: String { group.mostRecent.displayName }
-    private var scenarioName: String { group.mostRecent.scenarioName }
+    /// The roster's copy, so a rename or an edit shows up without leaving the screen.
+    private var shown: PilotRoster.PilotGroup {
+        model.roster.groups.first { $0.id == group.id } ?? group
+    }
+    private var pilotName: String { shown.mostRecent.displayName }
+    private var scenarioName: String { shown.mostRecent.scenarioName }
     /// Oldest-first, matching `group.slots` — "Slot 1" is always the original.
-    private var slots: [PilotSave] { group.slots }
+    private var slots: [PilotSave] { shown.slots }
 
     var body: some View {
         ZStack {
             NovaDialog(title: pilotName, width: 480, buttons: [
                 NovaDialogButton(title: "Back") { onClose() },
-                NovaDialogButton(title: "Continue", isDefault: true) { play(group.mostRecent) },
+                NovaDialogButton(title: "Continue", isDefault: true) { play(shown.mostRecent) },
             ]) {
                 VStack(alignment: .leading, spacing: 14) {
                     header
                     savesSection
-                    if group.canAddSlot { newSlotButton }
+                    if shown.canAddSlot { newSlotButton }
                     backupsButton
                 }
+            }
+            if let editingSlotID {
+                PilotEditorView(slotID: editingSlotID, onClose: { self.editingSlotID = nil })
+                    .transition(.opacity)
             }
             if showBackups {
                 PilotBackupsView(group: group, onClose: { showBackups = false }, onPlay: onPlay)
@@ -92,30 +101,41 @@ struct PilotGroupDetailView: View {
     }
 
     private func slotRow(index: Int, save: PilotSave) -> some View {
-        Button { play(save) } label: {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    NovaText("Slot \(index + 1)", size: 12, weight: .bold)
-                    NovaText("\(save.snapshot.shipName) · \(save.snapshot.systemName.isEmpty ? "—" : save.snapshot.systemName)",
-                             size: 11, color: .secondary)
-                    NovaText("\(save.snapshot.credits.formatted()) cr · \(save.snapshot.ratingTitle) · \(PilotListView.relative(save.updatedAt))",
-                             size: 10, color: Color(white: 0.5))
-                }
-                Spacer(minLength: 0)
-                if slots.count > 1 {
-                    Button { pendingDeleteSlot = save } label: {
-                        Image(systemName: "trash").foregroundStyle(.red.opacity(0.8))
+        HStack(spacing: 6) {
+            Button { play(save) } label: {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        NovaText("Slot \(index + 1)", size: 12, weight: .bold)
+                        NovaText("\(save.snapshot.shipName) · \(save.snapshot.systemName.isEmpty ? "—" : save.snapshot.systemName)",
+                                 size: 11, color: .secondary)
+                        NovaText("\(save.snapshot.credits.formatted()) cr · \(save.snapshot.ratingTitle) · \(PilotListView.relative(save.updatedAt))",
+                                 size: 10, color: Color(white: 0.5))
                     }
-                    .buttonStyle(.novaPlain)
+                    Spacer(minLength: 0)
+                    if slots.count > 1 {
+                        Button { pendingDeleteSlot = save } label: {
+                            Image(systemName: "trash").foregroundStyle(.red.opacity(0.8))
+                        }
+                        .buttonStyle(.novaPlain)
+                    }
+                    Image(systemName: "play.circle.fill").foregroundStyle(novaAmber)
                 }
-                Image(systemName: "play.circle.fill").foregroundStyle(novaAmber)
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(white: 0.06), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(white: 0.24)))
             }
-            .padding(.horizontal, 10).padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(white: 0.06), in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(white: 0.24)))
+            .buttonStyle(.novaPlain)
+            Button {
+                model.audio.play(.uiSelect)
+                editingSlotID = save.id
+            } label: {
+                Image(systemName: "pencil").font(.callout).foregroundStyle(novaAmber)
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.novaPlain)
+            .accessibilityLabel("Edit")
         }
-        .buttonStyle(.novaPlain)
     }
 
     private var newSlotButton: some View {

@@ -179,6 +179,12 @@ static func slot_row(parent: Node, sl: Dictionary, acts: Dictionary) -> Dictiona
 		row.add_child(del)
 		out["delete"] = del
 	NC.icon_rect(row, "play.circle.fill", 18, T.AMBER)
+	var edit_cb: Callable = acts.get("edit", Callable())
+	if edit_cb.is_valid():
+		var ed := NC.icon_button("pencil", edit_cb, T.AMBER, 30, 16)
+		ed.tooltip_text = "Edit"
+		h.add_child(ed)
+		out["edit"] = ed
 	return out
 
 

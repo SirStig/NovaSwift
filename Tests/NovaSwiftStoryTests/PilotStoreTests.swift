@@ -192,4 +192,103 @@ final class PilotStoreTests: XCTestCase {
         XCTAssertEqual(Set(dest.list().map(\.displayName)), ["FromCloud", "FromLocal"],
                        "switching stores unions both sides' pilots")
     }
+
+    func testEditorFieldsSurviveSaveAndLoad() throws {
+        let game = makeGame([
+            shipResource(id: 128, cargo: 10),
+            shipResource(id: 129, cargo: 20),
+            ownedSystemResource(id: 128, govt: -1),
+        ])
+        let store = archive()
+        var save = makeSave(name: "Ripley")
+        save.player.nickname = "Rip"
+        save.player.setBits = [7]
+        save.player.cargo = [1: 4]
+        save.player.hullFittingsGranted = true
+        save.player.systemReputation = [:]
+        save.player.dominatedStellars = [42]
+        save.player.credits = 25000
+        try store.save(save, backup: false)
+        var sibling = try store.createSlot(from: save.id)
+        sibling.player.credits = 10
+        try store.save(sibling, backup: false)
+
+        var edit = PilotEdit(save: save)
+        edit.name = "Dallas"
+        edit.nickname = "Dal"
+        edit.isMale = false
+        edit.strictPlay = true
+        edit.shipType = 129
+        edit.shipName = "Nostromo"
+        edit.credits = -50
+        edit.combatRating = 400
+        XCTAssertEqual(PilotSaves.write(edit, slot: save.id, archive: store, game: game), "")
+
+        let loaded = try store.load(id: save.id)
+        let prepared = PilotSaves.prepareForPlay(loaded, game: game).state
+        XCTAssertEqual(loaded.displayName, "Dallas")
+        XCTAssertEqual(prepared.pilotName, "Dallas")
+        XCTAssertEqual(prepared.nickname, "Dal")
+        XCTAssertFalse(prepared.isMale)
+        XCTAssertTrue(prepared.isStrictPlay)
+        XCTAssertEqual(prepared.shipType, 129)
+        XCTAssertEqual(prepared.shipName, "Nostromo")
+        XCTAssertEqual(prepared.credits, 0, "credits clamp at 0")
+        XCTAssertEqual(prepared.combatRating, 400)
+        XCTAssertEqual(loaded.snapshot.credits, 0)
+        XCTAssertEqual(loaded.snapshot.shipName, "Nostromo")
+        XCTAssertEqual(loaded.snapshot.ratingTitle, CombatRating.title(forRating: 400))
+        XCTAssertEqual(prepared.setBits, [7])
+        XCTAssertEqual(prepared.cargo[1], 4)
+        XCTAssertEqual(prepared.dominatedStellars, [42])
+
+        let other = try store.load(id: sibling.id)
+        XCTAssertEqual(other.displayName, "Dallas")
+        XCTAssertEqual(other.player.pilotName, "Dallas")
+        XCTAssertEqual(other.player.credits, 10, "another slot keeps its own credits")
+        XCTAssertEqual(other.player.shipType, 128)
+
+        edit.name = ""
+        XCTAssertFalse(PilotSaves.write(edit, slot: save.id, archive: store, game: game).isEmpty)
+        edit.name = "Dallas"
+        edit.shipType = 999
+        XCTAssertFalse(PilotSaves.write(edit, slot: save.id, archive: store, game: game).isEmpty)
+        XCTAssertEqual(try store.load(id: save.id).player.shipType, 129)
+    }
+
+    /// Changing the hull in the editor is the same handover as buying one
+    /// (`PilotEconomy.buyShip`), minus price and scripts: only oütf Flags
+    /// 0x0004 items stay, the old hull's absolute armor/shield/fuel go, and
+    /// the hold is shrunk to the new hull.
+    func testEditorHullChangeHandsOverLikeBuyingAShip() throws {
+        var license = [UInt8](outfitResource(id: 129, name: "License").data)
+        Bytes.i16(&license, 12, 0x0004)
+        let game = makeGame([
+            shipResource(id: 128, cargo: 30),
+            shipResource(id: 129, cargo: 5),
+            ownedSystemResource(id: 128, govt: -1),
+            outfitResource(id: 128, name: "Gun"),
+            Resource(type: NovaType.outfit, id: 129, name: "License", data: Data(license)),
+        ])
+        let store = archive()
+        var save = makeSave(name: "Ripley")
+        save.player.outfits = [128: 2, 129: 1]
+        save.player.armor = 40
+        save.player.shield = 30
+        save.player.fuel = 100
+        save.player.cargo = [1: 20]
+        try store.save(save, backup: false)
+
+        var edit = PilotEdit(save: save)
+        edit.shipType = 129
+        XCTAssertEqual(PilotSaves.write(edit, slot: save.id, archive: store, game: game), "")
+        let p = try store.load(id: save.id).player
+        XCTAssertEqual(p.shipType, 129)
+        XCTAssertNil(p.outfits[128], "an ordinary outfit goes with the old hull")
+        XCTAssertEqual(p.outfits[129], 1, "a Flags 0x0004 item stays with the pilot")
+        XCTAssertNil(p.armor)
+        XCTAssertNil(p.shield)
+        XCTAssertNil(p.fuel)
+        XCTAssertLessThanOrEqual(p.cargo.values.reduce(0, +), 5, "the hold fits the new hull")
+    }
 }

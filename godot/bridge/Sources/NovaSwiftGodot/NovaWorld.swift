@@ -2404,6 +2404,56 @@ class NovaWorld: Node2D {
         return created.id.uuidString
     }
 
+    /// The editable fields of save `id`, plus the hulls the loaded data knows,
+    /// as JSON. `{}` when the save or the game data is missing. Same `.evpilot`
+    /// payload `PilotEdit` reads; nothing new is stored.
+    @Callable(autoSnakeCase: true) func pilotEditor(dir: String, id: String) -> String {
+        guard let game, let uuid = UUID(uuidString: id),
+              let save = try? archive(at: dir).load(id: uuid) else { return "{}" }
+        let edit = PilotEdit(save: save)
+        let hulls = game.ships().sorted {
+            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
+        var ships: [[String: Any]] = hulls.map { ["id": $0.id, "name": $0.displayName] }
+        if !hulls.contains(where: { $0.id == edit.shipType }) {
+            ships.insert(["id": edit.shipType, "name": "Ship \(edit.shipType)"], at: 0)
+        }
+        return Self.json(["name": edit.name, "nickname": edit.nickname, "is_male": edit.isMale,
+                          "strict_play": edit.strictPlay, "ship_type": edit.shipType,
+                          "ship_name": edit.shipName, "credits": edit.credits,
+                          "combat_rating": edit.combatRating,
+                          "max_name": PilotFactory.maxNameLength,
+                          "max_ship_name": PilotEdit.maxShipNameUTF8,
+                          "ships": ships] as [String: Any])
+    }
+
+    /// Write one slot from the pilot editor. "" on success, otherwise a sentence
+    /// for the dialog. Uses `PilotSaves.write` (`PilotArchive.save`).
+    @Callable(autoSnakeCase: true)
+    func pilotApplyEdit(dir: String, id: String, name: String, nickname: String, isMale: Bool,
+                        strictPlay: Bool, shipType: Int, shipName: String, credits: Int,
+                        combatRating: Int) -> String {
+        guard let game, let uuid = UUID(uuidString: id) else { return "Could not open that pilot." }
+        let edit = PilotEdit(name: name, nickname: nickname, isMale: isMale, strictPlay: strictPlay,
+                             shipType: shipType, shipName: shipName, credits: credits,
+                             combatRating: combatRating)
+        let a = archive(at: dir)
+        let message = PilotSaves.write(edit, slot: uuid, archive: a, game: game)
+        if message.isEmpty, training == nil, pilotStarted, let live = pilotSaveID,
+           let written = try? a.load(id: live) {
+            if live == uuid {
+                // The same edit on the in-memory pilot, so progress since the last save survives.
+                var s = written
+                s.player = pilot
+                if PilotSaves.apply(edit, to: &s, game: game).isEmpty { pilot = s.player }
+                pilot.rosterID = live
+            } else {
+                pilot.pilotName = written.player.pilotName
+            }
+        }
+        return message
+    }
+
     /// Rename every slot of a group (the display name is the pilot's identity).
     @Callable(autoSnakeCase: true) func pilotRenameGroup(dir: String, groupID: String, name: String) -> Bool {
         let a = archive(at: dir)

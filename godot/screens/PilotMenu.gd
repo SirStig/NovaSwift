@@ -78,6 +78,16 @@ var _name_edit: LineEdit
 var _scenario_btn: Button
 var _gender_btn: Button
 var _status: Label
+var _edit_slot := ""
+var _edit_name: LineEdit
+var _edit_nick: LineEdit
+var _edit_ship_name: LineEdit
+var _edit_credits: LineEdit
+var _edit_rating: LineEdit
+var _edit_male := true
+var _edit_strict := false
+var _edit_ship_ids: Array = []
+var _edit_ship_index := 0
 # What ui_cancel does on the current screen.
 var _on_back: Callable = Callable()
 
@@ -758,7 +768,8 @@ func _show_group(any_id: String) -> void:
 	var first: Control = null
 	for sl in slots:
 		var parts := PilotUI.slot_row(_panel, sl, {"play": _play_slot.bind(str(sl.id)),
-			"delete": _confirm_delete_slot.bind(str(sl.id), int(sl.slot)), "multiple": slots.size() > 1})
+			"delete": _confirm_delete_slot.bind(str(sl.id), int(sl.slot)), "multiple": slots.size() > 1,
+			"edit": _show_editor.bind(str(sl.id))})
 		if first == null:
 			first = parts.play
 	if bool(g.can_add):
@@ -766,6 +777,89 @@ func _show_group(any_id: String) -> void:
 	PilotUI.link_button(_panel, "View All Backups", "clock.arrow.circlepath", _show_backups.bind(0), T.SECONDARY)
 	_status = NC.label(_panel, "", "caption", "regular", Color(1.0, 0.55, 0.5), true)
 	_focus(d.default if first == null else first)
+
+
+## Edit Pilot: the fields PilotSaves.write stores on the existing .evpilot.
+func _show_editor(slot_id: String) -> void:
+	if not _nova.has_method("pilot_editor") or not _nova.has_method("pilot_apply_edit"):
+		_status_msg("Pilot editing isn't available in this build yet.")
+		return
+	var info = JSON.parse_string(_nova.pilot_editor(_dir, slot_id))
+	if not info is Dictionary or not info.has("ships"):
+		_status_msg("Could not open that pilot.")
+		return
+	_edit_slot = slot_id
+	_edit_male = bool(info.get("is_male", true))
+	_edit_strict = bool(info.get("strict_play", false))
+	_edit_ship_ids = []
+	_edit_ship_index = 0
+	var names: Array = []
+	var want := int(info.get("ship_type", 0))
+	var ships: Array = info.get("ships", [])
+	for i in ships.size():
+		var s: Dictionary = ships[i]
+		names.append(str(s.get("name", "")))
+		_edit_ship_ids.append(int(s.get("id", 0)))
+		if int(s.get("id", 0)) == want:
+			_edit_ship_index = i
+	var back := _show_group.bind(_group_id if _group_id != "" else slot_id)
+	_nd("Edit Pilot", 480.0, [
+		{"text": "Cancel", "cb": back},
+		{"text": "Save", "default": true, "cb": _commit_edit}], back)
+	_edit_name = _named_line("Full Name:", str(info.get("name", "")), int(info.get("max_name", 24)))
+	_edit_nick = _named_line("Nickname:", str(info.get("nickname", "")), int(info.get("max_name", 24)))
+	var gender := HBoxContainer.new()
+	gender.add_theme_constant_override("separation", 10)
+	_panel.add_child(gender)
+	var gl := NC.label(gender, "Gender:", "body")
+	gl.custom_minimum_size = Vector2(84, 0)
+	NC.segmented(gender, ["Male", "Female"], 0 if _edit_male else 1, func(i: int): _edit_male = i == 0)
+	NC.toggle(_panel, "Strict Play", _edit_strict, func(on: bool): _edit_strict = on)
+	if names.is_empty():
+		_named_line("Ship:", "Ship %d" % want, 0).editable = false
+	else:
+		NC.menu(_panel, "Ship", names, _edit_ship_index, func(i: int): _edit_ship_index = i)
+	var ship_limit := maxi(int(info.get("max_ship_name", 64)), str(info.get("ship_name", "")).length())
+	_edit_ship_name = _named_line("Ship Name:", str(info.get("ship_name", "")), ship_limit)
+	_edit_credits = _named_line("Credits:", str(int(info.get("credits", 0))), 12)
+	_edit_rating = _named_line("Rating:", str(int(info.get("combat_rating", 0))), 8)
+	_status = NC.label(_panel, "", "caption", "regular", Color(1.0, 0.55, 0.5), true)
+	_focus(_edit_name)
+
+
+func _named_line(title: String, text: String, limit: int) -> LineEdit:
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 10)
+	_panel.add_child(h)
+	var l := NC.label(h, title, "body")
+	l.custom_minimum_size = Vector2(84, 0)
+	var e := NC.text_field("", text)
+	if limit > 0:
+		e.max_length = limit
+	e.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(e)
+	return e
+
+
+func _commit_edit() -> void:
+	var credits_text := _edit_credits.text.strip_edges()
+	var rating_text := _edit_rating.text.strip_edges()
+	if not credits_text.is_valid_int() or int(credits_text) < 0:
+		_status_msg("Credits have to be a whole number, zero or more.")
+		return
+	if not rating_text.is_valid_int() or int(rating_text) < 0:
+		_status_msg("Combat rating has to be a whole number, zero or more.")
+		return
+	var ship_id := 0
+	if _edit_ship_index >= 0 and _edit_ship_index < _edit_ship_ids.size():
+		ship_id = int(_edit_ship_ids[_edit_ship_index])
+	var err: String = _nova.pilot_apply_edit(_dir, _edit_slot, _edit_name.text, _edit_nick.text,
+		_edit_male, _edit_strict, ship_id, _edit_ship_name.text, int(credits_text), int(rating_text))
+	if err == "":
+		_nova.sound_beep(1)
+		_show_group(_group_id if _group_id != "" else _edit_slot)
+	else:
+		_status_msg(err)
 
 
 func _play_slot(slot_id: String) -> void:
