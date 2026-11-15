@@ -42,7 +42,8 @@ public struct ServerConfig: Equatable {
 
     // [admin]
     public var adminPort = defaultAdminPort
-    /// "0.0.0.0" (everyone who can reach the port) or "127.0.0.1" (this computer only).
+    /// "127.0.0.1" or "::1" (this computer only), "0.0.0.0" or "::" (every interface),
+    /// or one IPv6 address of this computer. The default stays this computer's IPv4 loopback.
     public var adminBind = "127.0.0.1"
     public var adminPasswordHash = ""
     /// The first-run wizard has been completed (or skipped).
@@ -123,6 +124,15 @@ public struct ServerConfig: Equatable {
         }
     }
 
+    /// Loopback, every interface, or one real IPv6 address. Nil for anything else (including a public IPv4).
+    public static func canonicalAdminBind(_ raw: String) -> String? {
+        let t = raw.trimmingCharacters(in: .whitespaces)
+        if t == "0.0.0.0" || t == "127.0.0.1" { return t }
+        guard IPAddressTools.isIPv6(t) else { return nil }
+        let n = IPAddressTools.normalize(t)
+        return IPAddressTools.isIPv6(n) ? n : nil
+    }
+
     // MARK: Validation
 
     /// Plain-language problems; empty when the config can run. Values are clamped by `normalized()` first.
@@ -136,7 +146,7 @@ public struct ServerConfig: Equatable {
         if !["safe", "full", "custom"].contains(rulesPreset) { out.append("Rules must be safe, full or custom.") }
         if !(0.25...4.0).contains(gameSpeed) { out.append("Game speed must be between 0.25 and 4.") }
         if !bindAddress.isEmpty, !IPAddressTools.isValid(bindAddress) { out.append("The game listen address must be empty (all interfaces) or an IPv4/IPv6 address of this computer.") }
-        if !["0.0.0.0", "127.0.0.1"].contains(adminBind) { out.append("The admin bind address must be 0.0.0.0 (anyone who can reach it) or 127.0.0.1 (this computer only).") }
+        if Self.canonicalAdminBind(adminBind) == nil { out.append("The admin bind address must be 127.0.0.1 or ::1 (this computer only), 0.0.0.0 or :: (every interface), or an IPv6 address of this computer.") }
         return out
     }
 
@@ -153,7 +163,7 @@ public struct ServerConfig: Equatable {
         c.gameSpeed = min(4.0, max(0.25, c.gameSpeed))
         c.bindAddress = c.bindAddress.trimmingCharacters(in: .whitespaces)
         if !c.bindAddress.isEmpty, !IPAddressTools.isValid(c.bindAddress) { c.bindAddress = "" }
-        if !["0.0.0.0", "127.0.0.1"].contains(c.adminBind) { c.adminBind = "127.0.0.1" }
+        c.adminBind = Self.canonicalAdminBind(c.adminBind) ?? "127.0.0.1"
         c.voteKickPercent = min(100, max(10, c.voteKickPercent))
         c.maxConnectionsPerIP = min(64, max(0, c.maxConnectionsPerIP))
         c.wordFilter = c.wordFilter.map { $0.lowercased().trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.prefix(200).map { String($0.prefix(40)) }

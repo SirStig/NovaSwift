@@ -677,14 +677,13 @@ public final class Ship {
     // AI state.
     public var brain: AIBrain?
 
-    /// Co-op **client-side mirror of an NPC** the authority owns: a `brain == nil`
-    /// ship whose entire state (position/velocity/health) is set from the
-    /// authority's `WorldSnapshot` each update and coasts on its last velocity
-    /// between them. Unlike `remotePlayer` it's not a player, so it gets no
-    /// nameplate/player-blip and never warns about a missing brain — it's a passive
-    /// visual/collision proxy for the shared world. Only ever set on a client whose
-    /// own spawner is paused (`spawningPaused`); false for the authority's real
-    /// AI/ambient NPCs and everything in single-player.
+    /// Co-op **client-side mirror of an NPC** the authority owns. Its pose and
+    /// health come from the authority's `WorldSnapshot` and it coasts on its last
+    /// velocity between them — the step never asks a brain to think, even when one
+    /// is kept so a host promotion can resume the same AI, person and escort links.
+    /// Unlike `remotePlayer` it's not a player, so it gets no nameplate/player-blip.
+    /// Only ever set on a client whose own spawner is paused (`spawningPaused`);
+    /// false for the authority's real AI/ambient NPCs and everything in single-player.
     public var networkMirror = false
 
     /// Non-nil marks this ship as **another player's ship** in a co-op session —
@@ -1394,6 +1393,11 @@ public final class World {
     /// can't be destroyed — its armor is floored at 1 so it survives, however hard
     /// it's hit (by anyone). True (default) = normal, ships can die.
     public var playerDeathReal = true
+    /// Co-op `SessionRules.carryEncounter`. False only for a visitor whose shared
+    /// fight must not persist: hull damage is put back when they leave the system,
+    /// and the legal record / combat rating accrued there is discarded instead of
+    /// folded into the pilot. Solo play and the system's authority stay true.
+    public var persistSharedEncounter = true
 
     public var tuning: FlightTuning
     public var combatTuning: CombatTuning
@@ -1781,12 +1785,13 @@ public final class World {
     /// and minimap blips; empty in single-player.
     public var remotePlayerShips: [Ship] { npcs.filter { $0.remotePlayer != nil } }
 
-    /// Inject a **client-side mirror of the authority's NPC** (co-op). A `brain ==
-    /// nil`, `networkMirror` ship added through the same `addNPC` seam as any other
-    /// — it renders, collides, and can be targeted like a real ship, but its state
-    /// is driven entirely by the authority's snapshots (see `networkMirror`).
-    /// Returns the assigned entity id; keep it to update/remove the mirror as
-    /// snapshots arrive. Build `ship` from the reported hull so it sprites right.
+    /// Inject a **client-side mirror of the authority's NPC** (co-op). A
+    /// `networkMirror` ship added through the same `addNPC` seam as any other —
+    /// it renders, collides, and can be targeted like a real ship, but its pose
+    /// and health are driven by the authority's snapshots (see `networkMirror`).
+    /// The brain is cleared here; the sync layer may attach the original one
+    /// afterwards, and it stays dormant until this ship is promoted.
+    /// Returns the assigned entity id. Build `ship` from the reported hull so it sprites right.
     @discardableResult
     public func spawnNetworkMirror(_ ship: Ship, arrival: ArrivalMode = .populate) -> Int {
         ship.brain = nil
@@ -2635,7 +2640,11 @@ public final class World {
                     continue
                 }
                 let npcIntent: ControlIntent
-                if npc.brain != nil {
+                if npc.networkMirror {
+                    // Client-side mirror of the authority's NPC. A brain may be
+                    // stashed for host promotion; it does not think or fire here.
+                    npcIntent = ControlIntent()
+                } else if npc.brain != nil {
                     npcIntent = originalAI.think(ship: npc, world: self, dt: dt)
                     npc.velocityMatchLed = npc.brain?.leaderID != nil
                         && originalAI.record(for: npc.entityID)?.mode == OriginalAIMode.velocityMatch
@@ -2645,11 +2654,6 @@ public final class World {
                     // frame. A missing entry = no input this frame (coast), never a
                     // warning — remote input is expected to have gaps.
                     npcIntent = remoteIntents[npc.entityID] ?? ControlIntent()
-                } else if npc.networkMirror {
-                    // Client-side mirror of the authority's NPC: its state is set
-                    // from snapshots; here it just coasts on its last velocity
-                    // between them. No intent, no missing-brain warning.
-                    npcIntent = ControlIntent()
                 } else {
                     npc.logNoBrainOnce()
                     npcIntent = ControlIntent()
@@ -4647,7 +4651,10 @@ public final class World {
         let vg = govts[victimGovt]
         if vg?.startsDisabled == true || vg?.ignoredWhenAttacked == true { return }
         for responder in npcs where responder.entityID != victim.entityID && responder.isAlive {
-            guard let brain = responder.brain, brain.aiType.isWarship, brain.state != .attacking,
+            // A network mirror keeps a brain only for host promotion; the authority decides who
+            // responds, so a dormant mirror brain must not be flipped here.
+            guard !responder.networkMirror,
+                  let brain = responder.brain, brain.aiType.isWarship, brain.state != .attacking,
                   responder.personID != 1151, !isPlayerFleetMember(responder.entityID) else { continue }
             let rg = responder.government
             let nosy = govts[rg]?.nosy ?? false
@@ -4926,7 +4933,9 @@ public final class World {
     /// escorts are never hostile, whatever their government.
     public func isEffectivelyHostileToPlayer(_ npc: Ship) -> Bool {
         guard !isPlayerFleetMember(npc.entityID) else { return false }
-        guard let brain = npc.brain else {
+        // A network mirror's brain is dormant (only its identity is synced, not its state), so it
+        // reads by government, as mirrors did before they carried a brain.
+        guard let brain = npc.brain, !npc.networkMirror else {
             return diplomacy?.isHostileToPlayer(npc.government) == true
         }
         return brain.isHostile(npc, player, self)

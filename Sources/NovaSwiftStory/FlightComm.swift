@@ -461,11 +461,16 @@ public final class FlightComm {
     /// the pilot (`GameContainerView.syncCombatStanding`): the stellar comm reads
     /// the per-system reputation, and tribute reads the combat rating.
     public static func syncStanding(world: World, game: NovaGame, pilot: inout PlayerState) {
-        pilot.applyReputationDelta(world.diplomacy?.consumeReputationDelta() ?? [:])
-        for crime in world.diplomacy?.consumeCrimeEvents() ?? [] {
+        let reputation = world.diplomacy?.consumeReputationDelta() ?? [:]
+        let crimes = world.diplomacy?.consumeCrimeEvents() ?? []
+        let delta = world.diplomacy?.consumeCombatRatingDelta() ?? 0
+        // A visitor whose shared fight does not persist: the deltas are drained so
+        // they cannot land on a later sync, and the pilot keeps the standing it had.
+        guard world.persistSharedEncounter else { return }
+        pilot.applyReputationDelta(reputation)
+        for crime in crimes {
             pilot.revokeRanks(forCrime: crime.kind, against: crime.victim, game: game)
         }
-        let delta = world.diplomacy?.consumeCombatRatingDelta() ?? 0
         if delta != 0 {
             pilot.combatRating = CombatRatingRule.fold(pilot.combatRating, adding: delta)
             world.playerCombatRating = pilot.combatRating

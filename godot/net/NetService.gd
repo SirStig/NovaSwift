@@ -104,6 +104,8 @@ func local_id() -> int:
 func status_text() -> String:
 	if transport == null or not transport.is_active():
 		return "Not in a game"
+	if transport._reconnecting:
+		return "Reconnecting to %s... (attempt %d of %d)" % [transport.address, maxi(transport._reconnect_attempt, 1), 5]
 	match transport.state:
 		"connecting": return "Connecting to %s..." % transport.address
 		"handshaking": return "Joining %s..." % transport.address

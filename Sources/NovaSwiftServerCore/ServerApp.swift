@@ -127,7 +127,7 @@ public final class ServerApp {
         // NOVASWIFT_ADMIN_BIND overrides the saved address for this run only (a container must listen on 0.0.0.0 inside
         // while Docker publishes the port on the host's 127.0.0.1 only).
         var bind = cfg.adminBind
-        if let e = ProcessInfo.processInfo.environment["NOVASWIFT_ADMIN_BIND"], ["0.0.0.0", "127.0.0.1"].contains(e) { bind = e }
+        if let e = ProcessInfo.processInfo.environment["NOVASWIFT_ADMIN_BIND"], let ok = ServerConfig.canonicalAdminBind(e) { bind = ok }
         effectiveAdminBind = bind
         let h = HTTPServer(bind: bind, port: cfg.adminPort) { [admin] req in admin.handle(req) }
         h.uploadPaths = ["/api/plugins/upload"]
@@ -144,7 +144,7 @@ public final class ServerApp {
             log.error(e.message)
             log.error("The admin panel is still running at \(adminURL) - open Settings to change the port.")
         }
-        if bind != "127.0.0.1" && !PlatformTools.isContainer {
+        if !IPAddressTools.isLoopback(bind) && !PlatformTools.isContainer {
             log.warn("The admin panel is reachable from other computers over plain HTTP (no encryption). Use a long password, don't open port \(cfg.adminPort) in your firewall unless you must, or set the admin address to 127.0.0.1 and use an SSH tunnel.")
         }
         // Look up the public address in the background (short timeouts) for the dashboard and the start-up banner.

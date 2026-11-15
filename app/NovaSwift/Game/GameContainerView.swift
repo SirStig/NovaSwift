@@ -2643,13 +2643,24 @@ struct GameContainerView: View {
 
     private func syncCombatStanding() {
         guard let scene = host?.scene else { return }
+        let persist = scene.persistSharedEncounter
+        let reputation = scene.consumeReputationDelta()
+        let crimes = scene.consumeCrimeEvents()
+        let delta = scene.consumeCombatRatingDelta()
         // Crimes committed in flight flooded the live per-system reputation
-        // (EC-02); fold the change into the pilot.
-        model.pilot.state.applyReputationDelta(scene.consumeReputationDelta())
-        // The same crimes revoke crime-sensitive allied ranks (EC-10).
-        if let game = model.data.game {
-            for crime in scene.consumeCrimeEvents() {
-                model.pilot.state.revokeRanks(forCrime: crime.kind, against: crime.victim, game: game)
+        // (EC-02); fold the change into the pilot. A visitor whose shared fight
+        // does not persist has the deltas drained above and not written.
+        if persist {
+            model.pilot.state.applyReputationDelta(reputation)
+            // The same crimes revoke crime-sensitive allied ranks (EC-10).
+            if let game = model.data.game {
+                for crime in crimes {
+                    model.pilot.state.revokeRanks(forCrime: crime.kind, against: crime.victim, game: game)
+                }
+            }
+            if delta != 0 {
+                model.pilot.state.combatRating = CombatRatingRule.fold(model.pilot.state.combatRating, adding: delta)
+                scene.syncPlayerCombatRating(model.pilot.state.combatRating)
             }
         }
         // Live stellar damage carries over to the next visit (OS-13).
@@ -2660,11 +2671,6 @@ struct GameContainerView: View {
                 left[id] = value
             }
             model.pilot.state.stellarStrengthLeft = left
-        }
-        let delta = scene.consumeCombatRatingDelta()
-        if delta != 0 {
-            model.pilot.state.combatRating = CombatRatingRule.fold(model.pilot.state.combatRating, adding: delta)
-            scene.syncPlayerCombatRating(model.pilot.state.combatRating)
         }
     }
 

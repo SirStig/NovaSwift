@@ -431,7 +431,7 @@ public final class AdminService {
             "address": addr, "addressSource": source, "gamePort": cfg.port, "queryPort": CrossPlayProtocol.queryPort(forGamePort: cfg.port),
             "rules": CrossPlayProtocol.presetName(cfg.sessionRules), "passwordSet": !cfg.password.isEmpty,
             "requiredPlugins": m.requirements.plugins.map { $0.name }, "optionalPlugins": m.all.cosmetic.map { $0.name }, "missingPlugins": m.missing,
-            "adminExposed": cfg.adminBind != "127.0.0.1", "adminPort": cfg.adminPort, "setupDone": cfg.setupDone,
+            "adminExposed": !IPAddressTools.isLoopback(cfg.adminBind), "adminPort": cfg.adminPort, "setupDone": cfg.setupDone,
             "platform": "\(PlatformTools.platformName)-\(PlatformTools.archName)", "dataFolder": store.paths.root.path,
             "update": ["available": upd.available, "latest": upd.latest as Any, "url": upd.pageURL],
             "recentRefusals": Array(server.refusals.suffix(5)), "restartRequired": restart,

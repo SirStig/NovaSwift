@@ -38,6 +38,10 @@ const SERVER_ID := 1
 ## How long a joining client waits for the server's plain UDP status reply (is it encrypted? which key?) before
 ## connecting in plain mode.
 const PROBE_TIMEOUT := 1.2
+## Same schedule as Apple MultiplayerSession.beginReconnect: wait this long before
+## attempt 1, 2, 3, 4, 5, and give up once the attempts or the 60 s budget run out.
+const RECONNECT_DELAYS: Array = [0.0, 2.0, 5.0, 10.0, 15.0]
+const RECONNECT_BUDGET := 60.0
 ## Server-side abuse limits (docs/MULTIPLAYER.md "Hardening"): per-peer token buckets, per-IP caps, temp bans.
 const PKT_RATE := 300.0          # packets / s sustained
 const PKT_BURST := 600.0
@@ -123,6 +127,10 @@ var _t_state: float = 0.0
 var _last_rx: float = 0.0
 var _next_ping: float = 0.0
 var _closed_reason: String = ""
+var _reconnecting: bool = false
+var _reconnect_attempt: int = 0
+var _reconnect_started: float = 0.0
+var _reconnect_next: float = 0.0
 
 
 # --- lifecycle ---------------------------------------------------------------------------------------
@@ -293,7 +301,7 @@ func _start_client(host_name: String, host_port: int, info: Dictionary) -> int:
 
 
 func is_active() -> bool:
-	return (peer != null or _probe != null) and mode != "none"
+	return mode != "none" and (peer != null or _probe != null or _reconnecting)
 
 
 func is_connected_to_session() -> bool:
@@ -302,12 +310,16 @@ func is_connected_to_session() -> bool:
 
 ## Leave / stop hosting. `announce` = emit the "disconnected" event.
 func close(reason: String = "", announce: bool = true) -> void:
+	var was_reconnecting: bool = _reconnecting
+	_reconnecting = false
 	if _probe != null:
 		_probe.close()
 		_probe = null
 	if peer == null:
 		mode = "none"
 		state = "idle"
+		if announce and was_reconnecting:
+			_emit({"type": "disconnected", "reason": reason if reason != "" else "Left the game."})
 		return
 	if mode == "server":
 		var told: int = 0
@@ -367,6 +379,10 @@ func poll(delta: float) -> void:
 		_poll_probe()
 		return
 	if peer == null:
+		if _reconnecting:
+			_clock += delta
+			if state == "reconnecting" and _clock >= _reconnect_next:
+				_reconnect_fire()
 		return
 	_clock += delta
 	peer.poll()
@@ -455,8 +471,81 @@ func _server_timers() -> void:
 			_drop(int(id), "handshake timeout")
 
 
-## Client-side failure: report once, tear down.
+## Drop from a live session: keep the flight bridge and retry on Apple's schedule.
+var _reconnect_why: String = ""
+
+func _begin_reconnect(why: String) -> void:
+	if mode != "client" or state != "connected" or _reconnecting:
+		return
+	_reconnecting = true
+	_reconnect_attempt = 0
+	_reconnect_started = _clock
+	_reconnect_why = why
+	var ids: Array = peers.keys()
+	peers.clear()
+	if bridge_active and bridge != null and bridge.has_method("net_peer_left"):
+		for id in ids:
+			bridge.net_peer_left(int(id))
+		bridge.net_peer_left(SERVER_ID)
+	if peer != null:
+		peer.close()
+	peer = null
+	if _probe != null:
+		_probe.close()
+		_probe = null
+	mode = "client"
+	state = "reconnecting"
+	_reconnect_fire()
+
+
+func _reconnect_fire() -> void:
+	if not _reconnecting:
+		return
+	if _reconnect_attempt > 0 and _clock - _reconnect_started > RECONNECT_BUDGET:
+		_reconnect_give_up("Lost the connection to the server and couldn't get back in.")
+		return
+	if _reconnect_attempt >= RECONNECT_DELAYS.size():
+		_reconnect_give_up("Lost the connection to the server and couldn't get back in.")
+		return
+	_reconnect_attempt += 1
+	_emit({"type": "reconnecting", "attempt": _reconnect_attempt, "of": RECONNECT_DELAYS.size(), "message": _reconnect_why if _reconnect_attempt == 1 else ""})
+	var host_name: String = str(_join_opts.get("host", ""))
+	var err: int = _start_client(host_name, port, {})
+	if err != OK:
+		_fail_client("error", "Couldn't start connecting to %s (%s)." % [address, error_string(err)])
+
+
+func _reconnect_attempt_failed(_kind: String, message: String) -> void:
+	if peer != null:
+		peer.close()
+		peer = null
+	if _probe != null:
+		_probe.close()
+		_probe = null
+	if _reconnect_attempt >= RECONNECT_DELAYS.size():
+		var prefix := "Lost the connection to the server and couldn't get back in."
+		_reconnect_give_up(prefix if message == "" else prefix + " " + message)
+		return
+	mode = "client"
+	state = "reconnecting"
+	_reconnect_next = _clock + float(RECONNECT_DELAYS[_reconnect_attempt])
+	_emit({"type": "reconnecting", "attempt": _reconnect_attempt, "of": RECONNECT_DELAYS.size(), "message": message})
+
+
+func _reconnect_give_up(message: String) -> void:
+	_reconnecting = false
+	_fail_client("disconnected", message)
+
+
+## Client-side failure: report once, tear down. A live client session retries first.
 func _fail_client(kind: String, message: String, detail: Dictionary = {}) -> void:
+	if _reconnecting and (kind == "timeout" or kind == "disconnected" or kind == "error"):
+		_reconnect_attempt_failed(kind, message)
+		return
+	if not _reconnecting and mode == "client" and state == "connected" and (kind == "timeout" or kind == "disconnected"):
+		_begin_reconnect(message)
+		return
+	_reconnecting = false
 	var was_connected: bool = state == "connected"
 	_end_bridge()
 	if peer != null:
@@ -880,7 +969,9 @@ func _apply_report(from: int, target: int, reason: String, detail: String) -> vo
 	# A report only counts when it comes from another address than the target's (an alt can't vouch against a friend).
 	if from_ip == "" or from_ip != target_ip or _is_loopback(from_ip):
 		by[from] = _clock
-		ips[from] = from_ip
+		# Loopback clients all share 127.0.0.1 / ::1 and can only be on the server's own machine (a local
+		# test or LAN-party host): count each as its own reporter, or reports could never kick there.
+		ips[from] = "loopback#%d" % from if _is_loopback(from_ip) else from_ip
 		if reason == "invalid":
 			inv[from] = _clock   # one "invalid" vote per reporter per target
 	for k in by.keys():
@@ -986,6 +1077,7 @@ func _client_welcome(w: Dictionary) -> void:
 	if state != "handshaking" or w.is_empty():
 		return
 	state = "connected"
+	_reconnecting = false
 	local_id = Proto.num_int(w.get("your_id", peer.get_unique_id()), 1, 2147483647, peer.get_unique_id())
 	server_name = Proto.clean_name(Proto.str_field(w.get("server_name", ""), Proto.MAX_SERVER_NAME), "Server", Proto.MAX_SERVER_NAME)
 	rules_json = w.get("rules", "") as String if w.get("rules", "") is String and (w.get("rules", "") as String).length() <= 4096 else ""
@@ -1038,6 +1130,13 @@ func _client_reject(r: Dictionary) -> void:
 	_closed_reason = Proto.clean_text(r.get("message", "The server refused the connection."), 300)
 	if _closed_reason == "":
 		_closed_reason = "The server refused the connection."
+	if _reconnecting and (code == "full" or code == "refused"):
+		if peer != null:
+			peer.close()
+		peer = null
+		_reconnect_attempt_failed(code, _closed_reason)
+		return
+	_reconnecting = false
 	if peer != null:
 		peer.close()
 	peer = null
@@ -1074,6 +1173,7 @@ func _client_peer_left(b: Dictionary) -> void:
 
 
 func _client_kick(b: Dictionary) -> void:
+	_reconnecting = false
 	var why: String = Proto.clean_text(b.get("reason", ""), 300)
 	if why == "":
 		why = "Disconnected by the host."

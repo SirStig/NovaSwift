@@ -1,4 +1,5 @@
 import Foundation
+import NovaSwiftENet
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)
@@ -16,6 +17,7 @@ enum Sock {
     // MARK: Shared
 
     static func tcp() -> Int32? { make(stream: true) }
+    static func tcp6() -> Int32? { make(stream: true, family: AF_INET6) }
     static func udp() -> Int32? { make(stream: false) }
 
     #if os(Windows)
@@ -27,9 +29,9 @@ enum Sock {
 
     private static func s(_ fd: Int32) -> SOCKET { SOCKET(UInt32(bitPattern: fd)) }
 
-    private static func make(stream: Bool) -> Int32? {
+    private static func make(stream: Bool, family: Int32 = AF_INET) -> Int32? {
         _ = winsock
-        let h = socket(AF_INET, stream ? Int32(SOCK_STREAM) : Int32(SOCK_DGRAM), 0)
+        let h = socket(family, stream ? Int32(SOCK_STREAM) : Int32(SOCK_DGRAM), 0)
         return h == INVALID_SOCKET ? nil : Int32(truncatingIfNeeded: h)
     }
 
@@ -67,17 +69,60 @@ enum Sock {
         return .ok(port: Int(UInt16(bigEndian: bound.sin_port)))
     }
 
+    static func bindIPv6(_ fd: Int32, address: String, port: Int, v6Only: Bool) -> BindResult {
+        var only: Int32 = v6Only ? 1 : 0
+        let set = withUnsafePointer(to: &only) {
+            $0.withMemoryRebound(to: CChar.self, capacity: MemoryLayout<Int32>.size) {
+                // WinSDK imports IPPROTO as a C enum (as UDPDiscovery.swift does).
+                setsockopt(s(fd), Int32(IPPROTO_IPV6.rawValue), IPV6_V6ONLY, $0, Int32(MemoryLayout<Int32>.size))
+            }
+        }
+        if set != 0 { return .failed("Winsock error \(WSAGetLastError())") }
+        var a = sockaddr_in6()
+        a.sin6_family = ADDRESS_FAMILY(AF_INET6)
+        a.sin6_port = UInt16(port).bigEndian
+        guard inet_pton(AF_INET6, address, &a.sin6_addr) == 1 else { return .invalidAddress }
+        let rc = withUnsafePointer(to: &a) {
+            $0.withMemoryRebound(to: WinSDK.sockaddr.self, capacity: 1) { WinSDK.bind(s(fd), $0, Int32(MemoryLayout<sockaddr_in6>.size)) }
+        }
+        if rc != 0 {
+            let e = WSAGetLastError()
+            return e == WSAEADDRINUSE ? .inUse : .failed("Winsock error \(e)")
+        }
+        var bound = sockaddr_in6(); var len = Int32(MemoryLayout<sockaddr_in6>.size)
+        _ = withUnsafeMutablePointer(to: &bound) { $0.withMemoryRebound(to: WinSDK.sockaddr.self, capacity: 1) { getsockname(s(fd), $0, &len) } }
+        return .ok(port: Int(UInt16(bigEndian: bound.sin6_port)))
+    }
+
     static func listen(_ fd: Int32, backlog: Int32) -> Bool { WinSDK.listen(s(fd), backlog) == 0 }
 
     /// nil = the listener is closed or failed; otherwise the connection and the peer's dotted address.
     static func accept(_ fd: Int32) -> (fd: Int32, ip: String)? {
-        var peer = sockaddr_in(); var len = Int32(MemoryLayout<sockaddr_in>.size)
-        let c = withUnsafeMutablePointer(to: &peer) { $0.withMemoryRebound(to: WinSDK.sockaddr.self, capacity: 1) { WinSDK.accept(s(fd), $0, &len) } }
+        var storage = sockaddr_storage(); var len = Int32(MemoryLayout<sockaddr_storage>.size)
+        let c = withUnsafeMutablePointer(to: &storage) { $0.withMemoryRebound(to: WinSDK.sockaddr.self, capacity: 1) { WinSDK.accept(s(fd), $0, &len) } }
         guard c != INVALID_SOCKET else { return nil }
-        var buf = [CChar](repeating: 0, count: 32)
-        var a = peer.sin_addr
-        inet_ntop(AF_INET, &a, &buf, buf.count)
-        return (Int32(truncatingIfNeeded: c), String(cString: buf))
+        return (Int32(truncatingIfNeeded: c), peerText(&storage))
+    }
+
+    private static func peerText(_ storage: inout sockaddr_storage) -> String {
+        var buf = [CChar](repeating: 0, count: 64)
+        if Int32(storage.ss_family) == AF_INET {
+            return withUnsafePointer(to: &storage) {
+                $0.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { sa in
+                    var addr = sa.pointee.sin_addr
+                    inet_ntop(AF_INET, &addr, &buf, buf.count)
+                    return String(cString: buf)
+                }
+            }
+        }
+        let text: String = withUnsafePointer(to: &storage) {
+            $0.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { sa in
+                var addr = sa.pointee.sin6_addr
+                inet_ntop(AF_INET6, &addr, &buf, buf.count)
+                return String(cString: buf)
+            }
+        }
+        return IPAddressTools.normalize(text)
     }
 
     static func recv(_ fd: Int32, _ buf: inout [UInt8], max: Int) -> Int {
@@ -134,13 +179,13 @@ enum Sock {
 
     #else
 
-    private static func make(stream: Bool) -> Int32? {
+    private static func make(stream: Bool, family: Int32 = AF_INET) -> Int32? {
         #if canImport(Darwin)
         let type = stream ? SOCK_STREAM : SOCK_DGRAM
         #else
         let type = Int32((stream ? SOCK_STREAM : SOCK_DGRAM).rawValue)
         #endif
-        let fd = socket(AF_INET, type, 0)
+        let fd = socket(family, type, 0)
         guard fd >= 0 else { return nil }
         #if canImport(Darwin)
         var one: Int32 = 1
@@ -184,20 +229,63 @@ enum Sock {
         return .ok(port: Int(UInt16(bigEndian: bound.sin_port)))
     }
 
+    static func bindIPv6(_ fd: Int32, address: String, port: Int, v6Only: Bool) -> BindResult {
+        var only: Int32 = v6Only ? 1 : 0
+        if setsockopt(fd, Int32(IPPROTO_IPV6), IPV6_V6ONLY, &only, socklen_t(MemoryLayout<Int32>.size)) != 0 {
+            return .failed(String(cString: strerror(errno)))
+        }
+        var a = sockaddr_in6()
+        a.sin6_family = sa_family_t(AF_INET6)
+        a.sin6_port = UInt16(port).bigEndian
+        guard inet_pton(AF_INET6, address, &a.sin6_addr) == 1 else { return .invalidAddress }
+        let rc = withUnsafePointer(to: &a) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sysBind(fd, $0, socklen_t(MemoryLayout<sockaddr_in6>.size)) }
+        }
+        if rc != 0 {
+            let e = errno
+            return e == EADDRINUSE ? .inUse : .failed(String(cString: strerror(e)))
+        }
+        var bound = sockaddr_in6(); var len = socklen_t(MemoryLayout<sockaddr_in6>.size)
+        _ = withUnsafeMutablePointer(to: &bound) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &len) } }
+        return .ok(port: Int(UInt16(bigEndian: bound.sin6_port)))
+    }
+
     static func listen(_ fd: Int32, backlog: Int32) -> Bool {
         return sysListen(fd, backlog) == 0
     }
 
     static func accept(_ fd: Int32) -> (fd: Int32, ip: String)? {
         while true {
-            var peer = sockaddr_in(); var len = socklen_t(MemoryLayout<sockaddr_in>.size)
-            let c = withUnsafeMutablePointer(to: &peer) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sysAccept(fd, $0, &len) } }
+            var storage = sockaddr_storage(); var len = socklen_t(MemoryLayout<sockaddr_storage>.size)
+            let c = withUnsafeMutablePointer(to: &storage) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sysAccept(fd, $0, &len) } }
             if c < 0 { if errno == EINTR { continue }; return nil }
-            var buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-            var a = peer.sin_addr
-            inet_ntop(AF_INET, &a, &buf, socklen_t(INET_ADDRSTRLEN))
-            return (c, String(cString: buf))
+            #if canImport(Darwin)
+            var one: Int32 = 1
+            setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+            #endif
+            return (c, peerText(&storage))
         }
+    }
+
+    private static func peerText(_ storage: inout sockaddr_storage) -> String {
+        var buf = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+        if Int32(storage.ss_family) == AF_INET {
+            return withUnsafePointer(to: &storage) {
+                $0.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { sa in
+                    var addr = sa.pointee.sin_addr
+                    inet_ntop(AF_INET, &addr, &buf, socklen_t(buf.count))
+                    return String(cString: buf)
+                }
+            }
+        }
+        let text: String = withUnsafePointer(to: &storage) {
+            $0.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { sa in
+                var addr = sa.pointee.sin6_addr
+                inet_ntop(AF_INET6, &addr, &buf, socklen_t(buf.count))
+                return String(cString: buf)
+            }
+        }
+        return IPAddressTools.normalize(text)
     }
 
     static func recv(_ fd: Int32, _ buf: inout [UInt8], max: Int) -> Int { sysRecv(fd, &buf, Swift.min(max, buf.count), 0) }

@@ -215,8 +215,8 @@ function renderWizard() {
     <label class="check"><input type="radio" name="acc" value="open" ${s.password ? '' : 'checked'}><span><b>Open</b><br><small class="muted">Anyone who has the address can join.</small></span></label>
     <label class="check"><input type="radio" name="acc" value="pw" ${s.password ? 'checked' : ''}><span><b>Password</b><br><small class="muted">Only people you give the password to.</small></span></label>
     <label id="w-pwrow" ${s.password ? '' : 'hidden'}><span class="l">Password</span><input type="text" id="w-pw" value="${esc(s.password)}" placeholder="something easy to say out loud"></label>
-    <label><span class="l">Who can open this admin panel?</span><select id="w-admin"><option value="127.0.0.1" ${s.adminBind === '127.0.0.1' ? 'selected' : ''}>Only this computer (recommended)</option><option value="0.0.0.0" ${s.adminBind === '0.0.0.0' ? 'selected' : ''}>Other computers on my network too</option></select></label>
-    <div id="w-adminwarn" class="card warn" ${s.adminBind === '0.0.0.0' ? '' : 'hidden'}><b>Be careful.</b> The panel uses plain HTTP: the password and your session travel unencrypted, and anyone who can reach port ${s.adminPort} can try to sign in. Only choose this on a home network you trust, never on a server on the internet. (Takes effect after a restart.)</div>
+    <label><span class="l">Who can open this admin panel?</span><select id="w-admin"><option value="127.0.0.1" ${s.adminBind === '127.0.0.1' ? 'selected' : ''}>Only this computer (recommended)</option><option value="::1" ${s.adminBind === '::1' ? 'selected' : ''}>Only this computer, IPv6</option><option value="0.0.0.0" ${s.adminBind === '0.0.0.0' ? 'selected' : ''}>Other computers on my network (IPv4)</option><option value="::" ${s.adminBind === '::' ? 'selected' : ''}>Other computers on my network (IPv4 and IPv6)</option>${['127.0.0.1','::1','0.0.0.0','::'].includes(s.adminBind) ? '' : `<option value="${esc(s.adminBind)}" selected>${esc(s.adminBind)}</option>`}</select></label>
+    <div id="w-adminwarn" class="card warn" ${(s.adminBind === '127.0.0.1' || s.adminBind === '::1') ? 'hidden' : ''}><b>Be careful.</b> The panel uses plain HTTP: the password and your session travel unencrypted, and anyone who can reach port ${s.adminPort} can try to sign in. Only choose this on a home network you trust, never on a server on the internet. (Takes effect after a restart.)</div>
     <div class="row"><label><span class="l">Player slots</span><input type="number" id="w-max" min="1" max="64" value="${s.maxPlayers}"></label>
     <label><span class="l">Rules</span><select id="w-rules"><option value="safe" ${s.rulesPreset === 'safe' ? 'selected' : ''}>Safe - fight for fun, nothing is lost</option><option value="full" ${s.rulesPreset === 'full' ? 'selected' : ''}>Full stakes - damage and death are real</option><option value="custom" ${s.rulesPreset === 'custom' ? 'selected' : ''}>Custom (set later)</option></select></label></div>`;
   if (step === 2) {
@@ -243,7 +243,7 @@ function renderWizard() {
     if (step === 3) { s.publicListed = $('input[name=pub]:checked').value === 'yes'; s.ownerName = $('#w-owner').value; s.ownerContact = $('#w-contact').value; s.publicAddress = $('#w-addr').value; }
   };
   if (step === 1) $$('input[name=acc]').forEach(r => r.onchange = () => { $('#w-pwrow').hidden = r.value !== 'pw' || !r.checked; if (r.checked && r.value === 'pw') $('#w-pw').focus(); });
-  if (step === 1) $('#w-admin').onchange = e => { $('#w-adminwarn').hidden = e.target.value !== '0.0.0.0'; };
+  if (step === 1) $('#w-admin').onchange = e => { $('#w-adminwarn').hidden = e.target.value === '127.0.0.1' || e.target.value === '::1'; };
   if (step === 3) $$('input[name=pub]').forEach(r => r.onchange = () => { $('#w-pubrow').hidden = $('input[name=pub]:checked').value !== 'yes'; });
   if (step === 2) wizPlugins();
   const back = $('#w-back'); if (back) back.onclick = () => { grab(); w.step--; renderWizard(); };
@@ -408,7 +408,7 @@ async function pgSettings() {
       ${f('port', 'Game port (UDP)', `Players connect here. Port + 1 (${+s.port + 1}) answers server-list pings. Changing it restarts the game port and drops players.`, 'number', 'min="1024" max="65534"')}
       ${c('lanAnnounce', 'Show up for people on my home network (LAN)')}
       ${c('upnp', 'Open the port on my router automatically (UPnP)', 'Works on many home routers. See the Network page for the result.')}
-      <div class="row"><label><span class="l">Admin panel is reachable from</span><select data-k="adminBind"><option value="127.0.0.1">This computer only (recommended; use an SSH tunnel from elsewhere)</option><option value="0.0.0.0">Other computers too - plain HTTP, protected only by the password (risky on the internet)</option></select><span class="hint">Takes effect after a restart.</span></label>
+      <div class="row"><label><span class="l">Admin panel is reachable from</span><select data-k="adminBind"><option value="127.0.0.1">This computer only (recommended; use an SSH tunnel from elsewhere)</option><option value="::1">This computer only, IPv6</option><option value="0.0.0.0">Other computers too, IPv4 - plain HTTP, protected only by the password (risky on the internet)</option><option value="::">Other computers too, IPv4 and IPv6 - plain HTTP, protected only by the password (risky on the internet)</option></select><span class="hint">Takes effect after a restart.</span></label>
       ${f('adminPort', 'Admin panel port (TCP)', 'Takes effect after a restart.', 'number', 'min="1024" max="65535"')}</div></div>
     <div class="actions" style="justify-content:flex-start;margin-bottom:18px"><button class="primary" type="submit">Save changes</button><span id="sres" class="muted"></span></div></form>
     <div class="card"><h3>Admin password</h3><div class="row"><label><span class="l">Current</span><input type="password" id="pw0" autocomplete="current-password"></label><label><span class="l">New (12+ characters, mixed)</span><input type="password" id="pw1" autocomplete="new-password"></label></div><button id="pw-go">Change password</button></div>
@@ -418,7 +418,10 @@ async function pgSettings() {
       ${c('checkForUpdates', 'Check for new server versions')}${c('autoUpdate', 'Install updates automatically', 'Replaces the program file; takes effect after a restart (immediately if run as a service). Off by default.')}
       <div id="auto"></div></div>
     <div class="card"><h3>Stop the server</h3><button class="danger" id="stop">Shut down</button> <small class="muted">If the server runs as a service it will start again by itself.</small></div>`;
-  $('[data-k=rulesPreset]').value = s.rulesPreset; $('[data-k=adminBind]').value = s.adminBind;
+  $('[data-k=rulesPreset]').value = s.rulesPreset;
+  const ab = $('[data-k=adminBind]');
+  if (ab && s.adminBind && ![...ab.options].some(o => o.value === s.adminBind)) { const o = document.createElement('option'); o.value = s.adminBind; o.textContent = s.adminBind; ab.appendChild(o); }
+  if (ab) ab.value = s.adminBind;
   $('[data-k=rulesPreset]').onchange = e => { $('#custom').hidden = e.target.value !== 'custom'; };
   $('#sf').onsubmit = async ev => {
     ev.preventDefault();

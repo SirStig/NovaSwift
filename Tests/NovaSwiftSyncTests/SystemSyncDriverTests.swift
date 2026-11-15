@@ -115,6 +115,59 @@ final class SystemSyncDriverTests: XCTestCase {
         for _ in 0..<10 { tick(nodes, alive: alive) }
         XCTAssertEqual(nodes[1].world.remotePlayerShips.count, 1)
     }
+
+    func testPromotionKeepsAIAndVisitorDamageDoesNotCarry() {
+        let nodes = [Node(1, system: 100, x: 0), Node(2, system: 100, x: 400), Node(3, system: 100, x: -400)]
+        var alive: Set<Int> = [1, 2, 3]
+        connect(nodes); pump(nodes, alive: alive)
+        let lead = Ship(name: "Lead", stats: ShipStats(maxSpeed: 100, acceleration: 50, turnRate: 1))
+        lead.brain = AIBrain(aiType: .interceptor, govt: 128)
+        lead.personID = 42
+        lead.weapons = []
+        let leadID = nodes[0].world.addNPC(lead)
+        let wing = Ship(name: "Wing", stats: ShipStats(maxSpeed: 100, acceleration: 50, turnRate: 1))
+        wing.brain = AIBrain(aiType: .braveTrader, govt: 128)
+        wing.brain?.leaderID = leadID
+        wing.brain?.formationSlot = 1
+        wing.brain?.isFleetMember = true
+        wing.brain?.fleetID = 7
+        wing.brain?.escortOrder = .aggressive
+        wing.weapons = []
+        nodes[0].world.addNPC(wing)
+        for _ in 0..<20 { tick(nodes, alive: alive) }
+
+        let mirrored = nodes[1].world.npcs.filter { $0.remotePlayer == nil }
+        let mirrorLead = mirrored.first { $0.name == "Lead" }
+        let mirrorWing = mirrored.first { $0.name == "Wing" }
+        XCTAssertEqual(mirrorLead?.brain?.aiType, .interceptor)
+        XCTAssertEqual(mirrorLead?.personID, 42)
+        XCTAssertEqual(mirrorWing?.brain?.leaderID, mirrorLead?.entityID)
+        XCTAssertEqual(mirrorWing?.brain?.formationSlot, 1)
+        XCTAssertEqual(mirrorWing?.brain?.fleetID, 7)
+        XCTAssertEqual(mirrorWing?.brain?.escortOrder, .aggressive)
+        XCTAssertTrue(mirrorLead?.networkMirror ?? false)
+        XCTAssertFalse(nodes[1].world.persistSharedEncounter)
+        XCTAssertTrue(nodes[0].world.persistSharedEncounter)
+
+        alive.remove(1)
+        nodes[1].transport.peerDisconnected(id: 1)
+        nodes[2].transport.peerDisconnected(id: 1)
+        tick(nodes, alive: alive)
+        let owned = nodes[1].world.npcs.filter { $0.remotePlayer == nil }
+        XCTAssertEqual(owned.first { $0.name == "Lead" }?.brain?.aiType, .interceptor)
+        XCTAssertFalse(owned.first { $0.name == "Lead" }?.networkMirror ?? true)
+        XCTAssertEqual(owned.first { $0.name == "Wing" }?.brain?.aiType, .braveTrader)
+        XCTAssertEqual(owned.first { $0.name == "Wing" }?.brain?.leaderID, owned.first { $0.name == "Lead" }?.entityID)
+
+        let full = nodes[1].world.player.armor
+        nodes[1].world.player.armor = 40
+        nodes[1].world.player.shield = 0
+        nodes[1].driver.setLocalSystem(200)
+        nodes[1].session.updateLocalPresence(name: "P2", systemID: 200)
+        nodes[1].driver.syncPreStep(world: nodes[1].world)
+        XCTAssertEqual(nodes[1].world.player.armor, full, accuracy: 0.01)
+        XCTAssertEqual(nodes[1].world.player.shield, nodes[1].world.player.maxShield, accuracy: 0.01)
+    }
 }
 
 /// Receiver-side validation (docs/SECURITY.md): a malicious peer can't wreck another player's world.

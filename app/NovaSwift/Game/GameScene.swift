@@ -7474,6 +7474,10 @@ final class GameScene: SKScene {
     /// `PlayerState.applyReputationDelta`. Read at natural save points
     /// (landing, jump-out), since a fresh `Diplomacy` is built on every jump.
     /// See `GameHost.init`'s seeding call for the inbound half of this bridge.
+    /// False while this world is a visitor in a shared system whose rules say the
+    /// encounter does not persist. The container still drains the deltas.
+    var persistSharedEncounter: Bool { world?.persistSharedEncounter ?? true }
+
     func consumeReputationDelta() -> [Int: Int] { world.diplomacy?.consumeReputationDelta() ?? [:] }
 
     /// Crimes committed since the last call, for the pilot's rank revocation

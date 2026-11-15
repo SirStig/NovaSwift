@@ -1,4 +1,5 @@
 import NovaSwiftEngine
+import NovaSwiftKit
 import NovaSwiftNet
 
 extension WorldSnapshot {
@@ -44,7 +45,15 @@ extension WorldSnapshot {
                 // A client copy never reports more than the maxima its owner told us (the client owns those).
                 shield: dead ? 0 : (ship.remotePlayer != nil ? min(ship.shield, ship.maxShield) : ship.shield),
                 armor: dead ? 0 : (ship.remotePlayer != nil ? min(ship.armor, ship.maxArmor) : ship.armor),
-                control: control, destroyed: dead ? true : nil))
+                control: control, destroyed: dead ? true : nil,
+                aiType: playerID == nil ? ship.brain?.aiType.rawValue : nil,
+                personID: playerID == nil ? ship.personID : nil,
+                leaderID: playerID == nil ? ship.brain?.leaderID : nil,
+                formationSlot: playerID == nil ? ship.brain?.formationSlot : nil,
+                fleetID: playerID == nil ? ship.brain?.fleetID : nil,
+                fleetMember: playerID == nil && ship.brain?.isFleetMember == true ? true : nil,
+                escortOrder: playerID == nil ? ship.brain?.escortOrder.rawValue : nil,
+                behavior: playerID == nil ? ship.brain?.behaviorOverride.rawValue : nil))
         }
         // Live shots, so co-located clients see fire (visual only — damage already
         // rides ship health). Skip any visual echoes we might be holding ourselves.

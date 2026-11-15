@@ -34,6 +34,10 @@ public final class SystemSyncDriver {
     /// relocate, respawn): every entity id the coordinator tracks is stale, so resync without being told.
     private weak var lastWorld: World?
     private var wasLanded = false
+    /// Hull at the moment this player became a visitor in a shared system. Put back
+    /// on a system change when `carryEncounter` is false, so the fight doesn't stick.
+    private var sharedBaseline: (shield: Double, armor: Double)?
+    private var sharedBaselineSystem: Int?
 
     /// Set by the app/bridge while the local player is landed on a stellar. The client then tells the authority (which
     /// removes its ship from the shared world instead of leaving a ghost) and ignores snapshot health until the first
@@ -119,8 +123,53 @@ public final class SystemSyncDriver {
 
     private func promoteNPC(_ ship: Ship, in world: World) {
         ship.networkMirror = false
-        let type: AIType = ship.weapons.isEmpty ? .braveTrader : .warship
-        ship.brain = AIBrain(aiType: type, govt: ship.government)
+        if ship.brain != nil { return }
+        let hullAI = world.galaxy?.game.ship(ship.shipTypeID)?.inherentAI ?? 0
+        var raw = hullAI
+        if let pid = ship.personID, let pers = world.galaxy?.game.pers(pid) {
+            ship.personFlags = Int(pers.flags)
+            if pers.aiType > 0 { raw = pers.aiType }
+        }
+        let resolved = AIType(raw: raw)
+        let type: AIType = (1...4).contains(resolved.rawValue) ? resolved : .warship
+        let brain = AIBrain(aiType: type, govt: ship.government)
+        if let pid = ship.personID, let pers = world.galaxy?.game.pers(pid) {
+            brain.personAggression = pers.aggression
+            brain.personCoward = pers.coward
+            brain.cadence = AIBrain.cadence(forAggress: pers.aggression)
+        }
+        ship.brain = brain
+    }
+
+    /// `carryEncounter` is the persist-across-systems half of `deathReal`: a visitor
+    /// remembers the hull they entered the shared system with, and gets it back on
+    /// the next system unless the rules say the encounter carries. The authority
+    /// and a solo player always keep what happened.
+    private func applySharedEncounter(authority: String?, world: World) {
+        let rules = session.sessionRules
+        let visitor = authority != nil && authority != localPlayerID
+        world.persistSharedEncounter = !visitor || rules.carryEncounter
+        if let base = sharedBaseline, sharedBaselineSystem != localSystemID {
+            if !rules.carryEncounter, world.player.isAlive {
+                world.player.shield = min(world.player.maxShield, max(0, base.shield))
+                let floor = rules.deathReal ? 0.0 : 1.0
+                world.player.armor = min(world.player.maxArmor, max(floor, base.armor))
+            }
+            sharedBaseline = nil
+            sharedBaselineSystem = nil
+        }
+        if visitor {
+            if sharedBaseline == nil {
+                sharedBaseline = (world.player.shield, world.player.armor)
+                sharedBaselineSystem = localSystemID
+            } else if world.player.shield >= world.player.maxShield - 0.5,
+                      world.player.armor >= world.player.maxArmor - 0.5 {
+                sharedBaseline = (world.player.shield, world.player.armor)
+            }
+        } else if rules.carryEncounter {
+            sharedBaseline = nil
+            sharedBaselineSystem = nil
+        }
     }
 
     private func handleAuthorityChange(to authority: String?, iAmAuthority: Bool, world: World) {
@@ -177,6 +226,7 @@ public final class SystemSyncDriver {
         coordinator.suspendHealthAdoption = isLocalPlayerLanded
         if wasLanded && !isLocalPlayerLanded { coordinator.beginLaunchHold() }
         wasLanded = isLocalPlayerLanded
+        applySharedEncounter(authority: authority, world: world)
         guard let authority else { return }
 
         if authority == localPlayerID {
@@ -250,6 +300,8 @@ public final class SystemSyncDriver {
         netTick = 0
         inputSeq = 0
         wasLanded = false
+        sharedBaseline = nil
+        sharedBaselineSystem = nil
     }
 
     private func buildMirror(shipTypeID: Int, government: Int, name: String, world: World,

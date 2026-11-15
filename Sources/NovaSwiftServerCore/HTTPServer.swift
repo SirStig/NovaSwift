@@ -1,4 +1,5 @@
 import Foundation
+import NovaSwiftENet
 
 public struct HTTPRequest {
     public var method: String
@@ -110,8 +111,13 @@ public final class HTTPServer {
         #if !os(Windows)
         signal(SIGPIPE, SIG_IGN)
         #endif
-        guard let fd = Sock.tcp() else { throw StartError.failed("Couldn't create a network socket.") }
-        switch Sock.bindIPv4(fd, address: bind, port: port) {
+        let address = IPAddressTools.normalize(bind)
+        let v6 = IPAddressTools.isIPv6(address)
+        guard let fd = (v6 ? Sock.tcp6() : Sock.tcp()) else { throw StartError.failed("Couldn't create a network socket.") }
+        let bound = v6
+            ? Sock.bindIPv6(fd, address: address, port: port, v6Only: address != "::")
+            : Sock.bindIPv4(fd, address: address, port: port)
+        switch bound {
         case .invalidAddress: Sock.close(fd); throw StartError.failed("\"\(bind)\" isn't a valid address.")
         case .inUse: Sock.close(fd); throw StartError.inUse(port)
         case .failed(let why): Sock.close(fd); throw StartError.failed("Couldn't open port \(port): \(why).")

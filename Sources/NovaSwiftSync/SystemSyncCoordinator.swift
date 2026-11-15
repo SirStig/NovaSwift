@@ -1,5 +1,6 @@
 import Foundation
 import NovaSwiftEngine
+import NovaSwiftKit
 import NovaSwiftNet
 
 /// Drives Layer-2 per-system simulation sync between one local `World` and the
@@ -599,9 +600,11 @@ public final class SystemSyncCoordinator {
                 seenNPCIDs.insert(state.id)
                 if let localID = npcMirrorIDByAuthorityID[state.id], let ship = world.ship(id: localID) {
                     updateMirror(ship, from: state)
+                    adoptNPCIdentity(ship, from: state, world: world)
                 } else {
                     let localID = world.spawnNetworkMirror(makeNPCMirror(state), arrival: .populate)
                     npcMirrorIDByAuthorityID[state.id] = localID
+                    if let ship = world.ship(id: localID) { adoptNPCIdentity(ship, from: state, world: world) }
                     injected.append(localID)
                 }
             }
@@ -619,6 +622,7 @@ public final class SystemSyncCoordinator {
             npcMirrorIDByAuthorityID[authorityID] = nil
             removed.append(localID)
         }
+        remapEscortLeaders(snapshot, world: world, ownAuthorityID: ownAuthorityID)
 
         // Re-seed the authority's in-flight shots as visual echoes (skip our own —
         // we already fired those locally). Replaced wholesale each snapshot; they
@@ -660,6 +664,60 @@ public final class SystemSyncCoordinator {
             }
         }
         return (injected, removed)
+    }
+
+    /// Keep the NPC's original disposition on the mirror so a promotion resumes it.
+    /// Out-of-range wire values are ignored. A snapshot with none of these fields
+    /// (an older build) leaves a brain-less mirror; promotion then falls back to the hull.
+    private func adoptNPCIdentity(_ ship: Ship, from state: ShipNetState, world: World) {
+        if let pid = state.personID, (1...100_000).contains(pid) { ship.personID = pid }
+        let hasWire = state.aiType != nil || state.personID != nil || state.leaderID != nil
+            || state.formationSlot != nil || state.fleetID != nil || state.fleetMember != nil
+            || state.escortOrder != nil || state.behavior != nil
+        let hullAI = world.galaxy?.game.ship(ship.shipTypeID)?.inherentAI ?? 0
+        let pers = ship.personID.flatMap { world.galaxy?.game.pers($0) }
+        guard hasWire || ship.brain != nil || hullAI >= 1 || pers != nil else { return }
+        var raw = state.aiType ?? 0
+        if raw < 1, let pers, pers.aiType > 0 { raw = pers.aiType }
+        if raw < 1 { raw = hullAI }
+        let resolved = AIType(raw: raw)
+        let type: AIType = (1...4).contains(resolved.rawValue) ? resolved : .warship
+        let brain = ship.brain ?? AIBrain(aiType: type, govt: ship.government)
+        if (1...4).contains(resolved.rawValue) || ship.brain == nil { brain.aiType = type }
+        brain.homeGovt = ship.government
+        if let slot = state.formationSlot, (0...64).contains(slot) { brain.formationSlot = slot }
+        if let fleet = state.fleetID { brain.fleetID = fleet }
+        if state.fleetMember == true || state.fleetID != nil { brain.isFleetMember = true }
+        if let order = state.escortOrder, let parsed = EscortOrder(rawValue: order) { brain.escortOrder = parsed }
+        if let behavior = state.behavior, (-1...2).contains(behavior) {
+            brain.behaviorOverride = MissionShipBehavior(raw: behavior)
+        }
+        if let pers {
+            ship.personFlags = Int(pers.flags)
+            brain.personAggression = pers.aggression
+            brain.personCoward = pers.coward
+            if state.aiType == nil { brain.cadence = AIBrain.cadence(forAggress: pers.aggression) }
+        }
+        ship.brain = brain
+    }
+
+    /// `leaderID` on the wire is the authority's entity id. Point it at the local mirror
+    /// (or the local player) once every ship in this snapshot exists.
+    private func remapEscortLeaders(_ snapshot: WorldSnapshot, world: World, ownAuthorityID: Int?) {
+        var authToLocal = npcMirrorIDByAuthorityID
+        if let ownAuthorityID { authToLocal[ownAuthorityID] = World.playerEntityID }
+        for state in snapshot.ships {
+            if let owner = state.playerID, owner != localPlayerID, let local = playerMirrorID[owner] {
+                authToLocal[state.id] = local
+            }
+        }
+        for state in snapshot.ships where state.playerID == nil {
+            guard let local = npcMirrorIDByAuthorityID[state.id],
+                  let ship = world.ship(id: local) else { continue }
+            // Unconditional: an escort the authority released (leaderID nil) must drop its
+            // old leader too, or a promoted mirror resumes escorting a ship that is gone.
+            ship.brain?.leaderID = state.leaderID.flatMap { authToLocal[$0] }
+        }
     }
 
     /// Snap a mirror ship to its latest networked state. Position/velocity/angle are

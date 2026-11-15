@@ -101,7 +101,7 @@ public final class OriginalAI {
         }
         world.escortGateEmergences.removeAll()
 
-        for ship in world.npcs where ship.isAlive && ship.disabled {
+        for ship in world.npcs where ship.isAlive && ship.disabled && !ship.networkMirror {
             guard let rec = records[ship.entityID] else { continue }
             // The disabled auto-guard (0x00401000): a crippled ship drops its
             // targets and stands down. A player escort keeps its place in
@@ -115,7 +115,7 @@ public final class OriginalAI {
             mirror(rec, ship)
         }
 
-        for ship in world.npcs where ship.brain != nil && ship.isAlive {
+        for ship in world.npcs where ship.brain != nil && ship.isAlive && !ship.networkMirror {
             _ = ensureRecord(ship, host: host)
         }
         tickCategoryCommands(host)

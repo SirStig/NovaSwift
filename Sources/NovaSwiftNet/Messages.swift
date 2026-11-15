@@ -185,17 +185,35 @@ public struct ShipNetState: Codable, Equatable, Sendable {
     /// On a `destroyed` entry: the owner's life generation (`InputFrame.lifeID`) that died, so a late-arriving death
     /// notice can't kill the owner's next life.
     public var life: UInt32?
+    /// NPC identity the receiver keeps for host promotion. Absent on player ships and on
+    /// snapshots from older builds; a receiver ignores values it doesn't understand.
+    public var aiType: Int?
+    public var personID: Int?
+    /// The authority's entity id of this NPC's escort leader, remapped to a local id on receipt.
+    public var leaderID: Int?
+    public var formationSlot: Int?
+    public var fleetID: Int?
+    public var fleetMember: Bool?
+    /// `EscortOrder.rawValue`.
+    public var escortOrder: String?
+    /// `MissionShipBehavior.rawValue`.
+    public var behavior: Int?
 
     public init(id: Int, playerID: String? = nil, shipTypeID: Int = -1, government: Int = 0,
                 name: String, x: Double, y: Double, vx: Double, vy: Double, angle: Double,
                 shield: Double, armor: Double, control: NetControlSource, destroyed: Bool? = nil,
-                life: UInt32? = nil) {
+                life: UInt32? = nil, aiType: Int? = nil, personID: Int? = nil, leaderID: Int? = nil,
+                formationSlot: Int? = nil, fleetID: Int? = nil, fleetMember: Bool? = nil,
+                escortOrder: String? = nil, behavior: Int? = nil) {
         self.destroyed = destroyed; self.life = life
         self.id = id; self.playerID = playerID; self.shipTypeID = shipTypeID
         self.government = government; self.name = name
         self.x = x; self.y = y; self.vx = vx; self.vy = vy
         self.angle = angle; self.shield = shield; self.armor = armor
         self.control = control
+        self.aiType = aiType; self.personID = personID; self.leaderID = leaderID
+        self.formationSlot = formationSlot; self.fleetID = fleetID; self.fleetMember = fleetMember
+        self.escortOrder = escortOrder; self.behavior = behavior
     }
 }
 
