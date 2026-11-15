@@ -269,7 +269,8 @@ final class LiveModelStore: @unchecked Sendable {
 /// texture as byte count + PNG; each geometry as vertex count, flags (1
 /// normals, 2 uvs), positions, normals, uvs (float), element count, and per
 /// element: effect layer (0 none, 1 engine, 2 lights, 3 weapons), a material
-/// block (see `putMaterial`), index count, `UInt32` indices.
+/// block (see `putMaterial`), index count, `UInt32` indices — triangles wound
+/// clockwise (Godot's front face), the reverse of SceneKit's.
 enum LiveModelExport {
     static let magic: UInt32 = 0x4E564D32
     private static let layers: [GraphicsEnhancement.EffectLayer] = [.engine, .lights, .weapons]
@@ -353,7 +354,9 @@ enum LiveModelExport {
                             tri[v] = id
                         }
                     }
-                    if whole { out.append(contentsOf: tri) }
+                    // SceneKit's front faces wind counter-clockwise, Godot's clockwise: kept as is,
+                    // Godot culls the hull's outside and draws its inner walls lit from behind.
+                    if whole { out.append(tri[0]); out.append(tri[2]); out.append(tri[1]) }
                 }
                 if !out.isEmpty { elementIndices.append((i, out)) }
             }

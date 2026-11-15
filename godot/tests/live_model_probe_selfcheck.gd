@@ -77,6 +77,25 @@ func _init() -> void:
 		else:
 			cone_front = maxf(cone_front, bb.end.z)
 	check(absf(cone_front - box.end.z) < 0.01 and wing_back < 0.0, "nose (the cone) toward +Z, wings behind (front %.2f, wings %.2f)" % [cone_front, wing_back])
+	# Godot's front faces wind clockwise (SceneKit's counter-clockwise): seen from outside, a
+	# triangle's (b - a) x (c - a) points into the hull, against its stored normal.
+	var facing := 0
+	var tris_seen := 0
+	for mi in meshes:
+		var arr: Array = (mi as MeshInstance3D).mesh.surface_get_arrays(0)
+		var vx: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		var nr = arr[Mesh.ARRAY_NORMAL]
+		var ix: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+		if nr == null:
+			continue
+		for k in range(0, ix.size(), 3):
+			var fn: Vector3 = (vx[ix[k + 1]] - vx[ix[k]]).cross(vx[ix[k + 2]] - vx[ix[k]])
+			if fn.length() < 1e-9:
+				continue
+			tris_seen += 1
+			if fn.dot((nr as PackedVector3Array)[ix[k]]) < 0.0:
+				facing += 1
+	check(tris_seen > 0 and facing * 10 >= tris_seen * 9, "triangles wound for Godot's front face (%d of %d)" % [facing, tris_seen])
 	# Simple lighting: every lit material is Lambert.
 	var simple_bytes: PackedByteArray = nova.live_model_probe(path, 0, true)
 	var simple: Node3D = lh._model_from_nvm2(simple_bytes)
