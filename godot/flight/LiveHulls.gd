@@ -36,6 +36,14 @@ const KEY_LIGHT := Vector3(-0.75, 0.85, 0.65)
 const FIT_POINT_BUDGET := 20000           # vertices sampled when fitting a model to its classic footprint
 const BUILDS_PER_FRAME := 2               # GameScene.liveBuildsPerFrame
 const PENDING_RETRY := 0.5                # GameScene.syncLiveHull: ask again for a model still loading
+# HDAssetPipeline.matchBrightness: passes, and the clamp on the total. Apple clamps at 3x; Godot's
+# Compatibility renderer has no reflections without a sky background, so a metal hull can need more.
+# Scaling a hull's albedo brightens its diffuse and metal reflectance but not its plain specular, so
+# a dark hull converges more slowly than Apple's light scaling: two more passes.
+const MATCH_PASSES := 5
+const MATCH_MIN := 0.5
+const MATCH_MAX := 8.0
+const MATCH_FRAMES := 2                   # frames between asking for a render and reading it back
 const LAYERS := ["engine", "lights", "weapons"]
 # Render layers: 1-16 are light rigs (a light lights a hull sharing its bit), 17-20 the four z bands
 # (each band's camera sees only its own hulls). See ShipDrawer.bands.
@@ -119,6 +127,15 @@ var _model_detail := 0
 var _simple := false
 var _glow_tex: Texture2D
 var _plume_tex: Texture2D
+var _env: Environment
+# Light matching (HDAssetPipeline.calibrateLive): ship type -> template waiting for its measurement,
+# the queue of those types, and the one being measured.
+var _matching := {}
+var _match_queue: Array = []
+var _match: Dictionary = {}
+var _match_vp: SubViewport
+var _match_cam: Camera3D
+var _match_root: Node3D
 
 
 func setup(renderer) -> void:
@@ -144,10 +161,15 @@ func drop_templates() -> void:
 		var t = _templates[k]
 		if t != null:
 			((t as Dictionary)["proto"] as Node).queue_free()
+	for k in _matching:
+		((_matching[k] as Dictionary)["proto"] as Node).queue_free()
 	_hulls.clear()
 	_templates.clear()
 	_retry.clear()
 	_shown.clear()
+	_matching.clear()
+	_match_queue.clear()
+	_end_match()
 
 
 func covers(index: int) -> bool:
@@ -181,6 +203,7 @@ func sync(frame_dt: float = 0.0, running: bool = true) -> void:
 	if not r.nova.has_method("ship_model_json"):
 		return
 	_ensure_view()
+	_match_step()
 	if budget == null:
 		budget = Budget.new(_ceiling())
 	for t in _retry.keys():
@@ -398,7 +421,8 @@ func _ensure_view() -> void:
 	stage = Node3D.new()
 	(_vps[0] as SubViewport).add_child(stage)
 	var env := WorldEnvironment.new()
-	env.environment = _environment()
+	_env = _environment()
+	env.environment = _env
 	stage.add_child(env)
 	_rig(KEY_LIGHT)                 # the shared rig is render layer 1
 	_glow_tex = ImageTexture.create_from_image(_glow_image())
@@ -454,8 +478,13 @@ func _rig(key: Vector3) -> int:
 	if layer > mini(RIG_LAYERS, MAX_RIGS):
 		return 1
 	_rigs[sig] = layer
-	var mask := 1 << (layer - 1)
-	# SceneKit intensity 1000 is a light of energy 1.
+	_add_lights(stage, key, 1 << (layer - 1))
+	return layer
+
+
+## ModelStage.addLights: key, fill and rim at fixed screen directions. SceneKit intensity 1000 is a
+## light of energy 1.
+static func _add_lights(parent: Node3D, key: Vector3, mask: int) -> void:
 	var specs := [
 		[key, 2.1, Color(1.0, 0.97, 0.92)],
 		[Vector3(0.8, -0.4, 0.4), 0.16, Color(0.55, 0.65, 0.85)],
@@ -469,8 +498,7 @@ func _rig(key: Vector3) -> int:
 		l.light_color = spec[2]
 		l.shadow_enabled = false
 		l.light_cull_mask = mask
-		stage.add_child(l)
-	return layer
+		parent.add_child(l)
 
 
 ## Dim ambient and the stage's reflection map (ModelStage.environmentImage): near-black space with a soft
@@ -611,7 +639,7 @@ func _hide_all() -> void:
 func _template(type: int, index: int):
 	if _templates.has(type):
 		return _templates[type]
-	if float(_retry.get(type, 0.0)) > 0.0:
+	if _matching.has(type) or float(_retry.get(type, 0.0)) > 0.0:
 		return null
 	var raw: String = r.nova.ship_model_json(type)
 	var parsed = JSON.parse_string(raw)
@@ -620,6 +648,11 @@ func _template(type: int, index: int):
 		return null
 	_retry.erase(type)
 	var t = _load_template(type, index, parsed)
+	if t != null and bool(t["match"]):
+		# Drawn as the classic sprite until its light is matched (a few frames).
+		_matching[type] = t
+		_match_queue.append(type)
+		return null
 	_templates[type] = t
 	return t
 
@@ -666,7 +699,10 @@ func _load_template(type: int, index: int, parsed):
 			and not bool(parsed.get("atmosphere", false))
 	var mask := 1 << (_rig(key) - 1)
 	_set_layers(model, mask)
-	_scale_light(model, exposure * light_scale)
+	# A model the pack doesn't give its own exposure is light-matched to its classic art here, in the
+	# renderer that draws it (the bridge's lightScale was measured in SceneKit); headless can't render.
+	var light_match := bool(parsed.get("matchLight", false)) and DisplayServer.get_name() != "headless"
+	_scale_light(model, exposure * (1.0 if light_match else light_scale))
 	var overlay := {}
 	for l in parsed.get("overlayLayers", []):
 		overlay[str(l)] = true
@@ -687,7 +723,168 @@ func _load_template(type: int, index: int, parsed):
 		"overlay": overlay,
 		"present": replaced,
 		"mask": mask,
+		"key": key,
+		"frame_w": frame_w,
+		"match": light_match,
 	}
+
+
+# MARK: Light matching
+
+## HDAssetPipeline.matchBrightness, in Godot: the hull at the classic sheet's eight sampled headings,
+## under its own rig, measured like ClassicFootprint.tones and its light scaled until the median and
+## upper-quartile tones match the classic art. One hull type at a time, a render every MATCH_FRAMES.
+func _match_step() -> void:
+	if _match.is_empty():
+		while not _match_queue.is_empty() and _match.is_empty():
+			_begin_match(int(_match_queue.pop_front()))
+		return
+	_match["wait"] = int(_match["wait"]) - 1
+	if int(_match["wait"]) > 0:
+		return
+	var got := _rendered_tones()
+	var t: Dictionary = _match["tones"]
+	var total := float(_match["total"])
+	if got.is_empty() or float(got["mid"]) <= 0.01:
+		_finish_match()
+		return
+	var ratio := (float(t["mid"]) / float(got["mid"]) + float(t["high"]) / maxf(float(got["high"]), 0.01)) * 0.5
+	var k := clampf(total * ratio, MATCH_MIN, MATCH_MAX) / total
+	_match["pass"] = int(_match["pass"]) + 1
+	if absf(k - 1.0) < 0.04 or int(_match["pass"]) >= MATCH_PASSES:
+		if absf(k - 1.0) >= 0.04 and _match_root.get_child_count() > 0:
+			_scale_light(_match_root.get_child(_match_root.get_child_count() - 1), k)
+		_finish_match()
+		return
+	# The copies share the template's meshes (Node.duplicate), so scaling one scales the template too.
+	if _match_root.get_child_count() > 0:
+		_scale_light(_match_root.get_child(_match_root.get_child_count() - 1), k)
+	_match["total"] = total * k
+	_match["wait"] = MATCH_FRAMES
+	_match_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+
+
+func _begin_match(type: int) -> void:
+	if not _matching.has(type):
+		return
+	var tpl: Dictionary = _matching[type]
+	var raw: PackedFloat32Array = r.nova.ship_classic_tones(type) if r.nova.has_method("ship_classic_tones") \
+			else PackedFloat32Array()
+	if raw.size() < 4:
+		_publish(type, tpl)          # nothing to match against: as the bridge prepared it
+		return
+	var fps := maxf(1.0, raw[2])
+	var headings: Array = []
+	for i in range(3, raw.size()):
+		headings.append(raw[i] * TAU / fps)
+	_ensure_match_view()
+	var fw := maxf(1.0, float(tpl["frame_w"]))
+	var fh := maxf(1.0, float(tpl["frame_h"]))
+	var ortho := float(tpl["ortho"])
+	# HDAssetPipeline measures at 2x; a small hull keeps that, a big one is measured at 1x.
+	var sc := 2.0 if fh <= 64.0 else 1.0
+	_match_vp.size = Vector2i(int(fw * sc) * headings.size(), int(fh * sc))
+	_match_cam.size = 2.0 * ortho
+	var p := deg_to_rad(float(tpl["pitch"]))
+	var pos := Vector3(0.0, sin(p), cos(p)) * 50.0
+	_match_cam.transform = Transform3D(_look_basis(-pos), pos)
+	_add_lights(_match_root, tpl["key"], 0xFFFFF)
+	var cell := 2.0 * ortho * fw / fh
+	for i in headings.size():
+		var pivot := Node3D.new()
+		pivot.position = Vector3((float(i) + 0.5 - float(headings.size()) * 0.5) * cell, 0.0, 0.0)
+		pivot.rotation = Vector3(0.0, PI - float(headings[i]), 0.0)
+		var copy := (tpl["proto"] as Node3D).duplicate() as Node3D
+		_hide_emitters(copy)
+		pivot.add_child(copy)
+		_match_root.add_child(pivot)
+	_match = {"type": type, "tones": {"mid": raw[0], "high": raw[1]}, "total": 1.0, "pass": 0,
+		"wait": MATCH_FRAMES}
+	_match_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+
+
+func _ensure_match_view() -> void:
+	if _match_vp != null:
+		return
+	_match_vp = SubViewport.new()
+	_match_vp.own_world_3d = true
+	_match_vp.transparent_bg = true
+	_match_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	add_child(_match_vp)
+	var env := WorldEnvironment.new()
+	env.environment = _env
+	_match_vp.add_child(env)
+	_match_cam = Camera3D.new()
+	_match_cam.projection = Camera3D.PROJECTION_ORTHOGONAL
+	_match_cam.keep_aspect = Camera3D.KEEP_HEIGHT
+	_match_cam.near = 1.0
+	_match_cam.far = 100.0
+	_match_cam.current = true
+	_match_vp.add_child(_match_cam)
+	_match_root = Node3D.new()
+	_match_vp.add_child(_match_root)
+
+
+## The hull pass (ModelStage.setPass(.hull)): emitters are their overlay's, not the hull's tones.
+static func _hide_emitters(node: Node) -> void:
+	if node.has_meta("nova_emitter") and node is Node3D:
+		(node as Node3D).visible = false
+	for c in node.get_children():
+		_hide_emitters(c)
+
+
+## ClassicFootprint.tones over the readback: luma of every pixel more than 200/255 opaque.
+func _rendered_tones() -> Dictionary:
+	var tex := _match_vp.get_texture() if _match_vp != null else null
+	var img: Image = tex.get_image() if tex != null else null
+	if img == null or img.is_empty():
+		return {}
+	if img.get_format() != Image.FORMAT_RGBA8:
+		img.convert(Image.FORMAT_RGBA8)
+	var data := img.get_data()
+	var hist := PackedInt32Array()
+	hist.resize(256)
+	var total := 0
+	for i in range(0, data.size() - 3, 4):
+		if data[i + 3] <= 200:
+			continue
+		hist[(int(data[i]) * 54 + int(data[i + 1]) * 183 + int(data[i + 2]) * 19) >> 8] += 1
+		total += 1
+	if total == 0:
+		return {}
+	return {"mid": _percentile(hist, total, 0.5), "high": _percentile(hist, total, 0.75)}
+
+
+static func _percentile(hist: PackedInt32Array, total: int, q: float) -> float:
+	var seen := 0
+	for v in hist.size():
+		seen += hist[v]
+		if float(seen) >= q * float(total):
+			return float(v) / 255.0
+	return 1.0
+
+
+## The template's meshes already carry the scale (shared with the measured copies).
+func _finish_match() -> void:
+	var type := int(_match["type"])
+	var tpl = _matching.get(type)
+	_end_match()
+	if tpl != null:
+		_publish(type, tpl)
+
+
+func _end_match() -> void:
+	_match = {}
+	if _match_root != null:
+		for c in _match_root.get_children():
+			c.queue_free()
+	if _match_vp != null:
+		_match_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+
+
+func _publish(type: int, tpl: Dictionary) -> void:
+	_matching.erase(type)
+	_templates[type] = tpl
 
 
 # MARK: glTF
@@ -1027,14 +1224,14 @@ func _model_from_nvm2(bytes: PackedByteArray) -> Node3D:
 		var mesh := ArrayMesh.new()
 		var layer := ""
 		for e in elements:
-			if o + 4 + 68 > bytes.size():
+			if o + 4 + 76 > bytes.size():
 				return null
 			var layer_i := int(bytes.decode_u32(o))
 			o += 4
 			if layer_i >= 1 and layer_i <= 3:
 				layer = LAYERS[layer_i - 1]
 			var mat := _nvm2_material(bytes, o, textures)
-			o += 68
+			o += 76
 			var ic := int(bytes.decode_u32(o))
 			o += 4
 			if o + ic * 4 > bytes.size():
@@ -1069,8 +1266,9 @@ func _model_from_nvm2(bytes: PackedByteArray) -> Node3D:
 	return root if root.get_child_count() > 0 else null
 
 
-## One LiveModelExport material block (68 bytes): diffuse rgba, diffuse tex, metalness, metal tex,
-## roughness, rough tex, emission rgb, emission tex, normal tex, lighting model, double sided, opacity.
+## One LiveModelExport material block (76 bytes): diffuse rgba, diffuse tex, metalness, metal tex,
+## roughness, rough tex, emission rgb, emission tex, normal tex, lighting model, double sided, opacity,
+## then which channel of the metal and rough textures holds the value (packed ORM maps: blue, green).
 static func _nvm2_material(b: PackedByteArray, o: int, textures: Array) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = Color(b.decode_float(o), b.decode_float(o + 4), b.decode_float(o + 8), b.decode_float(o + 12))
@@ -1079,6 +1277,8 @@ static func _nvm2_material(b: PackedByteArray, o: int, textures: Array) -> Stand
 	m.metallic_texture = _tex(textures, b.decode_s32(o + 24))
 	m.roughness = b.decode_float(o + 28)
 	m.roughness_texture = _tex(textures, b.decode_s32(o + 32))
+	m.metallic_texture_channel = clampi(int(b.decode_u32(o + 68)), 0, 3) as BaseMaterial3D.TextureChannel
+	m.roughness_texture_channel = clampi(int(b.decode_u32(o + 72)), 0, 3) as BaseMaterial3D.TextureChannel
 	var e := Color(b.decode_float(o + 36), b.decode_float(o + 40), b.decode_float(o + 44))
 	var etex := _tex(textures, b.decode_s32(o + 48))
 	if e.r + e.g + e.b > 0.001 or etex != null:
@@ -1279,21 +1479,27 @@ func _collect_points(node: Node, parent: Transform3D, out: PackedVector3Array, s
 
 ## The hull's light level on its lit materials (LiveHull.sharedFragment's `novaLight`): the lit colour is
 ## scaled, emission is not (Apple divides emission back out of the same multiply).
-func _scale_light(node: Node, k: float) -> void:
+func _scale_light(node: Node, k: float, seen: Dictionary = {}) -> void:
 	if absf(k - 1.0) < 0.001:
 		return
-	if node is MeshInstance3D and (node as MeshInstance3D).mesh != null and not node.has_meta("nova_emitter"):
+	if node is MeshInstance3D and (node as MeshInstance3D).mesh != null and not node.has_meta("nova_emitter") \
+			and not seen.has((node as MeshInstance3D).mesh):
 		var mi := node as MeshInstance3D
+		seen[mi.mesh] = true   # a mesh shared by two instances is scaled once
 		for s in mi.mesh.get_surface_count():
 			var src := mi.get_active_material(s) as BaseMaterial3D
 			if src == null or src.shading_mode == BaseMaterial3D.SHADING_MODE_UNSHADED:
 				continue
 			var m := src.duplicate() as BaseMaterial3D
+			# A light scale is linear; albedo_color is sRGB, so scale it in linear space (for a
+			# diffuse surface, and a metal's reflectance, that is the same as brightening the lights).
 			var c := m.albedo_color
-			m.albedo_color = Color(c.r * k, c.g * k, c.b * k, c.a)
+			var l := c.srgb_to_linear()
+			m.albedo_color = Color(l.r * k, l.g * k, l.b * k, c.a).linear_to_srgb()
+			m.albedo_color.a = c.a
 			mi.mesh.surface_set_material(s, m)
 	for c in node.get_children():
-		_scale_light(c, k)
+		_scale_light(c, k, seen)
 
 
 func _set_layers(node: Node, mask: int) -> void:

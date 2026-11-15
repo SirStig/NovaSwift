@@ -2280,6 +2280,24 @@ class NovaWorld: Node2D {
         #endif
     }
 
+    /// `HDAssetPipeline.matchBrightness`' target for a live hull: the classic sheet's tones
+    /// (`HDFlight.tones`) over eight level headings. Returns mid, high, frames per set, then the
+    /// sampled frame indices (heading = frame * 2π / frames per set); empty when the sheet is too
+    /// dark to measure or there is no live model. The frontend renders the hull at those headings
+    /// with its own renderer and scales the hull's light until its tones match.
+    @Callable(autoSnakeCase: true)
+    func shipClassicTones(shipType: Int) -> PackedFloat32Array {
+        guard let game, hdModel(shipType: shipType) != nil, let sheet = game.shipSprite(shipType) else {
+            return PackedFloat32Array()
+        }
+        let anim = game.shan(shipType).map { HullAnimConfig($0, animations: flightVisuals.shipAnimations) }
+            ?? HullAnimConfig()
+        let n = max(1, anim.framesPerSet)
+        let samples = Array(Set((0..<8).map { $0 * n / 8 })).filter { $0 < sheet.frameCount }.sorted()
+        guard let t = HDFlight.tones(of: sheet, frames: samples), t.mid > 0.02 else { return PackedFloat32Array() }
+        return PackedFloat32Array([Float(t.mid), Float(t.high), Float(n)] + samples.map { Float($0) })
+    }
+
     /// The prepared geometry (`LiveModelExport`, "NVM2") of a SceneKit-format
     /// hull, once `shipModelJSON` reports it ready. Empty for glTF, on Linux,
     /// and while it is still being prepared.

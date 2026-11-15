@@ -27,6 +27,34 @@ import UniformTypeIdentifiers
 /// NovaSwiftHD needs SceneKit, so the Linux bridge does not link it: a USDZ
 /// hull there stays on its sprite.
 enum HDFlight {
+    /// `ClassicFootprint.tones` (NovaSwiftHD, which only the macOS bridge links): the median and
+    /// upper-quartile luma of a classic sheet's opaque pixels over `frames` — what
+    /// `HDAssetPipeline.matchBrightness` lights a model to match.
+    static func tones(of sheet: SpriteSheet, frames: [Int]) -> (mid: Double, high: Double)? {
+        var hist = [Int](repeating: 0, count: 256)
+        let stride = sheet.surfaceWidth * 4
+        for f in frames where f >= 0 && f < sheet.frameCount {
+            let ox = (f % SpriteSheet.framesPerRow) * sheet.frameWidth
+            let oy = (f / SpriteSheet.framesPerRow) * sheet.frameHeight
+            for y in 0..<sheet.frameHeight {
+                let row = (oy + y) * stride
+                for x in 0..<sheet.frameWidth {
+                    let i = row + (ox + x) * 4
+                    guard i + 3 < sheet.rgba.count, sheet.rgba[i + 3] > 200 else { continue }
+                    hist[(Int(sheet.rgba[i]) * 54 + Int(sheet.rgba[i + 1]) * 183 + Int(sheet.rgba[i + 2]) * 19) >> 8] += 1
+                }
+            }
+        }
+        let total = hist.reduce(0, +)
+        guard total > 0 else { return nil }
+        func at(_ q: Double) -> Double {
+            var seen = 0
+            for (v, c) in hist.enumerated() { seen += c; if Double(seen) >= q * Double(total) { return Double(v) / 255 } }
+            return 1
+        }
+        return (at(0.5), at(0.75))
+    }
+
     /// PNG atlas bytes, or nil when this enhancement is not a PNG sprite sheet.
     static func pngBytes(_ source: GraphicsAssetSource) -> [UInt8]? {
         guard let data = source.loadData(), isPNG(data) else { return nil }
@@ -76,6 +104,9 @@ enum HDFlight {
             "bankRoll": bake?.bankRoll ?? 30,
             "exposure": bake?.exposure ?? 1,
             "atmosphere": bake?.atmosphere != nil,
+            // HDAssetPipeline.calibrateLive: light-matched to the classic art unless the pack sets
+            // its own exposure (or the model is a planet).
+            "matchLight": bake?.exposure == nil && bake?.atmosphere == nil,
             "banks": banks,
             "framesPerSet": framesPerSet,
             "overlayLayers": overlayLayers,
@@ -273,26 +304,77 @@ enum LiveModelExport {
         }
 
         stage.roll.enumerateHierarchy { node, _ in
-            guard let g = node.geometry, let vsrc = g.sources(for: .vertex).first else { return }
-            let pos = readVectors(vsrc, components: 3)
+            guard let g = node.geometry else { return }
+            let srcs = g.sources
+            guard let pk = srcs.firstIndex(where: { $0.semantic == .vertex }) else { return }
+            let pos = readVectors(srcs[pk], components: 3)
             guard !pos.isEmpty else { return }
-            let nrm = g.sources(for: .normal).first.map { readVectors($0, components: 3) } ?? []
-            let uv = g.sources(for: .texcoord).first.map { readVectors($0, components: 2) } ?? []
-            let hasN = nrm.count == pos.count, hasUV = uv.count == pos.count
+            let nk = srcs.firstIndex(where: { $0.semantic == .normal })
+            let tk = srcs.firstIndex(where: { $0.semantic == .texcoord })
+            let nrm = nk.map { readVectors(srcs[$0], components: 3) } ?? []
+            let uv = tk.map { readVectors(srcs[$0], components: 2) } ?? []
+            // Unify the corners: SceneKit geometry either shares one index per corner across every
+            // source, or (USD face-varying data, as MeshSimplifier reads it) carries one index
+            // channel per source, in source order. Godot wants one index per vertex, so each
+            // distinct (position, normal, uv) triple becomes a vertex.
+            var remap: [SIMD3<Int32>: UInt32] = [:]
+            var corners: [SIMD3<Int32>] = []
+            var hasN = !nrm.isEmpty, hasUV = !uv.isEmpty
+            var elementIndices: [(Int, [UInt32])] = []
+            for (i, el) in g.elements.enumerated() {
+                let tris = cornerIndices(el, sources: srcs.count)
+                guard !tris.idx.isEmpty else { continue }
+                let ch = tris.channels
+                var out: [UInt32] = []
+                out.reserveCapacity(tris.idx.count / ch)
+                var tri = [UInt32](repeating: 0, count: 3)
+                for t in 0..<(tris.idx.count / (3 * ch)) {
+                    var whole = true
+                    for v in 0..<3 {
+                        let c = (t * 3 + v) * ch
+                        let pi = Int(tris.idx[c + (ch == 1 ? 0 : pk)])
+                        guard pi < pos.count else { whole = false; break }
+                        var ni = -1, ti = -1
+                        if let nk, hasN {
+                            ni = Int(tris.idx[c + (ch == 1 ? 0 : nk)])
+                            if ni >= nrm.count { hasN = false; ni = -1 }
+                        }
+                        if let tk, hasUV {
+                            ti = Int(tris.idx[c + (ch == 1 ? 0 : tk)])
+                            if ti >= uv.count { hasUV = false; ti = -1 }
+                        }
+                        let key = SIMD3<Int32>(Int32(pi), Int32(ni), Int32(ti))
+                        if let found = remap[key] {
+                            tri[v] = found
+                        } else {
+                            let id = UInt32(corners.count)
+                            remap[key] = id
+                            corners.append(key)
+                            tri[v] = id
+                        }
+                    }
+                    if whole { out.append(contentsOf: tri) }
+                }
+                if !out.isEmpty { elementIndices.append((i, out)) }
+            }
+            guard !corners.isEmpty, !elementIndices.isEmpty else { return }
             let m = node.simdConvertTransform(matrix_identity_float4x4, to: stage.roll)
             let nm = simd_inverse(simd_transpose(m))
             let layer = classify(node, stop: stage.roll, descriptor: descriptor)
             if let layer { present.insert(layer.rawValue) }
 
             var block = Data()
-            put(&block, UInt32(pos.count))
+            put(&block, UInt32(corners.count))
             put(&block, UInt32((hasN ? 1 : 0) | (hasUV ? 2 : 0)))
-            for p in pos {
+            for k in corners {
+                let p = pos[Int(k.x)]
                 let w = m * SIMD4<Float>(p[0], p[1], p[2], 1)
                 put(&block, w.x); put(&block, w.y); put(&block, w.z)
             }
             if hasN {
-                for n in nrm {
+                for k in corners {
+                    // A corner seen before the normals were found short still has a slot: point it up.
+                    let n = k.y >= 0 ? nrm[Int(k.y)] : [0, 1, 0]
                     let t = nm * SIMD4<Float>(n[0], n[1], n[2], 0)
                     let v = SIMD3(t.x, t.y, t.z)
                     let len = simd_length(v)
@@ -300,12 +382,15 @@ enum LiveModelExport {
                     put(&block, u.x); put(&block, u.y); put(&block, u.z)
                 }
             }
-            if hasUV { for t in uv { put(&block, t[0]); put(&block, t[1]) } }
+            if hasUV {
+                for k in corners {
+                    let t = k.z >= 0 ? uv[Int(k.z)] : [0, 0]
+                    put(&block, t[0]); put(&block, t[1])
+                }
+            }
             var elements = Data()
             var elementCount: UInt32 = 0
-            for (i, el) in g.elements.enumerated() {
-                let idx = triangles(el, vertexCount: UInt32(pos.count))
-                guard !idx.isEmpty else { continue }
+            for (i, idx) in elementIndices {
                 let mat = g.materials.isEmpty ? SCNMaterial() : g.materials[i % g.materials.count]
                 put(&elements, UInt32(layer.flatMap { layers.firstIndex(of: $0).map { $0 + 1 } } ?? 0))
                 putMaterial(&elements, mat, simple: simple, texture: texture)
@@ -373,10 +458,10 @@ enum LiveModelExport {
         return nil
     }
 
-    /// Material block: diffuse rgba, diffuse tex, metalness, metal tex,
+    /// Material block (76 bytes): diffuse rgba, diffuse tex, metalness, metal tex,
     /// roughness, rough tex, emission rgb, emission tex, normal tex, lighting
     /// (0 physically based, 1 blinn/phong, 2 lambert, 3 constant), double sided,
-    /// opacity (`SCNMaterial.transparency`).
+    /// opacity (`SCNMaterial.transparency`), metal tex channel, rough tex channel.
     private static func putMaterial(_ out: inout Data, _ m: SCNMaterial, simple: Bool,
                                     texture: (SCNMaterialProperty) -> Int32) {
         let diffuse = color(m.diffuse) ?? SIMD4<Float>(1, 1, 1, 1)
@@ -399,6 +484,19 @@ enum LiveModelExport {
         put(&out, model)
         put(&out, UInt32(m.isDoubleSided ? 1 : 0))
         put(&out, Float(m.transparency))
+        // Which channel of a packed texture holds the value (glTF-style ORM maps keep metalness in
+        // blue and roughness in green): 0 red, 1 green, 2 blue, 3 alpha, as Godot's TextureChannel.
+        put(&out, channel(m.metalness.textureComponents))
+        put(&out, channel(m.roughness.textureComponents))
+    }
+
+    private static func channel(_ mask: SCNColorMask) -> UInt32 {
+        switch mask {
+        case .green: return 1
+        case .blue: return 2
+        case .alpha: return 3
+        default: return 0
+        }
     }
 
     private static func color(_ p: SCNMaterialProperty) -> SIMD4<Float>? {
@@ -458,31 +556,29 @@ enum LiveModelExport {
         return out
     }
 
-    /// Whole triangles only: a bad index drops its triangle, never shifts the rest.
-    private static func triangles(_ element: SCNGeometryElement, vertexCount count: UInt32) -> [UInt32] {
-        guard element.primitiveType == .triangles else { return [] }
+    /// A triangle element's raw corner indices: `channels` per corner (1 = shared by every source,
+    /// or one per source in source order), or nothing for an element this export can't read.
+    private static func cornerIndices(_ element: SCNGeometryElement, sources: Int) -> (idx: [UInt32], channels: Int) {
+        guard element.primitiveType == .triangles else { return ([], 1) }
         let bpi = element.bytesPerIndex
-        guard bpi == 1 || bpi == 2 || bpi == 4 else { return [] }
-        let n = element.primitiveCount * 3
+        guard bpi == 1 || bpi == 2 || bpi == 4 else { return ([], 1) }
+        let ch = max(1, element.indicesChannelCount)
+        guard ch == 1 || ch == sources else { return ([], 1) }
+        let n = element.primitiveCount * 3 * ch
         var out: [UInt32] = []
-        out.reserveCapacity(n)
         element.data.withUnsafeBytes { raw in
-            guard raw.count >= n * bpi else { return }
-            func index(_ i: Int) -> UInt32 {
+            guard n > 0, raw.count >= n * bpi else { return }
+            out.reserveCapacity(n)
+            for i in 0..<n {
                 let off = i * bpi
                 switch bpi {
-                case 1: return UInt32(raw.load(fromByteOffset: off, as: UInt8.self))
-                case 2: return UInt32(raw.loadUnaligned(fromByteOffset: off, as: UInt16.self))
-                default: return raw.loadUnaligned(fromByteOffset: off, as: UInt32.self)
+                case 1: out.append(UInt32(raw.load(fromByteOffset: off, as: UInt8.self)))
+                case 2: out.append(UInt32(raw.loadUnaligned(fromByteOffset: off, as: UInt16.self)))
+                default: out.append(raw.loadUnaligned(fromByteOffset: off, as: UInt32.self))
                 }
             }
-            for t in 0..<(n / 3) {
-                let a = index(t * 3), b = index(t * 3 + 1), c = index(t * 3 + 2)
-                guard a < count, b < count, c < count else { continue }
-                out.append(a); out.append(b); out.append(c)
-            }
         }
-        return out
+        return (out, ch)
     }
 
     private static func put(_ out: inout Data, _ v: UInt32) {

@@ -287,6 +287,7 @@ func _extra_checks(lh, r, path: String) -> void:
 	put_u.call(0xFFFFFFFF); put_f.call(0.7); put_u.call(0xFFFFFFFF); put_f.call(0.3); put_u.call(0xFFFFFFFF)
 	for v in [0.0, 0.0, 0.0]: put_f.call(v)
 	put_u.call(0xFFFFFFFF); put_u.call(0xFFFFFFFF); put_u.call(0); put_u.call(1); put_f.call(1.0)
+	put_u.call(2); put_u.call(1)   # metal from blue, roughness from green (a packed ORM map)
 	put_u.call(3); put_u.call(0); put_u.call(1); put_u.call(2)
 	var model: Node3D = lh._model_from_nvm2(b)
 	var mi: MeshInstance3D = model.get_child(0) if model != null and model.get_child_count() > 0 else null
@@ -294,7 +295,9 @@ func _extra_checks(lh, r, path: String) -> void:
 	if mi != null:
 		var m := mi.mesh.surface_get_material(0) as StandardMaterial3D
 		check(m != null and absf(m.metallic - 0.7) < 0.001 and absf(m.roughness - 0.3) < 0.001 \
-				and m.cull_mode == BaseMaterial3D.CULL_DISABLED and absf(m.albedo_color.g - 0.25) < 0.001, "NVM2: material fields")
+				and m.cull_mode == BaseMaterial3D.CULL_DISABLED and absf(m.albedo_color.g - 0.25) < 0.001 \
+				and m.metallic_texture_channel == BaseMaterial3D.TEXTURE_CHANNEL_BLUE \
+				and m.roughness_texture_channel == BaseMaterial3D.TEXTURE_CHANNEL_GREEN, "NVM2: material fields")
 	check(lh._model_from_nvm2(b.slice(0, b.size() - 6)) == null, "NVM2: a truncated dump is refused")
 	var bad := b.duplicate()
 	bad.encode_u32(bad.size() - 4, 7)   # last index past the 3 vertices
