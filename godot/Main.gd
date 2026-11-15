@@ -581,6 +581,14 @@ func _process_hotkeys() -> void:
 		"plain": _clear_target()
 	if Input.is_action_just_pressed("dismiss_message"):
 		_log.clear()   # Return: dismiss the status-bar message (slot 0x06)
+	if Input.is_action_just_pressed("cycle_camera_view"):
+		_cycle_camera_view()
+	if Input.is_action_just_pressed("camera_zoom_in") or Input.is_action_just_pressed("camera_zoom_out"):
+		# The Settings slider's range, a step at a time (GameContainerView .cameraZoomIn/Out).
+		var z := float(Prefs.get_value("graphics", "camera_zoom"))
+		z *= (1.0 / 1.15) if Input.is_action_just_pressed("camera_zoom_in") else 1.15
+		Prefs.set_value("graphics", "camera_zoom", clampf(z, 0.5, 2.5))
+		_flight.refresh_settings()
 	if Input.is_action_just_pressed("clear_secondary"):
 		nova.clear_secondary_weapon()
 	if Input.is_action_just_pressed("secondary_prev"):
@@ -1099,3 +1107,15 @@ func _draw_nav_panel(vp: Vector2) -> void:
 		var col := Color(0.55, 0.8, 1.0) if rd[2] != "1" else Color(0.45, 0.5, 0.58)
 		draw_string(ThemeDB.fallback_font, pos + Vector2(0, 17), rd[1], HORIZONTAL_ALIGNMENT_LEFT, -1,
 			HUD_FONT_SIZE, col)
+
+
+## GameContainerView .cycleCameraView: step through the views on offer, silently (the original has no
+## camera views, so no status line). Chase is on offer only with live 3D hulls (CameraView.available).
+func _cycle_camera_view() -> void:
+	var live3d: bool = bool(Prefs.get_value("apple", "hd_graphics")) and int(Prefs.get_value("apple", "hull_presentation")) == 1
+	var count := 4 if live3d else 3
+	var cur := int(Prefs.get_value("graphics", "camera_view"))
+	if cur == 3 and not live3d:
+		cur = 2   # effective(live3D:): a stored Chase flies as Ship up
+	Prefs.set_value("graphics", "camera_view", (cur + 1) % count)
+	_flight.refresh_settings()

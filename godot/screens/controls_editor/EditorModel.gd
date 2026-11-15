@@ -40,7 +40,7 @@ const _CAT := {
 		"cycle_hyperspace_link_prev", "launch", "map_select", "map_extend", "map_auto_route", "map_find", "map_close"],
 	"interface": ["dismiss_message", "player_info", "mission_info", "pause_menu", "trade_sell", "shop_buy_qty",
 		"shop_sell_qty", "ship_info", "bbs_accept"],
-	"camera": ["route_map_zoom_out", "route_map_zoom_in", "map_pan_left", "map_pan_right", "map_pan_up",
+	"camera": ["cycle_camera_view", "camera_zoom_in", "camera_zoom_out", "route_map_zoom_out", "route_map_zoom_in", "map_pan_left", "map_pan_right", "map_pan_up",
 		"map_pan_down", "map_zoom_in", "map_zoom_out", "map_center"],
 }
 
@@ -74,7 +74,7 @@ const _SHORT := {
 	"target_nearest": "Nearest", "target_nearest_hostile": "Hostile", "clear_target": "Clr Nav", "clear_ship_target": "Clr Tgt",
 	"nav_stellar_1": "Nav 1", "nav_stellar_2": "Nav 2", "nav_stellar_3": "Nav 3", "nav_stellar_4": "Nav 4",
 	"cycle_hyperspace_link": "Link >", "cycle_hyperspace_link_prev": "Link <", "route_map_zoom_out": "Map -",
-	"route_map_zoom_in": "Map +", "dismiss_message": "Dismiss", "land": "Land", "galaxy_map": "Map", "hyperspace_arm": "Arm",
+	"route_map_zoom_in": "Map +", "cycle_camera_view": "Camera", "camera_zoom_in": "Zoom +", "camera_zoom_out": "Zoom −", "dismiss_message": "Dismiss", "land": "Land", "galaxy_map": "Map", "hyperspace_arm": "Arm",
 	"hyperjump": "Jump", "player_info": "Pilot", "mission_info": "Missions", "pause_menu": "Pause", "hail_target": "Hail",
 	"hail_stellar": "Hail Pl.", "board_target": "Board", "escort_panel": "Escorts", "escort_attack": "Esc: Atk",
 	"escort_defend": "Esc: Def", "escort_hold": "Esc: Hold", "escort_formation": "Esc: Form", "escort_return": "Esc: Home",

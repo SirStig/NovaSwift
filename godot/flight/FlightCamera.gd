@@ -3,9 +3,9 @@
 #
 # Views: "classic" is the original's camera exactly (north up, ship dead centre, no zoom) and the
 # default. "look_ahead" drifts the view ahead of the ship along its flight path, "ship_up" turns the
-# world with the ship so it always points up the screen, "chase" is the Apple 3D-tilt view; like Apple
-# without live 3D hulls (which this frontend does not have) it falls back to ship_up (see
-# CameraView.effective(live3D:)), so the tilt itself is not drawn.
+# world with the ship so it always points up the screen, "chase" is the Apple 3D-tilt view.
+# Without a live hull it falls back to ship_up (CameraView.effective(live3D:)). With one, LiveHulls
+# lowers the hull camera by half the tilt (GameScene.liveViewPitch).
 #
 # Engine space is y-up, Godot's screen y-down: the renderer flips y when it builds its world
 # transform; here everything is engine-space (offset in world units, rotation = Apple's cameraRig.rotation,
@@ -18,13 +18,13 @@ const SHAKE_FELT_DISTANCE := 900.0
 
 var rotation := 0.0          # Apple CameraRig.rotation (radians)
 var offset := Vector2.ZERO   # camera position minus the ship's, world units
-var tilt := 0.0              # eased chase tilt (radians); informational, not drawn (no live 3D)
+var tilt := 0.0              # eased chase tilt (radians); LiveHulls lowers the 3D camera by half of it
 var shake_time := 0.0
 var shake_mag := 0.0
 
 
-static func effective_view(view: String) -> String:
-	return "ship_up" if view == "chase" else view
+static func effective_view(view: String, live3d: bool = false) -> String:
+	return "ship_up" if view == "chase" and not live3d else view
 
 
 static func rotates_with_ship(view: String) -> bool:
@@ -34,9 +34,9 @@ static func rotates_with_ship(view: String) -> bool:
 ## Advance one frame. `heading` is the ship's render heading (radians clockwise from north),
 ## `view_size` the visible play area in world units.
 func update(view: String, heading: float, velocity: Vector2, max_speed: float, view_size: Vector2,
-		tilt_angle: float, dt: float) -> void:
+		tilt_angle: float, dt: float, live3d: bool = false) -> void:
 	dt = clampf(dt, 0.0, 0.1)
-	var eff := effective_view(view)
+	var eff := effective_view(view, live3d)
 	var target_rot := -heading if rotates_with_ship(eff) else 0.0
 	var dr := fmod(target_rot - rotation, TAU)
 	if dr > PI:
@@ -60,19 +60,19 @@ func update(view: String, heading: float, velocity: Vector2, max_speed: float, v
 		offset = Vector2.ZERO
 	if eff == "classic" and absf(rotation) < 1e-4:
 		rotation = 0.0
-	var target_tilt := tilt_angle if view == "chase" else 0.0
+	var target_tilt := tilt_angle if eff == "chase" else 0.0
 	tilt += (target_tilt - tilt) * minf(1.0, dt * 5.0)
 	if absf(tilt - target_tilt) < 1e-4:
 		tilt = target_tilt
 
 
 ## Jump straight to the target framing (a new system, a launch).
-func snap(view: String, heading: float, view_size: Vector2, tilt_angle: float) -> void:
+func snap(view: String, heading: float, view_size: Vector2, tilt_angle: float, live3d: bool = false) -> void:
 	rotation = 0.0
 	offset = Vector2.ZERO
 	tilt = 0.0
 	for i in 40:
-		update(view, heading, Vector2.ZERO, 0.0, view_size, tilt_angle, 0.1)
+		update(view, heading, Vector2.ZERO, 0.0, view_size, tilt_angle, 0.1, live3d)
 
 
 ## Register a camera-shake impulse from an explosion at `at` (world), scaled by how close and big.

@@ -302,7 +302,14 @@ func _caption(text: String) -> Label:
 
 # TODO(wiring) rows: the Apple row exists, the engine does not read it yet. The value persists to
 # Prefs [apple] under the Apple GameSettings property name (snake_case).
+## [apple] keys the Godot frontend reads (HD sheets, live hulls, their quality options), so not to-dos.
+const WIRED_APPLE := ["hd_graphics", "hd_detail", "hull_presentation", "model_detail", "live_lighting",
+	"graphics_quality"]
+
+
 func _todo_note(title_text: String, key: String) -> void:
+	if WIRED_APPLE.has(key):
+		return
 	todo_rows.append("%s / %s -> apple.%s" % [PAGE_TITLES.get(page, page), title_text, key])
 
 
@@ -356,6 +363,48 @@ func _apple_segmented(key: String, options: Array, default_i: int) -> HBoxContai
 		_mark_changed())
 	_note_first(h.get_meta("buttons")[0])
 	return h
+
+
+## GameSettings.GraphicsQuality.apply: [hd_detail, model_detail, live_lighting, particle_density,
+## starfield_density] per level (menu indices as stored: hd 0 1x / 1 2x / 2 4x; model 0 Full .. 3 Low;
+## lighting 0 Full / 1 Simple).
+const QUALITY_LEVELS := [
+	[0, 3, 1, "minimal", 0.5],
+	[1, 2, 1, "reduced", 0.8],
+	[1, 0, 0, "full", 1.0],
+	[2, 0, 0, "full", 1.0],
+]
+
+
+func _quality_matched() -> int:
+	for q in QUALITY_LEVELS.size():
+		var L: Array = QUALITY_LEVELS[q]
+		if int(_pv("apple", "hd_detail", 1)) == int(L[0]) and int(_pv("apple", "model_detail", 0)) == int(L[1]) \
+				and int(_pv("apple", "live_lighting", 0)) == int(L[2]) \
+				and str(Prefs.get_value("graphics", "particle_density")) == str(L[3]) \
+				and absf(float(_pv("graphics", "starfield_density", 1.0)) - float(L[4])) < 0.001:
+			return q
+	return -1
+
+
+func _quality_picker() -> void:
+	var matched := _quality_matched()
+	var names := ["Low", "Medium", "High", "Ultra"]
+	if matched < 0:
+		names.append("Custom")
+	var h := NC.segmented(_group, names, matched if matched >= 0 else 4, func(i: int):
+		if i >= QUALITY_LEVELS.size():
+			return
+		var L: Array = QUALITY_LEVELS[i]
+		Prefs.set_value("apple", "hd_detail", int(L[0]))
+		Prefs.set_value("apple", "model_detail", int(L[1]))
+		Prefs.set_value("apple", "live_lighting", int(L[2]))
+		Prefs.set_value("graphics", "particle_density", str(L[3]))
+		Prefs.set_value("graphics", "starfield_density", float(L[4]))
+		Prefs.set_value("apple", "graphics_quality", i)
+		_mark_changed()
+		_rebuild())
+	_note_first(h.get_meta("buttons")[0])
 
 
 func _after_change(section: String) -> void:
@@ -579,21 +628,35 @@ func open_controls_editor() -> Node:
 
 func _build_video() -> void:
 	_section("Graphics", "Camera zoom is world pixels shown per screen point; 1.0 is the original's own native scale (higher shows more of the system at once, everything reading smaller). Camera view changes only how flight is framed: Classic is the original's fixed, north-up view; Look ahead drifts the view toward where you're heading; Ship up turns the view with your ship; Chase, with live 3D ships, lays the view back behind your ship (falls back to Ship up without them). Ships fly and fight the same in every view. In flight, O changes the view and [ and ] zoom. EV Nova's art is pixel art — leave smooth scaling off for the crisp, faithful look. Hyperspace jumps fade to white as on the Mac; the Windows look skips the fade and only flashes.", "sparkles")
-	# Quality presets and the HD / 3D rows have no Godot key (HD pipeline not ported): drawn, stored
-	# under [apple], not read. Everything else is bound to docs/GODOT_SETTINGS_KEYS.md.
-	_apple_segmented("graphics_quality", ["Low", "Medium", "High", "Ultra"], 2)
+	# GameSettings.GraphicsQuality: a template over the cost options below, not a mode. Picking one
+	# sets them all; hand-changing any of them shows Custom (which can't be picked).
+	_quality_picker()
 	_slider("Starfield density", "graphics", "starfield_density", 0.2, 2.0, 0.05, _pct)
-	_slider("Camera zoom", "graphics", "camera_zoom", 0.5, 3.0, 0.05, _pct)
-	var cv := _menu("Camera view", "graphics", "camera_view", ["Classic", "Look ahead", "Ship up", "Chase"], 0)
-	cv.item_selected.connect(func(_i: int): _rebuild())
-	if int(_pv("graphics", "camera_view", 0)) == 3:
-		_slider("Chase camera tilt", "graphics", "chase_tilt", 0.0, 60.0, 1.0, func(x: float): return "%d°" % roundi(x))
+	_slider("Camera zoom", "graphics", "camera_zoom", 0.5, 2.5, 0.05, _pct)
+	# CameraView.available(live3D:): Chase is offered only with live 3D hulls; a stored Chase
+	# without them shows (and flies) as Ship up.
+	var live3d := bool(_pv("apple", "hd_graphics", false)) and int(_pv("apple", "hull_presentation", 0)) == 1
+	var views := ["Classic", "Look ahead", "Ship up", "Chase"] if live3d else ["Classic", "Look ahead", "Ship up"]
+	var cur_view := int(_pv("graphics", "camera_view", 0))
+	var cv := NC.menu(_group, "Camera view", views, mini(cur_view, views.size() - 1), func(i: int):
+		Prefs.set_value("graphics", "camera_view", i)
+		_after_change("graphics")
+		_rebuild())
+	_note_first(cv)
+	if cur_view == 3 and live3d:
+		# CameraTilt.range: past ~40 degrees the far edge needs too much overscan.
+		_slider("Chase camera tilt", "graphics", "chase_tilt", 15.0, 40.0, 1.0, func(x: float): return "%d°" % roundi(x))
 	_enum_menu("Frame rate limit", "graphics", "frame_rate_cap", ["fps30", "fps60", "fps120", "unlimited"], ["30 FPS", "60 FPS", "120 FPS", "Unlimited"])
 	_check("Smooth sprite scaling", "graphics", "smooth_sprites")
-	_apple_check("HD graphics from plug-ins", "hd_graphics")
+	var hd := _apple_check("HD graphics from plug-ins", "hd_graphics")
+	hd.toggled.connect(func(_on: bool): _rebuild())
 	if bool(_pv("apple", "hd_graphics", false)):
 		_apple_menu("HD detail", "hd_detail", ["Low (1×)", "Standard (2×)", "Sharp (4×)"], 1)
-		_apple_menu("Ships with 3D models", "hull_presentation", ["Sprites", "Full live 3D"], 0)
+		var hp := _apple_menu("Ships with 3D models", "hull_presentation", ["Sprites", "Full live 3D"], 0)
+		hp.item_selected.connect(func(_i: int): _rebuild())
+		if int(_pv("apple", "hull_presentation", 0)) == 1:
+			_apple_menu("3D model detail", "model_detail", ["Full", "High", "Medium", "Low"], 0)
+			_apple_menu("3D lighting", "live_lighting", ["Full", "Simple"], 0)
 	_enum_menu("Particle effects", "graphics", "particle_density", ["full", "reduced", "minimal"], ["Full", "Reduced", "Minimal"])
 	_check("Engine & weapon glow", "classic", "engine_glow")
 	_check("Windows hyperspace look", "graphics", "ce_hyperspace_look")

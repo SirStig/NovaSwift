@@ -122,11 +122,12 @@ func _run() -> void:
 	var add: Button = page.find_child("fk_info_add", true, false)
 	add.pressed.emit()
 	await process_frame
-	_check("Add slot appends to the Info wheel", (ActionWheels.wheel_by_id("info")["slots"] as Array).size() == 7)
-	var rm: Button = page.find_child("fk_info_rm_6", true, false)
+	# Info has 9 default slots (Apple's: camera view and zoom in/out joined the info actions).
+	_check("Add slot appends to the Info wheel", (ActionWheels.wheel_by_id("info")["slots"] as Array).size() == 10)
+	var rm: Button = page.find_child("fk_info_rm_9", true, false)
 	rm.pressed.emit()
 	await process_frame
-	_check("Remove slot shrinks it back", (ActionWheels.wheel_by_id("info")["slots"] as Array).size() == 6)
+	_check("Remove slot shrinks it back", (ActionWheels.wheel_by_id("info")["slots"] as Array).size() == 9)
 	page.queue_free()
 	ActionWheels.reset_to_defaults()
 

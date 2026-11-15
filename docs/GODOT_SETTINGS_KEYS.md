@@ -71,10 +71,15 @@ the engine is running with. The tables and rules are the shared `Sources/NovaSwi
 | `noHyperspaceEffects` | `classic/hyperspace_effects` (same polarity as Apple's "Hyperspace effects" toggle: true = effects on) | bool | true | Hyperspace effects | yes (existing, `HyperjumpFx.gd`) |
 | `shipBarPosition` | `graphics/ship_bar_position` | enum `above` `below` `off` | `off` | Hull / shield bars | **key only**: no ship bars are drawn (flight agent) |
 | `showPlanetLabels` | `graphics/show_planet_labels` | bool | false | Show planet names | **key only**: no stellar labels are drawn (flight agent) |
-| `cameraView` | `graphics/camera_view` | int 0..3 (Classic, Look ahead, Ship up, Chase) | 0 | Camera view | yes (flight agent) |
-| `cameraZoom` | `graphics/camera_zoom` | float 0.5..3 | 1.0 | (zoom) | yes (flight agent) |
-| `chaseTilt` | `graphics/chase_tilt` | float degrees | 30 | Chase tilt | yes (flight agent) |
-| `hdGraphics`, `hdDetail`, `hullPresentation`, `modelDetail`, `liveLighting`, quality presets | none | | | HD / 3D options | n/a for now (no HD pipeline in Godot, parity package 9) |
+| `cameraView` | `graphics/camera_view` | int 0..3 (Classic, Look ahead, Ship up, Chase) | 0 | Camera view | yes. Chase is offered (menu, O key) only with live 3D; a stored Chase flies as Ship up without it (`CameraView.available/effective`) |
+| `cameraZoom` | `graphics/camera_zoom` | float 0.5..2.5 | 1.0 | Camera zoom | yes ([ and ] step it by 1.15, as Apple) |
+| `chaseTilt` | `graphics/chase_tilt` | float degrees 15..40 (`CameraTilt.range`) | 30 | Chase camera tilt | yes: the world is drawn with the tilt's overscan and warped in perspective (`FlightRenderer` `_tilt_shader`); clicks and HUD markers go through the same projection |
+| `hdGraphics` | `apple/hd_graphics` | bool | false | HD graphics from plug-ins | yes (HD sprite atlases, `FlightSprites.gd`) |
+| `hdDetail` | `apple/hd_detail` | int 0..2 (Low 1×, Standard 2×, Sharp 4×) | 1 | HD detail | yes: a resolution cap, atlases above it are downsampled |
+| `hullPresentation` | `apple/hull_presentation` | int 0 Sprites, 1 Full live 3D | 0 | Ships with 3D models | yes (`flight/LiveHulls.gd`; USDZ needs the macOS bridge, glTF everywhere) |
+| `modelDetail` | `apple/model_detail` | int 0..3 (Full, High, Medium, Low) | 0 | 3D model detail | yes: `MeshSimplifier` grid and texture cap (bridge on macOS, `LiveHulls._simplify` for glTF) |
+| `liveLighting` | `apple/live_lighting` | int 0 Full, 1 Simple | 0 | 3D lighting | yes: Lambert materials, no reflections |
+| graphics quality | `apple/graphics_quality` (last picked) | Low / Medium / High / Ultra, Custom when hand-mixed | High | (segmented) | yes: sets hd_detail, model_detail, live_lighting, particle_density, starfield_density as `GraphicsQuality.apply` |
 | classic Preferences: `smokeTrails`, `shipAnimations`, `runningLights`, `weaponEffects`, `parallaxStarfield` | `classic/smoke_trails`, `ship_animations`, `running_lights`, `weapon_effects`, `parallax_starfield` | bool | true | Original Preferences window | yes (flight renderer) |
 | classic: `playMovies`, `ambientSounds`, `shareProcessorTime`, `brightnessStep` | `classic/play_movies`, `ambient_sounds`, `share_processor_time`, `brightness_step` | bool / int 0..5 | true / false / 3 | Original Preferences window | key only (no movies, no ambient loop, no brightness ramp in Godot) |
 | classic: `introMusic`, `soundVolumeStep` | `classic/intro_music`, `classic/sound_volume_step` | bool / int 0..7 | true / 5 | Original Preferences window | yes (existing) |

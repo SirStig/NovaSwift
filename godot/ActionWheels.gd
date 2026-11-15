@@ -46,8 +46,8 @@ static func defaults() -> Array:
 				"nav_stellar_1", "nav_stellar_2", "nav_stellar_3", "nav_stellar_4", "hail_stellar",
 				"hyperspace_arm", "cycle_hyperspace_link", "cycle_hyperspace_link_prev"]},
 		{"id": "info", "title": "Info & View", "trigger": JOY_BUTTON_BACK, "anchor": "left",
-			"slots": ["player_info", "mission_info", "dismiss_message", "route_map_zoom_in",
-				"route_map_zoom_out", "pause_menu"]},
+			"slots": ["player_info", "mission_info", "dismiss_message", "cycle_camera_view",
+				"camera_zoom_in", "camera_zoom_out", "route_map_zoom_in", "route_map_zoom_out", "pause_menu"]},
 	]
 
 

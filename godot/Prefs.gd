@@ -103,6 +103,11 @@ const DEFAULTS := {
 		"chase_tilt": 30.0, "starfield_density": 1.0, "show_fps": false, "smooth_sprites": false,
 		"particle_density": "full", "frame_rate_cap": "fps60", "ce_hyperspace_look": false,
 		"ship_bar_position": "off", "show_planet_labels": false},
+	# HD sheets and live hulls. The Graphics page writes these; flight reads them.
+	# hd_detail caps HD resolution (Apple's hdDetail): 0 Low 1×, 1 Standard 2×, 2 Sharp 4×.
+	# hull_presentation: 0 sprites, 1 live 3D. model_detail (Apple ModelDetail): 0 Full, 1 High,
+	# 2 Medium, 3 Low. live_lighting: 0 Full, 1 Simple.
+	"apple": {"hd_graphics": false, "hd_detail": 1, "hull_presentation": 0, "model_detail": 0, "live_lighting": 0},
 	# Apple's Interface HUD options (show_radar, hud_opacity 0.2-1) and the overall ui_scale (0.8-1.4).
 	"interface": {"show_radar": true, "hud_opacity": 1.0, "ui_scale": 1.0, "sidebar_pause_menu": true},
 	# Apple's Accessibility section. reduce_flashing lives in [graphics] (the flight agent's key) and

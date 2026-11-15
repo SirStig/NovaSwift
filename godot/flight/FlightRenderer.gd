@@ -28,6 +28,7 @@ const Stellars = preload("res://flight/StellarDrawer.gd")
 const Ships = preload("res://flight/ShipDrawer.gd")
 const Shots = preload("res://flight/ShotDrawer.gd")
 const Effects = preload("res://flight/EffectsDrawer.gd")
+const LiveHullsScript = preload("res://flight/LiveHulls.gd")
 
 var nova
 var has_data := false
@@ -55,6 +56,15 @@ var reduce_flashing := false
 var camera_view := "classic"
 var chase_tilt := 30.0
 var zoom := 1.0
+# Chase tilt (Apple CameraTilt): the world is drawn zoomed out by the overscan so the tilted plane still
+# reaches every corner, then warped in perspective by _warp. render_zoom is what the world is drawn at.
+const TILT_EYE := 1.2                # CameraTilt.eyeFactor: eye distance as a multiple of the view height
+var render_zoom := 1.0
+var tilt_overscan := 1.0
+var _warp: ColorRect
+var live_3d := false                 # apple/hull_presentation, and only while HD graphics are on
+var live_hulls
+var _hd_sig := ""
 
 # Frame state.
 var background := Color(0.02, 0.02, 0.06)
@@ -108,6 +118,9 @@ func setup(world: Object) -> void:
 	ships.setup(self)
 	shots.setup(self)
 	fx.setup(self)
+	live_hulls = LiveHullsScript.new()
+	add_child(live_hulls)
+	live_hulls.setup(self)
 	if is_inside_tree():
 		_push_view_span(get_viewport_rect().size)
 	show_behind_parent = true      # the world draws under Main's HUD
@@ -122,6 +135,13 @@ func setup(world: Object) -> void:
 	_add_layer("add", _draw_fx_add)
 	_add_layer("add", _draw_beams)
 	_add_layer("mix", _draw_fx)
+	_warp = ColorRect.new()
+	_warp.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_warp.visible = false
+	var sm := ShaderMaterial.new()
+	sm.shader = _tilt_shader()
+	_warp.material = sm
+	add_child(_warp)                  # last: it reads back everything the world drew, nothing of the HUD
 	refresh_settings()
 
 
@@ -145,14 +165,36 @@ func refresh_settings() -> void:
 	screen_shake = bool(Prefs.get_value("graphics", "screen_shake"))
 	reduce_flashing = bool(Prefs.get_value("graphics", "reduce_flashing"))
 	camera_view = Camera.VIEWS[clampi(int(Prefs.get_value("graphics", "camera_view")), 0, Camera.VIEWS.size() - 1)]
-	chase_tilt = float(Prefs.get_value("graphics", "chase_tilt"))
-	zoom = clampf(float(Prefs.get_value("graphics", "camera_zoom")), 0.5, 3.0)
+	chase_tilt = clampf(float(Prefs.get_value("graphics", "chase_tilt")), 15.0, 40.0)   # CameraTilt.range
+	zoom = clampf(float(Prefs.get_value("graphics", "camera_zoom")), 0.5, 2.5)
 	if nova != null:
 		nova.set_flight_options(bool(Prefs.get_value("classic", "ship_animations")), reduce_flashing)
+	var hd := bool(Prefs.get_value("apple", "hd_graphics"))
+	var detail_v = Prefs.get_value("apple", "hd_detail")
+	var detail := int(detail_v) if detail_v != null else 1
+	var hull_v = Prefs.get_value("apple", "hull_presentation")
+	live_3d = hd and hull_v != null and int(hull_v) == 1
+	var model_detail := int(Prefs.get_value("apple", "model_detail"))
+	var simple_lighting := int(Prefs.get_value("apple", "live_lighting")) == 1
+	if nova != null and nova.has_method("set_hd_options"):
+		nova.set_hd_options(hd, live_3d, detail, model_detail, simple_lighting)
+	if live_hulls != null:
+		live_hulls.configure(model_detail, simple_lighting)
+	var sig := "%s|%s|%s" % [hd, detail, live_3d]
+	if sig != _hd_sig:
+		# The first read must not throw away a classic prewarm. Clearing is for
+		# turning HD on, or for any later change of these three settings.
+		var first := _hd_sig == ""
+		_hd_sig = sig
+		if not first or hd or live_3d:
+			sprites.clear()
+			if live_hulls != null:
+				live_hulls.drop_templates()
 
 
 ## The system was rebuilt (launch, jump arrival, new pilot): drop transient state and snap the camera.
 func reset_world() -> void:
+	refresh_settings()
 	fx.clear()
 	# Sprite art is keyed by resource id: it survives launches and jumps (clearing it here made every
 	# launch / arrival re-decode and re-upload every sprite on the main thread -- the hitch and the pop-in).
@@ -176,7 +218,7 @@ func reset_world() -> void:
 	stellars.cursor_zoom = 0.0
 	refresh_background()
 	var vp := get_viewport_rect().size
-	cam.snap(camera_view, nova.player_angle(), vp * zoom, deg_to_rad(chase_tilt))
+	cam.snap(camera_view, nova.player_angle(), vp * zoom, deg_to_rad(chase_tilt), live_3d)
 
 
 func refresh_background() -> void:
@@ -220,13 +262,107 @@ func w2l(p: Vector2) -> Vector2:
 	return Vector2(p.x - cam_pos.x, -(p.y - cam_pos.y))
 
 
+## Where a world point is seen on screen, chase tilt included (HUD markers, the debug overlay).
 func world_to_screen(p: Vector2) -> Vector2:
+	return _tilt_project(base_xf * w2l(p))
+
+
+## Where a world point is drawn before the chase tilt warps the picture (the live 3D hull layer, which
+## is warped with the rest of the world).
+func world_to_render(p: Vector2) -> Vector2:
 	return base_xf * w2l(p)
 
 
+## The world point under a screen point as the player sees it (GameScene.scenePoint(fromSeenViewPoint:)).
 func screen_to_world(s: Vector2) -> Vector2:
-	var l := base_xf.affine_inverse() * s
+	var l := base_xf.affine_inverse() * _tilt_unproject(s)
 	return Vector2(l.x + cam_pos.x, cam_pos.y - l.y)
+
+
+# MARK: Chase tilt (CameraTilt, GameContainerView.chaseOverscan)
+
+## The overscan (drawn that much bigger, chosen from the setting while the chase view is in effect, as
+## GameContainerView does) and the warp's parameters for this frame's eased tilt.
+func _update_tilt(vp: Vector2) -> void:
+	var chase := Camera.effective_view(camera_view, live_3d) == "chase"
+	tilt_overscan = 1.0
+	if chase:
+		var a := deg_to_rad(chase_tilt)
+		var k2 := 2.0 * TILT_EYE
+		# CameraTilt.overscan height (k2 + sin) / (k2 cos); the width's is smaller, so one uniform scale
+		# covers both and keeps world units square.
+		tilt_overscan = (k2 + sin(a)) / (k2 * cos(a))
+	render_zoom = zoom * tilt_overscan
+	var on := cam.tilt > 0.0001
+	_warp.visible = on
+	if not on:
+		return
+	_warp.position = Vector2.ZERO
+	_warp.size = Vector2(maxf(1.0, vp.x - play_bar), vp.y)
+	var sm := _warp.material as ShaderMaterial
+	sm.set_shader_parameter("vp_size", vp)
+	sm.set_shader_parameter("ctr", play_ctr)
+	sm.set_shader_parameter("angle", cam.tilt)
+	sm.set_shader_parameter("eye_d", TILT_EYE * vp.y * tilt_overscan)
+	sm.set_shader_parameter("overscan", tilt_overscan)
+
+
+## CameraTilt.project: a point of the untilted (drawn) view to where it is seen. The scene the tilt acts
+## on is the overscanned one, `tilt_overscan` times the drawn picture.
+func _tilt_project(rp: Vector2) -> Vector2:
+	var a := cam.tilt
+	if a <= 0.0001:
+		return rp
+	var p := Vector2(rp.x - play_ctr.x, play_ctr.y - rp.y) * tilt_overscan
+	var d := TILT_EYE * get_viewport_rect().size.y * tilt_overscan
+	var k := d / (d + p.y * sin(a))
+	return Vector2(play_ctr.x + p.x * k, play_ctr.y - p.y * cos(a) * k)
+
+
+## CameraTilt.unproject: the drawn point seen at screen point `s` (far off past the horizon).
+func _tilt_unproject(s: Vector2) -> Vector2:
+	var a := cam.tilt
+	if a <= 0.0001:
+		return s
+	var q := Vector2(s.x - play_ctr.x, play_ctr.y - s.y)
+	var d := TILT_EYE * get_viewport_rect().size.y * tilt_overscan
+	var denom := d * cos(a) - q.y * sin(a)
+	if denom <= 0.000001:
+		return Vector2(s.x, -1.0e9)
+	var y := q.y * d / denom
+	var k := d / (d + y * sin(a))
+	var p := Vector2(q.x / k, y)
+	return Vector2(play_ctr.x + p.x / tilt_overscan, play_ctr.y - p.y / tilt_overscan)
+
+
+## CameraTilt.layerTransform as a read-back: each screen pixel samples the drawn world at its
+## unprojected point. Above the horizon is empty space.
+static func _tilt_shader() -> Shader:
+	var sh := Shader.new()
+	sh.code = """
+shader_type canvas_item;
+uniform sampler2D screen_tex : hint_screen_texture, filter_linear;
+uniform vec2 vp_size = vec2(1.0);
+uniform vec2 ctr = vec2(0.0);
+uniform float angle = 0.0;
+uniform float eye_d = 1.0;
+uniform float overscan = 1.0;
+void fragment() {
+	vec2 s = SCREEN_UV * vp_size;
+	vec2 q = vec2(s.x - ctr.x, ctr.y - s.y);
+	float sa = sin(angle);
+	float denom = eye_d * cos(angle) - q.y * sa;
+	if (denom <= 0.0001) {
+		COLOR = vec4(0.0, 0.0, 0.0, 1.0);
+	} else {
+		float y = q.y * eye_d / denom;
+		float k = eye_d / (eye_d + y * sa);
+		vec2 r = ctr + vec2(q.x / k, -y) / overscan;
+		COLOR = vec4(texture(screen_tex, r / vp_size).rgb, 1.0);
+	}
+}
+"""
+	return sh
 
 
 ## The centre of the flight view: the middle of the play area. With the Classic status bar up the original
@@ -266,19 +402,22 @@ func frame(delta: float, bar_width: float, advance_sim_effects: bool = true) -> 
 	var pw: Vector2 = nova.player_position()
 	var vel: Vector2 = nova.player_velocity()
 	var heading: float = nova.player_angle()
-	cam.update(camera_view, heading, vel, nova.player_max_speed(), vp * zoom, deg_to_rad(chase_tilt), delta)
+	cam.update(camera_view, heading, vel, nova.player_max_speed(), vp * zoom, deg_to_rad(chase_tilt), delta, live_3d)
+	_update_tilt(vp)
 	cam_base = pw + cam.offset
 	cam_pos = cam_base
 	if screen_shake and not reduce_flashing:
 		cam_pos += cam.shake_offset(delta)
 	else:
 		cam.shake_time = 0.0
-	base_xf = Transform2D(cam.rotation, play_ctr).scaled_local(Vector2(1.0 / zoom, 1.0 / zoom))
+	base_xf = Transform2D(cam.rotation, play_ctr).scaled_local(Vector2(1.0 / render_zoom, 1.0 / render_zoom))
 	if advance_sim_effects:
 		fx.advance(delta)
 		ships.advance(delta)
 		shots.spawn_trails()
 	ships.build_order()
+	if live_hulls != null:
+		live_hulls.sync(delta, advance_sim_effects)
 	fog_world.clear()
 	fog_ships.clear()
 	fog_shots.clear()
@@ -293,8 +432,8 @@ func frame(delta: float, bar_width: float, advance_sim_effects: bool = true) -> 
 func _push_view_span(vp: Vector2) -> void:
 	if not nova.has_method("set_view_span"):
 		return
-	var w: float = vp.x * zoom
-	var h: float = vp.y * zoom
+	var w: float = vp.x * render_zoom
+	var h: float = vp.y * render_zoom
 	if cam.rotation != 0.0:
 		var d: float = Vector2(w, h).length()
 		w = d

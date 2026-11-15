@@ -44,6 +44,9 @@ let package = Package(
                 .product(name: "NovaSwiftSync", package: "NovaSwift"),
                 .product(name: "NovaSwiftPluginStore", package: "NovaSwift"),
                 .product(name: "SwiftGodot", package: "SwiftGodot"),
+                // Live 3D hulls from USDZ: the Apple app's model pipeline (load, fit, light
+                // match, simplify). It needs SceneKit, so macOS only; see HDFlight.swift.
+                .product(name: "NovaSwiftHD", package: "NovaSwift", condition: .when(platforms: [.macOS])),
             ],
             path: "Sources/NovaSwiftGodot"
         ),

@@ -132,6 +132,30 @@ func _build(kind: int, id: int):
 	var rate: int = info[7] if info.size() > 7 else 0
 	if sw <= 0 or sh <= 0:
 		return null
+	if nova.has_method("hd_sprite_png"):
+		var png: PackedByteArray = nova.hd_sprite_png(kind, id)
+		if png.size() > 8:
+			var himg := Image.new()
+			if himg.load_png_from_buffer(png) == OK and himg.get_width() > 0 and himg.get_height() > 0:
+				var meta: PackedInt32Array = nova.hd_sprite_meta(kind, id)
+				var hcols: int = meta[0] if meta.size() > 0 and meta[0] > 0 else maxi(cols, 1)
+				var hframes: int = maxi(frames, 1)
+				var rows: int = maxi(1, (hframes + hcols - 1) / hcols)
+				var tw: int = himg.get_width() / hcols
+				var th: int = himg.get_height() / rows
+				# HD detail is a resolution cap (Apple's hdDetail): shrink a sheet shipped above it.
+				var cap: int = meta[2] if meta.size() > 2 and meta[2] > 0 else 4
+				if tw > fw * cap or th > fh * cap:
+					var k: float = minf(float(fw * cap) / float(tw), float(fh * cap) / float(th))
+					tw = maxi(1, int(tw * k))
+					th = maxi(1, int(th * k))
+					himg.resize(tw * hcols, th * rows, Image.INTERPOLATE_LANCZOS)
+				if tw > 0 and th > 0:
+					var hd := {"tex": ImageTexture.create_from_image(himg), "fw": fw, "fh": fh,
+						"tw": tw, "th": th, "cols": hcols, "frames": hframes, "rate": rate}
+					if meta.size() > 1 and meta[1] != 0:
+						hd["hide_overlays"] = true
+					return hd
 	var bytes: PackedByteArray = nova.sprite_rgba(kind, id)
 	if bytes.size() < sw * sh * 4:
 		return null
@@ -141,8 +165,10 @@ func _build(kind: int, id: int):
 
 
 static func src(e: Dictionary, frame: int) -> Rect2:
-	var fw: int = e["fw"]
-	var fh: int = e["fh"]
+	# `tw`/`th` are the atlas cell. `fw`/`fh` stay the classic size, which is
+	# what draw() uses, so an HD sheet occupies the same rectangle.
+	var fw: int = int(e["tw"]) if e.has("tw") else int(e["fw"])
+	var fh: int = int(e["th"]) if e.has("th") else int(e["fh"])
 	var cols: int = e["cols"]
 	var f: int = clampi(frame, 0, e["frames"] - 1)
 	return Rect2((f % cols) * fw, (f / cols) * fh, fw, fh)

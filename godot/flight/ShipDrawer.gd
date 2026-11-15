@@ -90,6 +90,10 @@ func setup(renderer) -> void:
 	r = renderer
 
 
+## Each ship's z band, by ship index: 0 disabled hulk, 1 escort, 2 ship, 3 player (see build_order).
+var bands := {}
+
+
 ## Draw order by Apple's z bands: disabled hulks (6.5), ships (9), escorts (8.5 -> before ships), player (9.5).
 func build_order() -> void:
 	var disabled: Array = []
@@ -106,10 +110,18 @@ func build_order() -> void:
 		else:
 			ships.append(k)
 	var out := PackedInt32Array()
+	bands.clear()
+	for k in disabled:
+		bands[k] = 0
+	for k in escorts:
+		bands[k] = 1
+	for k in ships:
+		bands[k] = 2
 	for k in disabled + escorts + ships:
 		out.append(k)
 	if n > 0:
 		out.append(0)
+		bands[0] = 3
 	order = out
 
 
@@ -126,7 +138,15 @@ func _alpha_of(n: int, kind: int) -> float:
 # MARK: Hulls (normal layer): synthetic plume, base hull, alt overlay
 
 func draw_hulls(ci: CanvasItem) -> void:
+	# Live 3D hulls draw a layer per z band, just before that band's sprites (GameScene's
+	# LiveHullLayer per band), so a sprite ship in a higher band still covers a lower band's mesh.
+	var band := -1
 	for n in order:
+		var b := int(bands.get(n, 2))
+		if b != band:
+			band = b
+			if r.live_hulls != null:
+				r.live_hulls.draw_band(ci, band)
 		var xf := n * 4
 		var pos: Vector2 = r.w2l(Vector2(r.ship_xf[xf], r.ship_xf[xf + 1]))
 		var angle: float = r.ship_xf[xf + 2]
@@ -153,19 +173,24 @@ func draw_hulls(ci: CanvasItem) -> void:
 			frame = Sprites.wrap(int(L[row + C_SET]) * int(L[row + C_FPS]) + int(L[row + C_HEADING]), entry["frames"])
 			hull_alpha = alpha * L[row + C_OPACITY]
 			tint = Color(L[row + C_TINT], L[row + C_TINT + 1], L[row + C_TINT + 2], hull_alpha)
+		var live: bool = r.live_hulls != null and r.live_hulls.covers(n)
+		var hide_over: bool = bool(entry.get("hide_overlays", false)) or (live and r.live_hulls.hides_alt(ship_type))
 		# Nova Swift only: a hull with no authored exhaust art gets the synthetic plume.
-		if thrusting and not r.classic_world and r.engine_glow \
+		if thrusting and not live and not r.classic_world and r.engine_glow \
 				and r.sprites.entry(Sprites.ENGINE_GLOW, ship_type) == null:
 			_draw_thruster_flame(ci, pos, angle, alpha, entry["fw"] * 0.5)
-		_put(ci, entry, pos, frame, tint, lf.x)
+		if not live:
+			_put(ci, entry, pos, frame, tint, lf.x)
 		if row >= 0:
-			var alt = r.sprites.entry(Sprites.ALT, ship_type)
-			if alt != null:
-				var af := Sprites.wrap(int(L[row + C_ALT]) * int(L[row + C_FPS]) + int(L[row + C_HEADING]), alt["frames"])
-				_put(ci, alt, pos, af, Color(1, 1, 1, alpha), lf.x)
+			if not hide_over:
+				var alt = r.sprites.entry(Sprites.ALT, ship_type)
+				if alt != null:
+					var af := Sprites.wrap(int(L[row + C_ALT]) * int(L[row + C_FPS]) + int(L[row + C_HEADING]), alt["frames"])
+					_put(ci, alt, pos, af, Color(1, 1, 1, alpha), lf.x)
 			# One blend slot: murk, overwritten by ionization when stronger, or the gate wash.
+			# A live mesh has no sprite to tint, so the wash stays on the sprite path.
 			var f: float = L[row + C_BLEND]
-			if f > 0.0 and lf.x >= 0.999:
+			if f > 0.0 and lf.x >= 0.999 and not live:
 				r.fog_ships.append([entry, pos, frame,
 					Color(L[row + C_BLEND + 1], L[row + C_BLEND + 2], L[row + C_BLEND + 3], 1.0), f * hull_alpha])
 
@@ -202,18 +227,26 @@ func draw_glows(ci: CanvasItem) -> void:
 		var alpha := _alpha_of(n, kind) * lf.y
 		var base := int(L[row + C_SET]) * int(L[row + C_FPS]) + int(L[row + C_HEADING])
 		var heading := int(L[row + C_HEADING])
+		var hull = r.sprites.entry(Sprites.SHIP, ship_type)
+		var live: bool = r.live_hulls != null and r.live_hulls.covers(n)
+		var hide_over: bool = hull != null and bool(hull.get("hide_overlays", false)) and not live
+		# A live mesh lights the layers it has parts or emitters for itself (LiveHulls); the classic
+		# overlay still draws for a layer the model says nothing about.
+		var hide_engine: bool = hide_over or (live and r.live_hulls.hides_layer(ship_type, "engine"))
+		var hide_lights: bool = hide_over or (live and r.live_hulls.hides_layer(ship_type, "lights"))
+		var hide_weapons: bool = hide_over or (live and r.live_hulls.hides_layer(ship_type, "weapons"))
 		var a: float = L[row + C_ENGINE]
-		if a > 0.0 and r.engine_glow:
+		if a > 0.0 and r.engine_glow and not hide_engine:
 			var e = r.sprites.entry(Sprites.ENGINE_GLOW, ship_type)
 			if e != null:
 				_put(ci, e, pos, Sprites.wrap(base, e["frames"]), Color(1, 1, 1, a * alpha), lf.x)
 		a = L[row + C_LIGHT]
-		if a > 0.0 and r.running_lights:
+		if a > 0.0 and r.running_lights and not hide_lights:
 			var e2 = r.sprites.entry(Sprites.LIGHTS, ship_type)
 			if e2 != null:
 				_put(ci, e2, pos, Sprites.wrap(base, e2["frames"]), Color(1, 1, 1, a * alpha), lf.x)
 		a = L[row + C_WGLOW]
-		if a > 0.0 and r.weapon_effects:
+		if a > 0.0 and r.weapon_effects and not hide_weapons:
 			var e3 = r.sprites.entry(Sprites.WEAPON_GLOW, ship_type)
 			if e3 != null:
 				_put(ci, e3, pos, Sprites.wrap(base, e3["frames"]), Color(1, 1, 1, a * alpha), lf.x)

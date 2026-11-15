@@ -123,8 +123,10 @@ func _init() -> void:
 	Prefs.set_value("presentation", "modern_hud", false)
 	st.show_page("Video")
 	await process_frame
-	var todo_count: int = st.todo_rows.size()
-	_ok(todo_count >= 2, "Graphics lists the Apple rows with no Godot key (quality presets, HD): %s" % str(st.todo_rows))
+	# The quality presets and the HD / live 3D rows are wired now (flight/LiveHulls.gd, FlightRenderer).
+	var graphics_todos := str(st.todo_rows)
+	_ok(not graphics_todos.contains("hd_graphics") and not graphics_todos.contains("graphics_quality"),
+		"Graphics: quality presets and HD rows are wired, not listed as to-dos: %s" % graphics_todos)
 	st.close()
 	await process_frame
 

@@ -250,9 +250,11 @@ func _run() -> void:
 		await _frames(2)
 		var found_unlock := false
 		for lab in g.card_at(locked_i).find_children("*", "Label", true, false):
-			if lab.text == "HOW TO UNLOCK":
+			# A locked step with a known route shows WHAT TO DO FIRST (the path, ebcd76c4); without one,
+			# HOW TO UNLOCK and its blockers.
+			if lab.text == "HOW TO UNLOCK" or lab.text == "WHAT TO DO FIRST":
 				found_unlock = true
-		_check("a locked step's detail shows HOW TO UNLOCK", found_unlock)
+		_check("a locked step's detail shows how to unlock it (HOW TO UNLOCK / WHAT TO DO FIRST)", found_unlock)
 		g.card_at(locked_i).activated.emit()
 
 	# zoom, lane cycling

@@ -185,6 +185,18 @@ final class PluginRuntime: @unchecked Sendable {
         return merged
     }
 
+    /// The HD/3D catalog for a merged data set: in-file `NSgx` plus `.nsx` packs
+    /// beside the enabled plug-ins. Same layering as the Apple app.
+    func graphicsCatalog(resources: ResourceCollection, base: URL) -> GraphicsEnhancementCatalog {
+        lock.lock()
+        let plugs = plugins
+        let flat = !pluginsAreManual
+        lock.unlock()
+        let packs = GameLibrary.discoverGraphicsPacks(in: pluginDirs(for: base))
+        return GameLibrary.graphicsCatalog(resources: resources, plugins: plugs,
+                                           graphicsPacks: packs, flatPluginOrder: flat)
+    }
+
     /// The editor's read-only base: the loaded game's files plus every enabled plug-in except
     /// `id` (the one being edited, so its own records are not both the base and the layer).
     /// An empty collection when no base folder has been scanned yet.

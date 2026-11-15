@@ -26,6 +26,9 @@ import NovaSwiftEngine
 import NovaSwiftKit
 import NovaSwiftNet
 import NovaSwiftStory
+#if canImport(NovaSwiftHD) && os(macOS)
+import NovaSwiftHD
+#endif
 
 /// Which decoded sheet a `sprite_info` / `sprite_rgba` call wants. One
 /// enumerated accessor rather than a method pair per art type: every one of
@@ -66,6 +69,19 @@ class NovaWorld: Node2D {
     private var netBridge: NetBridge?
     private var galaxy: Galaxy?
     private var game: NovaGame?
+    /// HD sprite sheets and live hulls from the loaded plug-ins. Read by the
+    /// Godot flight view; empty until `loadGame` / a test flight builds it.
+    private var hdCatalog = GraphicsEnhancementCatalog()
+    private var hdSpritesOn = false
+    private var hdLiveOn = false
+    private var hdDetail = 1
+    private var hdModelDetail = LiveModelDetail(index: 0)
+    private var hdSimpleLighting = false
+    private var hdDataDir: URL?
+    #if canImport(NovaSwiftHD) && os(macOS)
+    private let hdLiveModels = LiveModelStore()
+    private var hdLayouts: SpriteLayouts?
+    #endif
     private var intent = ControlIntent()
     /// The user settings that change how the world plays (see `// MARK: Settings plumbing`).
     private var plumbing = SettingsPlumbing()
@@ -199,6 +215,8 @@ class NovaWorld: Node2D {
         guard let collection = PluginRuntime.shared.loadMerged(baseDir: URL(fileURLWithPath: baseDir)) else { return false }
         let g = PerfSupport.makeGame(collection, baseDir: URL(fileURLWithPath: baseDir))   // + the decoded-sprite disk cache
         self.game = g
+        self.hdDataDir = URL(fileURLWithPath: baseDir, isDirectory: true)
+        rebuildHDCatalog()
         self.galaxy = Galaxy(game: g, flightTuning: plumbing.flightTuning)
         dataGen += 1
         return true
@@ -2184,6 +2202,172 @@ class NovaWorld: Node2D {
         // Convenience init from `[UInt8]` — one bulk copy, no per-byte Variant
         // crossing. Cached texture-side by GDScript.
         return PackedByteArray(found.sheet.rgba)
+    }
+
+    /// Graphics page: HD atlases, live hulls, the HD detail menu index (0 =
+    /// Low 1×, 1 = Standard 2×, 2 = Sharp 4×; as in the Apple app a resolution
+    /// cap, not an off switch: `hdSpriteMeta` reports it and the frontend
+    /// downsamples an atlas shipped above it), the 3D model detail index (0
+    /// Full, 1 High, 2 Medium, 3 Low; `LiveModelDetail`) and Simple lighting.
+    @Callable(autoSnakeCase: true)
+    func setHdOptions(sprites: Bool, live: Bool, detail: Int, modelDetail: Int, simpleLighting: Bool) {
+        hdSpritesOn = sprites
+        hdLiveOn = live
+        hdDetail = detail
+        hdModelDetail = LiveModelDetail(index: modelDetail)
+        hdSimpleLighting = simpleLighting
+    }
+
+    /// PNG atlas for one sprite, or empty when HD is off or this id has no
+    /// sprite-kind enhancement. The frontend draws it at the classic frame
+    /// size, so the ship stays the same size on screen and only gets sharper.
+    @Callable(autoSnakeCase: true)
+    func hdSpritePNG(kind: Int, id: Int) -> PackedByteArray {
+        guard let e = hdSprite(kind: kind, id: id), let bytes = HDFlight.pngBytes(e.source) else {
+            return PackedByteArray()
+        }
+        return PackedByteArray(bytes)
+    }
+
+    /// `[columns, hideClassicOverlays, maxScale]` for the atlas `hdSpritePNG`
+    /// just returned. Empty when there is no atlas.
+    @Callable(autoSnakeCase: true)
+    func hdSpriteMeta(kind: Int, id: Int) -> PackedInt32Array {
+        guard let e = hdSprite(kind: kind, id: id) else { return PackedInt32Array() }
+        return PackedInt32Array([
+            Int32(e.descriptor.effectiveColumns),
+            e.descriptor.hidesClassicOverlays ? 1 : 0,
+            Int32([1, 2, 4][max(0, min(2, hdDetail))]),
+        ])
+    }
+
+    /// JSON for a live hull: `{"pending": true}` while a SceneKit model is
+    /// still being prepared (ask again shortly), "" when this ship stays a
+    /// sprite. glTF: `ext`, `path` plus the shared keys (`HDFlight.baseDescription`).
+    /// SceneKit formats (macOS): `ext` "nvm", `space` "roll", `ortho`,
+    /// `lightScale`, `layersPresent`, `simple`; the geometry is `shipModelMesh`.
+    @Callable(autoSnakeCase: true)
+    func shipModelJSON(shipType: Int) -> String {
+        guard let game, let e = hdModel(shipType: shipType) else { return "" }
+        let anim = game.shan(shipType).map { HullAnimConfig($0, animations: flightVisuals.shipAnimations) }
+            ?? HullAnimConfig()
+        let banks = anim.mode == .banking && anim.setCount > 1
+        var overlays: [String] = []
+        if let shan = game.shan(shipType) {
+            if shan.engineSpriteID > 0 { overlays.append("engine") }
+            if shan.lightSpriteID > 0 { overlays.append("lights") }
+            if shan.weaponGlowSpriteID > 0 { overlays.append("weapons") }
+        }
+        let base = HDFlight.baseDescription(e, banks: banks, framesPerSet: anim.framesPerSet, overlayLayers: overlays)
+        if let file = HDFlight.gltfFile(e.source, spriteID: e.spriteID) {
+            var obj = base
+            obj["ext"] = file.ext
+            obj["path"] = file.url.path
+            return HDFlight.json(obj)
+        }
+        #if canImport(NovaSwiftHD) && os(macOS)
+        guard HDFlight.isSceneKitModel(e.source), let sheet = game.shipSprite(shipType) else { return "" }
+        if hdLayouts == nil { hdLayouts = SpriteLayouts(game: game) }
+        guard let layout = hdLayouts?.layout(for: sheet) else { return "" }
+        switch hdLiveModels.state(e, classic: sheet, layout: layout, detail: hdModelDetail,
+                                  simple: hdSimpleLighting, base: base) {
+        case .ready(let r): return HDFlight.json(r.json)
+        case .pending: return #"{"pending":true}"#
+        case .unavailable: return ""
+        }
+        #else
+        return ""
+        #endif
+    }
+
+    /// The prepared geometry (`LiveModelExport`, "NVM2") of a SceneKit-format
+    /// hull, once `shipModelJSON` reports it ready. Empty for glTF, on Linux,
+    /// and while it is still being prepared.
+    @Callable(autoSnakeCase: true)
+    func shipModelMesh(shipType: Int) -> PackedByteArray {
+        #if canImport(NovaSwiftHD) && os(macOS)
+        guard let game, let e = hdModel(shipType: shipType), HDFlight.isSceneKitModel(e.source),
+              let sheet = game.shipSprite(shipType) else { return PackedByteArray() }
+        if hdLayouts == nil { hdLayouts = SpriteLayouts(game: game) }
+        guard let layout = hdLayouts?.layout(for: sheet) else { return PackedByteArray() }
+        if case .ready(let r) = hdLiveModels.state(e, classic: sheet, layout: layout, detail: hdModelDetail,
+                                                   simple: hdSimpleLighting, base: [:]) {
+            return PackedByteArray(r.mesh)
+        }
+        #endif
+        return PackedByteArray()
+    }
+
+    /// The most live hulls this machine is given (`LiveHullBudget.ceiling`,
+    /// as `HDGraphics.liveCeiling` works it out on a Mac). The frontend runs
+    /// the adaptive part itself; on Linux/Windows it decides from the GPU type.
+    @Callable(autoSnakeCase: true)
+    func liveHullCeiling() -> Int {
+        #if os(macOS)
+        let memoryGB = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
+        #if arch(arm64)
+        return LiveHullBudget.ceiling(mobile: false, appleGPU: true, lowPowerGPU: false, memoryGB: memoryGB)
+        #else
+        return LiveHullBudget.ceiling(mobile: false, appleGPU: false, lowPowerGPU: true, memoryGB: memoryGB)
+        #endif
+        #else
+        return -1
+        #endif
+    }
+
+    /// Self-check aid (tests/live_model_probe_selfcheck.gd): write a small USDZ hull (an arrow, nose
+    /// +Z, red left wing named "engine_pod", green right wing) to `path`. macOS only; false elsewhere.
+    @Callable(autoSnakeCase: true)
+    func liveModelProbeWrite(path: String) -> Bool {
+        #if canImport(NovaSwiftHD) && os(macOS)
+        return LiveModelExport.writeProbe(to: URL(fileURLWithPath: path))
+        #else
+        return false
+        #endif
+    }
+
+    /// Self-check aid: the macOS live-model path on any SceneKit file, without a pack: Apple's
+    /// `ModelLoader.load`, `MeshSimplifier` / `capTextures` at `modelDetail`, then the NVM2 export.
+    @Callable(autoSnakeCase: true)
+    func liveModelProbe(path: String, modelDetail: Int, simpleLighting: Bool) -> PackedByteArray {
+        #if canImport(NovaSwiftHD) && os(macOS)
+        guard let node = try? ModelLoader.load(.file(URL(fileURLWithPath: path))) else { return PackedByteArray() }
+        let d = LiveModelDetail(index: modelDetail)
+        if let cells = d.cells { MeshSimplifier.simplify(node, cells: cells) }
+        LiveModelCache.capTextures(node, maxPixels: d.texturePixels)
+        guard let dump = LiveModelExport.dump(node, descriptor: GraphicsEnhancement(kind: .model),
+                                              simple: simpleLighting) else { return PackedByteArray() }
+        return PackedByteArray(dump.bytes)
+        #else
+        return PackedByteArray()
+        #endif
+    }
+
+    private func rebuildHDCatalog() {
+        #if canImport(NovaSwiftHD) && os(macOS)
+        hdLiveModels.reset()
+        hdLayouts = nil
+        #endif
+        guard let game else { hdCatalog = GraphicsEnhancementCatalog(); return }
+        let base = hdDataDir ?? URL(fileURLWithPath: "/", isDirectory: true)
+        hdCatalog = PluginRuntime.shared.graphicsCatalog(resources: game.resources, base: base)
+    }
+
+    /// The sprite-kind enhancement for this sheet, when HD is on and the
+    /// atlas frame count matches the classic sheet.
+    private func hdSprite(kind: Int, id: Int) -> ResolvedGraphicsEnhancement? {
+        guard hdSpritesOn, let found = decodedSheet(kind: kind, id: id),
+              let sid = found.sheet.sourceSpriteID, let e = hdCatalog[sid],
+              e.descriptor.kind == .sprite else { return nil }
+        if let n = e.descriptor.frameCount, n != found.sheet.frameCount { return nil }
+        return e
+    }
+
+    /// A model the player asked to see live. Keyed by the hull's base sprite.
+    private func hdModel(shipType: Int) -> ResolvedGraphicsEnhancement? {
+        guard hdLiveOn, let sheet = game?.shipSprite(shipType), let sid = sheet.sourceSpriteID,
+              let e = hdCatalog[sid], e.descriptor.allowsLive else { return nil }
+        return e
     }
 
     // MARK: Pilots & saves
@@ -6360,6 +6544,8 @@ class NovaWorld: Node2D {
         editorBackup = EditorBackup(game: game, galaxy: galaxy, pilot: pilot, started: pilotStarted, saveID: pilotSaveID)
         let g = PerfSupport.makeGame(resources, baseDir: URL(fileURLWithPath: baseDir))
         game = g
+        hdDataDir = URL(fileURLWithPath: baseDir, isDirectory: true)
+        rebuildHDCatalog()
         galaxy = Galaxy(game: g, flightTuning: plumbing.flightTuning)
         var p = PilotFactory.makeDefault(name: "Editor", isMale: true, game: g)
         if shipType >= 128 { p.shipType = shipType }

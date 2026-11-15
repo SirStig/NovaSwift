@@ -79,7 +79,7 @@ func _draw_original(ci: CanvasItem, vp: Vector2, center: Vector2, cam: Vector2) 
 	var murk: int = r.nova.system_murk()
 	if murk < 0:
 		return true   # stars are hidden while murk < 0
-	var count: int = r.nova.star_count(vp.y * r.zoom)
+	var count: int = r.nova.star_count(vp.y * r.render_zoom)
 	if count != _orig_count or _orig_parallax != r.parallax_starfield:
 		_rebuild_original(vp, count)
 	var t := float(r.nova.star_tint(murk)) / 32.0
