@@ -53,14 +53,29 @@ enum StuffIt {
     /// `budget` is what the whole archive may still unpack to: every codec
     /// allocates the length the header claims, so a few bytes of header could
     /// otherwise ask for gigabytes.
-    private static func decodeFork(_ f: Fork, _ b: [UInt8], budget: inout Int) throws -> [UInt8] {
+    /// `zeroCRCMeansNone`: StuffIt 5 leaves the fork CRC 0 on a lot of real archives, so there a 0 means
+    /// "not recorded". Classic archives always store it, so a 0 there is checked like any other value.
+    /// The most a compressed fork may unpack to per packed byte (past the first MiB).
+    static let maxExpansion = 4096
+
+    private static func decodeFork(_ f: Fork, _ b: [UInt8], budget: inout Int,
+                                   zeroCRCMeansNone: Bool = false) throws -> [UInt8] {
         if f.length == 0 { return [] }
         if f.encrypted { throw MacArchiveError.encrypted }
         guard f.length > 0, f.length <= budget else { throw MacBytes.tooBig() }
         budget -= f.length
+        // A few bytes of header may claim gigabytes, and every codec commits the claimed length (method 3's
+        // one-symbol tree fills it from 2 bytes). Real StuffIt output is nowhere near this ratio over its
+        // packed size, so cap the claim instead of trusting it.
+        if f.method != 0, f.length > f.packed * maxExpansion + (1 << 20) { throw MacBytes.tooBig() }
         guard f.offset >= 0, f.offset + f.packed <= b.count else { throw MacArchiveError.corrupt("fork runs past end of file") }
         let out = try StuffItCodecs.decode(method: f.method, b[f.offset..<f.offset + f.packed], outLen: f.length)
-        guard MacBytes.crc16(out) == f.crc else { throw MacArchiveError.corrupt("checksum mismatch") }
+        // With the CRC often 0 (below), the length is the one check every fork gets: a
+        // truncated stream must not pass as a short file.
+        guard out.count == f.length else { throw MacArchiveError.corrupt("fork decoded to the wrong length") }
+        if !(zeroCRCMeansNone && f.crc == 0), MacBytes.crc16(out) != f.crc {
+            throw MacArchiveError.corrupt("checksum mismatch")
+        }
         return out
     }
 
@@ -159,7 +174,8 @@ enum StuffIt {
                     let rsrcFork = Fork(method: rMethod, length: rLen, offset: q, packed: rPacked, crc: rCRC, encrypted: encrypted)
                     let dataFork = Fork(method: dMethod, length: dLen, offset: q + rPacked, packed: dPacked, crc: dCRC, encrypted: encrypted)
                     out.append(MacFile(folders: folders, name: name, fileType: type, creator: creator,
-                                       data: try decodeFork(dataFork, b, budget: &budget), rsrc: try decodeFork(rsrcFork, b, budget: &budget)))
+                                       data: try decodeFork(dataFork, b, budget: &budget, zeroCRCMeansNone: true),
+                                       rsrc: try decodeFork(rsrcFork, b, budget: &budget, zeroCRCMeansNone: true)))
                 }
                 pos = next; n += 1
             }
