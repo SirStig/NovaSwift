@@ -49,7 +49,7 @@ struct KeyBindings: Codable, Equatable {
             .commandEscortEvasive: "", .shipInfo: "", .pauseGame: "",
             .openMenu: "escape", .cycleHyperspaceLink: "\\",
             .routeMapZoomOut: "-", .routeMapZoomIn: "=",
-            .cycleCameraView: "o", .cameraZoomOut: "[", .cameraZoomIn: "]",
+            .cycleCameraView: "opt+o", .cameraZoomOut: "[", .cameraZoomIn: "]",
         ]
         #if !os(macOS)
         m[.fireSecondary] = "return"
@@ -91,7 +91,7 @@ struct KeyBindings: Codable, Equatable {
         .hyperspaceArm: "h", .dismissMessage: "", .playerInfo: "", .missionInfo: "",
         .clearSecondary: "s", .hailStellar: "opt+y", .selfDestruct: "opt+-",
         .commandEscortFormation: "", .commandEscortReturnHangar: "",
-        .cycleCameraView: "o", .cameraZoomOut: "[", .cameraZoomIn: "]",
+        .cycleCameraView: "opt+o", .cameraZoomOut: "[", .cameraZoomIn: "]",
     ]
 
     func token(for action: GameAction) -> String { map[action] ?? "" }
@@ -159,10 +159,12 @@ struct KeyBindings: Codable, Equatable {
                 // launch doesn't mistake it for a pre-existing one.
                 let fresh = KeyBindings()
                 fresh.save()
+                UserDefaults.standard.set(true, forKey: cameraChordMigratedKey)
                 return fresh
             }
             let pinned = KeyBindings(map: modernDefaults)
             pinned.save()
+            UserDefaults.standard.set(true, forKey: cameraChordMigratedKey)
             return pinned
         }
         var m: [GameAction: String] = [:]
@@ -175,7 +177,23 @@ struct KeyBindings: Codable, Equatable {
             let token = base[action] ?? ""
             m[action] = used.contains(token) ? "" : token
         }
+        migrateCameraViewChord(&m)
         return KeyBindings(map: m)
+    }
+
+    /// Maps saved before the camera chord still have bare O on Change Camera
+    /// View. Move that factory binding to Option+O once. A key the player
+    /// chose (anything other than O) is left, and so is a later rebind back to O.
+    private static let cameraChordMigratedKey = "com.novaswift.keybindings.cameraChord.v1"
+
+    private static func migrateCameraViewChord(_ map: inout [GameAction: String]) {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: cameraChordMigratedKey) else { return }
+        defaults.set(true, forKey: cameraChordMigratedKey)
+        guard map[.cycleCameraView] == "o" else { return }
+        let taken = map.values.contains("opt+o")
+        map[.cycleCameraView] = taken ? "" : "opt+o"
+        KeyBindings(map: map).save()
     }
 
     func save() {

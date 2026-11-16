@@ -155,6 +155,12 @@ static func load_all() -> void:
 		for action in _cfg.get_section_keys("keys"):
 			if Controls.BINDINGS.has(action) and _cfg.get_value("keys", action) is Dictionary:
 				Controls.overrides[action] = _cfg.get_value("keys", action)
+	# Saved maps from before the camera chord still bind bare O. Move that factory
+	# binding to Alt+O once; a key the player chose, and a later rebind back to O, stay.
+	if not _cfg.get_value("input", "camera_chord_migrated", false):
+		Controls.migrate_camera_view_chord()
+		_cfg.set_value("input", "camera_chord_migrated", true)
+		_cfg.save(path)
 	# Action wheels: the defaults with any saved wheel laid over them (ActionWheels.from_store), then the trigger set
 	# reaches Controls so register() strips those buttons off the Flight actions.
 	var stored_wheels: Dictionary = {}

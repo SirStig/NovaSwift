@@ -117,8 +117,10 @@ const BINDINGS := {
 	"route_map_zoom_in": {"keys": [KEY_EQUAL]},
 	"clear_ship_target": {"alt_keys": [KEY_N]},
 	# Port-only camera controls (Apple GameAction .cycleCameraView / .cameraZoomOut / .cameraZoomIn,
-	# KeyBindings "o" "[" "]" in both layouts). The original has no camera views.
-	"cycle_camera_view": {"keys": [KEY_O]},
+	# KeyBindings "opt+o" "[" "]" in both layouts). Alt, like eject: a bare letter
+	# turns the whole system around the ship and the choice is saved globally.
+	# The original has no camera views.
+	"cycle_camera_view": {"alt_keys": [KEY_O]},
 	"camera_zoom_out": {"keys": [KEY_BRACKETLEFT]},
 	"camera_zoom_in": {"keys": [KEY_BRACKETRIGHT]},
 	"nav_stellar_1": {"keys": [KEY_1]},
@@ -345,6 +347,22 @@ static func rebind(action: String, field: String, code: int) -> String:
 
 static func reset_defaults() -> void:
 	overrides.clear()
+
+
+## A stored override that is still the old factory binding (bare O, no Alt chord)
+## becomes Alt+O. Anything else — a chosen key, or O plus some other field the
+## player set — is left for them.
+static func migrate_camera_view_chord() -> void:
+	var o: Dictionary = overrides.get("cycle_camera_view", {})
+	if o.is_empty():
+		return
+	if o.get("keys", []) != [KEY_O]:
+		return
+	if not (o.get("alt_keys", []) as Array).is_empty():
+		return
+	o.erase("keys")
+	o["alt_keys"] = [KEY_O]
+	overrides["cycle_camera_view"] = o
 
 
 ## Human-readable binding for the rebind screen, e.g. "Left / A", "Alt+Y", "—".
