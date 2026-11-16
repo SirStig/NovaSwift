@@ -32,7 +32,7 @@ struct PilotEditorView: View {
                     NovaText("Reading the pilot…", size: 13, color: .secondary)
                 }
                 if !error.isEmpty {
-                    NovaText(error, size: 11, width: 440, color: .red)
+                    NovaText(error, size: 11, color: .red, width: 440)
                 }
             }
         }
