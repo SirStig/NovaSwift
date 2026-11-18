@@ -101,7 +101,19 @@ struct NewPilotView: View {
         return AnyView(modernNameDialog)
     }
 
-    private var classicChrome: Bool { !model.settings.modernDialogs && model.data.game != nil }
+    /// The native DLOG/DITL 3101/3102 pilot dialog — only when the data has it.
+    /// Without it (an import missing `Nova.rez`) the dialog would be an empty
+    /// white window, so the flow uses the in-app dialogs (and scenario step).
+    private var classicChrome: Bool {
+        guard !model.settings.modernDialogs, let game = model.data.game else { return false }
+        let multi = scenarios.count > 1
+        return game.hasDialogItems(multi ? 3101 : 3102, multi ? [0, 1, 3, 7, 8, 10, 12] : [0, 1, 3, 7, 8, 10])
+    }
+
+    /// The native DLOG/DITL 3001 ship-name prompt, when the data has it.
+    private var classicShipNameChrome: Bool {
+        !model.settings.modernDialogs && model.data.game?.hasDialogItems(3001, [0, 2, 4, 5]) == true
+    }
 
     /// DLOG/DITL 3102 in the native window: OK (0), Cancel (1), Strict Play
     /// (3), "Full Name:"/"Nickname:" (4/5) with their edit fields (7/8) and
@@ -199,7 +211,7 @@ struct NewPilotView: View {
     /// The ship-name prompt after the pilot dialog (0x00489d70): STR# 2002
     /// #121 and the hull's name. Cancelling abandons the new pilot.
     private var shipNameDialog: some View {
-        classicChrome ? AnyView(classicShipNameDialog) : AnyView(modernShipNameDialog)
+        classicShipNameChrome ? AnyView(classicShipNameDialog) : AnyView(modernShipNameDialog)
     }
 
     /// DLOG/DITL 3001 "Text Input": the prompt (2), the name field (4, 64

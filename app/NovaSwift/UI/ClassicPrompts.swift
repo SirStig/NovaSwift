@@ -46,11 +46,8 @@ private struct ClassicPromptModifier: ViewModifier {
     /// or replaced 3001/3002 would otherwise draw an empty white window with
     /// no way out, so it falls back to the in-app alert.
     private var classic: Bool {
-        guard !model.settings.modernDialogs, let game = model.data.game,
-              let items = game.dialog(text == nil ? 3002 : 3001)?.items.items else { return false }
-        let present = Set(items.map(\.index))
-        let needed: Set<Int> = text == nil ? [0, 2, 4] : [0, 2, 4, 5]
-        return needed.isSubset(of: present)
+        guard !model.settings.modernDialogs, let game = model.data.game else { return false }
+        return text == nil ? game.hasDialogItems(3002, [0, 2, 4]) : game.hasDialogItems(3001, [0, 2, 4, 5])
     }
 
     private func ok() {

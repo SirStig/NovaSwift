@@ -117,6 +117,13 @@ public struct DITLRes: Equatable, Sendable {
         items = Self.decodeItems(resource.data)
     }
 
+    /// A list built in code (the stock fallback layouts).
+    public init(id: Int, name: String, items: [DITLItem]) {
+        self.id = id
+        self.name = name
+        self.items = items
+    }
+
     /// Item by `DITL` index, or nil when the resource is shorter than expected.
     /// Views bind content through this, so a truncated/absent resource degrades
     /// to "no rect" rather than trapping.
@@ -230,6 +237,20 @@ public struct DLOGRes: Equatable, Sendable {
     public let itemsID: Int
     public let title: String
 
+    /// A window built in code (the stock fallback layouts): a plain dialog
+    /// box (procID 1), no close box, created hidden like the stock DLOGs.
+    public init(id: Int, name: String, bounds: NovaRect, itemsID: Int, title: String = "") {
+        self.id = id
+        self.name = name
+        self.bounds = bounds
+        self.procID = 1
+        self.isVisible = false
+        self.hasGoAway = false
+        self.refCon = 0
+        self.itemsID = itemsID
+        self.title = title
+    }
+
     public init(_ resource: Resource) {
         id = resource.id
         name = resource.name
@@ -333,7 +354,18 @@ public extension NovaGame {
         if let items = ditl(id) {
             return NovaDialogRes(window: nil, items: items)
         }
-        return nil
+        // Data without Nova.rez (an import that missed it): the stock layout,
+        // so the native prompts still draw instead of an empty window.
+        return StockDialogs.dialog(id)
+    }
+
+    /// True when dialog `id` loads with every DITL item index in `needed`.
+    /// A screen drawn purely from the data (the native-chrome prompts) checks
+    /// this first: data without the dialog (e.g. an import that lacks
+    /// `Nova.rez`) would otherwise get an empty window with no controls.
+    func hasDialogItems(_ id: Int, _ needed: Set<Int>) -> Bool {
+        guard let items = dialog(id)?.items.items else { return false }
+        return needed.isSubset(of: Set(items.map(\.index)))
     }
 }
 

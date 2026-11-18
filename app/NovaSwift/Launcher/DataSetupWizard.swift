@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import NovaSwiftKit
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -538,6 +539,12 @@ struct DataSetupWizard: View {
             } text: {
                 Text("Your data is imported and lives on this \(device.label). Tap **Play** to launch EV Nova.")
                     .novaFont(.body)
+                // No Nova.rez came along: the game plays, but a few screens
+                // use NOVA Swift's own dialogs. Say where to find it.
+                if let game = model.data.game, !game.hasDialogItems(3001, [0]) {
+                    Text(GameFileDiscovery.dialogLayoutsWarning)
+                        .novaFont(.caption).foregroundStyle(.orange)
+                }
                 #if canImport(CloudKit)
                 if model.settings.iCloudGameData {
                     Text("A copy is syncing to your private iCloud, so your other devices can set themselves up automatically.")

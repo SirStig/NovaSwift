@@ -247,7 +247,8 @@ struct SettingsView: View {
                                 options: GameSettings.UIMode.allCases.filter {
                                     $0 != .novaSwift || model.settings.matchedPreset == .novaSwift
                                 }) { $0.label }
-            if model.data.game != nil {
+            // Only when the data has DLOG/DITL 4003 — otherwise it's an empty window.
+            if model.data.game?.hasDialogItems(4003, [0]) == true {
                 Button {
                     showClassicPreferences = true
                 } label: {

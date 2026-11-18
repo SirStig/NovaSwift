@@ -44,6 +44,20 @@ public enum GameFileDiscovery {
             + iniFiles(in: directory)
     }
 
+    /// True when the data has no dialog layouts (DITL 3001, from `Nova.rez`).
+    /// The game still plays — those screens use NovaSwift's own dialogs — so
+    /// this is a warning, not a missing essential.
+    public static func lacksDialogLayouts(_ merged: ResourceCollection) -> Bool {
+        merged.resource(NovaType.ditl, 3001) == nil
+    }
+
+    /// The import-screen warning for `lacksDialogLayouts`.
+    public static let dialogLayoutsWarning =
+        "The game's dialog layouts (Nova.rez) weren't found, so a few screens (New Pilot, naming prompts, "
+        + "the original Preferences) use NOVA Swift's own dialogs. Windows: pick the whole game folder that "
+        + "holds EV Nova.exe and Nova.rez, not just Nova Files. Mac (WineNova): pick the EV Nova folder in "
+        + "Applications, which contains EV Nova.app."
+
     /// The resource kinds a data set genuinely can't play without, phrased for the import
     /// screens (moved from `GameDataController.findMissingEssentials`). Deliberately
     /// conservative: only things whose absence wedges the app or the game.

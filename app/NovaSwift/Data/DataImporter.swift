@@ -62,6 +62,11 @@ enum DataImporter {
             // the art doesn't). Ask iCloud for them first and give it a moment.
             outcome.pendingDownload = materialiseICloudPlaceholders(in: src)
             sources = GameFileDiscovery.importableFiles(in: src)
+            // The dialog layouts (Nova.rez): inside EV Nova.app on a Mac
+            // (WineNova) install. See `NovaRezLocator`.
+            if !sources.isEmpty, !NovaRezLocator.hasNovaRez(sources), let rez = NovaRezLocator.locate(in: src) {
+                sources.append(rez)
+            }
         } else {
             sources = [src]
         }

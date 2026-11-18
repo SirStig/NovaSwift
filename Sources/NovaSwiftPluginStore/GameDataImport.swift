@@ -172,6 +172,13 @@ public enum GameDataImport {
                 plan.items.append(Item(src: f, rel: f.lastPathComponent, size: size(f)))
             }
         }
+        // The dialog layouts: a Mac (WineNova) install keeps Nova.rez inside
+        // EV Nova.app, and a Windows import of just Nova Files leaves it a
+        // folder up. Bring it along when it can be found.
+        if !plan.items.isEmpty, !NovaRezLocator.hasNovaRez(plan.items.map(\.src)),
+           let rez = NovaRezLocator.locate(in: root) {
+            plan.items.append(Item(src: rez, rel: "Nova.rez", size: size(rez)))
+        }
         if includePlugins {
             for d in pluginDirs {
                 guard let e = fm.enumerator(at: d, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
@@ -286,6 +293,9 @@ public enum GameDataImport {
         ins.unreadable = unreadable
         ins.resourceCount = merged.totalCount
         ins.missingEssentials = GameFileDiscovery.missingEssentials(in: merged)
+        if merged.totalCount > 0, GameFileDiscovery.lacksDialogLayouts(merged) {
+            ins.warnings.append(GameFileDiscovery.dialogLayoutsWarning)
+        }
         if let v = versionString(merged) {
             let ce = ins.version.contains("Community")
             ins.version = "EV Nova " + v + (ce ? " (Windows / Community Edition data)" : "")

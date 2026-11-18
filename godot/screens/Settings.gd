@@ -452,7 +452,8 @@ func _build_presentation() -> void:
 		_mark_changed()
 		_rebuild())
 	_note_first(h.get_meta("buttons")[0])
-	if ClassicTheme.has_data():
+	# Only when the data has DLOG/DITL 4003 (Nova.rez): without it the window would be empty.
+	if ClassicTheme.has_data() and _has_dialog(4003):
 		_button("Original Preferences Window…", open_classic_preferences, "macwindow")
 	_section("Interface Options", "Mix the port's modern touches over the authentic EV Nova presentation. Full-screen map opens the galaxy map without its dialog frame. The sidebar pause menu (on by default) opens the port's own menu, with the Story Guide and, in debug mode, the Debug Suite; off, pausing opens the original's plain pause dialog. Storyline tags mark missions that continue a reconstructed campaign and jump to it in the Story Guide — an aftermarket hint the original game never had.", "slider.horizontal.3")
 	for t in [["Full-screen galaxy map", "fullscreen_galaxy_map"], ["Modern main menu", "modern_menu"],
@@ -475,6 +476,14 @@ func _build_hud_interface() -> void:
 	_check("High-contrast HUD", "accessibility", "high_contrast_hud")
 	_slider("Overall UI scale", "interface", "ui_scale", 0.8, 1.4, 0.05, _pct)
 	_check("Show FPS counter", "graphics", "show_fps")
+
+
+## True when the loaded data carries dialog `id` with items (Nova.rez can be missing from an import).
+func _has_dialog(id: int) -> bool:
+	if _nova == null:
+		return false
+	var parsed: Variant = JSON.parse_string(str(_nova.classic_dialog(id)))
+	return parsed is Dictionary and not (parsed as Dictionary).get("items", []).is_empty()
 
 
 ## The original's Preferences window (DLOG 4003) over Settings; Settings comes back, focused, when
