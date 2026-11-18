@@ -65,11 +65,16 @@ public enum NovaRezLocator {
         for f in files(in: root, depth: 0) where f.pathExtension.isEmpty {
             if let hit = accept(f) { return hit }
         }
+        // Per-user install locations only exist on macOS (no home directory API on iOS).
+        #if os(macOS)
         let home = fm.homeDirectoryForCurrentUser
         for f in files(in: home.appendingPathComponent(macSupportPath), depth: 2) {
             if let hit = accept(f) { return hit }
         }
         return accept(home.appendingPathComponent(wineNovaPrefixPath))
+        #else
+        return nil
+        #endif
     }
 
     /// True when `url` (data fork, or on macOS its resource fork) parses as a
