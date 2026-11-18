@@ -391,6 +391,23 @@ struct MissionBoardView: View {
     }
 }
 
+/// The galaxy-map command (rebindable, default M) as a button. The original is a
+/// key, which a phone has no way to press. Desktop keeps that key.
+struct TouchGalaxyMapButton: View {
+    let graphics: SpaceportGraphics
+    let action: () -> Void
+
+    var body: some View {
+        #if os(iOS) || os(tvOS)
+        NovaButton(graphics: graphics, title: "Map", width: 72, action: action)
+            .padding(.bottom, 12)
+            .accessibilityLabel("Open the galaxy map")
+        #else
+        EmptyView()
+        #endif
+    }
+}
+
 /// A small chart pin beside a mission offer's title: the offer window's Map
 /// command, shown only for missions whose mïsn Flags 0x0100 preselect their
 /// destination system on the starmap (0x00442510), as in the original.
@@ -571,6 +588,9 @@ private struct MissionInfoSheet: View {
         }
         // Ⓑ refuses, when the offer can be refused.
         .cursorCancel(offer.canRefuse ? onDecline : nil)
+        .overlay(alignment: .bottom) {
+            TouchGalaxyMapButton(graphics: graphics) { present(.map(mapPreselect)) }
+        }
         .missionWindowKeys { press in
             if consumeDockedKey(press) { return true }
             switch MissionOfferKey.resolve(press, acceptLabel: offer.acceptButton,
@@ -762,6 +782,11 @@ struct MissionSingleDialog: View {
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
         .overlay { if moviePlayer != nil { moviePlayerOverlay } }
+        .overlay(alignment: .bottom) {
+            if moviePlayer == nil, movieGIF == nil {
+                TouchGalaxyMapButton(graphics: graphics) { present(.map(mapPreselect)) }
+            }
+        }
         // Ⓑ refuses, when the offer can be refused.
         .cursorCancel(offer.canRefuse ? { finish(onDecline) } : nil)
         .missionWindowKeys { press in

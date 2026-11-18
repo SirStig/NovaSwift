@@ -28,13 +28,33 @@ public enum PilotFactory {
 
     public enum NameField { case pilot, nickname, ship }
 
-    /// The ship-name prompt (0x00489d70): STR# 2002 #121 ("Now, please christen your brand-new", no
-    /// trailing space in the data), then the exe's " " literal (0x0056ce88), the starting hull's name
-    /// and the ": " literal (0x0056d040).
-    public static func shipNamePrompt(scenario: CharRes, game: NovaGame) -> String {
+    /// The name a christening prompt uses for `ship` (0x00489d70 / 0x00492f30):
+    /// the hull's long name (`shïp` +0x62e), else its class display name.
+    public static func christenHull(_ ship: ShipRes) -> String {
+        let long = ship.longName.novaDisplayName
+        return long.isEmpty ? ship.displayName : long
+    }
+
+    /// STR# 2002 #121 ("Now, please christen your brand-new", no trailing space
+    /// in the data), then " ", the hull name and ": ". Shared by the new-pilot
+    /// prompt (0x00489d70) and a shipyard purchase (0x00492f30).
+    public static func christenPrompt(hull: String, game: NovaGame) -> String {
         let prompt = game.stringList(2002)?.string(at: 121) ?? ""
-        let hull = game.ship(scenario.shipID)?.name ?? ""
         return prompt + " " + hull + ": "
+    }
+
+    /// The ship-name prompt (0x00489d70) for a starting scenario.
+    public static func shipNamePrompt(scenario: CharRes, game: NovaGame) -> String {
+        let hull = game.ship(scenario.shipID).map(christenHull) ?? ""
+        return christenPrompt(hull: hull, game: game)
+    }
+
+    /// The name a shipyard purchase offers to edit (0x00492f30): the class long
+    /// name, a space, and three digits each rolled from 1 through 9.
+    public static func purchaseSuggestedName(_ ship: ShipRes) -> String {
+        let hull = christenHull(ship)
+        let suffix = (0..<3).map { _ in String(Int.random(in: 1...9)) }.joined()
+        return hull.isEmpty ? suffix : hull + " " + suffix
     }
 
     /// Build a new pilot for `scenario`.

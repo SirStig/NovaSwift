@@ -450,6 +450,10 @@ public struct ShipRes {
     /// `OnRetire` (@1231, n0FF 255B, NCB **Set**): run when the player sells or
     /// replaces (trades in) a ship of this type. Blank = no effect.
     public let onRetire: String
+    /// `shïp` +0x62e, 128 bytes: the long name the christening prompt uses when
+    /// this hull is bought or is a new pilot's starting ship. Empty when the
+    /// record doesn't carry one; callers then use the class display name.
+    public let longName: String
     public let require: UInt64      // @896 bits that must be met (via owned outfits/current ship) to buy
     /// "The subtitle to show on the target display for this ship type" (Nova
     /// Bible). Offset verified against novaparse `ShipResource.ts` (`subtitle`)
@@ -558,6 +562,7 @@ public struct ShipRes {
         onPurchase = cstr(d, 618, 255)
         onCapture = cstr(d, 976, 255)
         onRetire = cstr(d, 1231, 255)
+        longName = cstr(d, 1582, 128)
         require = u64(d, 896)
         subtitle = cstr(d, 1766, 64)
         flags3 = UInt16(truncatingIfNeeded: u16(d, 1830))

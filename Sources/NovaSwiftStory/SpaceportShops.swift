@@ -88,10 +88,10 @@ public enum SpaceportShops {
     /// scale and tech level.
     @discardableResult
     public static func buyShip(_ state: inout PlayerState, _ ship: ShipRes, at spob: SpobRes, galaxy: Galaxy,
-                                rolled: Bool = false) -> Bool {
+                                shipName: String? = nil, rolled: Bool = false) -> Bool {
         PilotEconomy.buyShip(&state, ship, game: galaxy.game,
                              scale: rankPriceScale(state, at: spob, galaxy: galaxy), stellarTech: spob.techLevel,
-                             rolled: rolled)
+                             shipName: shipName, rolled: rolled)
     }
 
     /// Buy Ship's enabled state: not the hull already flown, affordable at the

@@ -230,4 +230,26 @@ final class ShopVisitFidelityTests: XCTestCase {
         XCTAssertNil(p.outfits[650], "paint is a global colour a purchase clears")
         XCTAssertEqual(p.outfits[651], 1, "a persistent outfit still stays")
     }
+
+    func testAPurchaseKeepsTheChristenedName() {
+        var bytes = [UInt8](repeating: 0, count: 1720)
+        Bytes.i32(&bytes, 48, 1000)
+        Bytes.cstr(&bytes, 1582, "Courier; fast")
+        let bought = Resource(type: NovaType.ship, id: 129, name: "Shuttle; A", data: Data(bytes))
+        let strings = Array(repeating: "", count: 120) + ["Now, please christen your brand-new"]
+        let game = makeGame([
+            shipResource(id: 128, cargo: 10), bought,
+            stringListResource(2002, strings),
+        ])
+        let hull = game.ship(129)!
+        XCTAssertEqual(PilotFactory.christenHull(hull), "Courier")
+        XCTAssertEqual(PilotFactory.christenPrompt(hull: "Courier", game: game),
+                       "Now, please christen your brand-new Courier: ")
+        let suggested = PilotFactory.purchaseSuggestedName(hull)
+        XCTAssertNotNil(suggested.range(of: #"^Courier [1-9]{3}$"#, options: .regularExpression), suggested)
+        var pilot = PlayerState(shipType: 128, shipName: "Old", credits: 1_000_000)
+        XCTAssertTrue(PilotEconomy.buyShip(&pilot, hull, game: game, shipName: "Falcon"))
+        XCTAssertEqual(pilot.shipName, "Falcon")
+        XCTAssertEqual(pilot.shipType, 129)
+    }
 }

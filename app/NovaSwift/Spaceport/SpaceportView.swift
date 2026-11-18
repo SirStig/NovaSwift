@@ -582,6 +582,9 @@ struct MissionBBSView: View {
             }
         }
         .overlay { StoryTextOverlay(services: services) }
+        .overlay(alignment: .bottom) {
+            TouchGalaxyMapButton(graphics: graphics) { openBoardMap() }
+        }
         .cursorCancel(onDone)
         .missionWindowKeys(bbsKey)
         .sheet(item: $nested) { kind in
@@ -602,6 +605,17 @@ struct MissionBBSView: View {
 
     private func reopen() {
         if let onReopen { onReopen() } else { onDone() }
+    }
+
+    /// The galaxy-map key (0x00440c90 action 6). Touch play has no key, so the
+    /// same command is a button.
+    private func openBoardMap() {
+        let preselect = services.pendingOffer.flatMap { engine?.offerHighlightSystem(for: $0.mission) }
+        if flightNav == nil {
+            let here = game.systems().first { $0.spobs.contains(spob.id) }?.id ?? pilot.state.currentSystem
+            localNav.configure(game: game, startSystemID: here)
+        }
+        nested = .map(preselect)
     }
 
     /// 0x00440c90: the map, Player Info and Mission Info commands, then Return,

@@ -663,6 +663,11 @@ struct ShipyardView: View {
     @State private var topRow = 0
     /// The full Ship Info card, opened by tapping the large preview picture.
     @State private var showInfo = false
+    /// The purchase christening prompt (0x00492f30, DLOG 3001). Cancel leaves
+    /// the old hull; the class's shipyard roll was already redrawn.
+    @State private var namingShip: ShipRes?
+    @State private var showNamePrompt = false
+    @State private var nameDraft = ""
     @FocusState private var gridFocused: Bool
     private var game: NovaGame { graphics.game }
     /// Tech-level-eligible stock on today's galaxy-wide `BuyRandom` roll (a
@@ -705,6 +710,21 @@ struct ShipyardView: View {
         }
         .cursorCancel(onDone)
         .animation(.easeOut(duration: 0.15), value: showInfo)
+        .classicTextPrompt(isPresented: $showNamePrompt,
+                           prompt: namingShip.map { christenPrompt($0) } ?? "",
+                           text: $nameDraft,
+                           onOK: { answer in
+                               guard let s = namingShip else { return }
+                               namingShip = nil
+                               let price = netPrice(s)
+                               if pilot.buyShip(s, at: spob, galaxy: galaxy, shipName: answer, alreadyRolled: true) {
+                                   Log.spaceport.debug("Bought ship \(s.id, privacy: .public) (\(s.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(price, privacy: .public)cr")
+                                   onLiveSync()
+                               } else {
+                                   Log.spaceport.notice("Shipyard buy no-op at spöb \(spob.id, privacy: .public): ship=\(s.id, privacy: .public) netPrice=\(price, privacy: .public) credits=\(pilot.state.credits, privacy: .public) — insufficient credits or already owned")
+                               }
+                           },
+                           onCancel: { namingShip = nil })
         .focusable().focusEffectDisabled().focused($gridFocused)
         .onAppear { gridFocused = true }
         .onKeyPress(phases: .down) { press in
@@ -841,6 +861,10 @@ struct ShipyardView: View {
         .cursorScrollable()
     }
 
+    private func christenPrompt(_ ship: ShipRes) -> String {
+        PilotFactory.christenPrompt(hull: PilotFactory.christenHull(ship), game: game)
+    }
+
     private func info(_ space: NovaSpace, _ d: DITLPlacement) -> some View {
         let s = selected
         return VStack(alignment: .leading, spacing: 10) {
@@ -889,13 +913,11 @@ struct ShipyardView: View {
                 Log.spaceport.error("Shipyard buy tapped with no ship selected at spöb \(spob.id, privacy: .public) — no-op")
                 return
             }
-            let price = netPrice(s)
-            if pilot.buyShip(s, at: spob, galaxy: galaxy) {
-                Log.spaceport.debug("Bought ship \(s.id, privacy: .public) (\(s.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(price, privacy: .public)cr")
-                onLiveSync()
-            } else {
-                Log.spaceport.notice("Shipyard buy no-op at spöb \(spob.id, privacy: .public): ship=\(s.id, privacy: .public) netPrice=\(price, privacy: .public) credits=\(pilot.state.credits, privacy: .public) — insufficient credits or already owned")
-            }
+            // The confirm is the christening prompt. The roll redraws as it opens.
+            pilot.beginShipPurchase(s)
+            nameDraft = PilotFactory.purchaseSuggestedName(s)
+            namingShip = s
+            showNamePrompt = true
         }
         .ditlPlace(space, d, 0, stock: CGRect(x: 365, y: 289, width: 109, height: 25), at: -18, 128)
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),

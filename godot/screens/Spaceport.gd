@@ -25,6 +25,7 @@ const BarScreens = preload("res://screens/BarScreens.gd")   # Hire Escort, Gambl
 const StoryGuide = preload("res://screens/StoryGuide.gd")
 const ClassicTheme = preload("res://ui/classic/ClassicTheme.gd")
 const SpaceportClassic = preload("res://screens/SpaceportClassic.gd")   # the original-UI look
+const ClassicDialog = preload("res://ui/classic/ClassicDialog.gd")
 const DescMovie = preload("res://ui/DescMovie.gd")   # the stellar's own dësc movie, played as the player docks
 
 const PANEL_SIZE := Vector2(1180, 660)
@@ -895,12 +896,33 @@ func _ship_buy() -> void:
 	var i := _find_item(_sel_id)
 	if i < 0:
 		return
-	var name := str(_items[i].name)
-	if _nova.shipyard_buy(_sel_id):
-		_message = "Bought the %s." % name
-	else:
+	var info = JSON.parse_string(_nova.shipyard_name_prompt(_sel_id))
+	if not (info is Dictionary):
+		_nova.sound_beep(4)
 		_message = "Can't buy that ship."
-	_show_shipyard()
+		return
+	var hull_name := str(_items[i].name)
+	var d := ClassicDialog.text_prompt(_nova, str(info.get("prompt", "")), str(info.get("default", "")))
+	if d.texts.get(4) != null:
+		d.texts[4].max_length = 64
+	var me := self
+	d.actions[0] = func():
+		var answer := ClassicDialog.prompt_answer(d.edit_text(4))
+		if answer.to_utf8_buffer().size() > 64:
+			me._nova.sound_beep(3)
+			return
+		var bought: bool = me._nova.shipyard_commit(me._sel_id, answer)
+		me._message = ("Bought the %s." % hull_name) if bought else "Can't buy that ship."
+		me._close_overlay()
+		me._show_shipyard.call_deferred()
+	d.actions[5] = func():
+		me._close_overlay()
+		me._show_shipyard.call_deferred()
+	if _classic():
+		_c.show_overlay(d)
+	else:
+		_close_overlay()
+		_overlay = ClassicDialog.modal(_root, d)
 
 
 func _ship_info() -> void:

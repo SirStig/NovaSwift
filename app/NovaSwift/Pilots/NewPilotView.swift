@@ -244,8 +244,11 @@ struct NewPilotView: View {
     // MARK: Actions
 
     private func start(_ scenario: CharRes) {
+        // DLOG 3001: more than 64 bytes beeps and stays open. A leading "the "
+        // is dropped before the name is stored (0x004665f0).
+        guard shipName.utf8.count <= 64 else { model.audio.play(.uiError); return }
         _ = model.createPilot(name: name, isMale: isMale, strictPlay: strictPlay, scenario: scenario,
-                              nickname: nickname, shipName: shipName)
+                              nickname: nickname, shipName: classicPromptAnswer(shipName))
         onClose()
         if scenario.introSlides.isEmpty && scenario.introTextID == nil {
             // No intro to play — go straight to the flight-training offer.

@@ -646,7 +646,7 @@ public enum PilotEconomy {
     /// run its OnPurchase and redraw the class's shipyard roll for the day.
     @discardableResult
     public static func buyShip(_ state: inout PlayerState, _ ship: ShipRes, game: NovaGame, scale: Float = 1,
-                               stellarTech: Int = 0, rolled: Bool = false) -> Bool {
+                               stellarTech: Int = 0, shipName: String? = nil, rolled: Bool = false) -> Bool {
         let price = LandedServices.shipPrice(ship, scale: scale, stellarTech: stellarTech)
         let tradeIn = tradeInValue(state, game: game, scale: scale, stellarTech: stellarTech)
         guard state.credits + tradeIn >= price, ship.id != state.shipType else { return false }
@@ -657,7 +657,13 @@ public enum PilotEconomy {
         }
         state.credits = max(0, state.credits - price)
         state.shipType = ship.id
-        state.shipName = ship.displayName
+        // The purchase prompt (0x00492f30) stores whatever the pilot accepted.
+        // Callers that skip the prompt keep the class name.
+        if let shipName {
+            state.shipName = shipName.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            state.shipName = ship.displayName
+        }
         // The old hull and everything installed on it are traded in together
         // (credited via `tradeInValue` above) — real EV Nova does NOT carry
         // outfits over to a new ship by default. The one exception is

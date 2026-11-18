@@ -1883,6 +1883,30 @@ class NovaWorld: Node2D {
         return ok
     }
 
+    /// The shipyard christening prompt (0x00492f30). Redraws that class's roll
+    /// as the dialog opens. JSON `{prompt, default}`, or `""` when the hull
+    /// cannot be bought.
+    @Callable(autoSnakeCase: true) func shipyardNamePrompt(id: Int) -> String {
+        guard let c = shopContext(), let s = c.game.ship(id),
+              SpaceportShops.shipyardList(game: c.game, spob: c.spob, state: pilot).contains(where: { $0.id == id }),
+              SpaceportShops.canBuyShip(s, game: c.game, galaxy: c.galaxy, spob: c.spob, state: pilot)
+        else { return "" }
+        PilotEconomy.beginShipPurchase(&pilot, s)
+        let hull = PilotFactory.christenHull(s)
+        return Self.json(["prompt": PilotFactory.christenPrompt(hull: hull, game: c.game),
+                           "default": PilotFactory.purchaseSuggestedName(s)] as [String: Any])
+    }
+
+    /// Finish a purchase whose christening prompt already redrew the roll.
+    @Callable(autoSnakeCase: true) func shipyardCommit(id: Int, name: String) -> Bool {
+        guard let c = shopContext(), let s = c.game.ship(id),
+              SpaceportShops.canBuyShip(s, game: c.game, galaxy: c.galaxy, spob: c.spob, state: pilot)
+        else { return false }
+        let ok = SpaceportShops.buyShip(&pilot, s, at: c.spob, galaxy: c.galaxy, shipName: name, rolled: true)
+        if ok { visitDays.shipPurchase = true }
+        return ok
+    }
+
     // MARK: Event drains
     //
     // Both of these genuinely *drain*: they hand over what has accumulated since

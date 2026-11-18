@@ -242,6 +242,11 @@ func _run() -> void:
 		print("  buying ", buy_ship, " sel=", sp._sel_id, " btn disabled=", sp._c.win_dlg.find_child("shop_buy", true, false).disabled)
 		sp._c.win_dlg.find_child("shop_buy", true, false).pressed.emit()
 		await _frames()
+		var host: Node = sp._overlay
+		_ok(host != null and host.get_child_count() > 1, "Buy Ship asks for a ship name")
+		if host != null and host.get_child_count() > 1:
+			host.get_child(1).actions[0].call()
+		await _frames()
 		_ok(c3 - nova.player_credits() == int(buy_ship.price), "Buy Ship changes credits by the net price", "%d vs %d" % [c3 - nova.player_credits(), int(buy_ship.price)])
 	_key("ui_cancel")
 	await _frames()
