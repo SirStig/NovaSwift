@@ -1127,7 +1127,9 @@ struct GameContainerView: View {
                 }
 
                 // Mobile action-menu panels (opened from the on-screen controls).
+                // The live chart, so Mission Info's map plots the real route.
                 mobilePanels
+                    .environment(\.flightNav, nav)
 
                 if showMenu {
                     GameMenuView(hud: host.hud,
@@ -1140,6 +1142,7 @@ struct GameContainerView: View {
                                      console.tab = .tools
                                      console.isPresented = true
                                  })
+                    .environment(\.flightNav, nav)
                 }
 
                 // Dev console: an on-screen entry point + live metrics chip while

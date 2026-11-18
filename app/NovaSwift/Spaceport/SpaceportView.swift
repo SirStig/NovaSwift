@@ -582,9 +582,7 @@ struct MissionBBSView: View {
             }
         }
         .overlay { StoryTextOverlay(services: services) }
-        .overlay(alignment: .bottom) {
-            TouchGalaxyMapButton(graphics: graphics) { openBoardMap() }
-        }
+        .touchMapBar(graphics: graphics, openBoardMap)
         .cursorCancel(onDone)
         .missionWindowKeys(bbsKey)
         .sheet(item: $nested) { kind in

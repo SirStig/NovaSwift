@@ -659,11 +659,7 @@ public enum PilotEconomy {
         state.shipType = ship.id
         // The purchase prompt (0x00492f30) stores whatever the pilot accepted.
         // Callers that skip the prompt keep the class name.
-        if let shipName {
-            state.shipName = shipName.trimmingCharacters(in: .whitespacesAndNewlines)
-        } else {
-            state.shipName = ship.displayName
-        }
+        state.shipName = shipName ?? ship.displayName
         // The old hull and everything installed on it are traded in together
         // (credited via `tradeInValue` above) — real EV Nova does NOT carry
         // outfits over to a new ship by default. The one exception is

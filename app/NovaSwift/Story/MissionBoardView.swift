@@ -391,19 +391,22 @@ struct MissionBoardView: View {
     }
 }
 
-/// The galaxy-map command (rebindable, default M) as a button. The original is a
-/// key, which a phone has no way to press. Desktop keeps that key.
-struct TouchGalaxyMapButton: View {
-    let graphics: SpaceportGraphics
-    let action: () -> Void
-
-    var body: some View {
+extension View {
+    /// The galaxy-map command (default M) as an authentic Nova button in the
+    /// safe area above the home indicator. Phones and Apple TV have no key for
+    /// it; desktop keeps the key and draws nothing.
+    @ViewBuilder func touchMapBar(graphics: SpaceportGraphics, shown: Bool = true,
+                                  _ action: @escaping () -> Void) -> some View {
         #if os(iOS) || os(tvOS)
-        NovaButton(graphics: graphics, title: "Map", width: 72, action: action)
-            .padding(.bottom, 12)
-            .accessibilityLabel("Open the galaxy map")
+        safeAreaInset(edge: .bottom, spacing: 0) {
+            if shown {
+                NovaButton(graphics: graphics, title: "Map", width: 72, action: action)
+                    .padding(.vertical, 6)
+                    .accessibilityLabel("Show this mission on the galaxy map")
+            }
+        }
         #else
-        EmptyView()
+        self
         #endif
     }
 }
@@ -588,9 +591,7 @@ private struct MissionInfoSheet: View {
         }
         // Ⓑ refuses, when the offer can be refused.
         .cursorCancel(offer.canRefuse ? onDecline : nil)
-        .overlay(alignment: .bottom) {
-            TouchGalaxyMapButton(graphics: graphics) { present(.map(mapPreselect)) }
-        }
+        .touchMapBar(graphics: graphics) { present(.map(mapPreselect)) }
         .missionWindowKeys { press in
             if consumeDockedKey(press) { return true }
             switch MissionOfferKey.resolve(press, acceptLabel: offer.acceptButton,
@@ -782,10 +783,8 @@ struct MissionSingleDialog: View {
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
         .overlay { if moviePlayer != nil { moviePlayerOverlay } }
-        .overlay(alignment: .bottom) {
-            if moviePlayer == nil, movieGIF == nil {
-                TouchGalaxyMapButton(graphics: graphics) { present(.map(mapPreselect)) }
-            }
+        .touchMapBar(graphics: graphics, shown: moviePlayer == nil && movieGIF == nil) {
+            present(.map(mapPreselect))
         }
         // Ⓑ refuses, when the offer can be refused.
         .cursorCancel(offer.canRefuse ? { finish(onDecline) } : nil)

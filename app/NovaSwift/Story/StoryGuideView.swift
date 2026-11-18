@@ -102,11 +102,9 @@ struct StoryGuideView: View {
         if isCompact {
             VStack(spacing: 0) {
                 if !lanes.isEmpty { searchRow }
-                StoryHero(model: model, lane: selectedLane, compact: true, onShowStep: showCurrentStep)
-                StoryLegend()
-                Divider().overlay(.white.opacity(0.12))
                 flow
             }
+            .frame(maxHeight: .infinity)
         } else {
             HStack(spacing: 0) {
                 StorylineSidebar(lanes: lanes, untaggedCount: model.storyMap.untaggedCount,
@@ -125,9 +123,20 @@ struct StoryGuideView: View {
     @ViewBuilder private var flow: some View {
         if let key = selectedKey {
             StorylineFlowView(model: model, storylineKey: key, focusRequest: focusRequest,
-                              onSwitchStoryline: { selectedKey = $0 }, onAbort: onAbort)
+                              onSwitchStoryline: { selectedKey = $0 }, onAbort: onAbort,
+                              preamble: isCompact ? AnyView(compactStatus) : AnyView(EmptyView()))
         } else {
             noSelectionState
+        }
+    }
+
+    /// The progress card and legend, drawn at the top of the step list on a
+    /// phone so they scroll away instead of pinning the list to a strip.
+    private var compactStatus: some View {
+        VStack(spacing: 0) {
+            StoryHero(model: model, lane: selectedLane, compact: true, onShowStep: showCurrentStep)
+            StoryLegend()
+            Divider().overlay(.white.opacity(0.12))
         }
     }
 
@@ -194,7 +203,7 @@ struct StoryGuideView: View {
             Spacer(minLength: 6)
             closeButton
         }
-        .padding(.horizontal, 16).padding(.vertical, 10)
+        .padding(.horizontal, 16).padding(.vertical, 6)
     }
 
     private var filteredLanes: [StoryMapLane] {

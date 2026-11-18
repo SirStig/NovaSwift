@@ -19,6 +19,9 @@ struct MissionInfoView: View {
     var onClose: () -> Void
 
     @EnvironmentObject private var appModel: AppModel
+    @Environment(\.flightNav) private var flightNav
+    @StateObject private var localNav = NavigationModel(game: nil, startSystemID: 128)
+    @State private var nested: LandedNested?
 
     @State private var summaries: [StoryEngine.MissionSummary] = []
     @State private var selectedID: Int?
@@ -79,6 +82,21 @@ struct MissionInfoView: View {
         .cursorCancel(close)
         .cursorModal()
         .onAppear(perform: rebuild)
+        // The map command (0x00446150 action 6, command slot 9).
+        .missionWindowKeys { press in
+            guard nested == nil else { return false }
+            let map = appModel.bindings.token(for: .galaxyMap)
+            guard !map.isEmpty, KeyToken.from(press) == map else { return false }
+            openMap()
+            return true
+        }
+        .sheet(item: $nested) { kind in
+            LandedWindowCover(kind: kind, graphics: graphics, pilot: pilot, nav: flightNav ?? localNav,
+                              fullscreenMap: appModel.settings.fullscreenGalaxyMap,
+                              closeToken: appModel.bindings.token(for: .playerInfo),
+                              onClose: { nested = nil })
+                .cursorHost()
+        }
         .storylineGuideSheet(isPresented: $showStoryGuide, game: game, player: { pilot.state },
                              storylineKey: storyGuideFocusKey)
     }
@@ -98,6 +116,16 @@ struct MissionInfoView: View {
     private func openStoryline(_ key: String) {
         storyGuideFocusKey = key
         showStoryGuide = true
+    }
+
+    /// Opens the starmap over the dialog, preselecting the selected mission's
+    /// destination when that mission asks for it (flags 0x0100).
+    private func openMap() {
+        let preselect = selected.flatMap {
+            StoryEngine(game: game, player: pilot.state).activeMissionMapSystem($0.id)
+        }
+        if flightNav == nil { localNav.configure(game: game, startSystemID: pilot.state.currentSystem) }
+        nested = .map(preselect)
     }
 
     private func abortSelected() {
@@ -151,6 +179,14 @@ struct MissionInfoView: View {
                            title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
                            width: CGFloat(items.done.w - 26), action: close)
                     .novaPlace(space, cx(items.done, nw), cy(items.done, nh))
+
+                #if os(iOS) || os(tvOS)
+                // Touch / remote stand-in for the map key, which these
+                // platforms can't press. Sits in the gap between Abort and Done.
+                NovaButton(graphics: graphics, title: "Map", width: 73, action: openMap)
+                    .accessibilityLabel("Show the selected mission on the galaxy map")
+                    .novaPlace(space, 174 - nw / 2, cy(items.done, nh))
+                #endif
             }
             .frame(width: nw, height: nh, alignment: .topLeading)
             .cursorScaleEffect(scale)

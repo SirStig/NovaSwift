@@ -602,6 +602,16 @@ public final class StoryEngine {
 
     // MARK: - Helpers
 
+    /// The system the starmap preselects when opened from the Mission Info
+    /// window for this active mission (0x00446150 action 6): only when the
+    /// mission sets `Flags` 0x0100, its TravelStel else its ReturnStel.
+    public func activeMissionMapSystem(_ missionID: Int) -> Int? {
+        guard let am = player.activeMissions.first(where: { $0.missionID == missionID }),
+              let m = game.mission(missionID), m.flags1 & 0x0100 != 0,
+              let spob = am.travelSpobID ?? returnStellar(of: am, m) else { return nil }
+        return owningSystem(ofSpob: spob)
+    }
+
     func stringListEntry(_ strID: Int, index: Int) -> String? {
         game.stringList(strID)?.string(at: index)
     }

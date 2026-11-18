@@ -27,6 +27,9 @@ struct StorylineFlowView: View {
     var focusRequest: StoryStepFocus?
     var onSwitchStoryline: (String) -> Void = { _ in }
     var onAbort: ((Int) -> Void)?
+    /// Drawn at the top of the same scroll as the steps, so a phone can move
+    /// it off screen instead of pinning it above a tiny list.
+    var preamble: AnyView = AnyView(EmptyView())
 
     @State private var expandedID: Int?
 
@@ -37,6 +40,7 @@ struct StorylineFlowView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    preamble
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                         StoryFlowRowView(
                             row: row, model: model,
