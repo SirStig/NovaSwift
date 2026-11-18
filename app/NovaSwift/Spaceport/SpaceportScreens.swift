@@ -711,20 +711,26 @@ struct ShipyardView: View {
         .cursorCancel(onDone)
         .animation(.easeOut(duration: 0.15), value: showInfo)
         .classicTextPrompt(isPresented: $showNamePrompt,
-                           prompt: namingShip.map { christenPrompt($0) } ?? "",
+                           prompt: namingShip.map { PilotFactory.purchasePrompt($0, game: game) } ?? "",
                            text: $nameDraft,
                            onOK: { answer in
                                guard let s = namingShip else { return }
                                namingShip = nil
                                let price = netPrice(s)
-                               if pilot.buyShip(s, at: spob, galaxy: galaxy, shipName: answer, alreadyRolled: true) {
+                               // buyShip redraws the class's roll whether or not it goes through.
+                               if pilot.buyShip(s, at: spob, galaxy: galaxy, shipName: answer) {
                                    Log.spaceport.debug("Bought ship \(s.id, privacy: .public) (\(s.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(price, privacy: .public)cr")
                                    onLiveSync()
                                } else {
                                    Log.spaceport.notice("Shipyard buy no-op at spöb \(spob.id, privacy: .public): ship=\(s.id, privacy: .public) netPrice=\(price, privacy: .public) credits=\(pilot.state.credits, privacy: .public) — insufficient credits or already owned")
                                }
                            },
-                           onCancel: { namingShip = nil })
+                           onCancel: {
+                               // 0x00492f30 redraws the class's roll after the
+                               // prompt closes, Cancel included (EC-11).
+                               if let s = namingShip { pilot.beginShipPurchase(s) }
+                               namingShip = nil
+                           })
         .focusable().focusEffectDisabled().focused($gridFocused)
         .onAppear { gridFocused = true }
         .onKeyPress(phases: .down) { press in
@@ -861,10 +867,6 @@ struct ShipyardView: View {
         .cursorScrollable()
     }
 
-    private func christenPrompt(_ ship: ShipRes) -> String {
-        PilotFactory.christenPrompt(hull: PilotFactory.christenHull(ship), game: game)
-    }
-
     private func info(_ space: NovaSpace, _ d: DITLPlacement) -> some View {
         let s = selected
         return VStack(alignment: .leading, spacing: 10) {
@@ -913,8 +915,8 @@ struct ShipyardView: View {
                 Log.spaceport.error("Shipyard buy tapped with no ship selected at spöb \(spob.id, privacy: .public) — no-op")
                 return
             }
-            // The confirm is the christening prompt. The roll redraws as it opens.
-            pilot.beginShipPurchase(s)
+            // The confirm is the naming prompt (0x00492f30). The class's roll
+            // redraws only once it closes, so the hull stays listed meanwhile.
             nameDraft = PilotFactory.purchaseSuggestedName(s)
             namingShip = s
             showNamePrompt = true

@@ -49,12 +49,19 @@ public enum PilotFactory {
         return christenPrompt(hull: hull, game: game)
     }
 
-    /// The name a shipyard purchase offers to edit (0x00492f30): the class long
-    /// name, a space, and three digits each rolled from 1 through 9.
+    /// The shipyard purchase prompt (0x00492f30): STR# 2002 #120 ("Please name
+    /// your new" — not the new-pilot #121), " " (0x0056d0c4), the hull's long
+    /// name and ": " (0x0056d0d4).
+    public static func purchasePrompt(_ ship: ShipRes, game: NovaGame) -> String {
+        (game.stringList(2002)?.string(at: 120) ?? "") + " " + christenHull(ship) + ": "
+    }
+
+    /// The name a shipyard purchase offers to edit (0x00492f30): the class
+    /// name (the ship record's +0x6c name, not the long name), a space, and
+    /// three digits each rolled from 1 through 9.
     public static func purchaseSuggestedName(_ ship: ShipRes) -> String {
-        let hull = christenHull(ship)
         let suffix = (0..<3).map { _ in String(Int.random(in: 1...9)) }.joined()
-        return hull.isEmpty ? suffix : hull + " " + suffix
+        return ship.displayName + " " + suffix
     }
 
     /// Build a new pilot for `scenario`.

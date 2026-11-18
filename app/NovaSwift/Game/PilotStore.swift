@@ -316,8 +316,8 @@ final class PilotStore: ObservableObject {
                               stellarTech: spob.techLevel)
     }
 
-    /// Opening the purchase prompt redraws that class's roll whether or not the
-    /// pilot goes through with it (0x00492f30, EC-11).
+    /// Closing the purchase prompt redraws that class's roll whether or not the
+    /// pilot went through with it (0x00492f30, EC-11).
     func beginShipPurchase(_ ship: ShipRes) {
         PilotEconomy.beginShipPurchase(&state, ship)
     }

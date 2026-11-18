@@ -236,7 +236,7 @@ final class ShopVisitFidelityTests: XCTestCase {
         Bytes.i32(&bytes, 48, 1000)
         Bytes.cstr(&bytes, 1582, "Courier; fast")
         let bought = Resource(type: NovaType.ship, id: 129, name: "Shuttle; A", data: Data(bytes))
-        let strings = Array(repeating: "", count: 120) + ["Now, please christen your brand-new"]
+        let strings = Array(repeating: "", count: 119) + ["Please name your new", "Now, please christen your brand-new"]
         let game = makeGame([
             shipResource(id: 128, cargo: 10), bought,
             stringListResource(2002, strings),
@@ -245,8 +245,11 @@ final class ShopVisitFidelityTests: XCTestCase {
         XCTAssertEqual(PilotFactory.christenHull(hull), "Courier")
         XCTAssertEqual(PilotFactory.christenPrompt(hull: "Courier", game: game),
                        "Now, please christen your brand-new Courier: ")
+        // 0x00492f30 reads row 120, not the new-pilot row 121.
+        XCTAssertEqual(PilotFactory.purchasePrompt(hull, game: game), "Please name your new Courier: ")
+        // The suggestion is the class name (+0x6c), not the long name.
         let suggested = PilotFactory.purchaseSuggestedName(hull)
-        XCTAssertNotNil(suggested.range(of: #"^Courier [1-9]{3}$"#, options: .regularExpression), suggested)
+        XCTAssertNotNil(suggested.range(of: #"^Shuttle [1-9]{3}$"#, options: .regularExpression), suggested)
         var pilot = PlayerState(shipType: 128, shipName: "Old", credits: 1_000_000)
         XCTAssertTrue(PilotEconomy.buyShip(&pilot, hull, game: game, shipName: "Falcon"))
         XCTAssertEqual(pilot.shipName, "Falcon")

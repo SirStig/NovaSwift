@@ -633,9 +633,9 @@ public enum PilotEconomy {
                - tradeInValue(state, game: game, scale: scale, stellarTech: stellarTech))
     }
 
-    /// Starting a ship purchase (0x00492f30) redraws that class's shipyard roll
-    /// whether or not the confirm dialog is accepted (EC-11). The shipyard calls
-    /// this when the confirm opens, then `buyShip(..., rolled: true)`.
+    /// A ship purchase (0x00492f30) redraws that class's shipyard roll once the
+    /// naming prompt closes, whether it was accepted or cancelled (EC-11). OK
+    /// goes through `buyShip` (which redraws it); Cancel calls this.
     public static func beginShipPurchase(_ state: inout PlayerState, _ ship: ShipRes) {
         state.rerollStock(shipType: ship.id, hire: false, day: state.date.julianDay)
     }

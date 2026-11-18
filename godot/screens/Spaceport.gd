@@ -916,6 +916,7 @@ func _ship_buy() -> void:
 		me._close_overlay()
 		me._show_shipyard.call_deferred()
 	d.actions[5] = func():
+		me._nova.shipyard_cancel_purchase(me._sel_id)
 		me._close_overlay()
 		me._show_shipyard.call_deferred()
 	if _classic():

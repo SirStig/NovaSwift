@@ -41,7 +41,17 @@ private struct ClassicPromptModifier: ViewModifier {
     let onOK: (String?) -> Void
     let onCancel: () -> Void
 
-    private var classic: Bool { !model.settings.modernDialogs && model.data.game != nil }
+    /// The native DLOG/DITL dialog, but only when the loaded data still has
+    /// the items it binds (prompt text, edit field, both buttons). A missing
+    /// or replaced 3001/3002 would otherwise draw an empty white window with
+    /// no way out, so it falls back to the in-app alert.
+    private var classic: Bool {
+        guard !model.settings.modernDialogs, let game = model.data.game,
+              let items = game.dialog(text == nil ? 3002 : 3001)?.items.items else { return false }
+        let present = Set(items.map(\.index))
+        let needed: Set<Int> = text == nil ? [0, 2, 4] : [0, 2, 4, 5]
+        return needed.isSubset(of: present)
+    }
 
     private func ok() {
         if let text {

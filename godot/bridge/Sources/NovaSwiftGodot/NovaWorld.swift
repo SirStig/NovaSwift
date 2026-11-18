@@ -1883,28 +1883,34 @@ class NovaWorld: Node2D {
         return ok
     }
 
-    /// The shipyard christening prompt (0x00492f30). Redraws that class's roll
-    /// as the dialog opens. JSON `{prompt, default}`, or `""` when the hull
-    /// cannot be bought.
+    /// The shipyard naming prompt (0x00492f30). JSON `{prompt, default}`, or
+    /// `""` when the hull cannot be bought. The class's roll is redrawn only
+    /// when the prompt closes (`shipyardCommit` / `shipyardCancelPurchase`).
     @Callable(autoSnakeCase: true) func shipyardNamePrompt(id: Int) -> String {
         guard let c = shopContext(), let s = c.game.ship(id),
               SpaceportShops.shipyardList(game: c.game, spob: c.spob, state: pilot).contains(where: { $0.id == id }),
               SpaceportShops.canBuyShip(s, game: c.game, galaxy: c.galaxy, spob: c.spob, state: pilot)
         else { return "" }
-        PilotEconomy.beginShipPurchase(&pilot, s)
-        let hull = PilotFactory.christenHull(s)
-        return Self.json(["prompt": PilotFactory.christenPrompt(hull: hull, game: c.game),
+        return Self.json(["prompt": PilotFactory.purchasePrompt(s, game: c.game),
                            "default": PilotFactory.purchaseSuggestedName(s)] as [String: Any])
     }
 
-    /// Finish a purchase whose christening prompt already redrew the roll.
+    /// OK on the naming prompt: buy the hull under `name`. The class's roll
+    /// is redrawn whether or not the purchase goes through (0x00492f30).
     @Callable(autoSnakeCase: true) func shipyardCommit(id: Int, name: String) -> Bool {
-        guard let c = shopContext(), let s = c.game.ship(id),
-              SpaceportShops.canBuyShip(s, game: c.game, galaxy: c.galaxy, spob: c.spob, state: pilot)
+        guard let c = shopContext(), let s = c.game.ship(id) else { return false }
+        PilotEconomy.beginShipPurchase(&pilot, s)
+        guard SpaceportShops.canBuyShip(s, game: c.game, galaxy: c.galaxy, spob: c.spob, state: pilot)
         else { return false }
         let ok = SpaceportShops.buyShip(&pilot, s, at: c.spob, galaxy: c.galaxy, shipName: name, rolled: true)
         if ok { visitDays.shipPurchase = true }
         return ok
+    }
+
+    /// Cancel on the naming prompt: the class's roll is still redrawn.
+    @Callable(autoSnakeCase: true) func shipyardCancelPurchase(id: Int) {
+        guard let s = shopContext()?.game.ship(id) else { return }
+        PilotEconomy.beginShipPurchase(&pilot, s)
     }
 
     // MARK: Event drains
