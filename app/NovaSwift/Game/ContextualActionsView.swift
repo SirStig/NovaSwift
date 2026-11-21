@@ -23,10 +23,12 @@ import SwiftUI
 /// carries **discrete tap actions only** — hold/reflex controls (fire, thrust,
 /// turn) live in `TouchControlsOverlay` and never move or pop in and out.
 ///
-/// Reshaping is debounced (`task(id:)` below): the situation must hold still
-/// for a beat before pills appear or leave, so cycling targets — or a ship's
-/// speed hovering right at the landing limit — can't make the row strobe
-/// under the player's thumb.
+/// Reshaping is debounced (`task(id:)` below), asymmetrically: a new pill
+/// shows after ~0.1 s, a departing one lingers ~0.45 s, so cycling targets —
+/// or a ship's speed hovering right at the landing limit — can't make the row
+/// strobe under the player's thumb. Labels step down (full → short → glyph)
+/// to fit the gap between the bottom-corner touch clusters, and taps go
+/// through the UIKit `PressCatcher` path so they aren't lost to the SKView.
 struct ContextualActionsView: View {
     @ObservedObject var hud: GameHUDModel
     /// Restrict the strip to the land pill/hint alone. The tutorial sandbox
@@ -38,6 +40,14 @@ struct ContextualActionsView: View {
     /// `GameContainerView.sidebarWidth`), so the strip centres on the actual
     /// play viewport instead of the full window.
     var rightInset: CGFloat = 0
+    /// Room the bottom-corner touch clusters take from each side of the play
+    /// viewport at the pills' height (`TouchLayout.bottomBandInsets`) — the
+    /// strip centres in, and fits itself to, the gap between them.
+    var clusterInsets: (leading: CGFloat, trailing: CGFloat) = (0, 0)
+    /// The bottom safe-area inset. The mobile message line lives in the
+    /// lowest band of the screen (`MessageLogView.mobileBand`); on a device
+    /// with no home-indicator inset the strip lifts itself clear of it.
+    var bottomSafeInset: CGFloat = 0
 
     /// One situational pill the strip can offer. The associated names are
     /// display-only — each tap dispatches a plain `GameAction` that acts on
@@ -89,7 +99,7 @@ struct ContextualActionsView: View {
     /// bottom edge rather than floating well above it.
     private var bottomPadding: CGFloat {
         #if os(iOS)
-        6
+        max(6, MessageLogView.mobileBand + 4 - bottomSafeInset)
         #else
         8
         #endif
@@ -103,6 +113,11 @@ struct ContextualActionsView: View {
                 content
                 Spacer(minLength: 0)
             }
+            #if os(iOS)
+            // Symmetric so the strip stays centred on the viewport, using the
+            // wider of the two clusters plus a thumb's gap.
+            .padding(.horizontal, max(clusterInsets.leading, clusterInsets.trailing) + 8)
+            #endif
             .padding(.trailing, rightInset)
             .padding(.bottom, bottomPadding)
         }
@@ -115,9 +130,14 @@ struct ContextualActionsView: View {
             // held still for a beat. `task(id:)` cancels the sleep whenever
             // `desired` changes again, so a flickering input (target cycling,
             // speed hovering at the landing limit) never reaches the screen.
+            // Asymmetric: a pill that's newly called for shows almost at once
+            // (waiting a third of a second for "Land" felt laggy), while one
+            // that's going away lingers, so a pill never vanishes from under
+            // a thumb that's already on its way to it.
             let target = desired
             guard target != shown else { return }
-            try? await Task.sleep(nanoseconds: 350_000_000)
+            let removes = shown.contains { !target.contains($0) }
+            try? await Task.sleep(nanoseconds: removes ? 450_000_000 : 90_000_000)
             guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: 0.15)) {
                 shown = target
@@ -136,10 +156,18 @@ struct ContextualActionsView: View {
                 hint(hud.landPrompt).allowsHitTesting(false)
             }
             if escortOrdersOpen {
-                escortOrdersRow
+                ViewThatFits(in: .horizontal) {
+                    escortOrdersRow(.full)
+                    escortOrdersRow(.iconOnly)
+                }
             } else if !shown.isEmpty {
-                HStack(spacing: 8) {
-                    ForEach(shown) { pill(for: $0) }
+                // Full labels when they fit between the corner clusters, then
+                // short labels, then glyphs only — three pills always fit on
+                // the smallest phone instead of spilling under the controls.
+                ViewThatFits(in: .horizontal) {
+                    pillRow(.full)
+                    pillRow(.short)
+                    pillRow(.iconOnly)
                 }
             }
         }
@@ -157,18 +185,30 @@ struct ContextualActionsView: View {
 
     // MARK: - Pills (iOS)
 
-    @ViewBuilder private func pill(for action: ContextualAction) -> some View {
+    /// How much text a pill carries — stepped down by `ViewThatFits` until
+    /// the row fits the gap between the touch clusters.
+    private enum PillStyle { case full, short, iconOnly }
+
+    private func pillRow(_ style: PillStyle) -> some View {
+        HStack(spacing: 8) {
+            ForEach(shown) { pill(for: $0, style) }
+        }
+        .fixedSize()
+    }
+
+    @ViewBuilder private func pill(for action: ContextualAction, _ style: PillStyle) -> some View {
         switch action {
         case .land(let name):
-            landPill(name)
+            landPill(name, style)
         case .board:
-            actionPill(icon: "shippingbox.fill", label: "Board") { onAction(.board) }
+            actionPill(icon: "shippingbox.fill", label: "Board", style) { onAction(.board) }
         case .hail:
-            actionPill(icon: "antenna.radiowaves.left.and.right", label: "Hail") { onAction(.hailTarget) }
+            actionPill(icon: "antenna.radiowaves.left.and.right", label: "Hail", style) { onAction(.hailTarget) }
         case .jump(let system):
-            actionPill(icon: "bolt.horizontal.circle.fill", label: "Jump: \(system)") { onAction(.hyperjump) }
+            actionPill(icon: "bolt.horizontal.circle.fill",
+                       label: style == .full ? "Jump: \(system)" : "Jump", style) { onAction(.hyperjump) }
         case .escorts:
-            actionPill(icon: "person.3.fill", label: "Escorts") {
+            actionPill(icon: "person.3.fill", label: "Escorts", style) {
                 withAnimation(.easeOut(duration: 0.15)) { escortOrdersOpen = true }
             }
         }
@@ -176,68 +216,70 @@ struct ContextualActionsView: View {
 
     /// The original amber Land pill — the one "do it now" primary in the row,
     /// filled rather than outlined so clearance to land is unmistakable.
-    private func landPill(_ name: String) -> some View {
-        Button { onAction(.land) } label: {
+    private func landPill(_ name: String, _ style: PillStyle) -> some View {
+        ContextPillButton(action: { onAction(.land) }, accessibility: "Land on \(name)") {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.down.to.line")
-                Text("Land on \(name)").lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: 170)
+                if style != .iconOnly {
+                    Text(style == .full ? "Land on \(name)" : "Land").lineLimit(1)
+                }
                 // Pad players see which physical button lands, right on
                 // the pill (renders nothing without a controller).
                 PadGlyph(.land, size: 13, tint: .black)
             }
-            .novaFont(.hud, weight: .semibold, size: 12)
+            .novaFont(.hud, weight: .semibold, size: 13)
             .foregroundStyle(.black)
-            .padding(.horizontal, 13).padding(.vertical, 6)
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .frame(minWidth: 44, minHeight: 36)
             .background(Capsule().fill(novaAmber))
             .shadow(color: .black.opacity(0.5), radius: 3, y: 1)
         }
-        .buttonStyle(.novaPlain)
         .transition(.opacity)
     }
 
     /// A secondary contextual pill in the EV Nova HUD idiom — dark translucent
     /// capsule, thin amber edge, amber glyph — visually quieter than Land so
     /// the row reads as "one command, some options."
-    private func actionPill(icon: String, label: String,
+    private func actionPill(icon: String, label: String, _ style: PillStyle,
                             action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        ContextPillButton(action: action, accessibility: label) {
             HStack(spacing: 6) {
-                Image(systemName: icon).font(.system(size: 11, weight: .semibold))
-                Text(label).lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: 150)
+                Image(systemName: icon).font(.system(size: 13, weight: .semibold))
+                if style != .iconOnly { Text(label).lineLimit(1) }
             }
-            .novaFont(.hud, weight: .semibold, size: 12)
+            .novaFont(.hud, weight: .semibold, size: 13)
             .foregroundStyle(novaAmber)
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(Capsule().fill(Color.black.opacity(0.55)))
-            .overlay(Capsule().strokeBorder(novaAmber.opacity(0.35)))
+            .padding(.horizontal, 13).padding(.vertical, 9)
+            .frame(minWidth: 44, minHeight: 36)
+            .background(Capsule().fill(Color.black.opacity(0.6)))
+            .overlay(Capsule().strokeBorder(novaAmber.opacity(0.4)))
             .shadow(color: .black.opacity(0.5), radius: 3, y: 1)
         }
-        .buttonStyle(.novaPlain)
         .transition(.opacity)
     }
 
     /// The Escorts pill, expanded: EV Nova's four Fleet Control standing
     /// orders plus a close. Issuing an order collapses back to the pill row —
     /// standing orders aren't something you re-issue in quick succession.
-    private var escortOrdersRow: some View {
+    private func escortOrdersRow(_ style: PillStyle) -> some View {
         HStack(spacing: 8) {
-            actionPill(icon: "flame.fill", label: "Aggressive") { issueEscortOrder(.commandEscortAggressive) }
-            actionPill(icon: "shield.fill", label: "Defensive") { issueEscortOrder(.commandEscortDefensive) }
-            actionPill(icon: "wind", label: "Evasive") { issueEscortOrder(.commandEscortEvasive) }
-            actionPill(icon: "pause.fill", label: "Hold") { issueEscortOrder(.commandEscortHold) }
-            Button {
+            actionPill(icon: "flame.fill", label: "Aggressive", style) { issueEscortOrder(.commandEscortAggressive) }
+            actionPill(icon: "shield.fill", label: "Defensive", style) { issueEscortOrder(.commandEscortDefensive) }
+            actionPill(icon: "wind", label: "Evasive", style) { issueEscortOrder(.commandEscortEvasive) }
+            actionPill(icon: "pause.fill", label: "Hold", style) { issueEscortOrder(.commandEscortHold) }
+            ContextPillButton(action: {
                 withAnimation(.easeOut(duration: 0.15)) { escortOrdersOpen = false }
-            } label: {
+            }, accessibility: "Close") {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(.white.opacity(0.85))
-                    .padding(8)
-                    .background(Circle().fill(Color.black.opacity(0.55)))
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(Color.black.opacity(0.6)))
                     .overlay(Circle().strokeBorder(Color.white.opacity(0.25)))
             }
-            .buttonStyle(.novaPlain)
             .transition(.opacity)
         }
+        .fixedSize()
     }
 
     private func issueEscortOrder(_ order: GameAction) {
@@ -251,11 +293,46 @@ struct ContextualActionsView: View {
         Text(text)
             #if os(iOS)
             .novaFont(.hud, weight: .semibold, size: 12)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
             #else
             .novaFont(.hud, weight: .semibold)
             #endif
             .foregroundStyle(.white)
             .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
             .transition(.opacity)
+    }
+}
+
+/// A contextual pill's touch target. On iOS the press is caught by the same
+/// UIKit `PressCatcher` the flight caps use: a SwiftUI `Button` floating over
+/// the SpriteKit view competes with the SKView for the very same touch, which
+/// is why taps on these pills were sometimes swallowed (or read as a fly-to
+/// tap on the world behind). The hit box is padded past the visual capsule so
+/// a thumb landing just off its edge still counts.
+private struct ContextPillButton<Label: View>: View {
+    let action: () -> Void
+    var accessibility: String = ""
+    @ViewBuilder let label: () -> Label
+    @State private var pressed = false
+
+    var body: some View {
+        #if os(iOS)
+        label()
+            .opacity(pressed ? 0.7 : 1)
+            .scaleEffect(pressed ? 0.95 : 1)
+            .animation(.easeOut(duration: 0.08), value: pressed)
+            .padding(5)
+            .contentShape(Rectangle())
+            .overlay(PressCatcher(onPressChange: { pressed = $0 }, onTap: action))
+            .padding(-5)
+            .cursorClickable(action)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibility)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { action() }
+        #else
+        Button(action: action, label: label).buttonStyle(.novaPlain)
+        #endif
     }
 }

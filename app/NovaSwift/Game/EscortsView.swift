@@ -199,7 +199,8 @@ struct EscortsView: View {
         let selected = selectedEntityID == e.id
         return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 5) {
-                NovaText(e.name, size: 11, color: .white, width: 118, align: .leading, weight: .semibold)
+                NovaText(e.name, size: 11, color: .white, width: 118, align: .leading, weight: .semibold,
+                         shrinkToFit: true)
                 Spacer(minLength: 0)
                 if e.isFighter { fighterLabel } else if let rec = record(for: e) { originLabel(rec) }
             }
@@ -315,38 +316,73 @@ struct EscortsView: View {
 
     // MARK: - Action strip (captured-escort economy, below the frame)
 
+    /// The strip under the frame. One row when everything fits the 424 pt
+    /// window; otherwise (a selected escort's status line plus three or four
+    /// verbs is wider than that, and more so on iOS where Geneva falls back to
+    /// the wider system sans) the status takes its own line above the
+    /// buttons, instead of wrapping into a tall column and shoving the
+    /// buttons out past the window's edge.
     private var actionBar: some View {
-        HStack(spacing: 6) {
-            if let sel = selectedEscort, sel.isFighter {
-                fighterStatus(sel)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                barStatus(width: nil)
                 Spacer(minLength: 6)
-                fighterActions
-            } else if let rec = selectedRecord {
-                hailStatus(rec)
-                Spacer(minLength: 6)
-                hailActions(rec)
-            } else if onGroupCommand != nil {
-                groupControls
-                Spacer(minLength: 6)
-            } else {
-                NovaText(hasEscorts ? "Select an escort to hail it." : "Hail an escort to command it.",
-                         size: 10, color: Color(white: 0.45))
-                Spacer(minLength: 6)
+                barButtons
             }
-            authButton("Done", width: 60, action: onClose)
+            .fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .leading, spacing: 4) {
+                barStatus(width: Self.frameW - 20)
+                HStack(spacing: 6) {
+                    Spacer(minLength: 0)
+                    barButtons
+                }
+            }
+            .padding(.vertical, 6)
         }
         .padding(.horizontal, 10)
-        .frame(width: Self.frameW, height: Self.actionBarH)
+        .frame(width: Self.frameW)
+        .frame(minHeight: Self.actionBarH)
         .background(Color(white: 0.08))
         .overlay(Rectangle().fill(novaAmber.opacity(0.22)).frame(height: 1), alignment: .top)
     }
 
+    /// The bar's left side: the selection's name + status, or a prompt.
+    /// `width` pins it (and shrinks long lines to one) in the stacked layout.
+    @ViewBuilder
+    private func barStatus(width: CGFloat?) -> some View {
+        if let sel = selectedEscort, sel.isFighter {
+            fighterStatus(sel, width: width)
+        } else if let rec = selectedRecord {
+            hailStatus(rec, width: width)
+        } else if onGroupCommand != nil {
+            EmptyView()
+        } else {
+            NovaText(hasEscorts ? "Select an escort to hail it." : "Hail an escort to command it.",
+                     size: 10, color: Color(white: 0.45), width: width, shrinkToFit: width != nil)
+        }
+    }
+
+    /// The bar's buttons: the selection's verbs (or the group controls),
+    /// then Done.
+    @ViewBuilder
+    private var barButtons: some View {
+        if let sel = selectedEscort, sel.isFighter {
+            fighterActions
+        } else if let rec = selectedRecord {
+            hailActions(rec)
+        } else if onGroupCommand != nil {
+            groupControls
+        }
+        authButton("Done", width: 60, action: onClose)
+    }
+
     /// A selected fighter's status — no upkeep/upgrade/resale to show, since it
     /// isn't an independently-tracked escort.
-    private func fighterStatus(_ sel: GameScene.EscortInfo) -> some View {
+    private func fighterStatus(_ sel: GameScene.EscortInfo, width: CGFloat?) -> some View {
         VStack(alignment: .leading, spacing: 1) {
-            NovaText(sel.name, size: 11, color: novaAmber, weight: .bold)
-            NovaText("Bay fighter · managed via its carrier", size: 9, color: Color(white: 0.55))
+            NovaText(sel.name, size: 11, color: novaAmber, width: width, weight: .bold, shrinkToFit: width != nil)
+            NovaText("Bay fighter · managed via its carrier", size: 9, color: Color(white: 0.55),
+                     width: width, shrinkToFit: width != nil)
         }
         .frame(minWidth: 90, alignment: .leading)
     }
@@ -362,7 +398,7 @@ struct EscortsView: View {
     /// The selected escort's name and its upgrade/resale costs (resale only
     /// for a captured ship) — the detail the button verbs stay short by not
     /// repeating.
-    private func hailStatus(_ sel: EscortRecord) -> some View {
+    private func hailStatus(_ sel: EscortRecord, width: CGFloat?) -> some View {
         let detail: String = {
             // The original's status lines (STR# 2002 #292 / #295).
             if sel.pendingUpgradeTo != nil, let s = game?.stringList(2002)?.string(at: 292) { return s }
@@ -376,8 +412,8 @@ struct EscortsView: View {
             return parts.joined(separator: " · ")
         }()
         return VStack(alignment: .leading, spacing: 1) {
-            NovaText(sel.name, size: 11, color: novaAmber, weight: .bold)
-            NovaText(detail, size: 9, color: Color(white: 0.55))
+            NovaText(sel.name, size: 11, color: novaAmber, width: width, weight: .bold, shrinkToFit: width != nil)
+            NovaText(detail, size: 9, color: Color(white: 0.55), width: width, shrinkToFit: width != nil)
         }
         .frame(minWidth: 90, alignment: .leading)
     }
@@ -447,44 +483,57 @@ struct EscortCommandPanelView: View {
 
     var body: some View {
         if let panel = hud.escortPanel {
-            VStack(alignment: .leading, spacing: 2) {
+            // Touch / pointer path: rows and order buttons sized for a thumb
+            // (the keyboard path keeps the original's compact 10 pt rows).
+            let touch = onOrder != nil
+            VStack(alignment: .leading, spacing: touch ? 0 : 2) {
                 Text(panel.title)
-                    .novaFont(.hud, weight: .bold, size: 11)
+                    .novaFont(.hud, weight: .bold, size: touch ? 12 : 11)
                     .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .padding(.bottom, touch ? 2 : 0)
                 ForEach(Array(panel.rows.enumerated()), id: \.offset) { index, row in
                     HStack(spacing: 8) {
                         Text("\(index + 1)  \(row.label)")
-                        Spacer(minLength: 12)
+                            .lineLimit(1).minimumScaleFactor(0.75)
+                        Spacer(minLength: 8)
                         Text(row.order)
+                            .lineLimit(1).minimumScaleFactor(0.75)
                     }
-                    .novaFont(.hud, weight: row.selected ? .bold : .regular, size: 10)
+                    .novaFont(.hud, weight: row.selected ? .bold : .regular, size: touch ? 12 : 10)
                     .foregroundStyle(row.enabled ? (row.selected ? Color.green : Color.white) : Color(white: 0.25))
-                    .contentShape(Rectangle())
-                    .onTapGesture { if row.enabled { onGroup?(index) } }
+                    .frame(minHeight: touch ? 30 : 0)
+                    .padding(.horizontal, touch ? 4 : 0)
+                    .background(touch && row.selected ? Color.white.opacity(0.08) : Color.clear)
+                    .novaTouchTap { if row.enabled { onGroup?(index) } }
                     .cursorClickable { if row.enabled { onGroup?(index) } }
                     // Only live while the panel is interactive and the row is usable.
                     .disabled(!row.enabled || onOrder == nil)
                 }
-                if onOrder != nil {
+                if touch {
+                    // Five equal-width cells across the panel, each a full
+                    // thumb-height target, so labels never wrap or squeeze.
                     HStack(spacing: 4) {
                         ForEach([("Attack", OriginalEscortCommand.attack), ("Defend", OriginalEscortCommand.defend),
                                  ("Form", OriginalEscortCommand.formation), ("Hold", OriginalEscortCommand.hold),
                                  ("Hangar", OriginalEscortCommand.returnToHangar)], id: \.1) { item in
-                            Button { onOrder?(item.1) } label: {
-                                Text(item.0)
-                                    .novaFont(.hud, weight: .regular, size: 9)
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 6).padding(.vertical, 3)
-                                    .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
-                            }
-                            .buttonStyle(.novaPlain)
+                            Text(item.0)
+                                .novaFont(.hud, weight: .semibold, size: 11)
+                                .lineLimit(1).minimumScaleFactor(0.7)
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity, minHeight: 34)
+                                .background(Color.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 5))
+                                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(novaAmber.opacity(0.3)))
+                                .novaTouchTap { onOrder?(item.1) }
+                                .cursorClickable { onOrder?(item.1) }
+                                .accessibilityAddTraits(.isButton)
                         }
                     }
-                    .padding(.top, 3)
+                    .padding(.top, 6)
                 }
             }
-            .padding(6)
-            .frame(width: 200, alignment: .leading)
+            .padding(touch ? 8 : 6)
+            .frame(width: touch ? 270 : 200, alignment: .leading)
             .background(Color.black.opacity(0.85))
             .border(Color(white: 0.4), width: 1)
             .opacity(Double(panel.level) / 32)

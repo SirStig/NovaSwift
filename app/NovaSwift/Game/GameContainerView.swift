@@ -964,7 +964,10 @@ struct GameContainerView: View {
 
                 GeometryReader { geo in
                     MessageLogView(hud: host.hud, rightInset: touchRightInset(host, in: geo.size),
-                                   classicRect: activeHUDStyle(host) != nil)
+                                   classicRect: activeHUDStyle(host) != nil,
+                                   clusterInsets: touchClusterInsets(
+                                       host, in: geo.size,
+                                       band: MessageLogView.mobileBand - geo.safeAreaInsets.bottom))
                 }
 
                 EscortCommandPanelView(hud: host.hud,
@@ -1044,8 +1047,13 @@ struct GameContainerView: View {
                 // floats over the galaxy map or another fullscreen dialog.
                 if flightControlsVisible && gateMapOrigin == nil {
                     GeometryReader { geo in
+                        // The strip's band: its bottom padding plus a pill row
+                        // (and the passive approach hint above it).
+                        let pillBand = max(6, MessageLogView.mobileBand + 4 - geo.safeAreaInsets.bottom) + 44
                         ContextualActionsView(hud: host.hud, onAction: handleDiscrete,
-                                              rightInset: touchRightInset(host, in: geo.size))
+                                              rightInset: touchRightInset(host, in: geo.size),
+                                              clusterInsets: touchClusterInsets(host, in: geo.size, band: pillBand),
+                                              bottomSafeInset: geo.safeAreaInsets.bottom)
                     }
                 }
 
@@ -2783,6 +2791,23 @@ struct GameContainerView: View {
             return Self.sidebarWidth(in: size, style: style)
         }
         return GameHUDView.reservedRightWidth(largerHUD: model.settings.largerHUD, viewportHeight: size.height)
+    }
+
+    /// How far the bottom-corner touch clusters reach in from each side of the
+    /// play viewport within its lowest `band` points (safe-area space), so the
+    /// pill strip and the message line can stay out from under them. Zero when
+    /// the touch cockpit isn't drawn (macOS/tvOS, a controller, a modal up).
+    private func touchClusterInsets(_ host: GameHost, in size: CGSize,
+                                    band: CGFloat) -> (leading: CGFloat, trailing: CGFloat) {
+        #if os(iOS)
+        guard flightControlsVisible, band > 0 else { return (0, 0) }
+        let right = touchRightInset(host, in: size)
+        let area = CGSize(width: max(0, size.width - right), height: size.height)
+        return model.touchLayout.bottomBandInsets(area: area, metric: TouchMetrics(size).s, band: band,
+                                                  tapToFly: model.settings.controlScheme == .tapToTurn)
+        #else
+        return (0, 0)
+        #endif
     }
 
     /// The authentic status-bar style to actually render, or nil to fall back to
@@ -4779,11 +4804,19 @@ struct MessageLogView: View {
     /// draw 0x004bcd30, rect set up at 0x0087550b). The Nova Swift look keeps
     /// its own styling.
     var classicRect = false
+    /// iOS: how far the bottom-corner touch clusters reach in over the
+    /// message band (`GameContainerView.touchClusterInsets`) — the line is
+    /// kept between them rather than drawn underneath a cap.
+    var clusterInsets: (leading: CGFloat, trailing: CGFloat) = (0, 0)
 
     /// The original's message rect is one 26 px line (0x0087550b).
     static let lineHeight: CGFloat = 26
     /// The Classic rect's height (0x0087550b).
     static let classicRectHeight: CGFloat = 30
+    /// iOS: the strip at the very bottom of the screen (measured from the
+    /// physical edge, through the home-indicator inset) that the message line
+    /// owns. The contextual pills sit above it, never on top of it.
+    static let mobileBand: CGFloat = 20
 
     private func plain(_ text: String) -> String {
         text.replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ")
@@ -4801,8 +4834,44 @@ struct MessageLogView: View {
     }
 
     @ViewBuilder var body: some View {
+        #if os(iOS)
+        mobileBody
+        #else
         if classicRect { classicBody } else { modernBody }
+        #endif
     }
+
+    #if os(iOS)
+    /// iOS (both looks): one line pinned to the physical bottom edge — down in
+    /// the home-indicator band, below the touch caps and the contextual pills,
+    /// so it never slides behind either — and fitted to the width between the
+    /// bottom clusters. A long line shrinks a little, then ends in an
+    /// ellipsis, rather than running off the side of the screen.
+    private var mobileBody: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            ZStack(alignment: .leading) {
+                if let m = hud.message {
+                    Text(plain(m.text))
+                        .novaFont(.hud, weight: classicRect ? .regular : .semibold, size: 12)
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .truncationMode(.tail)
+                        .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
+                        .transition(.opacity)
+                }
+            }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, max(16, clusterInsets.leading + 6))
+            .padding(.trailing, rightInset + max(16, clusterInsets.trailing + 6))
+            .padding(.bottom, 2)
+        }
+        .ignoresSafeArea(.container, edges: .bottom)
+        .novaResponsive()
+        .allowsHitTesting(false)
+    }
+    #endif
 
     /// The original's rect: top-left aligned so the line box starts at the rect's
     /// top (the pen lands at `top + ascent`), clipped at the right edge (no
@@ -4819,8 +4888,8 @@ struct MessageLogView: View {
                         .fixedSize(horizontal: true, vertical: false)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: Self.classicRectHeight, maxHeight: Self.classicRectHeight,
-                   alignment: .topLeading)
+            .frame(minWidth: 0, maxWidth: .infinity, minHeight: Self.classicRectHeight,
+                   maxHeight: Self.classicRectHeight, alignment: .topLeading)
             .clipped()
             .padding(.leading, 25).padding(.trailing, rightInset + 50).padding(.bottom, 5)
         }
@@ -4838,18 +4907,15 @@ struct MessageLogView: View {
                     // (no ellipsis). Updated in place (no per-message
                     // identity), so a fading old view can never sit beside
                     // the new text in the stack.
-                    Text(m.text.replacingOccurrences(of: "\r", with: " ")
-                            .replacingOccurrences(of: "\n", with: " "))
-                        #if os(iOS)
-                        .novaFont(.hud, weight: .semibold, size: 12)
-                        #else
+                    Text(plain(m.text))
                         .novaFont(.hud, weight: .semibold)
-                        #endif
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                         .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        // minWidth 0: without it the frame adopts the text's
+                        // full width and the "clip" happens off-screen.
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                         .clipped()
                         .transition(.opacity)
                 }

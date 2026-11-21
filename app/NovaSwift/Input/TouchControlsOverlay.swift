@@ -32,7 +32,50 @@ struct TouchMetrics {
     var edge: CGFloat { 12 * s }
 }
 
+extension TouchLayout {
+    /// Whether the flight overlay draws `c`. Hidden controls are skipped (the
+    /// Actions toggle can't be hidden — it's the only way to the grid), and
+    /// tap-to-fly steers by tapping the world, so the turn holds go away.
+    static func isShown(_ c: TouchControl, tapToFly: Bool) -> Bool {
+        if c.kind == .actionsToggle { return true }
+        if c.hidden { return false }
+        if tapToFly, c.kind == .hold, c.effect == .turnLeft || c.effect == .turnRight { return false }
+        return true
+    }
+
+    /// How far the visible bottom-corner controls reach in from each side of
+    /// the play viewport within the lowest `band` points of it — the room the
+    /// centred pill strip and the message line must stay clear of so they
+    /// never sit under (or over) a cap. `area` is the safe-area play viewport
+    /// (sidebar already excluded), the same space `touchPlaced` lays out in.
+    func bottomBandInsets(area: CGSize, metric s: CGFloat, band: CGFloat,
+                          tapToFly: Bool) -> (leading: CGFloat, trailing: CGFloat) {
+        let u = unit(metric: s)
+        var leading: CGFloat = 0, trailing: CGFloat = 0
+        for c in controls where c.anchor.isBottom && Self.isShown(c, tapToFly: tapToFly) {
+            let r = c.frame(in: area, unit: u)
+            guard r.maxY > area.height - band else { continue }
+            if c.anchor.isTrailing { trailing = max(trailing, area.width - r.minX) }
+            else { leading = max(leading, r.maxX) }
+        }
+        return (leading, trailing)
+    }
+}
+
 extension View {
+    /// A tap for HUD chrome that floats over the SpriteKit flight view. On iOS
+    /// it goes through the UIKit `PressCatcher` (a SwiftUI gesture or `Button`
+    /// there competes with the SKView for the same touch, so taps were
+    /// sometimes lost or read as a fly-to tap); elsewhere a plain tap gesture.
+    @ViewBuilder
+    func novaTouchTap(_ action: @escaping () -> Void) -> some View {
+        #if os(iOS)
+        contentShape(Rectangle()).overlay(PressCatcher(onTap: action))
+        #else
+        contentShape(Rectangle()).onTapGesture(perform: action)
+        #endif
+    }
+
     /// Pin a control to a screen corner at an absolute offset (points) from it.
     /// The frame fills the safe area but has no hit shape, so only the control
     /// itself captures touches and the open middle stays free for steering.
@@ -122,12 +165,7 @@ struct TouchControlsOverlay: View {
     /// Hidden controls are skipped (the Actions toggle can't be hidden — it's
     /// the only way to the grid), and tap-to-fly steers by tapping the world, so
     /// the turn holds go away exactly as the old fixed turn cluster did.
-    private func isShown(_ c: TouchControl) -> Bool {
-        if c.kind == .actionsToggle { return true }
-        if c.hidden { return false }
-        if tapToFly, c.kind == .hold, c.effect == .turnLeft || c.effect == .turnRight { return false }
-        return true
-    }
+    private func isShown(_ c: TouchControl) -> Bool { TouchLayout.isShown(c, tapToFly: tapToFly) }
 
     @ViewBuilder
     private func controlView(_ c: TouchControl) -> some View {
@@ -174,53 +212,83 @@ struct TouchControlsOverlay: View {
     /// of them out at a definite height (row count derives from `.count`).
     /// Target/Next and Menu are deliberately *not* repeated here — they're
     /// already always-on controls (`driveCluster`, `topLeftMenuButton`), and
-    /// duplicating them just made the grid taller for no reason.
+    /// duplicating them just made the grid taller for no reason. Together with
+    /// the always-on caps, the contextual pills and the pause menu, this covers
+    /// every discrete command a keyboard player has in flight.
     private var actionItems: [(icon: String, label: String, run: () -> Void, enabled: Bool)] {
         [
             ("exclamationmark.triangle.fill", "Hostile", { onDiscrete(.nearestHostile) }, true),
+            ("arrow.uturn.backward.circle", "Prev Tgt", { onDiscrete(.targetPrevious) }, true),
+            ("person.2.circle", "Escort Tgt", { onDiscrete(.targetEscortNext) }, hud.hasEscorts),
             ("xmark.circle", "Untarget", { onDiscrete(.clearTarget) }, true),
             ("antenna.radiowaves.left.and.right", "Hail", { onDiscrete(.hailTarget) }, true),
-            ("person.3.fill", "Escorts", { onDiscrete(.openEscorts) }, true),
+            ("globe", "Hail Planet", { onDiscrete(.hailStellar) }, true),
             ("shippingbox.fill", "Board", { onDiscrete(.board) }, true),
+            ("person.3.fill", "Escorts", { onDiscrete(.openEscorts) }, true),
             (hud.cloakEngaged ? "eye.slash.fill" : "eye.slash", hud.cloakEngaged ? "Uncloak" : "Cloak",
              { onDiscrete(.toggleCloak) }, hud.hasCloak),
             // Fighters launch via the normal secondary-weapon fire control (select
             // the bay like any other secondary, then fire) — recall is the one
             // dedicated fighter-bay touch command left.
             ("airplane.arrival", "Recall", { onDiscrete(.recallFighters) }, hud.hasFighterBays),
+            ("minus.circle", "Clear 2nd", { onDiscrete(.clearSecondary) }, hud.hasSecondary),
             ("lifepreserver", "Eject", { onDiscrete(.eject) }, hud.canEject),
             ("map.fill", "Map", { onDiscrete(.galaxyMap) }, true),
+            ("point.3.connected.trianglepath.dotted", "Next Sys", { onDiscrete(.cycleHyperspaceLink) }, true),
             ("bolt.horizontal.circle.fill", "Jump", { onDiscrete(.hyperjump) }, true),
             ("arrow.down.to.line", "Land", { onDiscrete(.land) }, hud.landReady),
             ("list.bullet.clipboard", "Missions", { onOpenPanel(.missions) }, true),
             ("person.crop.circle", "Pilot", { onOpenPanel(.pilotInfo) }, true),
+            ("info.circle", "Ship Info", { onDiscrete(.shipInfo) }, true),
+            ("camera.fill", "Camera", { onDiscrete(.cycleCameraView) }, true),
         ]
     }
 
+    /// Tiles plus the one held tile (self-destruct) at the end.
+    private var tileCount: Int { actionItems.count + 1 }
+
     private var actionGrid: some View {
-        let columns = 4
-        let cols = Array(repeating: GridItem(.fixed(m.tile), spacing: 9 * m.s), count: columns)
-        // Lay the grid out at its full content height so every row is visible at
-        // once (no more one-row scrolling). Row height matches the tile frame.
-        let rows = (actionItems.count + columns - 1) / columns
+        let spacing = 9 * m.s
         let rowH = m.tile * 0.92
-        let contentH = CGFloat(rows) * rowH + CGFloat(rows - 1) * 9 * m.s
-        // Cap so it can never run off the bottom of a short (landscape) screen;
-        // it scrolls only if it genuinely wouldn't fit.
+        // Cap so it can never run off the bottom of a short (landscape) screen.
         let maxH = max(rowH, viewportSize.height - m.toggle - m.edge * 2 - 40 * m.s)
+        // Pick enough columns that every row fits that height (a landscape
+        // phone is short and wide), but never more than the width allows.
+        let rowsThatFit = max(1, Int((maxH + spacing) / (rowH + spacing)))
+        let widthForGrid = viewportSize.width - rightInset - m.edge * 2 - 22 * m.s
+        let maxColumns = max(4, Int((widthForGrid + spacing) / (m.tile + spacing)))
+        let columns = min(maxColumns, max(4, (tileCount + rowsThatFit - 1) / rowsThatFit))
+        let cols = Array(repeating: GridItem(.fixed(m.tile), spacing: spacing), count: columns)
+        let rows = (tileCount + columns - 1) / columns
+        let contentH = CGFloat(rows) * rowH + CGFloat(rows - 1) * spacing
         return ScrollView(.vertical, showsIndicators: false) {
-            LazyVGrid(columns: cols, spacing: 9 * m.s) {
+            LazyVGrid(columns: cols, spacing: spacing) {
                 ForEach(actionItems.indices, id: \.self) { i in
                     let item = actionItems[i]
                     tile(item.icon, item.label, item.run, enabled: item.enabled)
                 }
+                selfDestructTile
             }
         }
         .cursorScrollable()
-        .frame(width: m.tile * CGFloat(columns) + 9 * m.s * CGFloat(columns - 1),
+        .frame(width: m.tile * CGFloat(columns) + spacing * CGFloat(columns - 1),
                height: min(contentH, maxH))
         .padding(11 * m.s)
         .novaControlPanel(corner: 14 * m.s)
+    }
+
+    private func tileFace(_ system: String, _ label: String, enabled: Bool, tint: Color = novaAmber) -> some View {
+        VStack(spacing: 5 * m.s) {
+            Image(systemName: system).font(.system(size: 19 * m.s, weight: .semibold))
+            Text(label).font(.system(size: 10 * m.s, weight: .medium))
+                .lineLimit(1).minimumScaleFactor(0.6)
+        }
+        .foregroundStyle(enabled ? tint : Color(white: 0.4))
+        .padding(.horizontal, 2)
+        .frame(width: m.tile, height: m.tile * 0.92)
+        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10 * m.s))
+        .overlay(RoundedRectangle(cornerRadius: 10 * m.s)
+            .strokeBorder(tint.opacity(enabled ? 0.22 : 0.08)))
     }
 
     private func tile(_ system: String, _ label: String, _ action: @escaping () -> Void,
@@ -229,19 +297,25 @@ struct TouchControlsOverlay: View {
             action()
             withAnimation(.easeOut(duration: 0.15)) { menuOpen = false }
         } label: {
-            VStack(spacing: 5 * m.s) {
-                Image(systemName: system).font(.system(size: 19 * m.s, weight: .semibold))
-                Text(label).font(.system(size: 10 * m.s, weight: .medium))
-                    .lineLimit(1).minimumScaleFactor(0.7)
-            }
-            .foregroundStyle(enabled ? novaAmber : Color(white: 0.4))
-            .frame(width: m.tile, height: m.tile * 0.92)
-            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10 * m.s))
-            .overlay(RoundedRectangle(cornerRadius: 10 * m.s)
-                .strokeBorder(novaAmber.opacity(enabled ? 0.22 : 0.08)))
+            tileFace(system, label, enabled: enabled)
         }
         .buttonStyle(.novaPlain)
         .disabled(!enabled)
+    }
+
+    /// Self-destruct is a *held* command in the original (Alt-−, five seconds,
+    /// let go to abort — `World.stepSelfDestruct`), so its tile is a hold, not
+    /// a tap, and the grid stays open while it's held so the countdown can be
+    /// watched and aborted by lifting the finger.
+    private var selfDestructTile: some View {
+        HoldButton(size: m.tile, onChange: { down in input.touch.selfDestruct = down }) {
+            tileFace("exclamationmark.octagon", "Self-Destruct", enabled: true,
+                     tint: Color(red: 1, green: 0.35, blue: 0.3))
+        }
+        .padding(-m.tile * 0.12)   // HoldButton pads its hit box; the grid cell is fixed
+        // Closing the grid mid-hold must not leave the command latched.
+        .onDisappear { input.touch.selfDestruct = false }
+        .accessibilityLabel("Self-destruct (hold)")
     }
 }
 
