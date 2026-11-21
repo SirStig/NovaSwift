@@ -5121,6 +5121,10 @@ public final class World {
     /// original's stand-down branch (0x0045a3d0: mïsn Flags 0x0001 and a
     /// ShipCount of 1). The host answers from the mission data.
     public var missionBoardStandsDown: (Int) -> Bool = { _ in false }
+    /// Whether mission `id` costs a jump of fuel (mïsn Flags 0x0008): its
+    /// stand-down boarding then reads "<class>:  Fuel transfer complete,
+    /// <ship>." instead of "Target ship has been boarded." (0x0045a3d0).
+    public var missionBoardTransfersFuel: (Int) -> Bool = { _ in false }
 
     /// The current system's sensor static (`sÿst.Interference`, 0-100). Set when
     /// the world is built for a system; degrades effective sensor range.
@@ -5654,6 +5658,20 @@ public final class World {
             if missionBoardStandsDown(mid) {
                 originalAI.setManeuverTimer(s, 100)
                 originalAI.clearShipsTargeting(s, in: self)
+                // 0x0045a3d0: "Target ship has been boarded." (#126), or with
+                // Flags 0x0008 "<class>:  Fuel transfer complete, <ship>."
+                // (#3), 0xfa raw calls, snd 154. The plunder window follows.
+                if let list = galaxy?.game.stringList(2002) {
+                    let line: String
+                    if missionBoardTransfersFuel(mid) {
+                        let shipClass = galaxy?.game.ship(s.shipTypeID)?.name ?? s.name
+                        let name = playerShipName.isEmpty ? pilotName : playerShipName
+                        line = "\(shipClass):  \(list.string(at: 3) ?? ""), \(name)."
+                    } else {
+                        line = list.string(at: 126) ?? ""
+                    }
+                    postOverlayMessage(line, frames: 0xfa, beep: 154)
+                }
             }
             events.append(.missionShipGoalReached(missionID: mid, entityID: s.entityID,
                                                   goal: goal, byPlayer: true))
@@ -5855,7 +5873,7 @@ public final class World {
         player.fuel = min(player.maxFuel, player.fuel + ShipFuel.perJump)
         let safeArmor = player.maxArmor * 0.4
         if player.armor < safeArmor { player.armor = safeArmor }
-        events.append(.assistanceDelivered(entityID: shipID))
+        events.append(.assistanceDelivered(entityID: shipID, refuel: false))
     }
 }
 

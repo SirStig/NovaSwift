@@ -675,6 +675,13 @@ models, so later batches can rely on them.
   jump's fire, deployed fighters with fuel for a jump dock back and the rest are abandoned (FL-23).
   The old free restock is `freeMunitionsRefill`. Shared pools (pod + turret) take the emptier
   mount. The rest of OS-03 (×1.333, launch rules, docking geometry) is Batch 2.
+  Only the flying ship is ever folded in: at touchdown and before in-flight saves, never while
+  docked (the landed ship is stale once the outfitter runs; build 462's vanishing fighters). A
+  mission op that edits outfits in flight (`G`/`D` of ammunition, `C`/`E`/`H`) first folds the
+  flying ship into the engine's pilot (`GameServices.syncLiveMunitions`), and an ammunition
+  `G`/`D` loads the result back onto the banks at once (`reloadLiveMunitions`,
+  `Munitions.reload`), so the ship and the pilot stay one count as in the original. The Apple
+  in-flight hull swap now rebuilds after the engine commits (it had flown the old hull).
 - **Original.** Pilot block 1 +0x241a holds mounted counts and +0x261a loaded ammo per bank;
   +0xe74e holds carried-fighter classes. Fired ammo and lost fighters stay spent across landing
   and reload until bought again; plundered ammo adds to the saved count.
@@ -4105,7 +4112,9 @@ with the decompiled call site:
 | "Transferred N rounds of ammunition." | replaced | #115 + lower-case count word (STR# 137) + outfit's lower-case singular/plural + #108; #117 when nothing fits (0x00482940 slot 4) |
 | "Salvaged N item(s): …" (përs ItemClass loot) | replaced | #106 + a/an or count word + lower-case outfit name + #108 "You retrieved a … from this ship." (0x00482940 head) |
 | "Ship captured — it joins your escorts." (and the Godot debug console's copy) | replaced | #123 (0x00482940) |
-| "<name> transfers fuel and makes repairs." | replaced | `<class>:  Repairs complete, <ship>.` — #384, 0xf0, snd 151 (`Ship_ApplyShipAiControls` 0x00408150, only when the target is the player) |
+| "<name> transfers fuel and makes repairs." | replaced | `<class>:  Repairs complete, <ship>.` — #384, 0xf0, snd 151 (`Ship_ApplyShipAiControls` 0x00408150, only when the target is the player). It never showed: the original-AI repair arm never emitted `.assistanceDelivered`; it does now |
+| (none) | added | `<class>:  Fuel transfer complete, <ship>.` — #3, 0xf0, snd 151, when an ally's fuel transfer takes the player past 100 (`Ship_UpdateShipAiState` 0x00405590) |
+| (none) | added | Boarding a stand-down mission ship (mïsn Flags 0x0001, one ship, board/rescue goal): "Target ship has been boarded." (#126), or with Flags 0x0008 `<class>:  Fuel transfer complete, <ship>.`, 0xfa, snd 154, then the plunder window (`Player_HandleBoardTargetCommand` 0x0045a3d0). Godot now also runs this branch's stand-down (`WorldPilotLink.configure`) |
 | "<stellar> scrambles N defenders." | removed | the original prints no line when defenders launch (Demand Tribute is the comm window, 0x00480030) |
 | "<stellar> submits to your rule — it will pay tribute daily." | removed | no status line (0x00480030); the comm window shows the reply (also removed from the shared `FlightComm.apply` Godot uses) |
 | "<stellar> has been destroyed." / "… has been restored." (shot down, story Y/Z) | removed | no line in the original; also removed from `FlightComm.apply` and the Godot story services |

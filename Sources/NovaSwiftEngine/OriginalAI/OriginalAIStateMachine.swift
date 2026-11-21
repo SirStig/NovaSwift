@@ -310,6 +310,11 @@ extension OriginalAI {
                 ship.velocity = Vec2()
                 ship.throttleSpeed = 0
                 if target.fuel > 100 {
+                    // "<class>:  Fuel transfer complete, <ship>." when the
+                    // customer is the player (0x00405590: #3, 0xf0, snd 151).
+                    if target === host.player, let world = (host as? WorldAIHost)?.world {
+                        world.emit(.assistanceDelivered(entityID: ship.entityID, refuel: true))
+                    }
                     rec.standDown()
                 } else {
                     host.transferFuel(to: target, amount: 1.0 * ticks)

@@ -278,10 +278,8 @@ final class GameHost {
                 guard let store = pilotStore else { return true }
                 return WorldPilotLink.shipSpawnEligible(id, pilot: store.state, game: scanGame)
             }
-            scene.missionBoardStandsDown = { id in
-                guard let m = scanGame.mission(id) else { return false }
-                return m.flags1 & 0x0001 != 0 && m.shipCount == 1
-            }
+            scene.missionBoardStandsDown = { scanGame.mission($0)?.boardingStandsDown ?? false }
+            scene.missionBoardTransfersFuel = { scanGame.mission($0)?.costsJumpOfFuel ?? false }
             if let holdGalaxy = aiGalaxy {
                 scene.playerHoldHasRoom = { [weak pilotStore] in
                     guard let store = pilotStore else { return false }
@@ -2163,22 +2161,33 @@ struct GameContainerView: View {
             host?.hud.post(message)
         }
         flightMissionServices.onSpawnMissionShips = { _, _ in spawnActiveMissionShips() }
+        flightMissionServices.liveFlightShip = {
+            guard landedSpobID == nil, let ship = host?.scene.playerShip, let game = host?.game else { return nil }
+            return (ship, game)
+        }
         flightMissionServices.onChangePlayerShip = { shipID, _ in
-            // The hull swap is already in `PlayerState`. In flight, rebuild the
-            // world in place so the new hull/sprite/stats take effect immediately
-            // (a mission `C/E/H` op that fires mid-space); landed, the takeoff
-            // rebuild picks it up. Mission ships respawn via `syncNav` and their
-            // objective counts persist in state, so a mid-mission swap is safe.
+            // In flight, rebuild the world in place so the new hull/sprite/stats
+            // take effect immediately (a mission `C/E/H` op that fires
+            // mid-space); landed, the takeoff rebuild picks it up. Mission ships
+            // respawn via `syncNav` and their objective counts persist in
+            // state, so a mid-mission swap is safe.
             guard landedSpobID == nil else { return }
-            // The swap keeps the hull's damage; a disabled hull is then
-            // repaired one armor point at a time until it no longer reads
-            // disabled (0x00449932, MS-18).
-            let damage = host?.scene.playerShip.map { (armor: $0.armor, shield: $0.shield) }
-            rebuildFlightHost(reason: "story ship swap")
-            if let damage, let ship = host?.scene.playerShip {
-                ship.armor = min(damage.armor, ship.maxArmor)
-                ship.shield = min(damage.shield, ship.maxShield)
-                while ship.disabled, ship.armor < ship.maxArmor { ship.armor += 1 }
+            // The swap lives in the engine's copy of the pilot until the caller
+            // commits it (`model.pilot.state = engine.player`); rebuilding now
+            // would fly the old hull. Rebuild on the next turn of the run loop,
+            // after the commit, as Godot does after its tick.
+            DispatchQueue.main.async {
+                guard landedSpobID == nil else { return }
+                // The swap keeps the hull's damage; a disabled hull is then
+                // repaired one armor point at a time until it no longer reads
+                // disabled (0x00449932, MS-18).
+                let damage = host?.scene.playerShip.map { (armor: $0.armor, shield: $0.shield) }
+                rebuildFlightHost(reason: "story ship swap")
+                if let damage, let ship = host?.scene.playerShip {
+                    ship.armor = min(damage.armor, ship.maxArmor)
+                    ship.shield = min(damage.shield, ship.maxShield)
+                    while ship.disabled, ship.armor < ship.maxArmor { ship.armor += 1 }
+                }
             }
         }
         flightMissionServices.onMovePlayer = { systemID, keepPosition in

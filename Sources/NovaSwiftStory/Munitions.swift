@@ -59,6 +59,26 @@ public enum Munitions {
         }
     }
 
+    /// Load the pilot's owned ammunition onto a ship already in flight, after
+    /// an in-flight edit to `state.outfits` (a mission `G`/`D` of ammunition).
+    /// Each bank drawing on a pool holds the pool's whole count, as when the
+    /// ship was built (`ShipLoadout`); a bay keeps the fighters it has out and
+    /// docks the rest it can carry. Pools no owned outfit loads are left alone.
+    public static func reload(_ ship: Ship, from state: PlayerState, game: NovaGame) {
+        for mount in ship.weapons where mount.spec.ammoPerShot > 0 && mount.ammo >= 0 {
+            guard mount.spec.ammoTypeRaw >= 0, !isFighterBay(mount.spec.id, ship: ship) else { continue }
+            let loaders = ammoOutfits(forPool: 128 + mount.spec.ammoTypeRaw, game: game)
+            guard !loaders.isEmpty else { continue }
+            mount.ammo = loaders.reduce(0) { $0 + (state.outfits[$1] ?? 0) }
+        }
+        for bay in ship.fighterBays {
+            guard let carried = carriedFighters(bayWeaponID: bay.spec.bayWeaponID, capacity: bay.spec.capacity,
+                                                state: state, game: game) else { continue }
+            bay.docked = max(0, carried - bay.deployed.count)
+            ship.weapons.first { $0.spec.id == bay.spec.bayWeaponID }?.ammo = bay.docked
+        }
+    }
+
     // MARK: -
 
     private static func isFighterBay(_ weaponID: Int, ship: Ship) -> Bool {

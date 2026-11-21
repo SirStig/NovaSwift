@@ -1,5 +1,6 @@
 import Foundation
 import NovaSwiftKit
+import NovaSwiftEngine
 import NovaSwiftStory
 
 /// The app's `GameServices` conformer — the seam the story/mission engine
@@ -64,6 +65,26 @@ final class AppGameServices: GameServices, ObservableObject {
 
     nonisolated func releaseMissionShips(missionID: Int) {
         MainActor.assumeIsolated { onReleaseMissionShips?(missionID) }
+    }
+
+    /// The flying ship and the game data, or nil while docked. Set on the
+    /// flight-side instance only; the spaceport instances leave it nil.
+    var liveFlightShip: (() -> (ship: Ship, game: NovaGame)?)?
+
+    nonisolated func syncLiveMunitions(into player: inout PlayerState) {
+        var p = player
+        MainActor.assumeIsolated {
+            guard let live = liveFlightShip?(), live.ship.isAlive else { return }
+            Munitions.record(live.ship, into: &p, game: live.game)
+        }
+        player = p
+    }
+
+    nonisolated func reloadLiveMunitions(from player: PlayerState) {
+        MainActor.assumeIsolated {
+            guard let live = liveFlightShip?(), live.ship.isAlive else { return }
+            Munitions.reload(live.ship, from: player, game: live.game)
+        }
     }
 
     // `GameServices` itself isn't main-actor-isolated (the CLI's

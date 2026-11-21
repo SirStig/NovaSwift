@@ -490,7 +490,13 @@ extension OriginalAI {
             }
         } else if rec.maneuverTimer <= 100, rec.state == OriginalAIState.repair {
             setBoarded(goal.entityID, false)
+            let wasDisabled = goal.disabled
             host.repairAboveDisable(goal)
+            // "<class>:  Repairs complete, <ship>." when the patient is the
+            // player (0x00408150: #384, 0xf0 raw calls, snd 151).
+            if wasDisabled, goal === host.player, let world = (host as? WorldAIHost)?.world {
+                world.emit(.assistanceDelivered(entityID: ship.entityID, refuel: false))
+            }
         }
     }
 

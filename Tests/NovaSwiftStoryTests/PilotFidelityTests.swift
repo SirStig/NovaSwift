@@ -220,4 +220,73 @@ final class PilotFidelityTests: XCTestCase {
         XCTAssertEqual(PilotEconomy.sellOutfit(&state, fighter, count: 4, galaxy: galaxy), 4)
         XCTAssertNil(state.outfits[213])
     }
+
+    /// A flying ship the story engine can see, like the front ends' services.
+    private final class FlightServices: LoggingGameServices {
+        var ship: Ship?
+        let game: NovaGame
+        init(game: NovaGame) { self.game = game; super.init() }
+        override func syncLiveMunitions(into player: inout PlayerState) {
+            if let ship { Munitions.record(ship, into: &player, game: game) }
+        }
+        override func reloadLiveMunitions(from player: PlayerState) {
+            if let ship { Munitions.reload(ship, from: player, game: game) }
+        }
+    }
+
+    /// A mission `G`/`D` of ammunition in flight: the original's banks *are*
+    /// the pilot's rounds, so the grant is aboard at once and counts on top of
+    /// what is left, not on top of what the ship launched with.
+    func testInFlightAmmoGrantAndRemoveKeepShipAndPilotInStep() throws {
+        let game = munitionsGame()
+        var state = PlayerState(shipType: 128)
+        state.outfits = [211: 1, 210: 10, 212: 1, 213: 2]
+        let ship = try XCTUnwrap(Galaxy(game: game).makeLoadedShip(128, extraOutfits: state.outfits,
+                                                                    includeDefaultItems: false, includeHullWeapons: false))
+        Munitions.loadCarriedFighters(into: ship, state: state, game: game)
+        let launcher = try XCTUnwrap(ship.weapons.first { $0.spec.id == 130 })
+        let bay = try XCTUnwrap(ship.fighterBays.first)
+        launcher.ammo = 6          // fired 4
+        bay.docked = 1             // lost one
+
+        let services = FlightServices(game: game)
+        services.ship = ship
+        let engine = StoryEngine(game: game, player: state, services: services)
+        engine.apply(set: "G210")
+        XCTAssertEqual(engine.player.outfits[210], 7, "6 left + 1 granted, not 10 + 1")
+        XCTAssertEqual(launcher.ammo, 7, "the granted round is aboard now")
+        engine.apply(set: "D210 G213")
+        XCTAssertEqual(engine.player.outfits[210], 6)
+        XCTAssertEqual(launcher.ammo, 6)
+        XCTAssertEqual(engine.player.outfits[213], 2)
+        XCTAssertEqual(bay.docked, 2)
+
+        // And the touchdown fold-in no longer undoes it.
+        var landed = engine.player
+        Munitions.record(ship, into: &landed, game: game)
+        XCTAssertEqual(landed.outfits[210], 6)
+        XCTAssertEqual(landed.outfits[213], 2)
+    }
+
+    /// A mission hull swap in flight keeps fired rounds spent: the engine folds
+    /// the flying ship in before the swap, and the rebuild reads the result.
+    func testInFlightShipSwapKeepsSpentRoundsSpent() throws {
+        let game = munitionsGame()
+        var state = PlayerState(shipType: 128)
+        state.outfits = [211: 1, 210: 10]
+        let ship = try XCTUnwrap(Galaxy(game: game).makeLoadedShip(128, extraOutfits: state.outfits,
+                                                                    includeDefaultItems: false, includeHullWeapons: false))
+        try XCTUnwrap(ship.weapons.first { $0.spec.id == 130 }).ammo = 3
+        let services = FlightServices(game: game)
+        services.ship = ship
+        let engine = StoryEngine(game: game, player: state, services: services)
+        engine.apply(set: "C129")
+        XCTAssertEqual(engine.player.shipType, 129)
+        XCTAssertEqual(engine.player.outfits[210], 3, "the 7 fired before the swap stay fired")
+
+        // Docked (no flying ship) the pilot is the truth and nothing is folded.
+        let docked = StoryEngine(game: game, player: state, services: FlightServices(game: game))
+        docked.apply(set: "C129")
+        XCTAssertEqual(docked.player.outfits[210], 10)
+    }
 }

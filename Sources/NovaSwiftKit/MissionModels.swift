@@ -203,6 +203,13 @@ public struct MissionRes: Sendable {
 
     // Named flag bits (subset that matters to the runtime).
     public var autoAbortWhenStarted: Bool { flags1 & 0x0001 != 0 }
+    /// Boarding this mission's ship takes the original's stand-down branch
+    /// (0x0045a3d0): Flags 0x0001 and a single special ship.
+    public var boardingStandsDown: Bool   { autoAbortWhenStarted && shipCount == 1 }
+    /// Flags 0x0008: the mission costs a jump of fuel — handed to the ship
+    /// the player boards ("Fuel transfer complete", 0x0045a3d0) and drained
+    /// when the auto-abort resolves (0x00447d90).
+    public var costsJumpOfFuel: Bool      { flags1 & 0x0008 != 0 }
     public var cannotBeRefused: Bool      { flags1 & 0x0004 != 0 }
     /// Flags 0x0010: auxiliary ships come back every visit, without limit
     /// (the original never spends the aux budget, 0x0041d6e0).

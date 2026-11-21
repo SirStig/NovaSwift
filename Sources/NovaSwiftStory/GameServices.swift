@@ -78,12 +78,27 @@ public protocol GameServices: AnyObject {
     /// 0x00440aa0): untagged, and any flying in a group (a mission escort)
     /// leaves it for its class's default AI. They stay in the system.
     func releaseMissionShips(missionID: Int)
+
+    /// In flight, fold the flying ship's rounds and carried fighters into
+    /// `player` (`Munitions.record`), so an op that edits outfits starts from
+    /// what is really aboard. In the original the ship's banks *are* the
+    /// pilot's ammunition, so a mission `G`/`D`/`C`/`E`/`H` mid-flight always
+    /// sees the rounds already fired. Docked, do nothing: the pilot is the
+    /// truth there.
+    func syncLiveMunitions(into player: inout PlayerState)
+
+    /// In flight, load `player`'s ammunition counts back onto the flying
+    /// ship's banks and bays after an op granted or removed ammunition, so the
+    /// rounds can be fired now and the next fold-in doesn't undo the change.
+    func reloadLiveMunitions(from player: PlayerState)
 }
 
 public extension GameServices {
     func showOverlayMessage(_ text: String) {}
     func closeSpaceportScreen() {}
     func releaseMissionShips(missionID: Int) {}
+    func syncLiveMunitions(into player: inout PlayerState) {}
+    func reloadLiveMunitions(from player: PlayerState) {}
 }
 
 /// A mission the engine wants to offer, with its presentation text resolved.
@@ -185,6 +200,8 @@ open class LoggingGameServices: GameServices {
     open func showOverlayMessage(_ text: String) { record("overlay: \(text)") }
     open func closeSpaceportScreen() { record("close spaceport screen") }
     open func releaseMissionShips(missionID: Int) { record("release ships of mission #\(missionID)") }
+    open func syncLiveMunitions(into player: inout PlayerState) {}
+    open func reloadLiveMunitions(from player: PlayerState) {}
 }
 
 public extension GameServices {

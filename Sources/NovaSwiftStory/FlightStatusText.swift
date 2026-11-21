@@ -75,6 +75,13 @@ extension OriginalText {
         "\(shipClass):  \(misc(384)), \(pilot)."
     }
 
+    /// "<class>:  Fuel transfer complete, <ship>." — #3, 0xf0 raw calls, snd
+    /// 151, when an ally's fuel transfer fills the player past 100
+    /// (`Ship_UpdateShipAiState` 0x00405590).
+    public func fuelTransferComplete(shipClass: String, pilot: String) -> String {
+        "\(shipClass):  \(misc(3)), \(pilot)."
+    }
+
     // MARK: Plunder (NovaUi_RunBoardingPlunderWindow 0x00482940)
 
     /// Credits button: "You stole all the credits from this ship." (#116 +

@@ -1118,9 +1118,11 @@ public enum WorldEvent {
     /// for contraband in EV Nova; here it's the visible fly-by + scan sweep).
     /// `scannerID` is the authority ship, `targetID` the ship being scanned.
     case shipScanned(scannerID: Int, targetID: Int, at: Vec2)
-    /// A paid "Request Assistance" ally docked with the player and delivered
-    /// fuel/repairs — `entityID` is the ally, for the renderer's banner text.
-    case assistanceDelivered(entityID: Int)
+    /// An ally finished helping the player — `entityID` is the ally, for the
+    /// banner text. `refuel` is the fuel transfer ("<class>:  Fuel transfer
+    /// complete, <ship>.", 0x00405590), otherwise the repair ("<class>:
+    /// Repairs complete, <ship>.", 0x00408150).
+    case assistanceDelivered(entityID: Int, refuel: Bool)
     /// A disabled hulk was boarded — by the player (to plunder/attempt
     /// capture), or, with `entityID` 0, the player was boarded by an NPC.
     case shipBoarded(entityID: Int, at: Vec2)

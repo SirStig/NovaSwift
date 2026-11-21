@@ -52,6 +52,7 @@ final class GameScene: SKScene {
             if let e = persSpawnEligible { world?.persSpawnEligible = e }
             if let e = shipSpawnEligible { world?.shipSpawnEligible = e }
             if let e = missionBoardStandsDown { world?.missionBoardStandsDown = e }
+            if let e = missionBoardTransfersFuel { world?.missionBoardTransfersFuel = e }
             if let room = playerHoldHasRoom { world?.playerHoldHasRoom = room }
             if let left = stellarStrengthLeft { world?.stellarArmor = left() }
         }
@@ -200,6 +201,8 @@ final class GameScene: SKScene {
     private var cargoPanelTick = 0
     /// Host gate: whether boarding mission `id`'s ship stands its attackers down.
     var missionBoardStandsDown: ((Int) -> Bool)?
+    /// Host gate: whether mission `id` costs a jump of fuel (mïsn Flags 0x0008).
+    var missionBoardTransfersFuel: ((Int) -> Bool)?
     /// The player's mining scoop collected (cargoType, quantity) from a destroyed
     /// asteroid; the host adds it to pilot cargo (clamped to free hold) and returns
     /// the tonnage actually stowed plus the commodity's display name, or nil if the
@@ -2947,14 +2950,18 @@ final class GameScene: SKScene {
                         onPlayerScanned?(scanner.government, world.broadcastLabel(of: scanner, game: game))
                     }
                 }
-            case let .assistanceDelivered(entityID):
-                // "<class>:  Repairs complete, <pilot>." (#384, 0xf0 raw calls;
-                // Ship_ApplyShipAiControls 0x00408150).
+            case let .assistanceDelivered(entityID, refuel):
+                // "<class>:  Repairs complete, <ship>." (#384; 0x00408150) or
+                // "<class>:  Fuel transfer complete, <ship>." (#3; 0x00405590),
+                // 0xf0 raw calls.
                 if let game = galaxy?.game, let helper = world.ship(id: entityID) {
-                    hud?.post(OriginalText(game: game).repairsComplete(
-                        shipClass: game.ship(helper.shipTypeID)?.name ?? helper.name, pilot: world.playerShipName.isEmpty ? world.pilotName : world.playerShipName))
+                    let text = OriginalText(game: game)
+                    let shipClass = game.ship(helper.shipTypeID)?.name ?? helper.name
+                    let name = world.playerShipName.isEmpty ? world.pilotName : world.playerShipName
+                    hud?.post(refuel ? text.fuelTransferComplete(shipClass: shipClass, pilot: name)
+                                     : text.repairsComplete(shipClass: shipClass, pilot: name))
                 }
-                audio?.play(.beep2)   // Ship_ApplyShipAiControls 0x00408150, snd 151
+                audio?.play(.beep2)   // 0x00408150 / 0x00405590, snd 151
                 audio?.play(.docking)
             case let .personGrudge(pid):
                 persGrudges.insert(pid)
@@ -3138,6 +3145,7 @@ final class GameScene: SKScene {
         if let e = persSpawnEligible { w.persSpawnEligible = e }
         if let e = shipSpawnEligible { w.shipSpawnEligible = e }
         if let e = missionBoardStandsDown { w.missionBoardStandsDown = e }
+        if let e = missionBoardTransfersFuel { w.missionBoardTransfersFuel = e }
         if let room = playerHoldHasRoom { w.playerHoldHasRoom = room }
         if let left = stellarStrengthLeft { w.stellarArmor = left() }
     }
@@ -3147,6 +3155,7 @@ final class GameScene: SKScene {
         if let e = persSpawnEligible { world?.persSpawnEligible = e }
         if let e = shipSpawnEligible { world?.shipSpawnEligible = e }
         if let e = missionBoardStandsDown { world?.missionBoardStandsDown = e }
+        if let e = missionBoardTransfersFuel { world?.missionBoardTransfersFuel = e }
     }
 
     /// Take the credits aboard a boarded hulk; returns the amount.

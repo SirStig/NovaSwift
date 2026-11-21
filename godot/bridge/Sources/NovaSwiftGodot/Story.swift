@@ -86,6 +86,19 @@ final class GodotGameServices: GameServices {
 
     func releaseMissionShips(missionID: Int) { onReleaseShips?(missionID) }
 
+    /// The flying ship and the game data, or nil while docked.
+    var liveFlightShip: (() -> (ship: Ship, game: NovaGame)?)?
+
+    func syncLiveMunitions(into player: inout PlayerState) {
+        guard let live = liveFlightShip?(), live.ship.isAlive else { return }
+        Munitions.record(live.ship, into: &player, game: live.game)
+    }
+
+    func reloadLiveMunitions(from player: PlayerState) {
+        guard let live = liveFlightShip?(), live.ship.isAlive else { return }
+        Munitions.reload(live.ship, from: player, game: live.game)
+    }
+
     func notify(_ event: StoryNotification) {
         if case let .escortDeparted(escortID, _) = event { onEscortDeparted?(escortID) }
     }

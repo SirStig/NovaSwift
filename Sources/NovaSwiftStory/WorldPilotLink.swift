@@ -72,6 +72,8 @@ public enum WorldPilotLink {
         w.playerPersGrudges = p.persGrudges ?? []
         w.persSpawnEligible = { persSpawnEligible($0, pilot: pilot(), game: game) }
         w.shipSpawnEligible = { shipSpawnEligible($0, pilot: pilot(), game: game) }
+        w.missionBoardStandsDown = { game.mission($0)?.boardingStandsDown ?? false }
+        w.missionBoardTransfersFuel = { game.mission($0)?.costsJumpOfFuel ?? false }
         w.stellarArmor = p.stellarStrengthLeft ?? [:]
         w.playerHoldHasRoom = { [weak w] in
             guard let w, let galaxy = w.galaxy else { return false }

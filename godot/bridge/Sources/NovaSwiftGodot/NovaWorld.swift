@@ -4121,6 +4121,10 @@ class NovaWorld: Node2D {
             self?.sound.pending.append(SoundCue(soundID: id, priority: OriginalAudio.Priority.beep))
         }
         s.onSpawnShips = { [weak self] in self?.storyState.spawnRequested = true }
+        s.liveFlightShip = { [weak self] in
+            guard let self, self.dockedSpobID == nil, let world = self.world, let game = self.game else { return nil }
+            return (world.player, game)
+        }
         s.onChangeShip = { [weak self] _, _ in
             // Landed, the takeoff rebuild flies the new hull; in flight it is applied
             // between ticks (`storyApplyDeferred`).
@@ -6277,11 +6281,15 @@ class NovaWorld: Node2D {
             break   // "Ship destroyed." (#288) was posted at .playerDying; the original adds no line here
         case let .repairSystemEngaged(entityID) where entityID == World.playerEntityID:
             post(strs?.string(at: 37) ?? "")                  // OS-07
-        case let .assistanceDelivered(entityID):
-            // "<class>:  Repairs complete, <pilot>." (#384, 0xf0; Ship_ApplyShipAiControls 0x00408150)
+        case let .assistanceDelivered(entityID, refuel):
+            // "<class>:  Repairs complete, <ship>." (#384; 0x00408150) or
+            // "<class>:  Fuel transfer complete, <ship>." (#3; 0x00405590), 0xf0.
             if let helper = world?.ship(id: entityID) {
-                post(OriginalText(game: game).repairsComplete(
-                    shipClass: game.ship(helper.shipTypeID)?.name ?? helper.name, pilot: pilot.shipAddressName(game: game)))
+                let text = OriginalText(game: game)
+                let shipClass = game.ship(helper.shipTypeID)?.name ?? helper.name
+                let name = pilot.shipAddressName(game: game)
+                post(refuel ? text.fuelTransferComplete(shipClass: shipClass, pilot: name)
+                            : text.repairsComplete(shipClass: shipClass, pilot: name))
             }
         case let .escortRejoined(_, fighter):
             post(strs?.string(at: fighter ? 128 : 127) ?? "")

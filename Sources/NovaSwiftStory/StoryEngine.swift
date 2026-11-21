@@ -140,7 +140,10 @@ public final class StoryEngine {
             }
 
         case .grantOutfit(let id):
+            let isAmmo = !(game.outfit(id)?.ammoFor.isEmpty ?? true)
+            if isAmmo { services?.syncLiveMunitions(into: &player) }
             player.grantOutfit(id)
+            if isAmmo { services?.reloadLiveMunitions(from: player) }
             // A granted map/chart or amnesty (ModType 16/21) reveals its systems
             // / clears its legal record the same as a bought one — the effect is
             // inherent to acquiring the item, not to paying for it.
@@ -149,7 +152,10 @@ public final class StoryEngine {
             }
             services?.notify(.outfitGranted(outfitID: id))
         case .removeOutfit(let id):
+            let isAmmo = !(game.outfit(id)?.ammoFor.isEmpty ?? true)
+            if isAmmo { services?.syncLiveMunitions(into: &player) }
             player.removeOutfit(id)
+            if isAmmo { services?.reloadLiveMunitions(from: player) }
             services?.notify(.outfitRemoved(outfitID: id))
 
         case .moveToSystem(let id, let keep):
@@ -158,6 +164,9 @@ public final class StoryEngine {
             services?.movePlayer(toSystem: id, keepPosition: keep)
 
         case .changeShip(let id, let mode):
+            // Spent rounds stay spent through the swap; the front end then
+            // rebuilds the flying ship from the committed pilot.
+            services?.syncLiveMunitions(into: &player)
             applyShipChange(to: id, mode: mode)
             services?.changePlayerShip(to: id, mode: mode)
 

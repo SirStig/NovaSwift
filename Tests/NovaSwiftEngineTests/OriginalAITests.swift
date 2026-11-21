@@ -649,6 +649,32 @@ final class OriginalAITests: XCTestCase {
         XCTAssertEqual(OriginalComms.promptEntry(0x13, variant: 0).index, 96)
     }
 
+    /// 0x00405590: the fuel transfer ends with "<class>:  Fuel transfer
+    /// complete, <ship>." when the customer is the player.
+    func testFuelTransferToThePlayerReportsCompletion() {
+        let w = world()
+        w.player.position = Vec2(0, 0)
+        w.player.velocity = Vec2()
+        let helper = npc("Helper", govt: 128, at: Vec2(200, 0), ai: .wimpyTrader)
+        w.addNPC(helper)
+        run(w, 1)
+        let r = rec(w, helper)
+        r.state = OriginalAIState.idle
+        w.player.maxFuel = 300; w.player.fuel = 50
+        var session = w.originalAI.openComm(with: helper, world: w, playerCredits: 50_000)
+        _ = w.originalAI.pressAssistance(session, ship: helper, world: w)
+        _ = w.originalAI.settle(&session, effect: .assist, paid: true, ship: helper, world: w)
+        XCTAssertEqual(r.state, OriginalAIState.refuel)
+        _ = w.drainEvents()
+        var reported: [Int] = []
+        run(w, 3000) {
+            for case let .assistanceDelivered(id, refuel) in w.drainEvents() where refuel { reported.append(id) }
+            return !reported.isEmpty
+        }
+        XCTAssertGreaterThan(w.player.fuel, 100)
+        XCTAssertEqual(reported, [helper.entityID], "reported once, by the helper")
+    }
+
     func testMissionAttackerAndRevengePersNeverTakeABribe() {
         let w = world()
         w.player.position = Vec2(0, 0)
