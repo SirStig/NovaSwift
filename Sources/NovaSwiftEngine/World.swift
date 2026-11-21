@@ -5329,13 +5329,14 @@ public final class World {
         max(1, carrier.weapons.first(where: { $0.spec.id == bay.spec.bayWeaponID })?.count ?? 1)
     }
 
-    /// The player's secondary trigger on a fighter bay (OS-03): with a target
-    /// in the system, launch one docked fighter; the bay then waits `Reload /
-    /// mounted`.
+    /// The player's secondary trigger on a fighter bay (OS-03): launch one
+    /// docked fighter; the bay then waits `Reload / mounted`. Unlike an NPC
+    /// carrier (`Ship_LaunchShipFromCarrierBay` 0x0040d9a0), the player needs
+    /// no target: `Weapon_FirePlayerWeaponBank` (0x00455150) calls the spawn
+    /// for a Guidance-99 bank on the trigger alone.
     private func launchPlayerBayFighter(from ship: Ship, mount: WeaponMount) {
         let spec = mount.spec
-        guard carrierTarget(ship) != nil,
-              let bay = ship.fighterBays.first(where: { $0.spec.bayWeaponID == spec.id }),
+        guard let bay = ship.fighterBays.first(where: { $0.spec.bayWeaponID == spec.id }),
               bay.docked > 0 else { mount.logBlockedIfNeeded(for: ship); return }
         let slot = allShips.filter { $0.brain?.leaderID == ship.entityID }.count
         guard let fighter = launchFighter(from: ship, bay: bay, formationSlot: slot) else { return }

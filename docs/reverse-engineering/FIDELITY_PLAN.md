@@ -1682,14 +1682,16 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
   missions and reputations at InitialRec.
 
 #### OS-03 · Carried fighters — **DONE**
-- **Done.** × 1.333 (AI-41's behavior-5 arm, `Ship.applyCarriedFighterScale`); launch needs a
-  target (the player's too), from the carrier's centre at the bay's Speed/100, cooldown `Reload /
+- **Done.** × 1.333 (AI-41's behavior-5 arm, `Ship.applyCarriedFighterScale`); an NPC launch needs a
+  target; the player's trigger does not (0x00455150 spawns on the trigger alone — the port wrongly
+  required one until build 464, so bays sat full with nothing targeted), from the carrier's centre at the bay's Speed/100, cooldown `Reload /
   mounted`; a carrier that stands down recalls its fighters; docking within 75 px per axis, an
   empty bay re-arms to Reload. The port's low-ammo/low-health recall is gone. Q-OS-04 was settled
   on 2026-10-13 (fighters that cannot jump are recovered at the carrier; see the closing pass).
 - **Original.** Bay contents are the bank's loaded-ammo count (persisted, UI-02). A launched
   fighter is behavior 5 (×1.333 max shield/armor and shield regen, AI-41). Launch
-  (`Ship_LaunchShipFromCarrierBay` 0x0040d9a0) needs an in-system target; cooldown is
+  (`Ship_LaunchShipFromCarrierBay` 0x0040d9a0) needs an in-system target for an NPC carrier;
+  the player's trigger (`Weapon_FirePlayerWeaponBank` 0x00455150) spawns with none; cooldown is
   `Reload / mounted` (mounted, not loaded: a quirk); the fighter starts at the carrier centre,
   heading ± Inaccuracy, velocity `Speed/100` clamped to its max. Fighters return (state 5) when
   the carrier stands down (0x00410d10), on escort command 3, or when the carrier jumps. Docking

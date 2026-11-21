@@ -79,6 +79,26 @@ final class FighterBayTests: XCTestCase {
         XCTAssertEqual(carrier.fighterBays.first?.docked, 2, "one fighter spent from the bay")
     }
 
+    /// The player launches on the secondary trigger alone — no target needed
+    /// (0x00455150), unlike an NPC carrier (0x0040d9a0). Play-test report: a
+    /// full Manta bay "says 7 but they won't come out" with nothing targeted.
+    func testPlayerLaunchesFromABayWithNoTarget() throws {
+        let galaxy = Galaxy(game: game())
+        let player = try XCTUnwrap(galaxy.makeLoadedShip(128, extraOutfits: [200: 1],
+                                                         includeDefaultItems: false, includeHullWeapons: false))
+        let world = World(player: player)
+        world.galaxy = galaxy
+        player.currentTargetID = nil
+        player.selectedSecondaryID = 149
+        // This test bay isn't flagged secondary, so it rides the primary
+        // trigger; a real one (the Manta Bay) is the selected secondary.
+        world.intent.firePrimary = true
+        world.intent.fireSecondary = true
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(world.npcs.filter { $0.carrierID == World.playerEntityID }.count, 1)
+        XCTAssertEqual(player.fighterBays.first?.docked, 2)
+    }
+
     func testLaunchedFightersGetDistinctFormationSlots() throws {
         // Regression: `launchFighter` never assigned `formationSlot`, so every
         // fighter from the same bay defaulted to slot 0 and piled onto the
