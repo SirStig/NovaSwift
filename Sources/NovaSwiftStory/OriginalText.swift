@@ -125,8 +125,9 @@ public struct OriginalText {
     /// The first Land press on a stellar that grants access: by `rand(3)` either
     /// "<name> traffic control reads you" (#78; stations "dockmaster" #76) or
     /// "Landing request received" (#79; stations #77); hypergates #74/#75 by
-    /// `rand(2)`. Half the time ", <pilot>" follows; always ". Begin initial
-    /// approach." (#80).
+    /// `rand(2)`. Half the time ", <ship>" follows; always ". Begin initial
+    /// approach." (#80). `pilot` is the name the original addresses, the ship's
+    /// (`PlayerState.shipAddressName`, Q-UI-08).
     public func landingRequest(body: Body, stellar: String, pilot: String, rand: (Int) -> Int) -> String {
         var line: String
         switch body {
@@ -141,8 +142,8 @@ public struct OriginalText {
         return line + ". " + misc(80)
     }
 
-    /// Clearance on reaching 250 px: by `rand(3)` "Cleared to land, <pilot>."
-    /// (#97), "<pilot>, you're cleared to land." (#98) or "You are cleared to
+    /// Clearance on reaching 250 px: by `rand(3)` "Cleared to land, <ship>."
+    /// (#97), "<ship>, you're cleared to land." (#98) or "You are cleared to
     /// land." (#99) (stations #94–96, hypergates #91–93); then by `rand(2)`
     /// "Commence final approach." (#100) or "Welcome to <stellar>." (#101); and
     /// " [Landing fee is <n> credits.]" (#104 + #105, stations #103, gates #102).

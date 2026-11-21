@@ -151,7 +151,7 @@ public final class FlightComm {
                                                                          pilot: pilot, game: game))
         self.session = session
         var line = Self.shipLine(session.openingPrompt, session, game)
-        if session.appendsPilotName { line += pilot.pilotName + "." }
+        if session.appendsPilotName { line += pilot.shipAddressName(game: game) + "." }
         var middle = Self.label(game, 23, "Request Assistance")
         if session.isPlayerEscort {
             middle = Self.label(game, 32, "Release")

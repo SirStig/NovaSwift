@@ -241,12 +241,12 @@ final class GameHost {
             (seedPilot?.state.reinforcementRetriggerDays ?? [:], seedPilot?.state.stellarGarrisons ?? [:])
         }
         scene.broadcastContextProvider = { [weak seedPilot] in
-            guard let state = seedPilot?.state, let game = aiGame else { return ("", 0) }
+            guard let state = seedPilot?.state, let game = aiGame else { return ("", "", 0) }
             var mask: UInt16 = 0
             for am in state.activeMissions where am.isCarryingCargo {
                 mask |= UInt16(truncatingIfNeeded: game.mission(am.missionID)?.scanMask ?? 0)
             }
-            return (state.pilotName, mask)
+            return (state.pilotName, state.shipAddressName(game: game), mask)
         }
         scene.onReinforcementsCalled = { [weak seedPilot] systemID, days in
             guard let seedPilot else { return }
@@ -1368,7 +1368,7 @@ struct GameContainerView: View {
                     repairOnLanding(spobID: id)
                     syncCombatStanding()
                     // What was fired or lost in flight stays spent (UI-02).
-                    recordMunitions()
+                    recordMunitions(atTouchdown: true)
                     saveGame(reason: .land)               // `frequentAutosave` only; the original saves on leaving
                 }
                 model.audio.startAmbient(soundID: host?.game?.spob(id)?.ambientSoundID)
@@ -1706,7 +1706,7 @@ struct GameContainerView: View {
             }
             model.audio.play(.beep2)
             host?.hud.post(text.landingRequest(body: body, stellar: spob.displayName,
-                                               pilot: model.pilot.state.pilotName) { Int.random(in: 0..<$0) },
+                                               pilot: model.pilot.state.shipAddressName(game: game)) { Int.random(in: 0..<$0) },
                            rawCalls: OriginalText.Duration.landing)
             scene.requestLandingClearance(id)
             return
@@ -1737,7 +1737,7 @@ struct GameContainerView: View {
         model.audio.play(.beep2)   // NovaUi_UpdateTravelEngagementProgress 0x00459950
         host?.hud.post(OriginalText(game: game).landingClearance(
             body: OriginalText.Body(spob), stellar: spob.displayName,
-            pilot: model.pilot.state.pilotName, fee: fee) { Int.random(in: 0..<$0) },
+            pilot: model.pilot.state.shipAddressName(game: game), fee: fee) { Int.random(in: 0..<$0) },
                        rawCalls: OriginalText.Duration.landing)
     }
 
@@ -2510,6 +2510,11 @@ struct GameContainerView: View {
         // system's first nav stellar at rest. The rebuild also drops the
         // target and brings the escorts along. Capture before the rebuild.
         let keptPosition = keepPosition ? host?.scene.playerShip?.position : nil
+        // The rebuild makes a fresh ship from the pilot: fold in what this
+        // flight fired or lost first, or it all comes back for free (UI-02).
+        // (Only here, in flight — the docked story move launches through
+        // `relocateFlightHost` too, where the scene still holds the landed ship.)
+        recordMunitions()
         relocateFlightHost(to: systemID, reason: "story relocate")
         if let keptPosition {
             host?.scene.playerShip?.position = keptPosition
@@ -2639,7 +2644,17 @@ struct GameContainerView: View {
 
     /// Fold the rounds and fighters the live ship has left back into the pilot's
     /// owned ammunition (UI-02).
-    private func recordMunitions() {
+    ///
+    /// Only the flying ship may be folded in. While docked, the scene still holds
+    /// the ship the player landed in, frozen at its landing counts, and the pilot
+    /// is the only truth: the outfitter and shipyard change `pilot.outfits`, not
+    /// that ship. Folding it in then (the launch-tail save in `depart`, a
+    /// background save, any event save) clamped whatever was bought this visit
+    /// back to the landing counts, so fighters bought for a bay vanished on
+    /// takeoff and could be neither launched nor sold. The landing itself folds
+    /// the ship in once, before any purchase, with `atTouchdown`.
+    private func recordMunitions(atTouchdown: Bool = false) {
+        guard atTouchdown || landedSpobID == nil else { return }
         guard let ship = host?.scene.playerShip, ship.isAlive, let game = host?.game else { return }
         Munitions.record(ship, into: &model.pilot.state, game: game)
     }
@@ -3847,7 +3862,7 @@ struct GameContainerView: View {
             pendingEscortRelease = nil
             if let session = shipComm {
                 var line = shipCommLine(session.openingPrompt, session)
-                if session.appendsPilotName { line += model.pilot.state.pilotName + "." }
+                if session.appendsPilotName { line += model.pilot.state.shipAddressName(game: host?.game) + "." }
                 shipState.responseText = line
                 if session.isPlayerEscort {
                     // STR# 150 #32.

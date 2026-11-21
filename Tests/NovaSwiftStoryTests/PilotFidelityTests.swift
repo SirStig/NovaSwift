@@ -172,4 +172,52 @@ final class PilotFidelityTests: XCTestCase {
         XCTAssertNil(state.outfits[210], "an empty pool owns no rounds")
         XCTAssertEqual(state.outfits[211], 1, "the launcher itself is untouched")
     }
+
+    /// Play-test bug (1.0.0 build 462): "When I purchase pirate vipers and
+    /// pirate thunderheads they leave my inventory and cannot be deployed or
+    /// resold." The launch-tail save folded the ship the player had *landed*
+    /// in back into the pilot after the outfitter visit, clamping this visit's
+    /// fighters to the landing count. The fix (both front ends) folds the
+    /// flight in once at touchdown and never while docked; this pins the flow
+    /// the front ends now follow.
+    func testFightersBoughtWhileDockedSurviveTakeoffAndCanBeLaunchedOrSold() throws {
+        let game = munitionsGame()
+        let galaxy = Galaxy(game: game)
+        let fighter = try XCTUnwrap(game.outfit(213))
+        var state = PlayerState(shipType: 128)
+        state.credits = 1_000
+        state.outfits = [212: 1, 213: 1]
+
+        // Flying in with one fighter, landing: the flight is folded in once.
+        let landed = try XCTUnwrap(galaxy.makeLoadedShip(128, extraOutfits: state.outfits,
+                                                         includeDefaultItems: false, includeHullWeapons: false))
+        Munitions.loadCarriedFighters(into: landed, state: state, game: game)
+        XCTAssertEqual(landed.fighterBays.first?.docked, 1)
+        Munitions.record(landed, into: &state, game: game)
+        XCTAssertEqual(state.outfits[213], 1)
+
+        // The outfitter: three more, up to the bay's MaxAmmo of 4.
+        XCTAssertEqual(PilotEconomy.buyOutfit(&state, fighter, count: 5, galaxy: galaxy), 3)
+        XCTAssertEqual(state.outfits[213], 4)
+
+        // What the bug did: folding the landed ship in again clamps them away.
+        var clamped = state
+        Munitions.record(landed, into: &clamped, game: game)
+        XCTAssertEqual(clamped.outfits[213], 1, "the stale landed ship must never be folded in while docked")
+
+        // Takeoff builds a fresh ship from the pilot: all four aboard and launchable.
+        let launched = try XCTUnwrap(galaxy.makeLoadedShip(128, extraOutfits: state.outfits,
+                                                           includeDefaultItems: false, includeHullWeapons: false))
+        Munitions.loadCarriedFighters(into: launched, state: state, game: game)
+        let bay = try XCTUnwrap(launched.fighterBays.first)
+        let bayMount = try XCTUnwrap(launched.weapons.first { $0.spec.id == 131 })
+        XCTAssertEqual(bay.docked, 4)
+        XCTAssertEqual(bayMount.ammo, 4, "the HUD's bay count")
+        XCTAssertTrue(launched.canFireBank(bayMount))
+
+        // And they can be sold back.
+        XCTAssertTrue(PilotEconomy.canSellOutfit(state, fighter))
+        XCTAssertEqual(PilotEconomy.sellOutfit(&state, fighter, count: 4, galaxy: galaxy), 4)
+        XCTAssertNil(state.outfits[213])
+    }
 }

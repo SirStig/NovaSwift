@@ -247,6 +247,9 @@ class NovaWorld: Node2D {
                                             includeHullWeapons: false)
             ?? Ship(name: "Player", stats: ShipStats(speed: 300, acceleration: 300, turnRate: 100))
         player.cargo = pilot.cargo
+        // Bays carry the fighters the pilot owns, not a free full load (UI-02),
+        // as the Apple app's `buildPlayerShip`.
+        Munitions.loadCarriedFighters(into: player, state: pilot, game: game)
 
         let (w, _) = makeConfiguredWorld(game: game, systemID: sysID, player: player, galaxy: galaxy)
         // A pilot saved at a spaceport (the original's only save point) resumes
@@ -1079,6 +1082,9 @@ class NovaWorld: Node2D {
                                             includeHullWeapons: false)
             ?? world?.player ?? Ship(name: "Player", stats: ShipStats(speed: 300, acceleration: 300, turnRate: 100))
         player.cargo = pilot.cargo
+        // Bays carry the fighters the pilot owns — including any bought this
+        // visit — not a free full load (UI-02, Apple `buildPlayerShip`).
+        Munitions.loadCarriedFighters(into: player, state: pilot, game: game)
         // The pilot's real tank level (a nil level reads as full), as the Apple
         // app's `buildPlayerShip` does.
         player.fuel = pilot.fuel.map { min($0, player.maxFuel) } ?? player.maxFuel
@@ -3013,7 +3019,12 @@ class NovaWorld: Node2D {
             pilot.shipPositionY = nil
             pilot.shipHeading = nil
         }
-        if let ship = world?.player, let game { Munitions.record(ship, into: &pilot, game: game) }
+        // Only the flying ship: docked, `world.player` is the ship the pilot
+        // landed in (already folded in at touchdown) and the outfitter has
+        // since changed `pilot.outfits`; folding it again would clamp this
+        // visit's purchases (bought fighters, ammunition) back to the landing
+        // counts.
+        if dockedSpobID == nil, let ship = world?.player, let game { Munitions.record(ship, into: &pilot, game: game) }
         syncLiveStanding()   // legal record, rating, garrisons, stellar armor
         return PilotSaves.persist(archive: a, id: id, state: pilot, game: game, backup: backup)
     }
@@ -3226,6 +3237,7 @@ class NovaWorld: Node2D {
         let ship = galaxy.makeLoadedShip(pilot.shipType, extraOutfits: pilot.outfits, at: old.position,
                                          includeDefaultItems: false, includeHullWeapons: false) ?? old
         ship.cargo = pilot.cargo
+        if ship !== old { Munitions.loadCarriedFighters(into: ship, state: pilot, game: game) }
         ship.fuel = pilot.fuel.map { min($0, ship.maxFuel) } ?? ship.maxFuel
         let (w, _) = makeConfiguredWorld(game: game, systemID: sysID, player: ship, galaxy: galaxy)
         ship.position = old.position
@@ -3654,7 +3666,7 @@ class NovaWorld: Node2D {
         let fee = pilot.hasDominated(id) ? 0 : spob.landingFee
         beep(2)   // NovaUi_UpdateTravelEngagementProgress 0x00459950
         post(OriginalText(game: game).landingClearance(
-            body: OriginalText.Body(spob), stellar: spob.displayName, pilot: pilot.pilotName, fee: fee) { Int.random(in: 0..<$0) },
+            body: OriginalText.Body(spob), stellar: spob.displayName, pilot: pilot.shipAddressName(game: game), fee: fee) { Int.random(in: 0..<$0) },
              rawCalls: OriginalText.Duration.landing)
     }
 
@@ -3745,7 +3757,7 @@ class NovaWorld: Node2D {
                 return landJSON("messages")   // the clearance line follows on the next tick
             }
             beep(2)
-            post(text.landingRequest(body: kind, stellar: spob.displayName, pilot: pilot.pilotName) { Int.random(in: 0..<$0) }, rawCalls: OriginalText.Duration.landing)
+            post(text.landingRequest(body: kind, stellar: spob.displayName, pilot: pilot.shipAddressName(game: game)) { Int.random(in: 0..<$0) }, rawCalls: OriginalText.Duration.landing)
             return landJSON("messages")
         }
         // Second press: land, or say why not.
@@ -4288,6 +4300,7 @@ class NovaWorld: Node2D {
             player.angle = old.angle
             player.velocity = old.velocity
             player.cargo = pilot.cargo
+            Munitions.loadCarriedFighters(into: player, state: pilot, game: game)
             player.fuel = pilot.fuel.map { min($0, player.maxFuel) } ?? player.maxFuel
             // The swap keeps the hull's damage; a disabled hull is then repaired
             // one armor point at a time until it no longer reads disabled (MS-18).
@@ -6268,7 +6281,7 @@ class NovaWorld: Node2D {
             // "<class>:  Repairs complete, <pilot>." (#384, 0xf0; Ship_ApplyShipAiControls 0x00408150)
             if let helper = world?.ship(id: entityID) {
                 post(OriginalText(game: game).repairsComplete(
-                    shipClass: game.ship(helper.shipTypeID)?.name ?? helper.name, pilot: pilot.pilotName))
+                    shipClass: game.ship(helper.shipTypeID)?.name ?? helper.name, pilot: pilot.shipAddressName(game: game)))
             }
         case let .escortRejoined(_, fighter):
             post(strs?.string(at: fighter ? 128 : 127) ?? "")

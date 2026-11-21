@@ -577,8 +577,9 @@ extension OriginalAI {
     /// The interceptor's scan warning (0x00403de0): picking the player as its
     /// scan mark while the player carries mission cargo whose ScanMask
     /// matches the interceptor's government, with no overlay up, it flashes
-    /// "<class>:  <pilot>, prepare to be scanned." (STR# 2002 #381–#383) for
-    /// 400 frames.
+    /// "<class>:  <ship>, prepare to be scanned." (STR# 2002 #381–#383) for
+    /// 400 frames. It hails the player's ship by its name, as the original does
+    /// (play-test report, build 462: it used the pilot's name).
     func scanWarning(_ ship: Ship, host: OriginalAIHost) {
         guard let world = (host as? WorldAIHost)?.world, world.overlayTicks < 0,
               let game = world.galaxy?.game, let g = host.govt(ship.government),
@@ -586,7 +587,8 @@ extension OriginalAI {
         let list = game.stringList(2002)
         let line = list?.string(at: 381 + host.random(3)) ?? ""
         // The scan warning sounds snd 154 (0x00403de0).
-        world.postOverlayMessage(Self.broadcastName(ship, game: game) + ":  " + world.pilotName + ", " + line + ".",
+        let addressed = world.playerShipName.isEmpty ? world.pilotName : world.playerShipName
+        world.postOverlayMessage(Self.broadcastName(ship, game: game) + ":  " + addressed + ", " + line + ".",
                                  frames: 400, beep: 154)
     }
 

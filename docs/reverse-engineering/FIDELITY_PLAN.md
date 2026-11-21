@@ -1424,6 +1424,12 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
   mounted`; mode-9 rounds hit homing shots only (friend or foe, durability bite) and ships only by
   proximity; mode-10 beam records bite per call. A target *ship* (hull Flags2 0x0008) must be
   attacking the owner or its leader (from the exe).
+  Mode-9 rounds meet missiles in `World.pointDefenseContacts` after every shot has moved: the
+  original's bounding-rectangle overlap (callback 0x00438630, paired in `Frame_TickSystems`),
+  tested at each raw call the step held, with the impact effect at the round. A missile mark is
+  aimed at straight (0x0043a310 `Math_BearingFromPointToPoint`); only a ship mark is lead-aimed.
+  The earlier 6 px end-point test let rounds pass through missiles (play-test report, build 462:
+  "Chainstorm rounds fire but no missiles are destroyed").
 - **Original.** `Weapon_SelectTurretTargetWithinArc` 0x0043a310:
   - Only the first ready mode-9/10 bank fires, once per call (known bug).
   - Reach is range × 1.5 for mode 9 and BeamLength for mode 10; blind spots apply.
@@ -2642,7 +2648,7 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
   impossible (oracle: 0x00482280).
 
 #### AI-43 · Greetings text — **DONE**
-- **Done (AI pass 2).** `OriginalAI.buildGreeting` at window open, in the original's draw order: STR# 2002 #175 by default; düde InfoTypes (now decoded, `DudeRes.infoTypes`, ships carry `dudeID`) pick a set type by `Rand(4)` rejection — a galaxy-wide trade tip (`Rand(6)` commodity, `Rand(0x800)` stellar until low/high: "<name> is a good place to buy|sell <commodity>."), a disaster report from the host's active disasters with > 1 day left (#179–#186), STR# (bits & 0xfff) + 7500 entry `Rand(DAT_007d17ca % count + 1) + 1` (`World.commQuoteRoll`: `Rand(0x800)` per arrival, −1 after a stellar comm), or the government's `STR ` 10010/10015 + variant falling back to STR# 7000 + govt; short or `*` text → STR# 3000 #46–50; a përs CommQuote overrides; a përs with Flags 0x8000 and no CommQuote reports a disaster. The opening line is the original's prompt 0/2/4/5/8 ("Glad to see you, <pilot>." for a ShipGoal-3 ship); Greetings answers "Stop wasting my time." while the ship presses or dislikes the player (`Ship_DoesShipLikePlayer` 0x0040fd20, `OriginalAI.likesPlayer`) and "No response." when disabled or flags_secondary 0x0001. Fleet ships have no düde, so they say "Greetings." (known bugs #125/#126).
+- **Done (AI pass 2).** `OriginalAI.buildGreeting` at window open, in the original's draw order: STR# 2002 #175 by default; düde InfoTypes (now decoded, `DudeRes.infoTypes`, ships carry `dudeID`) pick a set type by `Rand(4)` rejection — a galaxy-wide trade tip (`Rand(6)` commodity, `Rand(0x800)` stellar until low/high: "<name> is a good place to buy|sell <commodity>."), a disaster report from the host's active disasters with > 1 day left (#179–#186), STR# (bits & 0xfff) + 7500 entry `Rand(DAT_007d17ca % count + 1) + 1` (`World.commQuoteRoll`: `Rand(0x800)` per arrival, −1 after a stellar comm), or the government's `STR ` 10010/10015 + variant falling back to STR# 7000 + govt; short or `*` text → STR# 3000 #46–50; a përs CommQuote overrides; a përs with Flags 0x8000 and no CommQuote reports a disaster. The opening line is the original's prompt 0/2/4/5/8 ("Glad to see you, <ship>." for a ShipGoal-3 ship); Greetings answers "Stop wasting my time." while the ship presses or dislikes the player (`Ship_DoesShipLikePlayer` 0x0040fd20, `OriginalAI.likesPlayer`) and "No response." when disabled or flags_secondary 0x0001. Fleet ships have no düde, so they say "Greetings." (known bugs #125/#126).
 - **Original.** 0x004819d0 picks one type uniformly from the set bits of düde +0x06:
   - 0x1000: a trade tip;
   - 0x2000: a disaster report;
@@ -3350,7 +3356,7 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
   attacking a warship, a miner when it turns to retreat; the overlay gate keeps it to one message
   at a time (`OriginalAI.distressCall`). The interceptor's line is the scan warning: picking the
   player as its scan mark while the player carries mission cargo whose ScanMask matches its
-  government, with no overlay up, it flashes "<class>:  <pilot>, <STR# 2002 #381–#383>!" for 400
+  government, with no overlay up, it flashes "<class>:  <ship>, <STR# 2002 #381–#383>!" for 400
   frames (`OriginalAI.scanWarning`; the app supplies `World.missionCargoScanMask` and the pilot's
   name). App-side HUD lines don't hold the gate; only overlays the engine posts do.
 - **Original (corrected).** The audit's "STR# 0x138b taunt on entering retreat or attack against
@@ -3564,7 +3570,7 @@ resources have no effect. Every string fix below reads the resource, never a cop
 - **Original.** First Land press (0x00457580): a denied stellar beeps and shows STR# 2002 #81 /
   #82 / #83 (hypergate / docking / landing denied) and clears the selection. Otherwise a request
   line by `rand(3)`: 1/3 "<name> traffic control reads you" (#78; #76 stations), else "Landing
-  request received" (#79; #77 stations; gates #74/#75), with 1/2 chance of ", <pilot>", always
+  request received" (#79; #77 stations; gates #74/#75), with 1/2 chance of ", <ship>", always
   ending ". Begin initial approach." (#80). Within 250 px on both axes the request is skipped.
   On reaching 250 px (0x00459950): clearance by `rand(3)` (#97 / #98 / #99; stations #94–96,
   gates #91–93), then `rand(2)` #100 or #101, plus " [Landing fee is <n> credits.]" (#104 + #105).
@@ -3840,7 +3846,7 @@ stock-data pass. "Decision" means it is not an RE question.
 | Q-UI-04 | Key table: squad-cycle modifier (Ctrl per the port, Alt per the manual), the DIK names of slots 0x0a/0x0d, and the meanings of slots 0x0c (H), 0x0f (K), 0x29 (U) | Ghidra key-name table 0x005776dc and the 0x0044b120 key reads |
 | Q-UI-06 | Does the star map preselect (green arrow) when opened from flight with an active mission? | Ghidra 0x004a3aa0 |
 | Q-UI-07 | NovaSwift's hidden-twin handling vs the original's root rewrite of every link (possible wrong link lines around the Koria/Vell-os twins) | Ghidra plus data |
-| Q-UI-08 | Is `DAT_00599acc` ("<name>, you're cleared to land") the pilot or the ship name? | Ghidra |
+| ~~Q-UI-08~~ | **Settled: the ship name.** `DAT_00599acc` is written from the ship-name prompt (new pilot 0x00489d70, shipyard purchase, capture) and the debug dump prints it as "Ship name:" (0x004ca2c0); the pilot name is `DAT_005997cc`. Every line that reads it now uses `PlayerState.shipAddressName`: scan warning and detection (0x00403de0, 0x00401800), landing request (0x00457580) and clearance (0x00459950), bribe clearance (0x00480030), hailed-ship greeting (0x0047e470) and "Repairs complete" (0x00408150) | Ghidra |
 
 **Decisions** (not RE questions):
 
@@ -4091,15 +4097,15 @@ with the decompiled call site:
 | Line (Apple `app/` / Godot bridge) | Decision | Original (STR# 2002, address) |
 |---|---|---|
 | "Your illicit cargo was detected — mission failed." | replaced | #286 "Your ship has been scanned - mission failed.", snd 151, none when the mission has Flags 0x0400 (`Ship_ScanPlayerForContraband` 0x00401800) |
-| "<govt>: contraband detected — you are let off with a warning." / "<govt> fined you Ncr…" | replaced | `<scanner>:  <pilot>, <finding> has been detected.` + ` You have been fined N credit(s).` when ScanFine is non-zero: mission cargo #376 #377 #378 #379, junk #376 + junk name + #378 #379, outfit #375 + a/an (#393/#394) or plural + #379; fine #380 + #32/#33; 0x190 raw calls, snd 154 (0x00401800). `ContrabandScan.scanLines`, `OriginalText.scanDetected`; the scanner is the përs name else the hull's class name (`World.broadcastLabel`) |
+| "<govt>: contraband detected — you are let off with a warning." / "<govt> fined you Ncr…" | replaced | `<scanner>:  <ship>, <finding> has been detected.` + ` You have been fined N credit(s).` when ScanFine is non-zero: mission cargo #376 #377 #378 #379, junk #376 + junk name + #378 #379, outfit #375 + a/an (#393/#394) or plural + #379; fine #380 + #32/#33; 0x190 raw calls, snd 154 (0x00401800). `ContrabandScan.scanLines`, `OriginalText.scanDetected`; the scanner is the përs name else the hull's class name (`World.broadcastLabel`) |
 | "<govt> logs your smuggling; your standing worsens." | removed | the SmugPenalty flood prints nothing (0x00401800) |
-| "You are being scanned." | removed | nothing prints when a scan starts; the interceptor's "<class>:  <pilot>, prepare to be scanned." (#381–383, 0x190, snd 154, 0x00403de0) is the AI's own overlay and was already there (its closing "!" is now "." as in the original) |
+| "You are being scanned." | removed | nothing prints when a scan starts; the interceptor's "<class>:  <ship>, prepare to be scanned." (#381–383, 0x190, snd 154, 0x00403de0) is the AI's own overlay and was already there (its closing "!" is now "." as in the original). Both scan lines address the player's **ship name** (`PlayerState.shipAddressName`; the hull name for a pilot with none), not the pilot name — play-test report against the original, build 462 |
 | "Took N credits." | replaced | #116 + #33 + #108 "You stole all the credits from this ship." (0x00482940 slot 3) |
 | "Siphoned N fuel (~N jumps)." | replaced | slot 6: #6 nothing fits, #5 tank still short, #4 tank full (0x00482940) |
 | "Transferred N rounds of ammunition." | replaced | #115 + lower-case count word (STR# 137) + outfit's lower-case singular/plural + #108; #117 when nothing fits (0x00482940 slot 4) |
 | "Salvaged N item(s): …" (përs ItemClass loot) | replaced | #106 + a/an or count word + lower-case outfit name + #108 "You retrieved a … from this ship." (0x00482940 head) |
 | "Ship captured — it joins your escorts." (and the Godot debug console's copy) | replaced | #123 (0x00482940) |
-| "<name> transfers fuel and makes repairs." | replaced | `<class>:  Repairs complete, <pilot>.` — #384, 0xf0, snd 151 (`Ship_ApplyShipAiControls` 0x00408150, only when the target is the player) |
+| "<name> transfers fuel and makes repairs." | replaced | `<class>:  Repairs complete, <ship>.` — #384, 0xf0, snd 151 (`Ship_ApplyShipAiControls` 0x00408150, only when the target is the player) |
 | "<stellar> scrambles N defenders." | removed | the original prints no line when defenders launch (Demand Tribute is the comm window, 0x00480030) |
 | "<stellar> submits to your rule — it will pay tribute daily." | removed | no status line (0x00480030); the comm window shows the reply (also removed from the shared `FlightComm.apply` Godot uses) |
 | "<stellar> has been destroyed." / "… has been restored." (shot down, story Y/Z) | removed | no line in the original; also removed from `FlightComm.apply` and the Godot story services |

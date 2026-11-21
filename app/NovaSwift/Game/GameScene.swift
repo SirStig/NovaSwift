@@ -102,14 +102,15 @@ final class GameScene: SKScene {
     var onEscortOrdersChanged: (([Int]) -> Void)?
     var onGarrisonSnapshot: (([Int: Int?]) -> Void)?
 
-    /// AI-32: the pilot's name and the ScanMask of the mission cargo aboard,
-    /// for NPC broadcasts.
-    var broadcastContextProvider: (() -> (pilotName: String, missionCargoScanMask: UInt16))?
+    /// AI-32: the pilot's name, the ship's name (the scan warning hails the
+    /// ship) and the ScanMask of the mission cargo aboard, for NPC broadcasts.
+    var broadcastContextProvider: (() -> (pilotName: String, shipName: String, missionCargoScanMask: UInt16))?
 
     /// Seed a freshly built world with the persisted defense state.
     private func applyDefenseState(_ w: World, systemID: Int) {
         if let ctx = broadcastContextProvider?() {
             w.pilotName = ctx.pilotName
+            w.playerShipName = ctx.shipName
             w.missionCargoScanMask = ctx.missionCargoScanMask
         }
         if let saved = escortOrdersProvider?() { w.originalAI.restoreCategoryCommand(saved) }
@@ -2951,7 +2952,7 @@ final class GameScene: SKScene {
                 // Ship_ApplyShipAiControls 0x00408150).
                 if let game = galaxy?.game, let helper = world.ship(id: entityID) {
                     hud?.post(OriginalText(game: game).repairsComplete(
-                        shipClass: game.ship(helper.shipTypeID)?.name ?? helper.name, pilot: world.pilotName))
+                        shipClass: game.ship(helper.shipTypeID)?.name ?? helper.name, pilot: world.playerShipName.isEmpty ? world.pilotName : world.playerShipName))
                 }
                 audio?.play(.beep2)   // Ship_ApplyShipAiControls 0x00408150, snd 151
                 audio?.play(.docking)

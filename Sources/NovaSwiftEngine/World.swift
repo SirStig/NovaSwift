@@ -1738,6 +1738,10 @@ public final class World {
     public var missionCargoScanMask: UInt16 = 0
     /// The pilot's name, for broadcasts that address the player.
     public var pilotName = ""
+    /// The player's ship name, set by the host: the interceptor's scan warning
+    /// addresses the ship, not the pilot (`OriginalAI.scanWarning`). Empty
+    /// falls back to `pilotName`.
+    public var playerShipName = ""
 
     /// `gövt.Flags` 0x0800 — "Ships of this govt start out disabled (derelicts)."
     /// The base data's gövt #160 "Derelicts" is what every `Drifting Derelict`
@@ -2903,7 +2907,8 @@ public final class World {
     /// state, vulnerable to PD (no `wëap` Flags 0x0080), that is aimed at this
     /// ship or its squad leader; with none, the nearest ship whose hull has
     /// Flags2 0x0008 and is attacking this ship or its leader. Mode 9 fires a
-    /// real PD round (see `isPointDefenseRound`), mode 10 queues a beam that
+    /// real PD round, aimed straight at a missile and lead-aimed at a ship (see
+    /// `isPointDefenseRound` and `pointDefenseContacts`), mode 10 queues a beam that
     /// bites `Mass + trunc(Energy / 2)` off the missile's durability per call.
     /// The bank's cooldown grows by `Reload / mounted`.
     private func runPointDefense(rawCalls: Int) {
@@ -2945,6 +2950,9 @@ public final class World {
                 guard bestShot != nil || bestShip != nil else { break }
                 let aimPoint = bestShot?.position ?? bestShip!.position
                 if spec.guidance == .pointDefense {
+                    // 0x0043a310: a missile mark is aimed at straight
+                    // (`Math_BearingFromPointToPoint`, no lead); only a ship
+                    // mark goes through `Ship_AimWeaponPredictive`.
                     var aim = OriginalMath.bearingRadians(from: ship.position, to: aimPoint)
                     if let target = bestShip {
                         aim = leadAngle(from: ship.position, shooterVel: ship.velocity, target: target,
@@ -3908,6 +3916,7 @@ public final class World {
             // times a small ship's radius per frame and would otherwise tunnel
             // clean through it (the "shots pass through and never hit" bug).
             let prevPos = p.position
+            p.stepOrigin = prevPos
             p.position += p.velocity * dt
 
             guard p.guidanceState != 998, p.proxSafetyRemaining <= 0 else { continue }
@@ -3922,23 +3931,8 @@ public final class World {
                 continue
             }
 
-            // A point-defense round (mode 9) collides only with homing shots,
-            // friend or foe (0x00438630): a shot with durability left loses the
-            // round's bite, one without dies.
-            if p.isPointDefenseRound {
-                for m in projectiles where m.alive && m !== p && m.guidance == .guided && !m.visualOnly
-                    && Self.segmentPointDistance(prevPos, p.position, m.position) <= 6 {
-                    if m.pdDurability > 0 {
-                        m.pdDurability -= Int(p.pointDefenseBite)
-                    } else {
-                        m.alive = false
-                        events.append(.explosion(at: m.position, radius: 10, soundID: nil, boomID: nil))
-                    }
-                    p.alive = false
-                    break
-                }
-                guard p.alive else { continue }
-            }
+            // A point-defense round (mode 9) meets homing shots in
+            // `pointDefenseContacts`, once every shot has moved this step.
 
             var struck: Ship?
             var byProximity = false
@@ -3997,9 +3991,70 @@ public final class World {
                 }
             }
         }
+        pointDefenseContacts(rawCalls: rawCalls)
         projectiles.append(contentsOf: spawned.prefix(max(0, OriginalRendering.shotPoolSize - projectiles.count)))
         projectiles.removeAll { !$0.alive }
         asteroids.removeAll { !$0.isAlive }
+    }
+
+    /// Point-defense rounds (mode 9) against homing shots (WP-14). The
+    /// original gives only Guidance-9 sprites a collision callback (0x00438630)
+    /// and pairs that pool with the homing-missile pool in `Frame_TickSystems`
+    /// on every raw call: a plain bounding-rectangle overlap of the two sprite
+    /// frames, friend or foe. Each contact spends the round; a missile with
+    /// durability left loses the round's bite (`Mass + trunc(Energy / 2)`),
+    /// one without dies, with impact effect 0 at the *round's* position.
+    ///
+    /// Runs after every shot has moved, testing at each raw call this step
+    /// held (1 or 2 at 30 Hz, `OriginalClock`), with both shots placed where
+    /// they were at that call. The earlier test only asked whether the
+    /// missile's single end point lay within 6 px of the round's path, which
+    /// is why build 462's Chainstorm rounds never stopped a missile. Inert
+    /// rounds (state 998) and rounds still inside their ProxSafety hit
+    /// nothing, as for ships.
+    func pointDefenseContacts(rawCalls: Int = 1) {
+        guard rawCalls > 0,
+              projectiles.contains(where: { $0.alive && $0.isPointDefenseRound }) else { return }
+        let rounds = projectiles.filter {
+            $0.isPointDefenseRound && !$0.visualOnly && $0.guidanceState != 998 && $0.proxSafetyRemaining <= 0
+        }
+        let marks = projectiles.filter { $0.guidance == .guided && !$0.visualOnly }
+        guard !rounds.isEmpty, !marks.isEmpty else { return }
+        func at(_ q: Projectile, _ f: Double) -> Vec2 { q.stepOrigin + (q.position - q.stepOrigin) * f }
+        for call in 1...rawCalls {
+            let f = Double(call) / Double(rawCalls)
+            for p in rounds where p.alive {
+                let pp = at(p, f)
+                let (phx, phy) = shotHalfExtents(p)
+                for m in marks where m.alive && m !== p {
+                    let (mhx, mhy) = shotHalfExtents(m)
+                    let d = pp - at(m, f)
+                    guard abs(d.x) <= phx + mhx, abs(d.y) <= phy + mhy else { continue }
+                    if m.pdDurability > 0 {
+                        m.pdDurability -= Int(p.pointDefenseBite)
+                    } else {
+                        m.alive = false
+                        events.append(.explosion(at: pp, radius: 10, soundID: nil, boomID: nil))
+                    }
+                    p.alive = false
+                    break
+                }
+            }
+        }
+    }
+
+    /// Half the width and height of a shot's sprite frame, for the
+    /// shot-vs-shot bounding rectangle. A shot with no sprite data (or a
+    /// sub-6 px graphic) counts as 6 × 6, the reach the port has always used.
+    func shotHalfExtents(_ p: Projectile) -> (Double, Double) {
+        let minimum = 3.0
+        guard let mask = p.graphicSpinID.flatMap({ galaxy?.shotCollisionMask(spinID: $0) }) else {
+            return (minimum, minimum)
+        }
+        // Shot frames are square headings; the original's bounds take the
+        // larger side for height (`SpriteContact.boundsOverlap`).
+        let w = Double(mask.width), h = Double(max(mask.height, mask.width))
+        return (max(minimum, w / 2), max(minimum, h / 2))
     }
 
     /// A ship's frame width for the proximity fuse (`Sprite_GetFrameFullWidth`

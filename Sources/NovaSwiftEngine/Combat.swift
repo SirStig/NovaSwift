@@ -738,6 +738,11 @@ public final class Projectile {
     /// fixed sim tick, so the renderer can draw a fast shot gliding between 30 Hz
     /// ticks instead of jumping. Seeded to the spawn position. Presentational only.
     public var renderPrevPosition: Vec2
+    /// Where this shot started the current sim step (before this step's move).
+    /// Point-defense contact places both shots between here and `position` at
+    /// each raw call the step held, as the original tests them once per raw
+    /// call. Seeded to the spawn position.
+    public var stepOrigin: Vec2
     public var targetID: Int?            // for guided/homing munitions
     /// The shot's target slot (`+0x2a`) whatever its guidance: the shooter's
     /// primary target at launch (a submunition's own target).
@@ -869,7 +874,7 @@ public final class Projectile {
         self.weaponID = weaponID; self.pdDurability = pdDurability
         self.translucentShots = translucentShots
         self.confusedByInterference = confusedByInterference; self.turnsAwayIfJammed = turnsAwayIfJammed
-        self.position = position; self.renderPrevPosition = position
+        self.position = position; self.renderPrevPosition = position; self.stepOrigin = position
         self.velocity = velocity; self.life = life
         self.shieldDamage = shieldDamage; self.armorDamage = armorDamage
         self.penetratesShields = penetratesShields

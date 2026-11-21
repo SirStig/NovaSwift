@@ -122,7 +122,7 @@ public struct StellarComm: Sendable {
             let cleared = spob.isStation ? (list?.string(at: 95) ?? "you're cleared to dock.")
                                          : (list?.string(at: 98) ?? "you're cleared to land.")
             let tail = list?.string(at: 100) ?? "Commence final approach."
-            return .paid(price: price, hudLine: "\(state.pilotName), \(cleared) \(tail)")
+            return .paid(price: price, hudLine: "\(state.shipAddressName(game: game)), \(cleared) \(tail)")
         }
         bribeLatch = 0
         bribePrice += 1000

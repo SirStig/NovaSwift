@@ -1,6 +1,25 @@
 import Foundation
 import NovaSwiftKit
 
+extension PlayerState {
+    /// The name the galaxy calls the player by: the player's ship name, the
+    /// original's `DAT_00599acc` (its debug log prints it as "Ship name:",
+    /// 0x004ca2c0). Every line that addresses the player reads it, not the
+    /// pilot name: the scan warning and detection lines (0x00403de0,
+    /// 0x00401800), the landing request (0x00457580) and clearance (0x00459950),
+    /// the bribe clearance (0x00480030), a hailed ship's greeting (0x0047e470) and "Repairs complete"
+    /// (0x00408150). A pilot with no
+    /// ship name (an old save) gets the hull's name, the same default the
+    /// new-pilot dialog gives a blank entry (0x00489d70); with no hull either,
+    /// the pilot's name.
+    public func shipAddressName(game: NovaGame?) -> String {
+        let named = shipName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !named.isEmpty { return named }
+        if let hull = game?.ship(shipType)?.name, !hull.isEmpty { return hull }
+        return pilotName
+    }
+}
+
 /// What the player's in-flight scan by a government ship turned up and cost —
 /// the consequence the Apple app wires into `GameScene.onPlayerScanned`.
 public struct PlayerScanOutcome: Equatable, Sendable {
@@ -52,14 +71,15 @@ extension ContrabandScan {
     }
 
     /// The sentences of one scan (see `PlayerScanOutcome.messages`). `state`
-    /// supplies the pilot's name and the outfit counts.
+    /// supplies the name the scanner addresses (`shipAddressName`, the ship's
+    /// name) and the outfit counts.
     public static func scanLines(failed: Bool, result: ContrabandResult?, state: PlayerState,
                                  game: NovaGame, scanner: String) -> [String] {
         let text = OriginalText(game: game)
         var lines: [String] = []
         if failed { lines.append(text.misc(286)) }
         guard let result, result.foundContraband else { return lines }
-        let pilot = state.pilotName
+        let pilot = state.shipAddressName(game: game)
         let fine = result.fine
         if !result.smugglingMissions.isEmpty {
             lines.append(text.scanDetected(scanner: scanner, pilot: pilot, finding: .missionCargo, fine: fine))

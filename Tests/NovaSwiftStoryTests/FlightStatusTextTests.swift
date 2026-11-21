@@ -73,6 +73,24 @@ final class FlightStatusTextTests: XCTestCase {
         XCTAssertTrue(ContrabandScan.scanLines(failed: false, result: nil, state: player, game: g, scanner: "Cruiser").isEmpty)
     }
 
+    /// Play-test report (build 462): a scan addresses the player's ship, not
+    /// the pilot, as in the original.
+    func testScanLinesAddressTheShipNotThePilot() {
+        let g = game()
+        var player = PlayerState(pilotName: "Aurelian", shipName: "Starfall", currentSystem: 128)
+        let result = ContrabandResult(contrabandOutfits: [], contrabandCargo: [], smugglingMissions: [3],
+                                      fine: 0, warningOnly: true, smugglingPenalty: 0)
+        let named = ContrabandScan.scanLines(failed: false, result: result, state: player, game: g, scanner: "Cruiser")
+        XCTAssertEqual(named.count, 1)
+        XCTAssertTrue(named[0].hasPrefix("Cruiser:  Starfall, "), named[0])
+        XCTAssertEqual(player.shipAddressName(game: g), "Starfall")
+        // No ship name and no hull record: the pilot's name.
+        player.shipName = "  "
+        XCTAssertEqual(player.shipAddressName(game: g), "Aurelian")
+        XCTAssertTrue(ContrabandScan.scanLines(failed: false, result: result, state: player, game: g,
+                                               scanner: "Cruiser")[0].hasPrefix("Cruiser:  Aurelian, "))
+    }
+
     func testAssistanceRepairsLine() {
         XCTAssertEqual(OriginalText(game: game()).repairsComplete(shipClass: "Shuttle", pilot: "Ann"),
                        "Shuttle:  Repairs complete, Ann.")

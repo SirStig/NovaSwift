@@ -83,10 +83,11 @@ public enum WorldPilotLink {
 
     /// Seed a freshly built world with the persisted system-defense state (AI-13 / AI-15):
     /// stellar garrisons, the system's reinforcement retrigger lock, the saved per-category
-    /// escort orders, and the pilot name / mission-cargo scan mask NPC broadcasts read (AI-32).
+    /// escort orders, and the pilot / ship names and mission-cargo scan mask NPC broadcasts read (AI-32).
     public static func applyDefenseState(world w: World, game: NovaGame, pilot p: PlayerState, systemID: Int,
                                          escortOrdersChanged: (([Int]) -> Void)?) {
         w.pilotName = p.pilotName
+        w.playerShipName = p.shipAddressName(game: game)
         var mask: UInt16 = 0
         for am in p.activeMissions where am.isCarryingCargo {
             mask |= UInt16(truncatingIfNeeded: game.mission(am.missionID)?.scanMask ?? 0)

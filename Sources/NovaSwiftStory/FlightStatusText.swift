@@ -46,7 +46,7 @@ extension OriginalText {
         case outfit(singular: String, plural: String, count: Int)
     }
 
-    /// "<scanner>:  <pilot>, <finding> has been detected." plus, when a fine
+    /// "<scanner>:  <ship>, <finding> has been detected." plus, when a fine
     /// is levied, " You have been fined N credits." (#375–#380; separators
     /// ":  ", ", ", " ", "." read from 0x0056b000–0x0056b00c). `scanner` is
     /// the scanning përs's name, else its hull's class name.
@@ -70,7 +70,7 @@ extension OriginalText {
 
     // MARK: Assistance (Ship_ApplyShipAiControls 0x00408150, mode 0xf)
 
-    /// "<class>:  Repairs complete, <pilot>." — #384, 0xf0 raw calls, snd 151.
+    /// "<class>:  Repairs complete, <ship>." — #384, 0xf0 raw calls, snd 151.
     public func repairsComplete(shipClass: String, pilot: String) -> String {
         "\(shipClass):  \(misc(384)), \(pilot)."
     }
