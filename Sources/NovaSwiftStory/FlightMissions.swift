@@ -108,12 +108,10 @@ public enum FlightMissions {
 
             // Special ships (0x0041d6e0) spawn whenever the slot's resolved
             // ShipSyst is this system, whatever the ShipGoal — a −1 goal's
-            // escorts, pursuers and ambushers included. Escort/observe and
-            // goal-less ships always (re)spawn while the mission is active;
-            // kill/disable/board objectives don't respawn once met.
-            let passiveGoal = m.shipGoal == .escort || m.shipGoal == .observe || m.shipGoal == .none
-            let goalEligible = m.shipCount > 0 && m.shipDude >= 128
-                && (passiveGoal || am.shipObjectivesRemaining > 0)
+            // escorts, pursuers and ambushers included — and only as many as
+            // are still alive (`specialShipsToSpawn`).
+            let liveCount = specialShipsToSpawn(am, m)
+            let goalEligible = liveCount > 0 && m.shipDude >= 128
             let goalSystemMatches = engine.shipSystemMatches(am, currentSystem: currentSystem)
             let shipName = engine.missionShipName(am, m)
             let shipSubtitle = engine.missionShipSubtitle(am, m)
@@ -124,13 +122,13 @@ public enum FlightMissions {
                     // AI-14: a ShipStart-1 batch waits out its rearm delay, then
                     // jumps in from the previous system's side.
                     host.scheduleMissionArrival(missionID: m.id, dudeID: m.shipDude,
-                                                count: max(1, m.shipCount), goal: m.shipGoal,
+                                                count: liveCount, goal: m.shipGoal,
                                                 behavior: m.shipBehaviorMode, auxiliary: false,
                                                 preferredShipID: am.lockedShipType,
                                                 name: shipName, subtitle: shipSubtitle)
                 } else {
                     host.spawnMissionShips(missionID: m.id, dudeID: m.shipDude,
-                                           count: max(1, m.shipCount), goal: m.shipGoal,
+                                           count: liveCount, goal: m.shipGoal,
                                            behavior: m.shipBehaviorMode, government: nil,
                                            arrival: arrivalMode(forShipStart: m.shipStart),
                                            navStellarIndex: (-16 ... -1).contains(m.shipStart) ? -1 - m.shipStart : nil,
@@ -154,6 +152,19 @@ public enum FlightMissions {
             }
         }
         return changed
+    }
+
+    /// How many of a slot's special ships (re)spawn: the original's live
+    /// count (`target_ship_count`, 0x0041af90), which every destroyed fleet
+    /// ship lowers for good — escort, observe and goal-less ships included, so
+    /// a silent mission's follow-the-player wing (the pirate string's mïsn
+    /// #711) stays dead once shot down. A kill/disable/board/chase-off goal
+    /// also stops at the targets it has already dealt with.
+    public static func specialShipsToSpawn(_ am: ActiveMission, _ m: MissionRes) -> Int {
+        guard m.shipCount > 0 else { return 0 }
+        let passiveGoal = m.shipGoal == .escort || m.shipGoal == .observe || m.shipGoal == .none
+        let alive = max(0, m.shipCount - (am.shipsDestroyed ?? 0))
+        return passiveGoal ? alive : min(alive, am.shipObjectivesRemaining)
     }
 
     /// The missions whose escort/observe ships are now present/seen (the

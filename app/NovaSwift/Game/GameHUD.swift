@@ -209,6 +209,11 @@ final class GameHUDModel: ObservableObject {
     @Published var hasIFF = false
     /// This radar refresh is all static (sÿst.Interference; OS-05): no contacts.
     @Published var radarStatic = false
+    /// The radar's blinking "back to the middle" arrow (0x0045d600): the
+    /// bearing from the ship to the system's origin, in degrees clockwise from
+    /// screen-up, while the ship is more than √7,000,000 px from it in a system
+    /// with stellars and not jumping. nil = no arrow.
+    @Published var radarHomeBearing: Double?
     /// Ship contacts in normalized [-1, 1] radar space (out-of-range ships are omitted).
     @Published var blips: [RadarContact] = []
     /// Stellar-object contacts (planets/stations) in normalized radar space.

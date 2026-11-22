@@ -4861,9 +4861,14 @@ public final class World {
                     // Any other mission ship that dies is a loss the story
                     // counts (MS-11): it fails a disable, escort or
                     // not-yet-boarded board/rescue mission. A boarded one
-                    // already met its goal.
+                    // already met its goal. A goal-less special ship's death
+                    // is counted too: the original decrements the slot's
+                    // live count for every destroyed fleet ship (0x00428340
+                    // destruction slice), so it never respawns.
+                    // Auxiliary ships aren't fleet ships and aren't counted.
                     if let mid = npc.missionID, let goal = npc.missionShipGoal,
-                       goal != .destroy, goal != .chaseOff, goal != .none,
+                       goal != .destroy, goal != .chaseOff,
+                       goal != .none || !npc.missionAuxiliary,
                        !npc.missionBoardingGoalReported {
                         events.append(.missionShipLost(missionID: mid, goal: goal))
                     }

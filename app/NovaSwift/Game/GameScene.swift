@@ -6776,6 +6776,17 @@ final class GameScene: SKScene {
             radarStaticClock = 0
             hud.radarStatic = Int.random(in: 0..<100) < world.radarStaticChance(for: p)   // a display roll, kept off the sim RNG
         }
+        // Far from the system's origin the scope flashes an arrow pointing
+        // back to it (0x0045d600): beyond √7,000,000 px, with stellars in
+        // the system, outside a hyperspace transfer.
+        let homeDistSq = shipPos.x * shipPos.x + shipPos.y * shipPos.y
+        if homeDistSq > 7_000_000, !isJumping, !world.systemContext.bodies.isEmpty {
+            var bearing = atan2(-shipPos.x, -shipPos.y) * 180 / .pi   // world +y is screen-up
+            if bearing < 0 { bearing += 360 }
+            hud.radarHomeBearing = bearing
+        } else if hud.radarHomeBearing != nil {
+            hud.radarHomeBearing = nil
+        }
         let largeHulls = p.hasDensityScanner
         hud.blips = world.npcs.compactMap { npc in
             if npc.isEffectivelyCloaked, !npc.cloakVisibleOnRadar, !radarRevealsCloaked { return nil }

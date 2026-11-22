@@ -37,7 +37,8 @@ struct AuthenticHUDView: View {
                 if showRadar {
                     RadarContactsView(model: model,
                                       brightRadar: style.intf.brightRadar,
-                                      dimRadar: style.intf.dimRadar)
+                                      dimRadar: style.intf.dimRadar,
+                                      designWidth: CGFloat(style.intf.radarArea.width))
                         .novaPlace(layout, origin: origin(style.intf.radarArea), size: size(style.intf.radarArea))
                 }
 
@@ -370,6 +371,9 @@ private struct RadarContactsView: View {
     @ObservedObject var model: GameHUDModel
     let brightRadar: NovaColor
     let dimRadar: NovaColor
+    /// The radar rect's width in the status bar's own pixels, so the home
+    /// arrow keeps the original's pixel lengths at any scale.
+    var designWidth: CGFloat = 0
 
     /// The player's own dot: BrightRadar, or IFF cyan (0,FFFF,FFFF) once an IFF
     /// is fitted — slot 0 goes through 0x00465f00 first (0x0045d600).
@@ -486,6 +490,28 @@ private struct RadarContactsView: View {
                             let dot: Color = (b.isTarget && blinkOn) ? novaSwiftUIColor(brightRadar)
                                                                      : radarColor(b.relationship, iff: b.iffColor)
                             ctx.fill(b.large ? Path(r) : Path(ellipseIn: r), with: .color(dot))
+                        }
+                        // Far from the system's origin, an arrow pointing back
+                        // to it flashes in DimRadar on the blink phase
+                        // (0x0045d600): a shaft from 25 to 50 px out, with
+                        // 6 px wings at ±135°.
+                        if blinkOn, let bearing = model.radarHomeBearing {
+                            let px = designWidth > 0 ? size.width / designWidth : 1
+                            func polar(_ from: CGPoint, _ deg: Double, _ len: CGFloat) -> CGPoint {
+                                let rad = deg * .pi / 180
+                                return CGPoint(x: from.x + CGFloat(sin(rad)) * len * px,
+                                               y: from.y - CGFloat(cos(rad)) * len * px)
+                            }
+                            let center = CGPoint(x: cx, y: cy)
+                            let tip = polar(center, bearing, 50)
+                            var arrow = Path()
+                            arrow.move(to: polar(center, bearing, 25))
+                            arrow.addLine(to: tip)
+                            for wing in [-135.0, 135.0] {
+                                arrow.move(to: tip)
+                                arrow.addLine(to: polar(tip, bearing + wing, 6))
+                            }
+                            ctx.stroke(arrow, with: .color(novaSwiftUIColor(dimRadar)), lineWidth: max(1, px))
                         }
                     }
                 }

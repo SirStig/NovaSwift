@@ -243,6 +243,32 @@ final class OriginalMissionRulesTests: XCTestCase {
         XCTAssertTrue(eng.player.isBitSet(21), "jumped out + destroyed >= target")
     }
 
+    /// 0x00428340 lowers a slot's live count for every destroyed fleet ship
+    /// and 0x0041af90 respawns only that many — so a silent mission's
+    /// goal-less wing (the pirate string's mïsn #711) stays dead once shot
+    /// down instead of returning at full strength on every landing.
+    func testDestroyedPassiveMissionShipsDoNotRespawn() {
+        let (eng, _) = engine([MissionSpec(id: 343, returnStellar: 500, shipCount: 5, shipGoal: -1).resource(),
+                               MissionSpec(id: 344, returnStellar: 500, shipCount: 3, shipGoal: 3).resource(),
+                               MissionSpec(id: 345, returnStellar: 500, shipCount: 3, shipGoal: 0).resource()])
+        XCTAssertTrue(eng.accept(343))
+        XCTAssertTrue(eng.accept(344))
+        XCTAssertTrue(eng.accept(345))
+        func live(_ id: Int) -> Int {
+            FlightMissions.specialShipsToSpawn(eng.player.activeMission(id)!, eng.game.mission(id)!)
+        }
+        XCTAssertEqual(live(343), 5)
+        for _ in 0..<2 { eng.missionShipDestroyed(missionID: 343) }
+        XCTAssertEqual(live(343), 3, "goal-less: only the survivors come back")
+        for _ in 0..<3 { eng.missionShipDestroyed(missionID: 343) }
+        XCTAssertEqual(live(343), 0, "the whole wing is gone for good")
+        XCTAssertTrue(eng.player.isMissionActive(343), "the silent slot itself lives on")
+
+        eng.missionShipDestroyed(missionID: 345)
+        XCTAssertEqual(live(345), 2, "destroy goal: the targets still standing")
+        XCTAssertEqual(live(344), 3)
+    }
+
     // MARK: MS-12 pickups recheck the hold
 
     func testTravelPickupWaitsForRoom() {

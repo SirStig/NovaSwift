@@ -154,22 +154,21 @@ extension EditorTestSession {
         }
         for am in pilot.state.activeMissions {
             guard let m = game.mission(am.missionID), !scene.hasMissionShips(m.id) else { continue }
-            let passiveGoal = m.shipGoal == .escort || m.shipGoal == .observe || m.shipGoal == .none
-            let goalEligible = m.shipCount > 0 && m.shipDude >= 128
-                && (passiveGoal || am.shipObjectivesRemaining > 0)
+            let liveCount = FlightMissions.specialShipsToSpawn(am, m)
+            let goalEligible = liveCount > 0 && m.shipDude >= 128
             let shipName = engine.missionShipName(am, m)
             let shipSubtitle = engine.missionShipSubtitle(am, m)
             if goalEligible, engine.shipSystemMatches(am, currentSystem: currentSys) {
                 if m.shipStart == 1 {
                     // A ShipStart-1 batch waits out its rearm delay, then jumps in.
                     scene.scheduleMissionArrival(missionID: m.id, dudeID: m.shipDude,
-                                                 count: max(1, m.shipCount), goal: m.shipGoal,
+                                                 count: liveCount, goal: m.shipGoal,
                                                  behavior: m.shipBehaviorMode, auxiliary: false,
                                                  preferredShipID: am.lockedShipType,
                                                  name: shipName, subtitle: shipSubtitle)
                 } else {
                     scene.spawnMissionShips(missionID: m.id, dudeID: m.shipDude,
-                                            count: max(1, m.shipCount), goal: m.shipGoal,
+                                            count: liveCount, goal: m.shipGoal,
                                             behavior: m.shipBehaviorMode, government: nil,
                                             arrival: .populate,
                                             navStellarIndex: (-16 ... -1).contains(m.shipStart) ? -1 - m.shipStart : nil,

@@ -280,6 +280,17 @@ func _draw_radar() -> void:
 		j += 4
 		n += 1
 
+	# Far from the system's origin, an arrow pointing back to it flashes in DimRadar on the blink
+	# phase (0x0045d600): beyond sqrt(7,000,000) px, with stellars in the system, not mid-jump.
+	# A shaft from 25 to 50 px out, with 6 px wings at +-135 degrees.
+	if blink and bodies.size() >= 4 and pw.length_squared() > 7000000.0 and not nova.hyperjump_active():
+		var home := Vector2(-pw.x, pw.y).normalized()
+		var tip := c + home * 50.0 * _scale
+		var lw := maxf(1.0, _scale)
+		draw_line(c + home * 25.0 * _scale, tip, dim, lw)
+		for wing_deg in [-135.0, 135.0]:
+			draw_line(tip, tip + home.rotated(deg_to_rad(wing_deg)) * 6.0 * _scale, dim, lw)
+
 	# The player's arrow at the centre, nose along the heading (cyan with an IFF).
 	var a: float = nova.player_angle()
 	var dir := Vector2(sin(a), -cos(a))
