@@ -285,7 +285,7 @@ async function pgSettings() {
     <div class="card"><h3>Updates and startup</h3>
       ${up ? `<p>Server version <b>${esc(up.current)}</b>. ${up.available ? `<span class="pill warn">${esc(up.latest)} is available</span> <a href="${esc(up.url)}" target="_blank" rel="noopener">Release notes and download</a>` : up.latest ? '<span class="pill ok">Up to date</span>' : (up.error ? esc(up.error) : 'Not checked yet.')}</p>
       <div class="actions" style="justify-content:flex-start"><button id="up-check">Check now</button>${up.available && up.canAutoApply ? '<button class="primary" id="up-apply">Install update</button>' : ''}</div><br>` : ''}
-      ${c('checkForUpdates', 'Check for new server versions')}${c('autoUpdate', 'Install updates automatically', 'Replaces the program file; takes effect after a restart (immediately if run as a service). Off by default.')}
+      ${c('checkForUpdates', 'Check for new server versions')}${c('autoUpdate', 'Install updates automatically', 'Installs signed releases by itself and restarts (as a Linux service the system updater does it, checked daily). Off by default.')}
       <div id="auto"></div></div>
     <div class="card"><h3>Stop the server</h3><button class="danger" id="stop">Shut down</button> <small class="muted">If the server runs as a service it will start again by itself.</small></div>`;
   $('[data-k=rulesPreset]').value = s.rulesPreset; $('[data-k=adminBind]').value = s.adminBind;

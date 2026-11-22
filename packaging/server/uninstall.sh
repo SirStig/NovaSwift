@@ -3,7 +3,9 @@
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 [ "$(id -u)" -eq 0 ] || { echo "run as root: sudo $0"; exit 1; }
+systemctl disable --now novaswift-server-update.path novaswift-server-update.timer 2>/dev/null || true
 systemctl disable --now novaswift-server 2>/dev/null || true
-rm -f /etc/systemd/system/novaswift-server.service
+rm -f /etc/systemd/system/novaswift-server.service /etc/systemd/system/novaswift-server-update.service \
+      /etc/systemd/system/novaswift-server-update.path /etc/systemd/system/novaswift-server-update.timer
 systemctl daemon-reload 2>/dev/null || true
 echo "Service removed. Delete $DIR to remove the program and its data."

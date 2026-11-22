@@ -237,6 +237,17 @@ public final class UpdateChecker {
 
     public var current: Info { lock.lock(); defer { lock.unlock() }; return info }
 
+    /// Set by the Linux installer's service (`NOVASWIFT_UPDATE_REQUEST`): creating this file asks the root updater unit
+    /// to install the newest signed release. When set, `apply()` never touches the (read-only) program file.
+    public var systemUpdaterRequestURL: URL? {
+        #if os(Linux)
+        guard PlatformTools.isSupervised, let p = ProcessInfo.processInfo.environment["NOVASWIFT_UPDATE_REQUEST"], p.hasPrefix("/") else { return nil }
+        return URL(fileURLWithPath: p)
+        #else
+        return nil
+        #endif
+    }
+
     /// Numeric dotted compare: "0.10.0" > "0.9.2".
     /// Semantic-version ordering (semver.org §11): numeric core first, then a pre-release ranks below its
     /// release (`1.0.0-beta.1` < `1.0.0-beta.2` < `1.0.0`), pre-release ids compare numerically when both are
@@ -329,6 +340,18 @@ public final class UpdateChecker {
         let i = current
         guard i.available, let asset = i.assetURL, let url = URL(string: asset), ServerUpdateTrust.isTrustedAssetURL(asset) else {
             return (false, "There's no update file for this system in the latest release. Download it from the releases page.")
+        }
+        if let request = systemUpdaterRequestURL {
+            // Sandboxed systemd install: the program file is root-owned and read-only here. Ask the root updater
+            // (novaswift-server-update.service, see install-server.sh) instead; it verifies the signed release itself,
+            // replaces the program and restarts this service. The file's contents are informational only.
+            do {
+                try Data("\(i.latest ?? "latest")\n".utf8).write(to: request, options: .atomic)
+            } catch {
+                return (false, "Couldn't ask the system updater to install it (\(error.localizedDescription)). Run the installer again by hand.")
+            }
+            log.info("Asked the system updater to install \(i.latest ?? "the new version"); the server restarts by itself when it's done.")
+            return (true, "Installing \(i.latest ?? "the update")... The server restarts by itself in a minute or two (players are disconnected briefly).")
         }
         guard let mURL = i.manifestURL.flatMap({ URL(string: $0) }), let sURL = i.signatureURL.flatMap({ URL(string: $0) }) else {
             return (false, "This release is not signed (it has no \(ServerUpdateTrust.manifestAsset) / .sig), so the server refuses to install it by itself. Download it by hand and check it came from the official releases page.")

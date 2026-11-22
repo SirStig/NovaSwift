@@ -13,6 +13,8 @@
 #   --admin-public    listen for the admin panel on all addresses (plain HTTP!). Not recommended on the internet.
 #   --allow-unsigned  install an archive whose signature can't be checked (an old release, a local file). Root runs it.
 #   --allow-downgrade install a release older than the one already installed (older releases may have known problems).
+#   --auto            used by the novaswift-server-update service: upgrade to the newest signed release only when the
+#                     server asked for it (data/update-request) or auto_update is on; does nothing when already current.
 # Env: NOVASWIFT_SERVER_URL=<url or file path of a .tar.gz>  to install a specific archive (testing, offline).
 set -euo pipefail
 
@@ -26,6 +28,7 @@ FIREWALL=1
 UNINSTALL=0
 ALLOW_UNSIGNED="${NOVASWIFT_ALLOW_UNSIGNED:-0}"
 ALLOW_DOWNGRADE=0
+AUTO=0
 
 say()  { printf '\033[1;33m==>\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -40,6 +43,7 @@ while [ $# -gt 0 ]; do
     --uninstall) UNINSTALL=1; shift ;;
     --allow-unsigned) ALLOW_UNSIGNED=1; shift ;;
     --allow-downgrade) ALLOW_DOWNGRADE=1; shift ;;
+    --auto) AUTO=1; shift ;;
     -h|--help) awk 'NR > 1 && /^set -euo/ {exit} NR > 1' "$0"; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
@@ -52,11 +56,44 @@ fi
 
 if [ "$UNINSTALL" = 1 ]; then
   say "Removing the service (your data in $DIR/data is kept; delete $DIR to remove it too)."
+  systemctl disable --now "$SERVICE-update.path" "$SERVICE-update.timer" 2>/dev/null || true
   systemctl disable --now "$SERVICE" 2>/dev/null || true
-  rm -f "/etc/systemd/system/$SERVICE.service"
+  rm -f "/etc/systemd/system/$SERVICE.service" "/etc/systemd/system/$SERVICE-update.service" \
+        "/etc/systemd/system/$SERVICE-update.path" "/etc/systemd/system/$SERVICE-update.timer"
   systemctl daemon-reload 2>/dev/null || true
   rm -f "$DIR/NovaSwiftServer"
   exit 0
+fi
+
+# ver_lt A B: is version A older than B? Numbers compare as numbers; 1.0.0-beta.1 is older than 1.0.0.
+ver_lt() {
+  local a_core="${1%%-*}" b_core="${2%%-*}" a_pre="" b_pre=""
+  [ "$1" != "$a_core" ] && a_pre="${1#*-}"
+  [ "$2" != "$b_core" ] && b_pre="${2#*-}"
+  if [ "$a_core" != "$b_core" ]; then
+    [ "$(printf '%s\n%s\n' "$a_core" "$b_core" | sort -V | head -1)" = "$a_core" ]; return
+  fi
+  [ "$a_pre" = "$b_pre" ] && return 1
+  [ -z "$a_pre" ] && return 1      # a final release is newer than its pre-releases
+  [ -z "$b_pre" ] && return 0
+  [ "$(printf '%s\n%s\n' "$a_pre" "$b_pre" | sort -V | head -1)" = "$a_pre" ]
+}
+
+# --auto (run by root from novaswift-server-update.service). The sandboxed server can't replace its own program file, so
+# it asks by creating data/update-request; the daily timer also runs this when auto_update is on. The request file's
+# contents are never read (the service account can write it): it only triggers an upgrade to the newest SIGNED release,
+# with the same signature, checksum and no-downgrade checks as a manual install.
+if [ "$AUTO" = 1 ]; then
+  [ -z "$VERSION" ] && [ -z "${NOVASWIFT_SERVER_URL:-}" ] || die "--auto always installs the newest signed release."
+  REQUEST="$DIR/data/update-request"
+  if [ -e "$REQUEST" ] || [ -L "$REQUEST" ]; then
+    rm -f "$REQUEST"    # first, so a failing upgrade can't retrigger the path unit in a loop
+    say "The server asked for an update."
+  elif grep -q '^auto_update = true' "$DIR/data/server.cfg" 2>/dev/null && ! grep -q '^check = false' "$DIR/data/server.cfg" 2>/dev/null; then
+    say "Automatic updates are on: checking for a new version."
+  else
+    say "Automatic updates are off and no update was requested. Nothing to do."; exit 0
+  fi
 fi
 
 case "$(uname -m)" in
@@ -94,6 +131,13 @@ else
     API="$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=30")" || die "couldn't reach GitHub. Check this machine's internet connection."
     SRC="$(printf '%s' "$API" | grep -o "\"browser_download_url\": *\"[^\"]*/server-v[^\"]*/$ASSET\"" | head -1 | sed 's/.*: *"//; s/"$//')"
     [ -n "$SRC" ] || die "no server release with $ASSET was found yet. Check https://github.com/$REPO/releases"
+  fi
+fi
+INSTALLED_NOW="$("$DIR/NovaSwiftServer" --version 2>/dev/null | sed -n 's/^NovaSwift Dedicated Server \([^ ]*\).*/\1/p' | head -1)" || INSTALLED_NOW=""
+if [ "$AUTO" = 1 ]; then
+  WANT_TAG="$(printf '%s' "$SRC" | sed -n 's#.*/server-v\([^/]*\)/.*#\1#p')"
+  if [ -n "$INSTALLED_NOW" ] && [ -n "$WANT_TAG" ] && ! ver_lt "$INSTALLED_NOW" "$WANT_TAG"; then
+    say "Already up to date ($INSTALLED_NOW)."; exit 0
   fi
 fi
 say "Downloading $SRC"
@@ -149,20 +193,6 @@ PEM
   say "Signature and checksum verified (version $SIGNED_VERSION)."
 }
 
-# ver_lt A B: is version A older than B? Numbers compare as numbers; 1.0.0-beta.1 is older than 1.0.0.
-ver_lt() {
-  local a_core="${1%%-*}" b_core="${2%%-*}" a_pre="" b_pre=""
-  [ "$1" != "$a_core" ] && a_pre="${1#*-}"
-  [ "$2" != "$b_core" ] && b_pre="${2#*-}"
-  if [ "$a_core" != "$b_core" ]; then
-    [ "$(printf '%s\n%s\n' "$a_core" "$b_core" | sort -V | head -1)" = "$a_core" ]; return
-  fi
-  [ "$a_pre" = "$b_pre" ] && return 1
-  [ -z "$a_pre" ] && return 1      # a final release is newer than its pre-releases
-  [ -z "$b_pre" ] && return 0
-  [ "$(printf '%s\n%s\n' "$a_pre" "$b_pre" | sort -V | head -1)" = "$a_pre" ]
-}
-
 SIGNED_VERSION=""
 verify_release
 # Don't silently roll an existing install back to an older (possibly vulnerable) release.
@@ -208,7 +238,7 @@ if [ "$UPGRADE" = 0 ]; then
 fi
 # The admin panel is for the owner only: 127.0.0.1 (SSH tunnel) unless --admin-public. Applied on upgrades too, so an old
 # install that listened on every address is closed.
-if [ -f "$DIR/data/server.cfg" ]; then
+if [ -f "$DIR/data/server.cfg" ] && [ "$AUTO" = 0 ]; then
   if [ "$ADMIN_PUBLIC" = 1 ]; then
     say "WARNING: the admin panel will listen on all addresses over plain HTTP (--admin-public)."
     sed -i 's/^bind = .*/bind = 0.0.0.0/' "$DIR/data/server.cfg"
@@ -237,6 +267,8 @@ ExecStart=$DIR/NovaSwiftServer --data $DIR/data --no-browser --no-stdin
 Restart=always
 RestartSec=5
 Environment=NOVASWIFT_SUPERVISED=1
+# Updates: the server creates this file to ask $SERVICE-update.service (root) to install the newest signed release.
+Environment=NOVASWIFT_UPDATE_REQUEST=$DIR/data/update-request
 LimitNOFILE=4096
 LimitCORE=0
 # libdispatch asks for a thread priority per QoS class; without this allowance the unprivileged service logs
@@ -275,8 +307,49 @@ SystemCallErrorNumber=EPERM
 [Install]
 WantedBy=multi-user.target
 UNIT
+# The updater: root, outside the sandbox, so the program file can stay root-owned and read-only to the server. It runs a
+# copy of the installer that came out of the last verified release (bash reads scripts as it goes, and the upgrade
+# replaces this file). Triggered by data/update-request (the panel's "Install update") or daily when auto_update is on.
+cat > "/etc/systemd/system/$SERVICE-update.service" <<UNIT
+[Unit]
+Description=NovaSwift Dedicated Server updater
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=3600
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+TimeoutStartSec=900
+ExecStart=/bin/bash -c 'tmp=\$\$(mktemp) && cp "$DIR/install-server.sh" "\$\$tmp" && bash "\$\$tmp" --dir "$DIR" --auto; rc=\$\$?; rm -f "\$\$tmp"; exit \$\$rc'
+UNIT
+cat > "/etc/systemd/system/$SERVICE-update.path" <<UNIT
+[Unit]
+Description=Install a NovaSwift server update when the server asks for one
+
+[Path]
+PathExists=$DIR/data/update-request
+Unit=$SERVICE-update.service
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+cat > "/etc/systemd/system/$SERVICE-update.timer" <<UNIT
+[Unit]
+Description=Daily NovaSwift server update check (only installs when auto_update = true)
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=2h
+Persistent=true
+Unit=$SERVICE-update.service
+
+[Install]
+WantedBy=timers.target
+UNIT
 systemctl daemon-reload
 systemctl enable --now "$SERVICE" >/dev/null
+systemctl enable --now "$SERVICE-update.path" "$SERVICE-update.timer" >/dev/null 2>&1 || say "WARNING: couldn't enable the updater (upgrade by running the installer again)."
 
 if [ "$FIREWALL" = 1 ] && command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
   say "Opening UDP 53735-53736 in ufw"
@@ -307,5 +380,5 @@ echo "  then open http://localhost:53737 and finish the setup wizard."
 echo
 echo "  Open UDP 53735-53736 in your cloud provider's firewall too."
 echo "  Logs: journalctl -u $SERVICE -f        Remove: $DIR/uninstall.sh"
-echo "  Upgrade: run the installer command again (the sandbox keeps the program file read-only)."
+echo "  Updates: panel 'Install update', or auto_update = true (daily). By hand: run the installer again."
 echo "============================================================"

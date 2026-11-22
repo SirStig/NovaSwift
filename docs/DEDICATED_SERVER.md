@@ -115,8 +115,17 @@ The server checks GitHub releases tagged `server-v<version>` (every 12 h; Settin
 update" (or the opt-in `auto_update`) installs a release only if it carries a valid signature (`server-update.json` + `.sig`, the same RSA key as
 the game updater) and the download matches the signed checksum; it replaces the program file (and any sidecar runtime libs /
 helper scripts that ship next to it in the archive) and takes effect after a restart. Linux packages stay
-`--static-swift-stdlib` for now so older betas can still self-update to a single binary. A sandboxed service install has a
-read-only program file: upgrade it by running the installer again (the installer also copies any `*.so` sidecars).
+`--static-swift-stdlib` for now so older betas can still self-update to a single binary.
+
+A sandboxed Linux service install keeps the program file root-owned and read-only to the server, so the server never replaces
+it itself. The installer adds a root updater instead: `novaswift-server-update.service` runs the `install-server.sh` that came
+out of the last verified release with `--auto`. It is started by `novaswift-server-update.path` when the server creates
+`data/update-request` (the panel's "Install update", or `auto_update` on the 12-hour check; the unit passes the path in
+`NOVASWIFT_UPDATE_REQUEST`), and daily by `novaswift-server-update.timer`, which installs only when `auto_update = true`.
+The request file's contents are never read. It can only trigger an upgrade to the newest signed release, with the same
+signature, checksum and no-downgrade checks as a manual install. `--auto` does nothing when the server is already current,
+and it leaves an opted-in public admin panel as it is. Logs: `journalctl -u novaswift-server-update`. Running the installer
+by hand still upgrades too.
 
 ## Building
 

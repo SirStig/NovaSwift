@@ -177,7 +177,7 @@ public final class ServerApp {
             if info.available, self.store.config.autoUpdate {
                 let r = self.updates.apply()
                 self.log.info(r.message)
-                if r.ok, PlatformTools.isSupervised { self.log.info("Restarting to use the new version..."); self.shutdown() }
+                if r.ok, PlatformTools.isSupervised, self.updates.systemUpdaterRequestURL == nil { self.log.info("Restarting to use the new version..."); self.shutdown() }
             }
         }
         t.resume()
