@@ -60,6 +60,9 @@ final class PluginRuntime: @unchecked Sendable {
     private var catalogTask: Task<Void, Never>?
     private var images: [URL: Data] = [:]
     private var imageTasks: Set<URL> = []
+    private var imageQueue: [URL] = []
+    private var imageWorkerRunning = false
+    private var imageCache: RemoteImageCache?
 
     // MARK: Locations
 
@@ -404,8 +407,9 @@ final class PluginRuntime: @unchecked Sendable {
         lock.lock()
         if refreshing { lock.unlock(); return }
         refreshing = true
-        lock.unlock()
         let p = provider
+        // Assigned under the lock (the task body takes it too), like `tasks[id]` below.
+        defer { lock.unlock() }
         catalogTask = Task.detached { [self] in
             let r = await p.load()
             lock.lock()
@@ -475,6 +479,11 @@ final class PluginRuntime: @unchecked Sendable {
         lock.unlock()
         let root = installDir
         let installed = installedVersions()
+        // `tasks` is read/cleared under the lock from the task itself and from catalogJSON on the
+        // main thread, so the write must be locked too: an unlocked dictionary write racing the
+        // task's own `tasks[id] = nil` is a heap-corrupting data race (and, if the task won,
+        // left a stale entry that kept the store "busy" forever).
+        lock.lock(); defer { lock.unlock() }
         tasks[id] = Task.detached { [self] in
             do {
                 let browser = PluginBrowser(entries: all, installedVersions: installed)
@@ -513,16 +522,37 @@ final class PluginRuntime: @unchecked Sendable {
         markDirty()
     }
 
-    /// Catalog artwork bytes once downloaded (empty while pending); starts the fetch on first ask.
+    /// Catalog artwork bytes once downloaded (empty while pending); queues the fetch on first ask.
+    ///
+    /// Fetched ONE AT A TIME through one shared cache. Opening the Browse tab used to fire a
+    /// detached URLSession request per icon (~22, many github.com → release-asset redirects) on
+    /// top of the catalog refresh; corelibs FoundationNetworking (libcurl multi handle) on Linux
+    /// is not robust to that burst and could take the whole game down right after the screen
+    /// filled in. Icons are small, so a serial queue costs a second or two of pop-in.
     func image(_ url: URL) -> Data {
         lock.lock()
         if let d = images[url] { lock.unlock(); return d }
         guard url.scheme?.lowercased() == "https", imageTasks.insert(url).inserted else { lock.unlock(); return Data() }
+        imageQueue.append(url)
+        let startWorker = !imageWorkerRunning
+        imageWorkerRunning = true
+        if imageCache == nil {
+            imageCache = RemoteImageCache(directory: root.appendingPathComponent("PluginImages", isDirectory: true))
+        }
+        let cache = imageCache!
         lock.unlock()
-        let cache = RemoteImageCache(directory: root.appendingPathComponent("PluginImages", isDirectory: true))
+        guard startWorker else { return Data() }
         Task.detached { [self] in
-            if let d = try? await cache.data(for: url) {
-                lock.lock(); images[url] = d; lock.unlock()
+            while true {
+                lock.lock()
+                guard !imageQueue.isEmpty else { imageWorkerRunning = false; lock.unlock(); return }
+                let next = imageQueue.removeFirst()
+                lock.unlock()
+                // A failed fetch leaves the URL in imageTasks, so it is not retried this session
+                // (same as before) and the placeholder glyph stays.
+                if let d = try? await cache.data(for: next) {
+                    lock.lock(); images[next] = d; lock.unlock()
+                }
             }
         }
         return Data()

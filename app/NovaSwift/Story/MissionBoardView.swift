@@ -1,5 +1,5 @@
 import SwiftUI
-import AVKit
+import AVFoundation
 import NovaSwiftKit
 import NovaSwiftStory
 
@@ -826,7 +826,7 @@ struct MissionSingleDialog: View {
             ZStack {
                 Color.black.opacity(0.92).ignoresSafeArea()
                 VStack(spacing: 14) {
-                    VideoPlayer(player: moviePlayer)
+                    MoviePlayerView(player: moviePlayer)
                         .frame(maxWidth: 640, maxHeight: 400)
                         .onReceive(NotificationCenter.default.publisher(
                             for: .AVPlayerItemDidPlayToEndTime, object: moviePlayer.currentItem)) { _ in

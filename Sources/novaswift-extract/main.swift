@@ -450,7 +450,7 @@ case "outfit":
     if args.count == 2 {
         let outfits = game.outfits()
         print("\(outfits.count) outfits:")
-        for o in outfits.prefix(80) {
+        for o in outfits {
             let mods = o.modifiers.map { "\($0.type)=\($0.value)" }.joined(separator: ",")
             print(String(format: "  #%-5d  %-28@  %4dt  %8dcr  [%@]",
                          o.id, o.name as NSString, o.mass, o.cost, mods as NSString))

@@ -176,8 +176,9 @@ public struct Loadout {
     /// zone's radius (Bible: "standard radius is 1000"; negative narrows it,
     /// letting the ship jump from closer to a system's populated core).
     public var hyperspaceDistBonus: Int = 0
-    /// `oütf` ModType 19 (`autoRefuel`): the fuel tank tops off for free on
-    /// landing/departure instead of needing to be bought at the Trade Center.
+    /// `oütf` ModType 19 (`autoRefuel`): on docking the tank is topped off at
+    /// 1 credit a unit, as far as the credits cover (`Player_RefuelShipWithCredits`
+    /// 0x004250f0) — see `SpaceportShops.autoRecharge`.
     public var hasAutoRefuel: Bool = false
     /// `oütf` ModType 13 (`densityScanner`): reveals a targeted ship's cargo
     /// hold contents in the targeting readout (Bible ModVal is "ignored" —
@@ -185,7 +186,10 @@ public struct Loadout {
     public var hasDensityScanner: Bool = false
     /// `oütf` ModType 49 (`repairSystem`): "will occasionally repair the ship
     /// when it's disabled." Not player-restricted in the Bible, so an NPC hull
-    /// stocked with one benefits too.
+    /// stocked with one benefits too. It does nothing while the ship is above
+    /// the disable line (0x0046e540 is only reached from the disabled arms) —
+    /// stock "Repair Droids" (#437) are this, not ModType-29 armor regen,
+    /// despite their dësc promising in-flight repair.
     public var hasRepairSystem: Bool = false
     /// `oütf` ModType 44 (`reinforcementInhibitor`), player-only per the Bible.
     /// Each fitted item's ModVal is a `gövt.Class1-4` value that can no longer

@@ -29,6 +29,30 @@ struct PluginsView: View {
     @State private var selected: PluginCatalogEntry?
     @State private var showingImporter = false
     @State private var importMessage: String?
+    #if os(iOS)
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
+
+    /// Phone-sized screen: the pinned chrome (title bar + tab row + search) ate most of a
+    /// landscape iPhone, leaving a sliver to scroll. In compact mode the title bar tightens,
+    /// the tab pill rides in it when there's room (landscape), and the search field moves
+    /// into the scrolling content so it scrolls away with the filter chips.
+    private var compact: Bool {
+        #if os(iOS)
+        return verticalSizeClass == .compact || horizontalSizeClass == .compact
+        #else
+        return false
+        #endif
+    }
+    /// Short screen (landscape phone): every point of height matters.
+    private var shortScreen: Bool {
+        #if os(iOS)
+        return verticalSizeClass == .compact
+        #else
+        return false
+        #endif
+    }
 
     var body: some View {
         ZStack {
@@ -36,7 +60,7 @@ struct PluginsView: View {
                 .ignoresSafeArea()
             VStack(spacing: 0) {
                 topBar
-                if selected == nil { tabBar }
+                if selected == nil && !shortScreen { tabBar }
                 content
             }
         }
@@ -69,16 +93,26 @@ struct PluginsView: View {
                 Text(entry.name).font(.title2.weight(.bold)).lineLimit(1)
             } else {
                 Image(systemName: "puzzlepiece.extension.fill")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: compact ? 15 : 18, weight: .semibold))
                     .foregroundStyle(pluginAccent)
-                    .frame(width: 38, height: 38)
+                    .frame(width: compact ? 30 : 38, height: compact ? 30 : 38)
                     .background(pluginAccent.opacity(0.18), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                Text("Plugins").font(.title2.weight(.bold)).lineLimit(1)
+                if !(shortScreen && horizontalNarrow) {
+                    Text("Plugins").font(compact ? .headline : .title2.weight(.bold)).lineLimit(1)
+                }
+                // Landscape phone: the tab pill lives in the title bar (no separate tab row).
+                if shortScreen { tabPill }
             }
-            Spacer()
+            Spacer(minLength: 8)
             #if !os(tvOS)
-            Button { showingImporter = true } label: { Label("Import", systemImage: "square.and.arrow.down.on.square") }
-                .novaBorderedButton()
+            Button { showingImporter = true } label: {
+                if compact {
+                    Image(systemName: "square.and.arrow.down.on.square")
+                } else {
+                    Label("Import", systemImage: "square.and.arrow.down.on.square")
+                }
+            }
+            .novaBorderedButton().accessibilityLabel("Import")
             #endif
             Button { Task { await model.store.loadCatalog(force: true) } } label: {
                 Image(systemName: "arrow.clockwise")
@@ -86,7 +120,16 @@ struct PluginsView: View {
             .novaBorderedButton().accessibilityLabel("Refresh catalog")
             Button("Done", action: onClose).novaProminentButton()
         }
-        .padding(.horizontal, 20).padding(.vertical, 12)
+        .padding(.horizontal, compact ? 12 : 20).padding(.vertical, compact ? 6 : 12)
+    }
+
+    /// Too narrow for title + pill + buttons on one line even in landscape (small iPhones).
+    private var horizontalNarrow: Bool {
+        #if os(iOS)
+        return UIScreen.main.bounds.width < 700
+        #else
+        return false
+        #endif
     }
 
     /// Icon segmented pill (Browse / Installed / Load order), with the search field alongside on Browse.
@@ -95,14 +138,15 @@ struct PluginsView: View {
             HStack(spacing: 12) {
                 tabPill
                 Spacer(minLength: 12)
-                if tab == .browse { searchField.frame(maxWidth: 340) }
+                if tab == .browse && !compact { searchField.frame(maxWidth: 340) }
             }
             VStack(alignment: .leading, spacing: 10) {
                 tabPill
-                if tab == .browse { searchField }
+                // Compact: the search field scrolls with the Browse content instead.
+                if tab == .browse && !compact { searchField }
             }
         }
-        .padding(.horizontal, 20).padding(.bottom, 8)
+        .padding(.horizontal, compact ? 12 : 20).padding(.bottom, compact ? 6 : 8)
     }
 
     private var tabPill: some View {
@@ -113,7 +157,7 @@ struct PluginsView: View {
                     Label(t.rawValue, systemImage: t.symbol)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(on ? Color.black : Color.primary)
-                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .padding(.horizontal, compact ? 10 : 14).padding(.vertical, compact ? 6 : 8)
                         .background(on ? pluginAccent : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         .contentShape(Rectangle())
                 }
@@ -149,6 +193,8 @@ struct PluginsView: View {
     private var browse: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                // Compact: search lives here so it scrolls away (see `compact`).
+                if compact { searchField }
                 filterChips
                 banners
                 if results.isEmpty {
@@ -176,7 +222,7 @@ struct PluginsView: View {
                 Text("Plug-in files download straight from each author's own site. NovaSwift doesn't host or change them, and you need your own copy of EV Nova to play any of them.")
                     .font(.footnote).foregroundStyle(.tertiary).padding(.top, 8)
             }
-            .padding(.horizontal, 20).padding(.bottom, 24)
+            .padding(.horizontal, compact ? 12 : 20).padding(.bottom, 24)
         }
         .cursorScrollable()
     }

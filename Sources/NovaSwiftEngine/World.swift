@@ -1008,7 +1008,9 @@ public final class Ship {
         // otherwise be able to heal itself back above 0 and un-die mid-sequence.
         guard armor > 0 else { return }
         if shield < maxShield { shield = min(maxShield, shield + shieldRechargePerSec * dt) }
-        if armor < maxArmor && armorRechargePerSec > 0 {
+        // The player's armor regen also waits out the 300-tick post-disable
+        // window (`DAT_0073549c < 0`, 0x0044c8d0); NPCs have no such gate.
+        if armor < maxArmor && armorRechargePerSec > 0 && (!isPlayer || recentlyHitTicks < 0) {
             armor = min(maxArmor, armor + armorRechargePerSec * dt)
         }
         if !isPlayer { regenFuel(dt) }
@@ -2588,6 +2590,12 @@ public final class World {
         refreshFlightFactors()
 
         prof("sim.player") {
+            // The post-disable window counts down every player frame, disabled
+            // or not (0x0044aa70), and holds off both the repair system and the
+            // player's armor regen until it runs out (0x0044c8d0).
+            if player.recentlyHitTicks >= 0 {
+                player.recentlyHitTicks -= dt * OriginalClock.ticksPerSecond
+            }
             if escapePodTicksLeft != nil {
                 stepEscapePod(dt)
             } else if escapePodLanded {
@@ -2731,7 +2739,8 @@ public final class World {
     /// disable line. The player hears and reads "repair systems engaged".
     func tickRepairSystem(_ ship: Ship, dt: Double) {
         let ticks = dt * OriginalClock.ticksPerSecond
-        if ship.recentlyHitTicks >= 0 { ship.recentlyHitTicks -= ticks }
+        // The player's window is counted down once per frame in the player block.
+        if ship !== player, ship.recentlyHitTicks >= 0 { ship.recentlyHitTicks -= ticks }
         guard ship.hasRepairSystem, ship.disabled, !ship.heldDisabled, ship.isAlive,
               ship.recentlyHitTicks < 0 else { return }
         let rolls = max(1, Int(ticks.rounded()))

@@ -1,5 +1,5 @@
 import SwiftUI
-import AVKit
+import AVFoundation
 import NovaSwiftKit
 import NovaSwiftStory
 
@@ -232,7 +232,7 @@ struct GamblingView: View {
     private var racingView: some View {
         VStack(spacing: 14) {
             if let player {
-                VideoPlayer(player: player)
+                MoviePlayerView(player: player)
                     .frame(width: 440, height: 260)
                     .onReceive(NotificationCenter.default.publisher(
                         for: .AVPlayerItemDidPlayToEndTime, object: player.currentItem)) { _ in

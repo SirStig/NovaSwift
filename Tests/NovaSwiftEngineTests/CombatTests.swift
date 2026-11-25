@@ -208,6 +208,20 @@ final class CombatTests: XCTestCase {
         XCTAssertEqual(player.armor, 30, accuracy: 1e-9, "no regeneration while disabled")
     }
 
+    func testPlayerArmorRegenWaitsOutPostDisableWindow() {
+        // 0x0044aa70 counts DAT_0073549c down every player frame; 0x0044c8d0
+        // only regenerates the player's armor once it is below zero.
+        let player = makeShip("A", govt: 1, at: Vec2())
+        let world = World(player: player)
+        player.maxArmor = 100; player.armor = 50
+        player.armorRechargePerSec = 30
+        player.recentlyHitTicks = 300
+        for _ in 0..<150 { world.step(1.0 / 30.0) }
+        XCTAssertEqual(player.armor, 50, accuracy: 1e-9, "no armor regen inside the window")
+        for _ in 0..<160 { world.step(1.0 / 30.0) }
+        XCTAssertGreaterThan(player.armor, 50, "armor regenerates once the window runs out")
+    }
+
     func testPointDefenseShootsDownIncomingGuidedProjectile() {
         // Guidance 9/10 (Bible): "fires automatically at incoming guided
         // weapons" — independent of the defender's own currentTargetID.

@@ -1,5 +1,5 @@
 import SwiftUI
-import AVKit
+import AVFoundation
 import NovaSwiftKit
 
 /// A `dësc` record's movie, played the way the original's text dialogs do
@@ -99,7 +99,7 @@ struct DescMovieOverlay: View {
                         AnimatedGIFView(url: gif, onFinish: { playback.dismiss() })
                             .frame(maxWidth: w, maxHeight: h)
                     } else if let player = playback.player {
-                        VideoPlayer(player: player)
+                        MoviePlayerView(player: player)
                             .frame(maxWidth: w, maxHeight: h)
                             .onReceive(NotificationCenter.default.publisher(
                                 for: .AVPlayerItemDidPlayToEndTime, object: player.currentItem)) { _ in playback.dismiss() }
